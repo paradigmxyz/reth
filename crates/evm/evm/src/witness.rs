@@ -16,12 +16,14 @@ pub struct ExecutionWitnessRecord<'a, DB> {
     state: &'a CacheDB<DB>,
     /// Additional hashed state to include in the witness.
     additional_state: Option<HashedPostState>,
+    /// Code read from parent state, before execution output was committed.
+    canonical_codes: Option<Vec<Bytes>>,
 }
 
 impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a CacheDB<DB>) -> Self {
-        Self { state, additional_state: None }
+        Self { state, additional_state: None, canonical_codes: None }
     }
 
     /// Adds hashed state that should be included when generating the witness.
@@ -80,19 +82,17 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     where
         SP: StateProofProvider + HashedPostStateProvider + AccountReader + ?Sized,
     {
-        let mut codes = self
-            .state
-            .cache
-            .contracts
-            .iter()
-            .filter(|(code_hash, _)| !code_hash.is_zero())
-            .map(|(_, code)| code)
-            .map(|code| code.original_bytes())
-            .filter(|code| !mode.is_canonical() || !code.is_empty())
-            .collect::<Vec<_>>();
-        if mode.is_canonical() {
-            codes.sort_unstable();
-        }
+        let codes = if mode.is_canonical() {
+            self.canonical_codes.take().unwrap_or_else(|| Self::capture_codes(self.state))
+        } else {
+            self.state
+                .cache
+                .contracts
+                .iter()
+                .filter(|(hash, _)| !hash.is_zero())
+                .map(|(_, code)| code.original_bytes())
+                .collect()
+        };
 
         let mut wiped_state = revm::database::BundleState::default();
         for (address, storage) in &self.state.cache.storage {
@@ -128,6 +128,28 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         let (hashed_state, keys) = self.hashed_post_state();
         let state = state_provider.witness(Default::default(), hashed_state, mode)?;
         Ok(ExecutionWitness { state, codes, keys, ..Default::default() })
+    }
+
+    /// Captures canonical witness bytecode after execution, before committing its output.
+    ///
+    /// The cache must contain only parent-state reads, excluding code produced by execution.
+    pub fn capture_codes(state: &CacheDB<DB>) -> Vec<Bytes> {
+        let mut codes = state
+            .cache
+            .contracts
+            .iter()
+            .filter(|(hash, code)| !hash.is_zero() && !code.is_empty())
+            .map(|(_, code)| code.original_bytes())
+            .collect::<Vec<_>>();
+        codes.sort_unstable();
+        codes
+    }
+
+    /// Uses captured parent-state bytecode for canonical witnesses, retaining all code in legacy
+    /// mode.
+    pub fn with_canonical_codes(mut self, codes: Vec<Bytes>) -> Self {
+        self.canonical_codes = Some(codes);
+        self
     }
 
     fn hashed_post_state(self) -> (HashedPostState, Vec<Bytes>) {

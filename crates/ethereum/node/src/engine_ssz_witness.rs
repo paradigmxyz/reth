@@ -78,6 +78,7 @@ where
                     )));
                     let output =
                         evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
+                    let codes = ExecutionWitnessRecord::capture_codes(&db);
                     db.commit_source(&reth_execution_types::BundleSource(&output.state));
                     let first_header = db
                         .cache
@@ -87,6 +88,7 @@ where
                         .min()
                         .unwrap_or_else(|| block_number.saturating_sub(1));
                     let witness = ExecutionWitnessRecord::new(&db)
+                        .with_canonical_codes(codes)
                         .into_execution_witness_without_headers(
                             state_provider.as_ref(),
                             ExecutionWitnessMode::Canonical,
