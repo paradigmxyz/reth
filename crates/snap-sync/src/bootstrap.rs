@@ -255,7 +255,8 @@ where
     // the last block both branches share. Unserved lists are waited for until they expire.
     async fn recover(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let pivot = self.pivot()?;
-        let Some(reorg) = self.factory.database_provider_ro()?.snap_reorg(write)? else {
+        let provider = self.factory.database_provider_ro()?;
+        let Some(reorg) = provider.snap_reorg(write)? else {
             info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
             return Ok(Step::Restart)
         };
@@ -264,19 +265,14 @@ where
             return Ok(Step::Restart)
         }
         let ancestor = reorg.ancestor();
-        let applied = self
-            .factory
-            .database_provider_ro()?
-            .catch_up_progress(write)?
-            .ok_or(SnapSyncError::NoCatchUpProgress)?
-            .applied();
+        let applied =
+            provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
         // Catch-up resumes from the ancestor, or from below it when it had not reached it yet.
         let resume = applied.number.min(ancestor.number);
         if !self.policy.is_catchable_from(resume, head) {
             info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
-        let provider = self.factory.database_provider_ro()?;
         let generation = self.policy.select(&provider, head, self.context.finalized())?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
         // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
