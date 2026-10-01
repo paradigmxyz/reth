@@ -534,7 +534,7 @@ where
         // Checks for gas limit
         let transaction_gas_limit = transaction.gas_limit();
         let block_gas_limit = self.max_gas_limit();
-        if transaction_gas_limit > block_gas_limit {
+        if self.check_block_gas_limit() && transaction_gas_limit > block_gas_limit {
             return Err(InvalidPoolTransactionError::ExceedsGasLimit(
                 transaction_gas_limit,
                 block_gas_limit,
@@ -1022,6 +1022,13 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         Self::on_new_head_block(self, new_tip_block.header())
+    }
+
+    fn check_block_gas_limit(&self) -> bool {
+        self.transaction_validation_gas_rules
+            .load()
+            .version
+            .feature(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK)
     }
 }
 
@@ -1604,6 +1611,7 @@ mod tests {
     use crate::{
         blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
         traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        TransactionPoolExt,
     };
     use alloy_consensus::{Header, Transaction};
     use alloy_eips::{
@@ -1920,6 +1928,76 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn block_gas_policy_preserves_real_head_and_operator_limit() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .set_block_gas_limit(1_000_000)
+            .with_max_tx_gas_limit(Some(2_000_000))
+            .build(blob_store.clone());
+        assert!(validator.check_block_gas_limit());
+        let mut rules = *validator.transaction_validation_gas_rules.load();
+        rules.version.features.remove(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK);
+        validator.transaction_validation_gas_rules.store(rules);
+        assert!(!validator.check_block_gas_limit());
+        assert_eq!(validator.block_gas_limit(), 1_000_000);
+        assert!(validator
+            .validate_one(TransactionOrigin::External, transaction.clone())
+            .is_valid());
+
+        // An operator's total-gas cap is independent of the protocol's block-gas policy.
+        let mut validator = validator;
+        validator.max_tx_gas_limit = Some(1_000_000);
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction),
+            Err(InvalidPoolTransactionError::MaxTxGasLimitExceeded(1_015_288, 1_000_000))
+        ));
+        validator.max_tx_gas_limit = Some(2_000_000);
+
+        // The insertion guard receives the policy through the task executor as well.
+        let (validator, task) = TransactionValidationTaskExecutor::new(validator);
+        let task = tokio::spawn(task.run());
+        let pool = Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            crate::PoolConfig { gas_limit: 1_000_000, ..Default::default() },
+        );
+        assert!(!pool.validator().check_block_gas_limit());
+        pool.add_external_transaction(transaction.clone()).await.unwrap();
+        assert_eq!(pool.block_info().block_gas_limit, 1_000_000);
+
+        // Returning to a head with ordinary gas accounting restores both guards.
+        let head = SealedBlock::seal_slow(reth_ethereum_primitives::Block {
+            header: Header { gas_limit: 900_000, number: 1, ..Default::default() },
+            body: Default::default(),
+        });
+        pool.on_canonical_state_change(crate::CanonicalStateUpdate {
+            new_tip: &head,
+            pending_block_base_fee: 0,
+            pending_block_blob_fee: None,
+            changed_accounts: vec![],
+            mined_transactions: vec![*transaction.hash()],
+            update_kind: crate::PoolUpdateKind::Reorg,
+        });
+        assert!(pool.validator().check_block_gas_limit());
+        assert_eq!(pool.block_info().block_gas_limit, 900_000);
+        assert_eq!(pool.block_info().last_seen_block_hash, head.hash());
+        assert!(matches!(
+            pool.add_external_transaction(transaction).await.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::ExceedsGasLimit(
+                1_015_288, 900_000
+            ))
+        ));
+        task.abort();
     }
 
     #[tokio::test]
