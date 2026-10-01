@@ -60,10 +60,25 @@ assert_eq!(policy.pivot_block(4, None), None);
 - **The trie is rebuilt once, at the end.** The existing merkle stage builds it from the downloaded
   state, instead of maintaining one during the download.
 - **Starting over is the fallback.** An attempt restarts when catch-up falls behind the BALs peers
-  still serve.
+  still serve, or when a reorg across its pivot cannot be repaired.
 
-Reorg recovery is not implemented yet: a reorg that orphans the pivot is detected and restarts the
-attempt, instead of repairing the state from the orphaned blocks' BALs as EIP-8189 describes.
+## Reorgs across the pivot
+
+A reorg that orphans the pivot leaves the downloaded state holding the abandoned branch's changes.
+The attempt keeps the headers of the last 64 blocks through its pivot, so it can find the last block
+both branches share and fetch the orphaned blocks' BALs:
+
+- Every field and storage slot those BALs changed is scheduled for repair, catch-up rewinds to the
+  shared block, and the attempt re-anchors to a new canonical pivot.
+- Applying the new branch's BALs drops whatever they overwrite, so only entries changed on the
+  orphaned branch alone stay scheduled.
+- Once catch-up reaches the new pivot, those entries are fetched again on their own, proved against
+  its root, and the hand-off waits until none remain.
+
+Orphaned BALs no peer serves are waited for while the head is within the served-state window (128
+blocks) of the ancestor. A reorg reaching further back than the kept headers, orphaned BALs still
+unserved past that window, or a reorg after the hand-off to the merkle stage starts the attempt over
+instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.
