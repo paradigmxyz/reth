@@ -646,6 +646,177 @@ mod tests {
         }
     }
 
+    // Blocks `0..=tip`, each committing to an empty list and to `root`.
+    fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
+        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
+        let mut parent = B256::ZERO;
+        (0..=tip)
+            .map(|number| {
+                let mut header = header(number, parent, Some(commitment));
+                header.state_root = root;
+                let sealed = SealedHeader::seal_slow(header);
+                parent = sealed.hash();
+                sealed
+            })
+            .collect()
+    }
+
+    // Blocks continuing `parent`, one per list, each committing to its list and to `root`.
+    fn branch(
+        parent: &SealedHeader,
+        lists: &[Vec<AccountChanges>],
+        root: B256,
+    ) -> Vec<SealedHeader> {
+        let mut parent = parent.clone();
+        lists
+            .iter()
+            .map(|list| {
+                let commitment = compute_block_access_list_hash(list);
+                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
+                header.state_root = root;
+                parent = SealedHeader::seal_slow(header);
+                parent.clone()
+            })
+            .collect()
+    }
+
+    // A peer serving `lists` in order, or none of them.
+    fn lists(
+        request_id: u64,
+        lists: &[Vec<AccountChanges>],
+        served: bool,
+    ) -> PeerRequestResult<SnapResponse> {
+        let block_access_lists =
+            lists.iter().map(|list| served.then(|| alloy_rlp::encode(list).into())).collect();
+        let message = BlockAccessListsMessage {
+            request_id,
+            block_access_lists: BlockAccessLists(block_access_lists),
+        };
+        Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
+    }
+
+    // Rebuilds the trie of `write`'s state up to `target` and checks it against that header.
+    fn rebuild_and_verify(factory: &Factory, write: SnapWrite, target: u64) -> VerifiedSnapState {
+        let provider = factory.database_provider_rw().unwrap();
+        let mut stage = MerkleStage::default_execution();
+        loop {
+            let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap();
+            let output =
+                stage.execute(&provider, ExecInput { target: Some(target), checkpoint }).unwrap();
+            provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint).unwrap();
+            if output.done {
+                break
+            }
+        }
+        provider.verify_state_root(write).unwrap()
+    }
+
+    // The accounts at every block of the new branch, which never credits `STALE`.
+    fn reorg_accounts() -> Vec<(B256, TrieAccount)> {
+        let mut accounts = vec![(keccak256(STALE), account(1)), (keccak256(KEPT), account(2))];
+        accounts.sort_by_key(|(hashed_address, _)| *hashed_address);
+        accounts
+    }
+
+    fn stale_changes() -> AccountChanges {
+        AccountChanges::new(STALE)
+    }
+
+    // An attempt that downloaded every account at pivot 4 of a branch crediting `STALE` in blocks
+    // 3 and 4, then a reorg to a branch forking after block 2 whose first lists are `new_lists`.
+    // Returns the orphaned headers and the new branch's.
+    fn reorged(
+        factory: &Factory,
+        new_lists: [Vec<AccountChanges>; 2],
+    ) -> (SnapAttemptId, Vec<SealedHeader>, Vec<SealedHeader>) {
+        let accounts = reorg_accounts();
+        let root = state_root(&accounts);
+        let shared = chain(2, root);
+        let orphaned = branch(&shared[2], &orphaned_lists(), root);
+        insert_headers(factory, &shared);
+        insert_headers(factory, &orphaned);
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..2, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        // The range was served at the orphaned pivot, holding its credit.
+        let mut credited = Account::from(account(1));
+        credited.balance = U256::from(1_000);
+        let stale = HashedPostState::default().with_accounts([(keccak256(STALE), Some(credited))]);
+        provider.write_hashed_state(&stale.into_sorted()).unwrap();
+        provider.commit().unwrap();
+
+        let [first, second] = new_lists;
+        let new = branch(&shared[2], &[first, second, Vec::new()], root);
+        factory.replace_headers_after(2, &new);
+        (attempt_id(factory), orphaned, new)
+    }
+
+    // The orphaned branch's lists for blocks 3 and 4, crediting `STALE` in each.
+    fn orphaned_lists() -> Vec<Vec<AccountChanges>> {
+        [999, 1_000]
+            .map(|balance| {
+                vec![stale_changes().with_balance_change(BalanceChange::new(
+                    BlockAccessIndex::new(1),
+                    U256::from(balance),
+                ))]
+            })
+            .to_vec()
+    }
+
+    // A peer serving no account range.
+    fn unserved_range(request_id: u64) -> PeerRequestResult<SnapResponse> {
+        let message = AccountRangeMessage { request_id, accounts: Vec::new(), proof: Vec::new() };
+        Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message)))
+    }
+
+    // A peer serving the account at `hashed_address` alone.
+    fn served_account(
+        request_id: u64,
+        accounts: &[(B256, TrieAccount)],
+        hashed_address: B256,
+    ) -> PeerRequestResult<SnapResponse> {
+        let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
+        account_range(request_id, accounts, index..index + 1, &[hashed_address])
+    }
+
+    fn hashes(headers: &[SealedHeader]) -> Vec<B256> {
+        headers.iter().map(SealedHeader::hash).collect()
+    }
+
+    // Runs a bootstrap through a reorg to a branch whose first lists are `new_lists`, returning
+    // the account ranges it fetched again.
+    async fn recover(new_lists: [Vec<AccountChanges>; 2], repaired: bool) -> Vec<B256> {
+        let accounts = reorg_accounts();
+        let factory = hashed_factory();
+        let (attempt, orphaned, new) = reorged(&factory, new_lists.clone());
+        let mut responses = vec![
+            lists(1, &orphaned_lists(), true),
+            // Blocks 3 and 4 of the new branch carry the state to its pivot.
+            lists(2, &new_lists, true),
+        ];
+        if repaired {
+            responses.push(served_account(1, &accounts, keccak256(STALE)));
+        }
+        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot, new[1].num_hash());
+        assert_eq!(attempt_id(&factory), attempt);
+        assert_eq!(*client.block_requests(), [hashes(&orphaned), hashes(&new[..2])]);
+        let origins = client.origins().clone();
+        // The repaired state is the new pivot's, as its header commits to.
+        let verified = rebuild_and_verify(&factory, write, pivot.number);
+        assert_eq!(verified.state_root(), state_root(&accounts));
+        origins
+    }
+
     #[tokio::test]
     async fn downloads_the_state_and_hands_it_to_the_trie_rebuild() {
         let accounts = accounts();
@@ -987,236 +1158,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_cancelled_repair_resumes_at_its_pending_slots() {
-        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
-        let mut contract = account(1);
-        contract.storage_root = storage_root_of(&slots);
-        let accounts = vec![(key(1), contract)];
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
-        let write =
-            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_slot(key(1), key(1));
-        repairs.insert_slot(key(1), key(2));
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let cancel = CancellationToken::new();
-        let on_request = cancel.clone();
-        // Cancellation is checked between repair batches, so the batch ends first, with
-        // `key(2)` left pending by a peer that does not serve it.
-        let client = Arc::new(
-            ScriptedSnapClient::new([
-                account_range(1, &accounts, 0..1, &[key(1)]),
-                storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
-                storage_ranges(2, &[], &[], &[]),
-            ])
-            .on_storage_request(move || on_request.cancel()),
-        );
-        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
-        let mut bootstrap =
-            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
-                .with_policy(policy())
-                .with_cancellation(cancel);
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(client.storage_requests().len(), 2);
-        let provider = factory.database_provider_ro().unwrap();
-        let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
-        assert_eq!(pending, [key(2)]);
-        assert_eq!(stored_slots(&provider, key(1)), slots[..1]);
-        drop(provider);
-
-        let (client, mut resumed) = scripted(
-            &factory,
-            [
-                account_range(1, &accounts, 0..1, &[key(1)]),
-                storage_ranges(1, &[&slots[1..]], &slots, &[key(2)]),
-                Err(RequestError::UnsupportedCapability),
-            ],
-            [3],
-        );
-        assert_eq!(resumed.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(*client.storage_requests(), [(vec![key(1)], key(2))]);
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider.snap_repairs(write).unwrap().is_empty());
-        assert_eq!(stored_slots(&provider, key(1)), slots);
-    }
-
-    // Blocks `0..=tip`, each committing to an empty list and to `root`.
-    fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
-        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
-        let mut parent = B256::ZERO;
-        (0..=tip)
-            .map(|number| {
-                let mut header = header(number, parent, Some(commitment));
-                header.state_root = root;
-                let sealed = SealedHeader::seal_slow(header);
-                parent = sealed.hash();
-                sealed
-            })
-            .collect()
-    }
-
-    // Blocks continuing `parent`, one per list, each committing to its list and to `root`.
-    fn branch(
-        parent: &SealedHeader,
-        lists: &[Vec<AccountChanges>],
-        root: B256,
-    ) -> Vec<SealedHeader> {
-        let mut parent = parent.clone();
-        lists
-            .iter()
-            .map(|list| {
-                let commitment = compute_block_access_list_hash(list);
-                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
-                header.state_root = root;
-                parent = SealedHeader::seal_slow(header);
-                parent.clone()
-            })
-            .collect()
-    }
-
-    // A peer serving `lists` in order, or none of them.
-    fn lists(
-        request_id: u64,
-        lists: &[Vec<AccountChanges>],
-        served: bool,
-    ) -> PeerRequestResult<SnapResponse> {
-        let block_access_lists =
-            lists.iter().map(|list| served.then(|| alloy_rlp::encode(list).into())).collect();
-        let message = BlockAccessListsMessage {
-            request_id,
-            block_access_lists: BlockAccessLists(block_access_lists),
-        };
-        Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
-    }
-
-    // Rebuilds the trie of `write`'s state up to `target` and checks it against that header.
-    fn rebuild_and_verify(factory: &Factory, write: SnapWrite, target: u64) -> VerifiedSnapState {
-        let provider = factory.database_provider_rw().unwrap();
-        let mut stage = MerkleStage::default_execution();
-        loop {
-            let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap();
-            let output =
-                stage.execute(&provider, ExecInput { target: Some(target), checkpoint }).unwrap();
-            provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint).unwrap();
-            if output.done {
-                break
-            }
-        }
-        provider.verify_state_root(write).unwrap()
-    }
-
-    // The accounts at every block of the new branch, which never credits `STALE`.
-    fn reorg_accounts() -> Vec<(B256, TrieAccount)> {
-        let mut accounts = vec![(keccak256(STALE), account(1)), (keccak256(KEPT), account(2))];
-        accounts.sort_by_key(|(hashed_address, _)| *hashed_address);
-        accounts
-    }
-
-    fn stale_changes() -> AccountChanges {
-        AccountChanges::new(STALE)
-    }
-
-    // An attempt that downloaded every account at pivot 4 of a branch crediting `STALE` in blocks
-    // 3 and 4, then a reorg to a branch forking after block 2 whose first lists are `new_lists`.
-    // Returns the orphaned headers and the new branch's.
-    fn reorged(
-        factory: &Factory,
-        new_lists: [Vec<AccountChanges>; 2],
-    ) -> (SnapAttemptId, Vec<SealedHeader>, Vec<SealedHeader>) {
-        let accounts = reorg_accounts();
-        let root = state_root(&accounts);
-        let shared = chain(2, root);
-        let orphaned = branch(&shared[2], &orphaned_lists(), root);
-        insert_headers(factory, &shared);
-        insert_headers(factory, &orphaned);
-        let provider = factory.database_provider_rw().unwrap();
-        let write =
-            provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let range = verified_range(&accounts, 0..2, B256::ZERO, &[]);
-        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        // The range was served at the orphaned pivot, holding its credit.
-        let mut credited = Account::from(account(1));
-        credited.balance = U256::from(1_000);
-        let stale = HashedPostState::default().with_accounts([(keccak256(STALE), Some(credited))]);
-        provider.write_hashed_state(&stale.into_sorted()).unwrap();
-        provider.commit().unwrap();
-
-        let [first, second] = new_lists;
-        let new = branch(&shared[2], &[first, second, Vec::new()], root);
-        factory.replace_headers_after(2, &new);
-        (attempt_id(factory), orphaned, new)
-    }
-
-    // The orphaned branch's lists for blocks 3 and 4, crediting `STALE` in each.
-    fn orphaned_lists() -> Vec<Vec<AccountChanges>> {
-        [999, 1_000]
-            .map(|balance| {
-                vec![stale_changes().with_balance_change(BalanceChange::new(
-                    BlockAccessIndex::new(1),
-                    U256::from(balance),
-                ))]
-            })
-            .to_vec()
-    }
-
-    // A peer serving no account range.
-    fn unserved_range(request_id: u64) -> PeerRequestResult<SnapResponse> {
-        let message = AccountRangeMessage { request_id, accounts: Vec::new(), proof: Vec::new() };
-        Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message)))
-    }
-
-    // A peer serving the account at `hashed_address` alone.
-    fn served_account(
-        request_id: u64,
-        accounts: &[(B256, TrieAccount)],
-        hashed_address: B256,
-    ) -> PeerRequestResult<SnapResponse> {
-        let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
-        account_range(request_id, accounts, index..index + 1, &[hashed_address])
-    }
-
-    fn hashes(headers: &[SealedHeader]) -> Vec<B256> {
-        headers.iter().map(SealedHeader::hash).collect()
-    }
-
-    // Runs a bootstrap through a reorg to a branch whose first lists are `new_lists`, returning
-    // the account ranges it fetched again.
-    async fn recover(new_lists: [Vec<AccountChanges>; 2], repaired: bool) -> Vec<B256> {
-        let accounts = reorg_accounts();
-        let factory = hashed_factory();
-        let (attempt, orphaned, new) = reorged(&factory, new_lists.clone());
-        let mut responses = vec![
-            lists(1, &orphaned_lists(), true),
-            // Blocks 3 and 4 of the new branch carry the state to its pivot.
-            lists(2, &new_lists, true),
-        ];
-        if repaired {
-            responses.push(served_account(1, &accounts, keccak256(STALE)));
-        }
-        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
-            panic!("the state is repaired: {outcome:?}")
-        };
-        assert_eq!(pivot, new[1].num_hash());
-        assert_eq!(attempt_id(&factory), attempt);
-        assert_eq!(*client.block_requests(), [hashes(&orphaned), hashes(&new[..2])]);
-        let origins = client.origins().clone();
-        // The repaired state is the new pivot's, as its header commits to.
-        let verified = rebuild_and_verify(&factory, write, pivot.number);
-        assert_eq!(verified.state_root(), state_root(&accounts));
-        origins
-    }
-
-    #[tokio::test]
     async fn a_new_branch_too_short_for_a_pivot_waits_before_fetching_lists() {
         let factory = hashed_factory();
         let (attempt, _, _) = reorged(&factory, [Vec::new(), Vec::new()]);
@@ -1454,5 +1395,64 @@ mod tests {
         };
         assert_eq!(pivot, new[127].num_hash());
         assert_ne!(attempt_id(&factory), attempt);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_repair_resumes_at_its_pending_slots() {
+        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_slot(key(1), key(1));
+        repairs.insert_slot(key(1), key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let cancel = CancellationToken::new();
+        let on_request = cancel.clone();
+        // Cancellation is checked between repair batches, so the batch ends first, with
+        // `key(2)` left pending by a peer that does not serve it.
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
+                storage_ranges(2, &[], &[], &[]),
+            ])
+            .on_storage_request(move || on_request.cancel()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy())
+                .with_cancellation(cancel);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(client.storage_requests().len(), 2);
+        let provider = factory.database_provider_ro().unwrap();
+        let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
+        assert_eq!(pending, [key(2)]);
+        assert_eq!(stored_slots(&provider, key(1)), slots[..1]);
+        drop(provider);
+
+        let (client, mut resumed) = scripted(
+            &factory,
+            [
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[1..]], &slots, &[key(2)]),
+                Err(RequestError::UnsupportedCapability),
+            ],
+            [3],
+        );
+        assert_eq!(resumed.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(*client.storage_requests(), [(vec![key(1)], key(2))]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
+        assert_eq!(stored_slots(&provider, key(1)), slots);
     }
 }
