@@ -10,9 +10,13 @@ use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
+use tracing::instrument;
+
+#[cfg(feature = "metrics")]
+use reth_primitives_traits::FastInstant as Instant;
+
 #[cfg(feature = "std")]
 use tracing::debug;
-use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -395,11 +399,18 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        let storage_tries = self.storage_trie_updates();
-        let revealed = self.revealed_trie_mut()?;
+        let root = self.revealed_trie_mut()?.root(new_epoch);
 
-        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        #[cfg(feature = "metrics")]
+        let start = Instant::now();
+
+        let storage_tries = self.storage_trie_updates();
+        let updates = self.revealed_trie_mut()?.take_updates();
         let updates = TrieUpdatesSorted::new(updates, storage_tries);
+
+        #[cfg(feature = "metrics")]
+        self.metrics.histograms.take_updates_duration_seconds.record(start.elapsed().as_secs_f64());
+
         Ok((root, updates))
     }
 

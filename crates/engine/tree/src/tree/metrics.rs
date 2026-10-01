@@ -586,7 +586,7 @@ pub struct BlockValidationMetrics {
     pub state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root
     pub state_root_histogram: Histogram,
-    /// Histogram of deferred trie computation duration.
+    /// Duration of deferred hashed-state sorting and publication, excluding trie updates.
     pub deferred_trie_compute_duration: Histogram,
     /// Payload conversion and validation latency
     pub payload_validation_duration: Gauge,
