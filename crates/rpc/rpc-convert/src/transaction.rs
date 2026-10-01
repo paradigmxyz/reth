@@ -480,7 +480,9 @@ fn transaction_request_to_evm2(
     let value = value.unwrap_or_default();
     let access_list = access_list.unwrap_or_default();
     let gas_price = gas_price.saturating_to();
-    let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or_default().saturating_to();
+    // Preserve flat pricing when the RPC request has no priority fee.
+    let max_priority_fee_per_gas =
+        max_priority_fee_per_gas.map(|fee| fee.saturating_to()).unwrap_or(gas_price);
 
     let tx = match tx_type {
         TxType::Legacy => TxEnvelope::Legacy(TxLegacy {

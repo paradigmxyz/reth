@@ -85,20 +85,40 @@ mod tests {
     }
 
     #[test]
-    fn test_blob_fee_cap_defaults_to_exact_block_fee() {
+    fn test_typed_request_fee_defaults() {
         let converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
         for blob_fee in [u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX] {
             let mut env = EthEvmEnv::default();
             env.block.blob_basefee = U256::from(blob_fee);
+            env.block.basefee = U256::from(30);
             let request = TransactionRequest {
                 to: Some(Address::repeat_byte(0xaa).into()),
                 blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                gas_price: Some(100),
                 ..Default::default()
             };
 
-            let tx = converter.tx_env(request, &env).unwrap();
+            let tx = converter.tx_env(request.clone(), &env).unwrap();
 
             assert_eq!(tx.max_fee_per_blob_gas(), Some(blob_fee));
+            assert_eq!(tx.effective_gas_price(Some(30)), 100);
+
+            let request = TransactionRequest {
+                authorization_list: Some(vec![]),
+                blob_versioned_hashes: None,
+                ..request
+            };
+            let tx = converter.tx_env(request.clone(), &env).unwrap();
+            assert_eq!(tx.effective_gas_price(Some(30)), 100);
+
+            let request = TransactionRequest {
+                gas_price: None,
+                max_fee_per_gas: Some(100),
+                max_priority_fee_per_gas: Some(0),
+                ..request
+            };
+            let tx = converter.tx_env(request, &env).unwrap();
+            assert_eq!(tx.effective_gas_price(Some(30)), 30);
         }
     }
 }
