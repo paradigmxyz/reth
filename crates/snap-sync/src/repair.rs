@@ -10,7 +10,10 @@ use alloy_eip7928::AccountChanges;
 use alloy_primitives::{keccak256, B256, U256};
 use reth_storage_api::{MetadataWriter, SnapAttemptId};
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::{
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    mem,
+};
 
 /// Accounts and storage slots to fetch again at the pivot, in key order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,14 +145,14 @@ impl StaleAccount {
     // Clears the fields and slots `changes` overwrites, returning whether any was stale.
     fn resolve_changes(&mut self, changes: &AccountChanges) -> bool {
         let info = changes.account_info();
-        let before = (self.balance, self.nonce, self.code, self.slots.len());
-        self.balance &= info.balance.is_none();
-        self.nonce &= info.nonce.is_none();
-        self.code &= info.code_hash.is_none();
+        let mut resolved = false;
+        resolved |= info.balance.is_some() && mem::take(&mut self.balance);
+        resolved |= info.nonce.is_some() && mem::take(&mut self.nonce);
+        resolved |= info.code_hash.is_some() && mem::take(&mut self.code);
         for slot in Self::slots_of(changes) {
-            self.slots.remove(&slot);
+            resolved |= self.slots.remove(&slot);
         }
-        before != (self.balance, self.nonce, self.code, self.slots.len())
+        resolved
     }
 
     // Hashed keys of the slots `changes` writes.
