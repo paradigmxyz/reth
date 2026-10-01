@@ -264,8 +264,16 @@ where
             return Ok(Step::Restart)
         }
         let ancestor = reorg.ancestor();
-        if !self.policy.is_catchable_from(ancestor.number, head) {
-            info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists expired, restarting");
+        let applied = self
+            .factory
+            .database_provider_ro()?
+            .catch_up_progress(write)?
+            .ok_or(SnapSyncError::NoCatchUpProgress)?
+            .applied();
+        // Catch-up resumes from the ancestor, or from below it when it had not reached it yet.
+        let resume = applied.number.min(ancestor.number);
+        if !self.policy.is_catchable_from(resume, head) {
+            info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
         let provider = self.factory.database_provider_ro()?;
@@ -1320,6 +1328,42 @@ mod tests {
             panic!("the new branch's state is complete: {outcome:?}")
         };
         assert_eq!(pivot, new[1].num_hash());
+        assert_ne!(attempt_id(&factory), attempt);
+        assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_stalled_below_the_ancestor_restarts_before_fetching_lists() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        let shared = chain(2, root);
+        let orphaned = branch(&shared[2], &orphaned_lists(), root);
+        insert_headers(&factory, &shared);
+        insert_headers(&factory, &orphaned);
+        // The pivot advanced to block 4 while catch-up stayed at block 1, below the ancestor.
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(shared[1].num_hash(), root)).unwrap();
+        provider
+            .advance_snap_pivot(write, SnapGeneration::new(orphaned[1].num_hash(), root))
+            .unwrap();
+        provider.commit().unwrap();
+        let attempt = attempt_id(&factory);
+        let mut lists = vec![vec![stale_changes()]];
+        lists.resize(8, Vec::new());
+        let new = branch(&shared[2], &lists, root);
+        factory.replace_headers_after(2, &new);
+        // Head 10 still serves the list after the ancestor, but not the one after block 1.
+        let (client, mut bootstrap) =
+            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [10]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the new branch's state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot, new[6].num_hash());
         assert_ne!(attempt_id(&factory), attempt);
         assert!(client.block_requests().is_empty());
     }
