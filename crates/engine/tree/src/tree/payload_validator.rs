@@ -1876,7 +1876,7 @@ where
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
-            Arc::new(Arc::unwrap_or_clone(block.trie_updates).into_sorted()),
+            block.trie_updates,
         ))
     }
 

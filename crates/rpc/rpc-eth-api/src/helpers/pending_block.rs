@@ -469,7 +469,7 @@ pub trait LoadPendingBlock:
             block.into(),
             Arc::new(execution_outcome),
             Arc::new(hashed_state.into_sorted()),
-            Arc::new(trie_updates.into_sorted()),
+            trie_updates,
         ))
     }
 }
