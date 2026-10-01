@@ -1,3 +1,4 @@
+use self::blob_cache::BlobValidationCache;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
@@ -47,6 +48,8 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
 
+mod blob_cache;
+
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
 pub struct ValidationApi<Provider, E: ConfigureEvm, T: PayloadTypes> {
@@ -84,6 +87,7 @@ where
             disallow,
             validation_window,
             cached_state: Default::default(),
+            validated_blobs: Default::default(),
             task_spawner,
             sender_recovery_cache,
             metrics: Default::default(),
@@ -116,6 +120,28 @@ where
         } else {
             *cache = (head, cached_state)
         }
+    }
+
+    /// Runs the validation on a blocking task.
+    ///
+    /// The validation is skipped if the request is dropped before it starts and stopped if the
+    /// request is dropped while the validation waits for the cached reads.
+    async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
+    where
+        F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
+    {
+        let (mut tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = tokio::select! {
+                biased;
+                _ = tx.closed() => return,
+                result = validation => result.map_err(ErrorObject::from),
+            };
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
 
@@ -304,7 +330,7 @@ where
         }
 
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
+            output.state.account(&message.proposer_fee_recipient)
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
@@ -373,16 +399,15 @@ where
     }
 
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
+    ///
+    /// Exact blob, commitment, and cell-proof matches from recent submissions reuse KZG
+    /// validation. The resulting hashes are still checked against the block's EIP-4844
+    /// transactions during payload validation.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle.versioned_hashes();
-        let sidecar =
-            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
-
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-        Ok(versioned_hashes)
+        self.validated_blobs.validate(blobs_bundle)
     }
 
     /// Converts the payload into a block and recovers the transaction senders.
@@ -590,16 +615,8 @@ where
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v3(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -608,16 +625,8 @@ where
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v4(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -626,16 +635,8 @@ where
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v5(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -644,16 +645,8 @@ where
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v6(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v6(&this, request).await };
+        self.spawn_validation(validation).await
     }
 }
 
@@ -676,6 +669,8 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
+    /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
+    validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
     /// Cache of recovered transaction senders shared with transaction ingress and payload

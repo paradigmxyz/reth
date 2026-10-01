@@ -428,9 +428,8 @@ where
             // - dispatch_bal_batch_io is false
             // - execution cache is not disabled
             //
-            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // we launch prewarming of the BAL accounts and declared storages (both storage_reads
+            // and storage_changes). Bytecode is loaded on demand during execution.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
@@ -787,6 +786,7 @@ mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
+    use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -970,7 +970,7 @@ mod tests {
 
     impl AsRef<[u8]> for CacheDropProbe {
         fn as_ref(&self) -> &[u8] {
-            &[0xef, 0x01, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            &EIP7702_CLEARED_DELEGATION
         }
     }
 
@@ -1172,6 +1172,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
@@ -1182,6 +1183,7 @@ mod tests {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            ..Default::default()
         };
         account.apply_bal_info(info);
 

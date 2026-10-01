@@ -1077,10 +1077,14 @@ Engine:
 
           [env: RETH_ENGINE_TXPOOL_PREWARMING=]
 
-      --engine.sender-recovery-cache
-          Enable caching recovered transaction senders across transaction ingress and payload execution
+      --engine.sender-recovery-cache [<SENDER_RECOVERY_CACHE_ENABLED>]
+          Cache recovered transaction senders across transaction ingress and payload execution.
+
+          Enabled by default, use `--engine.sender-recovery-cache=false` to disable it.
 
           [env: RETH_ENGINE_SENDER_RECOVERY_CACHE=]
+          [default: true]
+          [possible values: true, false]
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls

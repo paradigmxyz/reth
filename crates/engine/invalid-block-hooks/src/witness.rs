@@ -128,8 +128,7 @@ fn collect_execution_data(
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
+        codes.insert(code.hash_slow(), code.original_bytes());
     });
 
     // Collect preimages
@@ -455,14 +454,13 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 storage,
                 status: AccountStatus::default(),

@@ -659,7 +659,7 @@ where
     }
 
     fn size_hint(&self) -> usize {
-        self.db.bundle_state.size_hint()
+        self.db.bundle_size_hint()
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {

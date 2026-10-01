@@ -260,35 +260,35 @@ mod tests {
             balance: U256::from(42),
             code_hash: KECCAK_EMPTY,
             code: None,
-            account_id: None,
+            ..Default::default()
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
         let provider = DatabaseStateProvider::new(db);
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: None })
+            Some(Account { nonce: 7, balance: U256::from(42), ..Default::default() })
         );
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn database_state_provider_maps_code_hash_and_bytecode() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let account = AccountInfo {
-            nonce: 7,
-            balance: U256::from(42),
-            code_hash,
-            code: Some(bytecode.clone()),
-            account_id: None,
-        };
+        let account = AccountInfo::new(U256::from(42), 7, code_hash, bytecode.clone());
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                ..Default::default()
+            })
         );
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
@@ -331,17 +331,12 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn database_state_provider_uses_cached_reads() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let account = AccountInfo {
-            nonce: 7,
-            balance: U256::from(42),
-            code_hash,
-            code: Some(bytecode.clone()),
-            account_id: None,
-        };
+        let account = AccountInfo::new(U256::from(42), 7, code_hash, bytecode.clone());
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
         let bytecode_reads = db.bytecode_reads.clone();
@@ -350,11 +345,21 @@ mod tests {
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                ..Default::default()
+            })
         );
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                ..Default::default()
+            })
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);
 
