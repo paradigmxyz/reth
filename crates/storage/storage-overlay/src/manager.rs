@@ -938,7 +938,7 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let hashed_states = blocks.iter().map(ExecutedBlock::hashed_state).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
-    let (nodes, state) = rayon::join(
+    let (nodes, state) = reth_rayon::join(
         || TrieUpdatesSorted::merge_batch(blocks.iter().map(ExecutedBlock::trie_updates)),
         || HashedPostStateSorted::merge_batch(hashed_states.iter().cloned()),
     );
