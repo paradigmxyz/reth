@@ -127,32 +127,20 @@ where
 
     fn context_for_block<'a>(
         &self,
-        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+        _block: &'a SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>
     where
         Self: 'a,
     {
-        let evm_env = self.inner.evm_env(block.header())?;
-        let ctx = self.inner.context_for_block(block)?;
-        Ok(EthBigBlockPlan::new(
-            vec![EthBigBlockSegment { start_tx: 0, evm_env, ctx }],
-            Vec::new(),
-            block.transaction_count(),
-        ))
+        unreachable!("big blocks EVM should only be used from within the engine pipeline")
     }
 
     fn context_for_next_block(
         &self,
-        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
-        attributes: Self::NextBlockEnvCtx,
+        _parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        _attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error> {
-        let evm_env = self.inner.next_evm_env(parent, &attributes)?;
-        let ctx = self.inner.context_for_next_block(parent, attributes)?;
-        Ok(EthBigBlockPlan::new(
-            vec![EthBigBlockSegment { start_tx: 0, evm_env, ctx }],
-            Vec::new(),
-            0,
-        ))
+        unreachable!("big blocks EVM should only be used from within the engine pipeline")
     }
 }
 
