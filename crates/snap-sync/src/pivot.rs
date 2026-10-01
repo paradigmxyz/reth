@@ -137,8 +137,7 @@ impl SnapPivotPolicy {
     /// Returns whether the lists of blocks a reorg orphaned after `ancestor` are still worth
     /// waiting for under `head`, since peers may keep lists only for canonical blocks.
     pub const fn awaits_orphaned_lists(&self, ancestor: u64, head: u64) -> bool {
-        head.saturating_sub(ancestor) <= SERVED_STATE_WINDOW &&
-            self.is_catchable_from(ancestor, head)
+        head.saturating_sub(ancestor) <= SERVED_STATE_WINDOW
     }
 }
 

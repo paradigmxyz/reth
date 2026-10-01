@@ -252,7 +252,8 @@ where
 
     // Repairs what a reorg across the pivot left in the downloaded state, as EIP-8189 describes:
     // the orphaned blocks' lists schedule what they changed for repair, and catch-up continues from
-    // the last block both branches share. Unserved lists are waited for until they expire.
+    // the last block both branches share. Unserved lists are waited for within the served state
+    // window.
     async fn recover(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let pivot = self.pivot()?;
         let provider = self.factory.database_provider_ro()?;
@@ -1378,7 +1379,8 @@ mod tests {
         new_lists.resize(129, Vec::new());
         let new = branch(&shared[2], &new_lists, root);
         factory.replace_headers_after(2, &new);
-        // Head 131 leaves the ancestor past the served state window, but its lists still served.
+        // Head 131 leaves the ancestor past the served state window, but its lists are still
+        // served.
         let responses =
             [lists(1, &orphaned_lists(), false), account_range(1, &accounts, 0..3, &[])];
         let (_, bootstrap) = scripted(&factory, responses, [131]);
