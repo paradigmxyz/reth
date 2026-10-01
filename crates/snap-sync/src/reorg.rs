@@ -266,7 +266,8 @@ mod tests {
         let generation = SnapGeneration::new(new.tip(), state_root(&accounts));
 
         let provider = factory.database_provider_rw().unwrap();
-        let recovered = provider.recover_snap_pivot(write, old.block(0), generation).unwrap();
+        let recovered =
+            provider.commit_reorg_recovery(write, old.block(0), &[], generation).unwrap();
         provider.commit().unwrap();
 
         let provider = factory.database_provider_ro().unwrap();
@@ -316,7 +317,8 @@ mod tests {
 
         let provider = factory.database_provider_rw().unwrap();
         let generation = SnapGeneration::new(new.tip(), state_root(&accounts));
-        let recovered = provider.recover_snap_pivot(write, old.block(0), generation).unwrap();
+        let recovered =
+            provider.commit_reorg_recovery(write, old.block(0), &[], generation).unwrap();
 
         assert_eq!(
             provider.catch_up_progress(recovered).unwrap().unwrap().applied(),

@@ -67,21 +67,6 @@ pub trait SnapAttemptStore {
     where
         Self: MetadataWriter;
 
-    /// Re-anchors an attempt whose pivot a reorg orphaned to `generation`, rewinding catch-up to
-    /// `ancestor`, the last block both branches share, and refusing writes proved against the
-    /// orphaned root.
-    ///
-    /// State the orphaned blocks changed must already be scheduled for repair. Storage persisted
-    /// ahead of its range may hold their values, so it is dropped.
-    fn recover_snap_pivot(
-        &self,
-        write: SnapWrite,
-        ancestor: BlockNumHash,
-        generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError>
-    where
-        Self: MetadataWriter + HeaderProvider + BlockHashReader;
-
     /// Returns where the canonical chain diverges from the branch the pivot of `write`'s attempt
     /// is on.
     ///
@@ -95,6 +80,8 @@ pub trait SnapAttemptStore {
 
     /// Schedules what `lists`, those of the orphaned blocks, changed in the downloaded state for
     /// repair, and moves the attempt to `generation` with catch-up back at `ancestor` at most.
+    ///
+    /// Storage persisted ahead of its range may hold the orphaned values, so it is dropped.
     fn commit_reorg_recovery(
         &self,
         write: SnapWrite,
@@ -234,44 +221,6 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         Ok(())
     }
 
-    fn recover_snap_pivot(
-        &self,
-        write: SnapWrite,
-        ancestor: BlockNumHash,
-        generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError>
-    where
-        Self: MetadataWriter + HeaderProvider + BlockHashReader,
-    {
-        let mut attempt = self.authorize_snap_write(write)?;
-        let target = generation.target();
-        for block in [ancestor, target] {
-            if self.block_hash(block.number)? != Some(block.hash) {
-                return Err(SnapSyncError::NonCanonicalBlock {
-                    block: block.number,
-                    hash: block.hash,
-                })
-            }
-        }
-        if target.number < ancestor.number {
-            return Err(SnapSyncError::PivotNotAdvanced {
-                pivot: ancestor.number,
-                target: target.number,
-            })
-        }
-        let applied =
-            self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
-        // Blocks up to the ancestor are the same on both branches.
-        let applied = if applied.number <= ancestor.number { applied } else { ancestor };
-
-        attempt.re_anchor(target, generation.state_root());
-        self.write_snap_attempt(&attempt)?;
-        CatchUpProgress::at_pivot(applied).write(self, attempt.id())?;
-        StoredProgress::clear(self)?;
-        StoredAncestry::record(self, attempt.id(), target)?;
-        Ok(SnapWrite::of(&attempt))
-    }
-
     fn snap_reorg(
         &self,
         write: SnapWrite,
@@ -292,6 +241,23 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
     where
         Self: MetadataWriter + HeaderProvider + BlockHashReader + DBProvider,
     {
+        let mut attempt = self.authorize_snap_write(write)?;
+        let target = generation.target();
+        for block in [ancestor, target] {
+            if self.block_hash(block.number)? != Some(block.hash) {
+                return Err(SnapSyncError::NonCanonicalBlock {
+                    block: block.number,
+                    hash: block.hash,
+                })
+            }
+        }
+        if target.number < ancestor.number {
+            return Err(SnapSyncError::PivotNotAdvanced {
+                pivot: ancestor.number,
+                target: target.number,
+            })
+        }
+
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let mut repairs = StateRepairs::default();
         for changes in lists.iter().flat_map(|list| list.as_bal().iter()) {
@@ -305,7 +271,17 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
             repairs.insert_changes(hashed_address, changes);
         }
         self.schedule_snap_repairs(write, repairs)?;
-        self.recover_snap_pivot(write, ancestor, generation)
+
+        let applied =
+            self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
+        // Blocks up to the ancestor are the same on both branches.
+        let applied = if applied.number <= ancestor.number { applied } else { ancestor };
+        attempt.re_anchor(target, generation.state_root());
+        self.write_snap_attempt(&attempt)?;
+        CatchUpProgress::at_pivot(applied).write(self, attempt.id())?;
+        StoredProgress::clear(self)?;
+        StoredAncestry::record(self, attempt.id(), target)?;
+        Ok(SnapWrite::of(&attempt))
     }
 }
 
