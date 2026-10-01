@@ -25,8 +25,7 @@ pub struct StateRepairs {
 impl StateRepairs {
     /// Schedules every field of the account at `hashed_address`.
     pub fn insert_account(&mut self, hashed_address: B256) {
-        let account = self.accounts.entry(hashed_address).or_default();
-        (account.balance, account.nonce, account.code) = (true, true, true);
+        self.accounts.entry(hashed_address).or_default().set_fields(true);
     }
 
     /// Schedules `hashed_slot` of the storage at `hashed_address`, along with its account.
@@ -91,7 +90,7 @@ impl StateRepairs {
     pub(crate) fn resolve(&mut self, hashed_address: B256, slots: Option<&[(B256, U256)]>) {
         let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return };
         let account = entry.get_mut();
-        (account.balance, account.nonce, account.code) = (false, false, false);
+        account.set_fields(false);
         match slots {
             Some(slots) => {
                 for (slot, _) in slots {
@@ -158,6 +157,13 @@ impl StaleAccount {
     // Hashed keys of the slots `changes` writes.
     fn slots_of(changes: &AccountChanges) -> impl Iterator<Item = B256> + '_ {
         changes.storage_post_states().map(|(slot, _)| keccak256(B256::from(slot)))
+    }
+
+    // Marks every account-level field stale, or none.
+    const fn set_fields(&mut self, stale: bool) {
+        self.balance = stale;
+        self.nonce = stale;
+        self.code = stale;
     }
 }
 
