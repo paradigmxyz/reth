@@ -85,6 +85,15 @@ impl CatchUpProgress {
         self.applied
     }
 
+    /// Last applied block still canonical after a reorg back to `ancestor`.
+    pub const fn resume_after(&self, ancestor: BlockNumHash) -> BlockNumHash {
+        if self.applied.number <= ancestor.number {
+            self.applied
+        } else {
+            ancestor
+        }
+    }
+
     /// Number of the block whose list comes next.
     pub const fn next(&self) -> u64 {
         self.applied.number + 1
@@ -269,14 +278,22 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
                 self.remove::<tables::HashedStorages>(*hashed_address..=*hashed_address)?;
             }
         }
+        // A canonical list overwrites the stale values of the fields it changes, in the accounts it
+        // writes.
+        let mut repairs = self.snap_repairs(write)?;
+        let mut resolved = false;
+        for changes in bal {
+            if repairs.is_empty() {
+                break
+            }
+            let hashed_address = keccak256(changes.address());
+            if state.accounts.contains_key(&hashed_address) {
+                resolved |= repairs.resolve_changes(hashed_address, changes);
+            }
+        }
         self.commit_bytecodes(write, bytecodes.into_iter().collect())?;
         self.write_hashed_state(&state.into_sorted())?;
-        // A canonical list overwrites the stale values of the fields it changes.
-        let mut repairs = self.snap_repairs(write)?;
-        if !repairs.is_empty() {
-            for changes in bal {
-                repairs.resolve_changes(keccak256(changes.address()), changes);
-            }
+        if resolved {
             StoredRepairs::store(self, write.attempt(), repairs)?;
         }
         advanced.write(self, write.attempt())?;
@@ -787,5 +804,21 @@ mod tests {
             &AccountChanges::new(CHANGED).with_nonce_change(NonceChange::new(index(1), 1)),
         );
         assert_eq!(provider.snap_repairs(write).unwrap(), expected);
+    }
+
+    #[test]
+    fn repairs_of_an_account_outside_the_coverage_stay_scheduled() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, changed_index(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(keccak256(CHANGED));
+        provider.schedule_snap_repairs(write, repairs.clone()).unwrap();
+        let (block, parent) = block(2);
+
+        // The list changes the balance, but leaves the account to its range.
+        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
+
+        assert_eq!(provider.snap_repairs(write).unwrap(), repairs);
     }
 }

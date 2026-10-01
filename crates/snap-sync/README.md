@@ -65,8 +65,8 @@ assert_eq!(policy.pivot_block(4, None), None);
 ## Reorgs across the pivot
 
 A reorg that orphans the pivot leaves the downloaded state holding the abandoned branch's changes.
-Following EIP-8189, the attempt keeps the headers of the last 64 blocks through its pivot, so it can
-find the last block both branches share and fetch the orphaned blocks' BALs:
+The attempt keeps the headers of the last 64 blocks through its pivot, so it can find the last block
+both branches share and fetch the orphaned blocks' BALs:
 
 - Every field and storage slot those BALs changed is scheduled for repair, catch-up rewinds to the
   shared block, and the attempt re-anchors to a new canonical pivot.
@@ -75,8 +75,10 @@ find the last block both branches share and fetch the orphaned blocks' BALs:
 - Once catch-up reaches the new pivot, those entries are fetched again on their own, proved against
   its root, and the hand-off waits until none remain.
 
-Orphaned BALs no peer serves are waited for. A reorg reaching further back than the kept headers,
-or orphaned BALs that expire before a peer serves them, starts the attempt over instead.
+Orphaned BALs no peer serves are waited for while the head is within the served-state window (128
+blocks) of the ancestor. A reorg reaching further back than the kept headers, orphaned BALs still
+unserved past that window, or a reorg after the hand-off to the merkle stage starts the attempt over
+instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.

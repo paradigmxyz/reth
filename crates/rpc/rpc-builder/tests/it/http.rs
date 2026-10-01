@@ -536,15 +536,7 @@ where
     C: ClientT + SubscriptionClientT + Sync,
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
-    let trace_filter = TraceFilter {
-        from_block: Default::default(),
-        to_block: Default::default(),
-        from_address: Default::default(),
-        to_address: Default::default(),
-        mode: Default::default(),
-        after: None,
-        count: None,
-    };
+    let trace_filter = TraceFilter::default();
 
     TraceApiClient::<TransactionRequest>::trace_raw_transaction(
         client,

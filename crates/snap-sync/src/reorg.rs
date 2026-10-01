@@ -5,47 +5,20 @@
 //! new branch overwrites it first. The reorg removes that branch's headers from the canonical
 //! chain, so the attempt keeps them from the moment it anchors.
 
-use crate::{
-    common::SnapRecord, pivot::DEFAULT_HEAD_DISTANCE, DownloadedAccount, SnapAccountStore,
-    SnapAttemptStore, SnapCatchUpStore, SnapGeneration, SnapSyncError, SnapWrite, StateRepairs,
-};
-use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
-use alloy_primitives::{keccak256, Bytes};
+use crate::{common::SnapRecord, SnapSyncError};
+use alloy_eips::BlockNumHash;
+use alloy_primitives::Bytes;
 use alloy_rlp::Decodable;
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
-    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttemptId,
+    BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId,
 };
 use reth_storage_errors::provider::ProviderError;
 use serde::{Deserialize, Serialize};
 
-/// Persistence for recovering an attempt whose pivot a reorg orphaned.
-///
-/// Blanket-implemented over node metadata access, so recovery joins the caller's transaction.
-pub trait SnapReorgStore {
-    /// Returns where the canonical chain diverges from the branch the pivot of `write`'s attempt
-    /// is on.
-    ///
-    /// `Ok(None)` when the kept headers do not reach back to where the branches part.
-    fn snap_reorg(
-        &self,
-        write: SnapWrite,
-    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
-    where
-        Self: HeaderProvider + BlockHashReader;
-
-    /// Schedules what `lists`, those of the orphaned blocks, changed in the downloaded state for
-    /// repair, and moves the attempt to `generation` with catch-up back at `ancestor` at most.
-    fn commit_reorg_recovery(
-        &self,
-        write: SnapWrite,
-        ancestor: BlockNumHash,
-        lists: &[DecodedBal],
-        generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError>
-    where
-        Self: MetadataWriter + HeaderProvider + BlockHashReader + DBProvider;
-}
+// Blocks of headers an attempt keeps through its pivot, bounding how deep a recoverable reorg
+// can reach.
+const KEPT_HEADERS: u64 = 64;
 
 /// Where a reorg left an attempt: the last block both branches share and the orphaned blocks
 /// after it.
@@ -70,84 +43,6 @@ impl<H> SnapReorg<H> {
     }
 }
 
-impl<T: MetadataProvider> SnapReorgStore for T {
-    fn snap_reorg(
-        &self,
-        write: SnapWrite,
-    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
-    where
-        Self: HeaderProvider + BlockHashReader,
-    {
-        let attempt = self.authorize_snap_write(write)?;
-        let Some(stored) =
-            StoredAncestry::read(self)?.filter(|stored| stored.attempt == write.attempt())
-        else {
-            return Ok(None)
-        };
-        let mut headers = stored
-            .headers
-            .iter()
-            .map(|header| {
-                <Self as HeaderProvider>::Header::decode(&mut header.as_ref())
-                    .map(SealedHeader::seal_slow)
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ProviderError::other)?;
-        // Kept headers end at the pivot they were recorded for.
-        if headers.last().map(SealedHeader::num_hash) != Some(attempt.pivot()) {
-            return Ok(None)
-        }
-
-        // The highest kept block still canonical is where the branches part.
-        let mut split = None;
-        for (index, header) in headers.iter().enumerate().rev() {
-            if self.block_hash(header.number())? == Some(header.hash()) {
-                split = Some((header.num_hash(), index + 1));
-                break
-            }
-        }
-        let (ancestor, from) = match split {
-            Some(split) => split,
-            None => {
-                // Otherwise they part just below the lowest kept block, or further down.
-                let lowest = &headers[0];
-                let Some(parent) = lowest.number().checked_sub(1) else { return Ok(None) };
-                if self.block_hash(parent)? != Some(lowest.parent_hash()) {
-                    return Ok(None)
-                }
-                (BlockNumHash::new(parent, lowest.parent_hash()), 0)
-            }
-        };
-        Ok(Some(SnapReorg { ancestor, orphaned: headers.split_off(from) }))
-    }
-
-    fn commit_reorg_recovery(
-        &self,
-        write: SnapWrite,
-        ancestor: BlockNumHash,
-        lists: &[DecodedBal],
-        generation: SnapGeneration,
-    ) -> Result<SnapWrite, SnapSyncError>
-    where
-        Self: MetadataWriter + HeaderProvider + BlockHashReader + DBProvider,
-    {
-        let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
-        let mut repairs = StateRepairs::default();
-        for changes in lists.iter().flat_map(|list| list.as_bal().iter()) {
-            let hashed_address = keccak256(changes.address());
-            // Accounts not downloaded yet are downloaded whole at a canonical pivot later.
-            if !changes.account_info().changes_state_root(changes) ||
-                self.downloaded_account(coverage, hashed_address)? == DownloadedAccount::Unknown
-            {
-                continue
-            }
-            repairs.insert_changes(hashed_address, changes);
-        }
-        self.schedule_snap_repairs(write, repairs)?;
-        self.recover_snap_pivot(write, ancestor, generation)
-    }
-}
-
 // Headers an attempt keeps of the blocks through its pivot, as RLP.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StoredAncestry {
@@ -165,15 +60,14 @@ impl SnapRecord for StoredAncestry {
 }
 
 impl StoredAncestry {
-    // Keeps the canonical headers of the last `DEFAULT_HEAD_DISTANCE` blocks through `pivot` for
-    // `attempt`, bounding how deep a recoverable reorg can reach. Keeps none unless they reach the
-    // pivot, leaving a reorg unrecoverable.
+    // Keeps the canonical headers of the last `KEPT_HEADERS` blocks through `pivot` for `attempt`.
+    // Keeps none unless they reach the pivot, leaving a reorg unrecoverable.
     pub(crate) fn record<P: HeaderProvider + MetadataWriter>(
         provider: &P,
         attempt: SnapAttemptId,
         pivot: BlockNumHash,
     ) -> Result<(), SnapSyncError> {
-        let from = pivot.number.saturating_sub(DEFAULT_HEAD_DISTANCE) + 1;
+        let from = pivot.number.saturating_sub(KEPT_HEADERS) + 1;
         let headers = provider.sealed_headers_range(from..=pivot.number)?;
         let contiguous = headers.windows(2).all(|pair| pair[1].parent_hash() == pair[0].hash());
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
@@ -183,6 +77,50 @@ impl StoredAncestry {
             headers.iter().map(|header| alloy_rlp::encode(header.header()).into()).collect();
         Self { version: Self::VERSION, attempt, headers }.write(provider)
     }
+
+    // Finds where the canonical chain diverges from the headers `attempt` keeps. `None` when they
+    // do not reach back to where the branches part.
+    pub(crate) fn reorg<P: MetadataProvider + HeaderProvider + BlockHashReader>(
+        provider: &P,
+        attempt: &SnapAttempt,
+    ) -> Result<Option<SnapReorg<P::Header>>, SnapSyncError> {
+        let Some(stored) = Self::read(provider)?.filter(|stored| stored.attempt == attempt.id())
+        else {
+            return Ok(None)
+        };
+        let mut headers = stored
+            .headers
+            .iter()
+            .map(|header| P::Header::decode(&mut header.as_ref()).map(SealedHeader::seal_slow))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(ProviderError::other)?;
+        // Kept headers end at the pivot they were recorded for.
+        if headers.last().map(SealedHeader::num_hash) != Some(attempt.pivot()) {
+            return Ok(None)
+        }
+
+        // The highest kept block still canonical is where the branches part.
+        let mut split = None;
+        for (index, header) in headers.iter().enumerate().rev() {
+            if provider.block_hash(header.number())? == Some(header.hash()) {
+                split = Some((header.num_hash(), index + 1));
+                break
+            }
+        }
+        let (ancestor, from) = match split {
+            Some(split) => split,
+            None => {
+                // Otherwise they part just below the lowest kept block, or further down.
+                let lowest = &headers[0];
+                let Some(parent) = lowest.number().checked_sub(1) else { return Ok(None) };
+                if provider.block_hash(parent)? != Some(lowest.parent_hash()) {
+                    return Ok(None)
+                }
+                (BlockNumHash::new(parent, lowest.parent_hash()), 0)
+            }
+        };
+        Ok(Some(SnapReorg { ancestor, orphaned: headers.split_off(from) }))
+    }
 }
 
 #[cfg(test)]
@@ -190,13 +128,14 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{account, hashed_factory, state_root, verified_range, BalChain},
-        SnapCatchUpStore,
+        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapGeneration, SnapWrite,
+        StateRepairs,
     };
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, NonceChange, SlotChanges, StorageChange,
     };
-    use alloy_eips::eip7928::bal::Bal;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_eips::eip7928::bal::{Bal, DecodedBal};
+    use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
         DatabaseProviderFactory, ProviderFactory,
@@ -303,7 +242,7 @@ mod tests {
     #[test]
     fn a_reorg_below_the_kept_headers_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
-        let depth = DEFAULT_HEAD_DISTANCE + 2;
+        let depth = KEPT_HEADERS + 2;
         let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
         let new = BalChain::new(1, (0..depth).map(|n| credit(address, n + 100)));
         let (factory, write) = started(&old, 1 + depth);
@@ -321,7 +260,8 @@ mod tests {
         let generation = SnapGeneration::new(new.tip(), state_root(&accounts));
 
         let provider = factory.database_provider_rw().unwrap();
-        let recovered = provider.recover_snap_pivot(write, old.block(0), generation).unwrap();
+        let recovered =
+            provider.commit_reorg_recovery(write, old.block(0), &[], generation).unwrap();
         provider.commit().unwrap();
 
         let provider = factory.database_provider_ro().unwrap();
@@ -371,7 +311,8 @@ mod tests {
 
         let provider = factory.database_provider_rw().unwrap();
         let generation = SnapGeneration::new(new.tip(), state_root(&accounts));
-        let recovered = provider.recover_snap_pivot(write, old.block(0), generation).unwrap();
+        let recovered =
+            provider.commit_reorg_recovery(write, old.block(0), &[], generation).unwrap();
 
         assert_eq!(
             provider.catch_up_progress(recovered).unwrap().unwrap().applied(),

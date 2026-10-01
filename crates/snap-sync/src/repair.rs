@@ -10,7 +10,10 @@ use alloy_eip7928::AccountChanges;
 use alloy_primitives::{keccak256, B256, U256};
 use reth_storage_api::{MetadataWriter, SnapAttemptId};
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::{
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    mem,
+};
 
 /// Accounts and storage slots to fetch again at the pivot, in key order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,10 +25,7 @@ pub struct StateRepairs {
 impl StateRepairs {
     /// Schedules every field of the account at `hashed_address`.
     pub fn insert_account(&mut self, hashed_address: B256) {
-        let account = self.accounts.entry(hashed_address).or_default();
-        account.balance = true;
-        account.nonce = true;
-        account.code = true;
+        self.accounts.entry(hashed_address).or_default().mark_fields_stale();
     }
 
     /// Schedules `hashed_slot` of the storage at `hashed_address`, along with its account.
@@ -35,12 +35,7 @@ impl StateRepairs {
 
     /// Schedules the fields and slots `changes` writes for the account at `hashed_address`.
     pub fn insert_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        let info = changes.account_info();
-        let account = self.accounts.entry(hashed_address).or_default();
-        account.balance |= info.balance.is_some();
-        account.nonce |= info.nonce.is_some();
-        account.code |= info.code_hash.is_some();
-        account.slots.extend(StaleAccount::slots_of(changes));
+        self.accounts.entry(hashed_address).or_default().insert_changes(changes);
     }
 
     /// Returns whether nothing is scheduled.
@@ -70,28 +65,23 @@ impl StateRepairs {
     // Adds what `other` schedules.
     pub(crate) fn extend(&mut self, other: Self) {
         for (hashed_address, stale) in other.accounts {
-            let account = self.accounts.entry(hashed_address).or_default();
-            account.balance |= stale.balance;
-            account.nonce |= stale.nonce;
-            account.code |= stale.code;
-            account.slots.extend(stale.slots);
+            self.accounts.entry(hashed_address).or_default().extend(stale);
         }
     }
 
-    // Drops the fields and slots a canonical list overwrites, as `changes` records them.
-    pub(crate) fn resolve_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return };
-        let info = changes.account_info();
-        let account = entry.get_mut();
-        account.balance &= info.balance.is_none();
-        account.nonce &= info.nonce.is_none();
-        account.code &= info.code_hash.is_none();
-        for slot in StaleAccount::slots_of(changes) {
-            account.slots.remove(&slot);
-        }
-        if account.is_resolved() {
+    // Drops the fields and slots a canonical list overwrites, as `changes` records them. Returns
+    // whether anything was dropped.
+    pub(crate) fn resolve_changes(
+        &mut self,
+        hashed_address: B256,
+        changes: &AccountChanges,
+    ) -> bool {
+        let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return false };
+        let resolved = entry.get_mut().resolve_changes(changes);
+        if entry.get().is_resolved() {
             entry.remove();
         }
+        resolved
     }
 
     // Drops the account at `hashed_address`, fetched whole, with the `slots` fetched along with it,
@@ -100,7 +90,7 @@ impl StateRepairs {
     pub(crate) fn resolve(&mut self, hashed_address: B256, slots: Option<&[(B256, U256)]>) {
         let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return };
         let account = entry.get_mut();
-        (account.balance, account.nonce, account.code) = (false, false, false);
+        account.clear_fields();
         match slots {
             Some(slots) => {
                 for (slot, _) in slots {
@@ -134,9 +124,53 @@ impl StaleAccount {
         !self.balance && !self.nonce && !self.code && self.slots.is_empty()
     }
 
+    // Marks the fields and slots `changes` writes as stale.
+    fn insert_changes(&mut self, changes: &AccountChanges) {
+        let info = changes.account_info();
+        self.balance |= info.balance.is_some();
+        self.nonce |= info.nonce.is_some();
+        self.code |= info.code_hash.is_some();
+        self.slots.extend(Self::slots_of(changes));
+    }
+
+    // Marks what `other` holds stale as stale.
+    fn extend(&mut self, other: Self) {
+        self.balance |= other.balance;
+        self.nonce |= other.nonce;
+        self.code |= other.code;
+        self.slots.extend(other.slots);
+    }
+
+    // Clears the fields and slots `changes` overwrites, returning whether any was stale.
+    fn resolve_changes(&mut self, changes: &AccountChanges) -> bool {
+        let info = changes.account_info();
+        let mut resolved = false;
+        resolved |= info.balance.is_some() && mem::take(&mut self.balance);
+        resolved |= info.nonce.is_some() && mem::take(&mut self.nonce);
+        resolved |= info.code_hash.is_some() && mem::take(&mut self.code);
+        for slot in Self::slots_of(changes) {
+            resolved |= self.slots.remove(&slot);
+        }
+        resolved
+    }
+
     // Hashed keys of the slots `changes` writes.
     fn slots_of(changes: &AccountChanges) -> impl Iterator<Item = B256> + '_ {
         changes.storage_post_states().map(|(slot, _)| keccak256(B256::from(slot)))
+    }
+
+    // Marks every account-level field stale.
+    const fn mark_fields_stale(&mut self) {
+        self.balance = true;
+        self.nonce = true;
+        self.code = true;
+    }
+
+    // Marks every account-level field fetched.
+    const fn clear_fields(&mut self) {
+        self.balance = false;
+        self.nonce = false;
+        self.code = false;
     }
 }
 
