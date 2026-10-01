@@ -45,10 +45,6 @@ function loadSamplyUrls(workDir) {
   return loadProfileUrls(workDir, 'samply-profile-url.txt');
 }
 
-function loadTracingChromeUrls(workDir) {
-  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
-}
-
 function loadProfileUrls(workDir, fileName) {
   const urls = {};
   let runs = [];
@@ -134,14 +130,17 @@ function metricRows(summary) {
       { label: 'Error rate',      baseline: optPct(b.error_rate_pct), feature: optPct(f.error_rate_pct), change: '' },
     ];
   }
+  const optS = v => (Number.isFinite(v) ? fmtS(v) : 'n/a');
+  const optMgas = v => (Number.isFinite(v) ? fmtMgas(v) : 'n/a');
   return [
-    { label: 'Mean',       baseline: fmtMs(b.mean_ms),       feature: fmtMs(f.mean_ms),       change: fmtChange(c.mean) },
-    { label: 'StdDev',     baseline: fmtMs(b.stddev_ms),     feature: fmtMs(f.stddev_ms),     change: '' },
-    { label: 'P50',        baseline: fmtMs(b.p50_ms),        feature: fmtMs(f.p50_ms),        change: fmtChange(c.p50) },
-    { label: 'P90',        baseline: fmtMs(b.p90_ms),        feature: fmtMs(f.p90_ms),        change: fmtChange(c.p90) },
-    { label: 'P99',        baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
-    { label: 'Mgas/s',     baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
-    { label: 'Wall Clock', baseline: fmtS(b.wall_clock_s),   feature: fmtS(f.wall_clock_s),   change: fmtChange(c.wall_clock) },
+    { label: 'Execution Mean',   baseline: fmtMs(b.mean_ms),       feature: fmtMs(f.mean_ms),       change: fmtChange(c.mean) },
+    { label: 'Execution StdDev', baseline: fmtMs(b.stddev_ms),     feature: fmtMs(f.stddev_ms),     change: '' },
+    { label: 'Execution P50',    baseline: fmtMs(b.p50_ms),        feature: fmtMs(f.p50_ms),        change: fmtChange(c.p50) },
+    { label: 'Execution P90',    baseline: fmtMs(b.p90_ms),        feature: fmtMs(f.p90_ms),        change: fmtChange(c.p90) },
+    { label: 'Execution P99',    baseline: fmtMs(b.p99_ms),        feature: fmtMs(f.p99_ms),        change: fmtChange(c.p99) },
+    { label: 'Execution Mgas/s', baseline: fmtMgas(b.mean_mgas_s), feature: fmtMgas(f.mean_mgas_s), change: fmtChange(c.mgas_s) },
+    { label: 'Wall Clock', baseline: optS(b.wall_clock_s), feature: optS(f.wall_clock_s), change: fmtChange(c.wall_clock) },
+    { label: 'End-to-end Mgas/s', baseline: optMgas(b.end_to_end_mgas_s), feature: optMgas(f.end_to_end_mgas_s), change: fmtChange(c.end_to_end_mgas_s) },
     { label: 'Persist Wait', baseline: fmtMs(b.mean_persist_ms || 0), feature: fmtMs(f.mean_persist_ms || 0), change: fmtChange(c.persist_wait) },
   ];
 }
@@ -166,7 +165,6 @@ module.exports = {
   verdict,
   isWin,
   loadSamplyUrls,
-  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

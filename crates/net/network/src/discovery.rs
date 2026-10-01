@@ -12,6 +12,7 @@ use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerAddr;
@@ -22,6 +23,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
@@ -31,6 +33,11 @@ use tracing::{debug, trace};
 ///
 /// Default is 10 000 peers.
 pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 10_000;
+
+/// How often discv5-only nodes refresh their external IP.
+///
+/// Matches the default interval of discv4.
+const RESOLVE_EXTERNAL_IP_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -67,13 +74,18 @@ pub struct Discovery {
     queued_events: VecDeque<DiscoveryEvent>,
     /// List of listeners subscribed to discovery events.
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
+    /// Resolves the external IP for discv5 when discv4 is disabled.
+    nat_resolver: Option<ResolveNatInterval>,
 }
 
 impl Discovery {
     /// Spawns the discovery service.
     ///
     /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
-    /// channel to receive all discovered nodes.
+    /// channel to receive all discovered nodes. When only discv5 is enabled, `nat` periodically
+    /// resolves its advertised external IP without waiting for peer votes. When ENR updates are
+    /// disabled or discv5 checks inbound connectivity, only explicit `extip` or `extaddr` settings
+    /// are applied.
     pub async fn new(
         tcp_addr: SocketAddr,
         discovery_v4_addr: SocketAddr,
@@ -81,6 +93,7 @@ impl Discovery {
         discv4_config: Option<Discv4Config>,
         mut discv5_config: Option<reth_discv5::Config>, // contains discv5 listen address
         dns_discovery_config: Option<DnsDiscoveryConfig>,
+        nat: Option<NatResolver>,
     ) -> Result<Self, NetworkError> {
         // setup discv4 with the discovery address and tcp port
         let local_enr =
@@ -158,6 +171,24 @@ impl Discovery {
             } else {
                 (None, None, None, None, None)
             };
+
+        // Discv4 resolves its own external IP when enabled.
+        let nat_resolver = if discv4.is_none() &&
+            let Some(config) = &mut discv5_config
+        {
+            let config = config.discv5_config_mut();
+            nat.filter(|nat| match nat {
+                NatResolver::None => false,
+                // Use the address or hostname explicitly configured by the operator.
+                NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_) => true,
+                // Preserve manual addresses and let discv5 handle reachability checks. Its check
+                // for incoming connections starts when peer votes change the advertised address.
+                _ => config.enr_update && config.auto_nat_listen_duration.is_none(),
+            })
+            .map(|nat| ResolveNatInterval::interval(nat, RESOLVE_EXTERNAL_IP_INTERVAL))
+        } else {
+            None
+        };
 
         // Start discv5, wiring in the shared socket if in shared-port mode.
         let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
@@ -243,6 +274,7 @@ impl Discovery {
             _dns_disc_service,
             _dns_discovery,
             dns_discovery_updates,
+            nat_resolver,
         })
     }
 
@@ -400,8 +432,42 @@ impl Discovery {
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 
+            while let Some(Poll::Ready(ip)) =
+                self.nat_resolver.as_mut().map(|resolver| resolver.poll_tick(cx))
+            {
+                if let Some(ip) = ip {
+                    self.on_external_ip(ip);
+                }
+            }
+
             if self.queued_events.is_empty() {
                 return Poll::Pending
+            }
+        }
+    }
+
+    /// Updates discv5's advertised IP without changing ports or address families.
+    ///
+    /// Discv4 owns its NAT resolution and updates its own node record and ENR, so only
+    /// discv5 needs an update here.
+    fn on_external_ip(&self, external_ip: IpAddr) {
+        let Some(discv5) = &self.discv5 else { return };
+        let enr = discv5.local_enr();
+        // TCP and UDP share the ENR IP fields. Preserve their ports, including ports learned
+        // from peer votes, and only update address families the service is listening on.
+        let result = match external_ip {
+            IpAddr::V4(ip) if enr.udp4().is_some() && enr.ip4() != Some(ip) => {
+                discv5.with_discv5(|discv5| discv5.enr_insert("ip", &ip))
+            }
+            IpAddr::V6(ip) if enr.udp6().is_some() && enr.ip6() != Some(ip) => {
+                discv5.with_discv5(|discv5| discv5.enr_insert("ip6", &ip))
+            }
+            _ => return,
+        };
+        match result {
+            Ok(_) => debug!(target: "net::discovery", ?external_ip, "Updated external IP"),
+            Err(err) => {
+                debug!(target: "net::discovery", ?external_ip, %err, "Failed to update external IP");
             }
         }
     }
@@ -466,6 +532,7 @@ impl Discovery {
             dns_discovery_updates: None,
             _dns_disc_service: None,
             discovery_listeners: Default::default(),
+            nat_resolver: None,
         }
     }
 }
@@ -487,6 +554,7 @@ mod tests {
             Default::default(),
             None,
             Default::default(),
+            None,
         )
         .await
         .unwrap();
@@ -517,9 +585,95 @@ mod tests {
             Some(discv4_config),
             Some(discv5_config),
             None,
+            None,
         )
         .await
         .expect("should build discv5 with discv4 downgrade")
+    }
+
+    async fn start_discv5_only(config: reth_discv5::Config, nat: Option<NatResolver>) -> Discovery {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        Discovery::new(
+            "127.0.0.1:30303".parse().unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+            secret_key,
+            None,
+            Some(config),
+            None,
+            nat,
+        )
+        .await
+        .expect("should start discv5")
+    }
+
+    #[tokio::test]
+    async fn discv5_only_advertises_resolved_external_ip() {
+        let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap());
+        let udp_port = socket.local_addr().unwrap().port();
+        let external_ip = "203.0.113.7".parse().unwrap();
+        // The advertised TCP port may differ from the listener port behind NAT.
+        let mut config = reth_discv5::Config::builder("127.0.0.1:30309".parse().unwrap()).build();
+        // Install pre-bound sockets after the builder normalizes its listen addresses.
+        let discv5_config = config.discv5_config_mut();
+        discv5_config.listen_config =
+            discv5::ListenConfig::FromSockets { ipv4: Some(socket), ipv6: None };
+        // Explicit NAT addresses still apply when peer-driven ENR updates are disabled.
+        discv5_config.enr_update = false;
+        let mut discovery =
+            start_discv5_only(config, Some(NatResolver::ExternalIp(external_ip))).await;
+        let discv5 = discovery.discv5().unwrap();
+        assert!(discv5.local_enr().ip4().is_none());
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::poll_fn(|cx| {
+                let _ = discovery.poll(cx);
+                if discv5.node_record().is_some_and(|record| record.address == external_ip) {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("external IP should be advertised");
+
+        let record = discv5.node_record().unwrap();
+        assert_eq!(record.address, external_ip);
+        assert_eq!(record.udp_port, udp_port);
+        assert_eq!(record.tcp_port, 30309);
+
+        let seq = discv5.local_enr().seq();
+        discovery.on_external_ip(external_ip);
+        assert_eq!(discv5.local_enr().seq(), seq);
+        discovery.on_external_ip("2001:db8::7".parse().unwrap());
+        assert_eq!(discv5.local_enr().seq(), seq);
+
+        // Peer votes can change the address and mapped UDP port between NAT resolutions.
+        discv5.with_discv5(|discv5| {
+            discv5.update_local_enr_socket((Ipv4Addr::LOCALHOST, 30310).into(), false);
+        });
+        discovery.on_external_ip(external_ip);
+        assert_eq!(discv5.node_record().unwrap(), NodeRecord { udp_port: 30310, ..record });
+    }
+
+    #[tokio::test]
+    async fn discv5_only_respects_enr_update_policy() {
+        for (enr_update, auto_nat_listen_duration) in
+            [(false, None), (true, Some(Duration::from_secs(300)))]
+        {
+            let mut config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into()).build();
+            let discv5_config = config.discv5_config_mut();
+            discv5_config.listen_config =
+                discv5::ListenConfig::Ipv4 { ip: Ipv4Addr::LOCALHOST, port: 0 };
+            discv5_config.enr_update = enr_update;
+            // Set this after building: the upstream builder clears the reachability timer.
+            discv5_config.auto_nat_listen_duration = auto_nat_listen_duration;
+            let discovery = start_discv5_only(config, Some(NatResolver::Any)).await;
+
+            // No automatic lookup may overwrite a pinned address or bypass reachability checks.
+            assert!(discovery.nat_resolver.is_none());
+        }
     }
 
     #[test]
@@ -658,6 +812,7 @@ mod tests {
             secret_key,
             Some(discv4_config),
             Some(discv5_config),
+            None,
             None,
         )
         .await
@@ -805,6 +960,7 @@ mod tests {
             secret_key,
             Some(discv4_config),
             Some(discv5_config),
+            None,
             None,
         )
         .await

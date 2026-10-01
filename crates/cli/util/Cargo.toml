@@ -19,7 +19,6 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 # misc
-cfg-if.workspace = true
 eyre.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 rand_08.workspace = true

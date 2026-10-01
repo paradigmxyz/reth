@@ -52,7 +52,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    RecoveredBlockAndExecutionOutput,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -72,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    HashedPostStateSorted,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -1158,6 +1161,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
+        // like the single block lookups, reject ranges that reach into expired history instead
+        // of assembling blocks whose bodies are no longer available
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if *range.start() < earliest_available {
+            return Err(ProviderError::BlockExpired {
+                requested: *range.start(),
+                earliest_available,
+            })
+        }
+
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
@@ -1245,6 +1258,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
+    #[allow(clippy::clone_on_copy)]
     pub(crate) fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -1270,11 +1284,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = get_account(address)?;
-                    entry.insert((old_info, new_info, HashMap::default()));
+                    entry.insert((old_info.clone(), new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
-                    entry.get_mut().0 = old_info;
+                    entry.get_mut().0 = old_info.clone();
                 }
             }
             // insert old info into reverts.
@@ -1288,7 +1302,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = get_account(address)?;
-                    entry.insert((present_info, present_info, HashMap::default()))
+                    entry.insert((present_info.clone(), present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
@@ -1446,6 +1460,15 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
                 Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
             }
             _ => Ok(()),
+        }
+    }
+
+    /// Refuses snap sync on a database without the hashed state layout it downloads into.
+    pub fn ensure_snap_sync_layout(&self) -> ProviderResult<()> {
+        if self.cached_storage_settings().use_hashed_state() {
+            Ok(())
+        } else {
+            Err(ProviderError::SnapStorageLayoutUnsupported)
         }
     }
 }
@@ -1886,13 +1909,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 
@@ -3234,6 +3257,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
+    #[allow(clippy::clone_on_copy)]
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -3243,7 +3267,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // changes are applied in the correct order.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
+            .map(|(_, e)| (keccak256(e.address), e.info.clone()))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -3583,7 +3607,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            Default::default(),
+            Default::default(),
         );
 
         self.save_blocks_inner(
@@ -4029,8 +4054,7 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
-        StoredNibblesSubKey,
+        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
@@ -4743,10 +4767,8 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData::new(
-                Arc::new(full_persist_hashed_state),
-                Arc::new(full_persist_trie_updates),
-            ),
+            Arc::new(full_persist_hashed_state),
+            Arc::new(full_persist_trie_updates),
         );
 
         let deferred_trie_hashed_state = HashedPostStateSorted::new(
@@ -4768,10 +4790,8 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData::new(
-                Arc::new(deferred_trie_hashed_state),
-                Arc::new(deferred_trie_updates),
-            ),
+            Arc::new(deferred_trie_hashed_state),
+            Arc::new(deferred_trie_updates),
         );
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -5170,7 +5190,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::PlainAccountState>()
                 .unwrap()
-                .upsert(address, &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })
+                .upsert(address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }
@@ -5183,8 +5203,8 @@ mod tests {
         state_init.insert(
             address,
             (
-                Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-                Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }),
+                Some(Account::default()),
+                Some(Account { nonce: 1, ..Default::default() }),
                 storage_map,
             ),
         );
@@ -5194,7 +5214,7 @@ mod tests {
         block_reverts.insert(
             address,
             (
-                Some(Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })),
+                Some(Some(Account::default())),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
         );
@@ -5496,7 +5516,8 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            Default::default(),
+            Default::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5565,9 +5586,8 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData {
-                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                },
+                Arc::new(hashed_state),
+                Default::default(),
             );
             blocks.push(executed);
         }
@@ -5787,10 +5807,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::HashedAccounts>()
                 .unwrap()
-                .upsert(
-                    hashed_address,
-                    &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None },
-                )
+                .upsert(hashed_address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }
