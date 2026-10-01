@@ -260,11 +260,16 @@ where
             info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
             return Ok(Step::Restart)
         };
-        if !reorg.has_lists() {
-            info!(target: "sync::snap", ?pivot, "Orphaned blocks predate block access lists, restarting");
+        let ancestor = reorg.ancestor();
+        // Lists activate by timestamp, which grows along a chain, so an ancestor committing to one
+        // means every block after it on either branch does too.
+        let committed = provider
+            .sealed_header(ancestor.number)?
+            .is_some_and(|header| header.block_access_list_hash().is_some());
+        if !committed {
+            info!(target: "sync::snap", ?pivot, ?ancestor, "Snap pivot was reorged across block access list activation, restarting");
             return Ok(Step::Restart)
         }
-        let ancestor = reorg.ancestor();
         let applied =
             provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
         // Catch-up resumes from the ancestor, or from below it when it had not reached it yet.
@@ -279,14 +284,7 @@ where
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
             return Ok(Step::Wait)
         };
-        // Catch-up applies the new branch's lists from the ancestor, so none may predate them.
-        let new_branch =
-            provider.sealed_headers_range(ancestor.number + 1..=generation.target().number)?;
         drop(provider);
-        if new_branch.iter().any(|header| header.block_access_list_hash().is_none()) {
-            info!(target: "sync::snap", ?pivot, ?ancestor, "New branch predates block access lists, restarting");
-            return Ok(Step::Restart)
-        }
         // A peer lacking side-chain lists says nothing of the others, so another is asked later.
         let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
             debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
@@ -1267,41 +1265,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn orphaned_blocks_before_block_access_lists_restart_the_attempt() {
+    async fn a_reorg_across_block_access_list_activation_restarts_the_attempt() {
         let accounts = accounts();
         let root = state_root(&accounts);
         let factory = hashed_factory();
-        let shared = chain(2, root);
-        // Block 3 predates block access lists, so the orphaned branch has none to repair from.
-        let mut before = header(3, shared[2].hash(), None);
-        before.state_root = root;
-        let before = SealedHeader::seal_slow(before);
-        let orphaned = [vec![before.clone()], branch(&before, &[Vec::new()], root)].concat();
-        insert_headers(&factory, &shared);
-        insert_headers(&factory, &orphaned);
-        let provider = factory.database_provider_rw().unwrap();
-        provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
-        provider.commit().unwrap();
-        let attempt = attempt_id(&factory);
-        let new = branch(&shared[2], &[vec![stale_changes()], Vec::new(), Vec::new()], root);
-        factory.replace_headers_after(2, &new);
-        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [5]);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
-            panic!("the new branch's state is complete: {outcome:?}")
-        };
-        assert_eq!(pivot, new[1].num_hash());
-        assert_ne!(attempt_id(&factory), attempt);
-    }
-
-    #[tokio::test]
-    async fn a_new_branch_before_block_access_lists_restarts_the_attempt() {
-        let accounts = accounts();
-        let root = state_root(&accounts);
-        let factory = hashed_factory();
-        let shared = chain(2, root);
+        let mut shared = chain(1, root);
+        // The ancestor predates block access lists, so the branches may hold blocks without them.
+        let mut ancestor = header(2, shared[1].hash(), None);
+        ancestor.state_root = root;
+        shared.push(SealedHeader::seal_slow(ancestor));
         let orphaned = branch(&shared[2], &orphaned_lists(), root);
         insert_headers(&factory, &shared);
         insert_headers(&factory, &orphaned);
@@ -1309,11 +1281,7 @@ mod tests {
         provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
         provider.commit().unwrap();
         let attempt = attempt_id(&factory);
-        // Block 3 of the new branch predates block access lists, so catch-up cannot apply it.
-        let mut before = header(3, shared[2].hash(), None);
-        before.state_root = root;
-        let before = SealedHeader::seal_slow(before);
-        let new = [vec![before.clone()], branch(&before, &[Vec::new(), Vec::new()], root)].concat();
+        let new = branch(&shared[2], &[vec![stale_changes()], Vec::new(), Vec::new()], root);
         factory.replace_headers_after(2, &new);
         let (client, mut bootstrap) =
             scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [5]);
