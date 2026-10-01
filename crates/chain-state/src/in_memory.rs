@@ -1000,8 +1000,7 @@ mod tests {
             vec![(reth_trie::Nibbles::from_nibbles([1]), None)],
             Default::default(),
         ));
-        let (hashed_state, producer) =
-            LazyHashedPostStateSorted::pending(Arc::new(HashedPostState::default()));
+        let (hashed_state, producer) = LazyHashedPostStateSorted::pending(Arc::default());
         let block = ExecutedBlock::<EthPrimitives>::with_deferred_hashed_state(
             Default::default(),
             Default::default(),
