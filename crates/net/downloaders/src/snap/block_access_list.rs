@@ -175,12 +175,14 @@ pub enum InvalidBlockAccessListRequest {
     /// The request asks for no blocks.
     #[error("block access list request has no block hashes")]
     NoBlocks,
-    /// A different number of headers was supplied than blocks requested.
-    #[error("requested {requested} block access lists but supplied {supplied} headers")]
+    /// A different number of headers or commitments was supplied than blocks requested.
+    #[error(
+        "requested {requested} block access lists but supplied {supplied} headers or commitments"
+    )]
     HeaderCount {
         /// Blocks the request asks for.
         requested: usize,
-        /// Headers supplied to authenticate them.
+        /// Headers or commitments supplied to authenticate them.
         supplied: usize,
     },
     /// A requested hash does not match the header at the same position.
