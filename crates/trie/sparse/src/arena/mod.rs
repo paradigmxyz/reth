@@ -11,7 +11,7 @@ use nodes::{
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
-use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
@@ -886,30 +886,14 @@ impl ArenaParallelSparseTrie {
         }
     }
 
-    /// Merges updates from a subtrie's buffer into the parent's buffer.
-    /// Both `dst` and `src` must be `Some` when updates are being tracked.
-    ///
-    /// Source removals cancel destination insertions (and vice versa) so that
-    /// updates accumulated across multiple `root()` calls within a single block
-    /// stay consistent.
+    /// Appends a subtrie's updates after the parent's earlier updates. Paths shared with
+    /// earlier hashing passes are resolved when updates are taken.
     fn merge_subtrie_updates(
         dst: &mut Option<SparseTrieUpdates>,
         src: &mut Option<SparseTrieUpdates>,
     ) {
-        if let Some(dst_updates) = dst.as_mut() {
-            let src_updates = src.as_mut().expect("updates are enabled");
-
-            // Source insertions cancel destination removals.
-            for path in src_updates.updated_nodes.keys() {
-                dst_updates.removed_nodes.remove(path);
-            }
-            dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
-
-            // Source removals cancel destination insertions.
-            for path in &src_updates.removed_nodes {
-                dst_updates.updated_nodes.remove(path);
-            }
-            dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
+        if let Some(dst) = dst.as_mut() {
+            dst.append(src.as_mut().expect("updates are enabled"));
         }
     }
 
@@ -1135,12 +1119,10 @@ impl ArenaParallelSparseTrie {
 
                 if !logical_path.is_empty() {
                     if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
-                        trie_updates.updated_nodes.remove(&logical_path);
-                        trie_updates.removed_nodes.insert(logical_path);
+                        trie_updates.push((logical_path, None));
                     } else if !new_branch_masks.is_empty() {
                         let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
-                        trie_updates.updated_nodes.insert(logical_path, compact);
-                        trie_updates.removed_nodes.remove(&logical_path);
+                        trie_updates.push((logical_path, Some(compact)));
                     }
                 }
             }
@@ -1755,8 +1737,7 @@ impl ArenaParallelSparseTrie {
         {
             let logical_path = cursor.head_logical_branch_path(arena);
             if !logical_path.is_empty() {
-                trie_updates.updated_nodes.remove(&logical_path);
-                trie_updates.removed_nodes.insert(logical_path);
+                trie_updates.push((logical_path, None));
             }
         }
 
@@ -2424,24 +2405,22 @@ impl SparseTrie for ArenaParallelSparseTrie {
         Self::find_leaf_in_arena(&self.upper_arena, self.root, full_path, 0, expected_value)
     }
 
-    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.buffers
-            .updates
-            .as_ref()
-            .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
-    }
-
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        match self.buffers.updates.take() {
-            Some(updates) => {
-                self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
-                    updates.updated_nodes.len(),
-                    updates.removed_nodes.len(),
-                ));
-                updates
+        let Some(updates) = self.buffers.updates.as_mut() else { return Vec::new() };
+
+        // Stable sorting preserves append order for each path. Keep the last update,
+        // including deletions, when collapsing each group of equal paths.
+        updates.sort_by_key(|(path, _)| *path);
+        updates.dedup_by(|later, earlier| {
+            if later.0 == earlier.0 {
+                mem::swap(earlier, later);
+                true
+            } else {
+                false
             }
-            None => SparseTrieUpdates::default(),
-        }
+        });
+        let capacity = updates.len();
+        mem::replace(updates, Vec::with_capacity(capacity))
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
@@ -2992,37 +2971,14 @@ mod tests {
             let actual_root = apst.root(epoch(0));
             let mut actual_updates = apst.take_updates();
 
-            // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
-            // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
-            actual_updates.updated_nodes.retain(|path, node| {
-                self.storage_trie_updates().storage_nodes.get(path) != Some(node)
+            actual_updates.retain(|(path, node)| match node {
+                Some(node) => self.storage_trie_updates().storage_nodes.get(path) != Some(node),
+                None => self.storage_trie_updates().storage_nodes.contains_key(path),
             });
-            actual_updates
-                .removed_nodes
-                .retain(|path| self.storage_trie_updates().storage_nodes.contains_key(path));
-
-            let mut expected_updated_nodes =
-                expected_trie_updates.storage_nodes.into_iter().collect::<Vec<_>>();
-            let mut actual_updated_nodes =
-                actual_updates.updated_nodes.into_iter().collect::<Vec<_>>();
-            expected_updated_nodes.sort();
-            actual_updated_nodes.sort();
             pretty_assertions::assert_eq!(
-                expected_updated_nodes,
-                actual_updated_nodes,
-                "updated nodes mismatch"
-            );
-
-            let mut expected_removed_nodes =
-                expected_trie_updates.removed_nodes.into_iter().collect::<Vec<_>>();
-            let mut actual_removed_nodes =
-                actual_updates.removed_nodes.into_iter().collect::<Vec<_>>();
-            expected_removed_nodes.sort();
-            actual_removed_nodes.sort();
-            pretty_assertions::assert_eq!(
-                expected_removed_nodes,
-                actual_removed_nodes,
-                "removed nodes mismatch"
+                expected_trie_updates.into_sorted().storage_nodes,
+                actual_updates,
+                "trie updates mismatch"
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
