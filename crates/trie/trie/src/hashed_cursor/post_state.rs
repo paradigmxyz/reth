@@ -57,11 +57,11 @@ where
 /// This design allows us to use `U256::ZERO`, rather than an Option, to indicate deletion for
 /// storage (which maps cleanly to how changesets are stored in the DB) while not requiring two
 /// different cursor implementations.
-pub trait HashedPostStateCursorValue: Copy {
+pub trait HashedPostStateCursorValue: Clone {
     /// The non-zero type returned by `into_option`.
     /// For `Option<Account>`, this is `Account`.
     /// For `U256`, this is `U256`.
-    type NonZero: Copy + std::fmt::Debug;
+    type NonZero: Clone + std::fmt::Debug;
 
     /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
     fn into_option(self) -> Option<Self::NonZero>;
@@ -248,7 +248,7 @@ where
     fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
         loop {
             let post_state_current =
-                self.post_state_cursor.current().copied().map(|(k, v)| (k, v.into_option()));
+                self.post_state_cursor.current().cloned().map(|(k, v)| (k, v.into_option()));
             let db_entry = self.db_cursor_state.entry();
 
             match (post_state_current, db_entry) {
@@ -277,7 +277,7 @@ where
                 // - mem_key > db_key
                 // - overlay is exhausted
                 // Return the db_entry. If DB is also exhausted then this returns None.
-                _ => return Ok(db_entry.copied()),
+                _ => return Ok(db_entry.cloned()),
             }
         }
     }
@@ -300,7 +300,7 @@ where
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let post_state_entry =
-            self.post_state_cursor.seek(&key).copied().map(|(k, v)| (k, v.into_option()));
+            self.post_state_cursor.seek(&key).cloned().map(|(k, v)| (k, v.into_option()));
 
         if let Some((mem_key, Some(value))) = post_state_entry &&
             mem_key == key
@@ -511,7 +511,7 @@ mod tests {
         ) -> Vec<(B256, V::NonZero)>
         where
             V: HashedPostStateCursorValue,
-            V::NonZero: Copy,
+            V::NonZero: Clone,
         {
             db_nodes
                 .into_iter()
