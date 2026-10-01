@@ -193,6 +193,14 @@ pub enum SnapSyncError {
     /// Work stopped because its session was cancelled.
     #[error("snap synchronization was cancelled")]
     Cancelled,
+    /// A reorg was recovered to a pivot below the last block both branches share.
+    #[error("pivot {target} is below reorg ancestor {ancestor}")]
+    PivotBelowAncestor {
+        /// Last block both branches share.
+        ancestor: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
 }
 
 impl SnapSyncError {

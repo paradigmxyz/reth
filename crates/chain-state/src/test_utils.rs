@@ -19,7 +19,7 @@ use reth_primitives_traits::{
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
+use reth_trie::root::state_root_unhashed;
 use revm::{database::BundleState, state::AccountInfo};
 use std::{
     ops::Range,
@@ -240,7 +240,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     },
                     state: BundleState::default(),
                 }),
-                ComputedTrieData::default(),
+                Default::default(),
+                Default::default(),
             );
             return executed;
         }
@@ -309,10 +310,6 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             receipts.into_iter().flatten().collect()
         };
 
-        let trie_data = ComputedTrieData {
-            sorted: SortedTrieData { hashed_state: Arc::new(hashed_state), ..Default::default() },
-        };
-
         let block_hash = recovered.hash();
         let executed = ExecutedBlock::new(
             Arc::new(recovered),
@@ -325,7 +322,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 },
                 state: bundle,
             }),
-            trie_data,
+            Arc::new(hashed_state),
+            Default::default(),
         );
 
         self.post_block_state.insert(block_hash, (post_info, new_slot_value));

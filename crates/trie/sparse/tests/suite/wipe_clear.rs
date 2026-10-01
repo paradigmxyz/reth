@@ -28,8 +28,7 @@ pub(super) fn test_clear_resets_trie_but_preserves_update_tracking<T: SparseTrie
 
     // take_updates should return empty updates since tracking is preserved.
     let updates = trie.take_updates();
-    assert!(updates.updated_nodes.is_empty(), "clear should produce empty updated_nodes");
-    assert!(updates.removed_nodes.is_empty(), "clear should produce empty removed_nodes");
+    assert!(updates.is_empty(), "clear should produce empty updates");
 }
 
 /// A cleared trie can be fully re-initialized and used

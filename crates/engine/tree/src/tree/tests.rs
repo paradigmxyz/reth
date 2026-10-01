@@ -39,7 +39,6 @@ use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
 use reth_tasks::spawn_os_thread;
-use reth_trie_common::ComputedTrieData;
 use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
@@ -1441,13 +1440,12 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
-    let empty_trie_data = ComputedTrieData::default;
-
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
             Arc::new(BlockExecutionOutput::default()),
-            empty_trie_data(),
+            Default::default(),
+            Default::default(),
         ));
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -1456,7 +1454,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
             Arc::new(BlockExecutionOutput::default()),
-            empty_trie_data(),
+            Default::default(),
+            Default::default(),
         ));
     }
 
@@ -3479,7 +3478,8 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                Arc::default(),
+                Arc::default(),
             )
         })
         .collect();
@@ -3517,7 +3517,8 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                Arc::default(),
+                Arc::default(),
             )
         })
         .collect();
