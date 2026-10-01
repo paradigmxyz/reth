@@ -166,7 +166,8 @@ where
     }
 
     // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
-    // the pivot under `head`. These are single-record writes, cheap enough for the async worker.
+    // the pivot under `head`. Starting one reads the kept headers and writes a few records, cheap
+    // enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
         let mut session = SnapSyncSession::new(self.policy);
@@ -690,8 +691,8 @@ mod tests {
         repairs.insert_account(key(2));
         provider.schedule_snap_repairs(write, repairs).unwrap();
         provider.commit().unwrap();
+        // One download fetches the repair and then the ranges, numbering both requests.
         let responses =
-            // One download fetches the repair and then the ranges, numbering both requests.
             [account_range(1, &accounts, 1..2, &[key(2)]), account_range(2, &accounts, 0..3, &[])];
         let (client, mut bootstrap) = scripted(&factory, responses, [3]);
 
