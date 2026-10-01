@@ -1,7 +1,7 @@
 //! Shared types for blockchain tree validation.
 
 use crate::tree::error::InsertPayloadError;
-use alloy_eip7928::bal::{DecodedBal, RawBal};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
@@ -19,9 +19,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub hash: B256,
     /// Hash of the parent block.
     pub parent_hash: B256,
-    /// State root of the parent block.
-    /// Used for sparse trie continuation: if the preserved trie's anchor matches this,
-    /// the trie can be reused directly.
+    /// State root of the parent block, used as the base state for execution.
     pub parent_state_root: B256,
     /// Number of transactions in the block.
     /// Used to determine parallel worker count for prewarming.
@@ -76,8 +74,6 @@ pub struct ValidationOutput<N: NodePrimitives> {
     pub executed_block: ExecutedBlock<N>,
     /// Optional execution timing stats collected during validation.
     pub execution_timing_stats: Option<Box<ExecutionTimingStats>>,
-    /// Validated raw block access list carried by the payload.
-    pub raw_bal: Option<RawBal>,
 }
 
 impl<N: NodePrimitives> ValidationOutput<N> {
@@ -86,12 +82,6 @@ impl<N: NodePrimitives> ValidationOutput<N> {
         executed_block: ExecutedBlock<N>,
         execution_timing_stats: Option<Box<ExecutionTimingStats>>,
     ) -> Self {
-        Self { executed_block, execution_timing_stats, raw_bal: None }
-    }
-
-    /// Sets the validated raw block access list carried by the payload.
-    pub fn with_raw_bal(mut self, raw_bal: Option<RawBal>) -> Self {
-        self.raw_bal = raw_bal;
-        self
+        Self { executed_block, execution_timing_stats }
     }
 }

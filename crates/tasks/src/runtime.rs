@@ -256,8 +256,8 @@ pub enum RuntimeBuildError {
 // ── RuntimeInner ──────────────────────────────────────────────────────
 
 struct RuntimeInner {
-    /// Owned tokio runtime, if we built one. Kept alive via the `Arc<RuntimeInner>`.
-    _tokio_runtime: Option<TokioRuntime>,
+    /// Owned tokio runtime, taken during shutdown even while other handles remain alive.
+    tokio_runtime: Mutex<Option<TokioRuntime>>,
     /// Handle to the tokio runtime.
     handle: Handle,
     /// Receiver of the shutdown signal.
@@ -302,6 +302,18 @@ struct RuntimeInner {
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+}
+
+impl Drop for RuntimeInner {
+    fn drop(&mut self) {
+        // The last handle can belong to an async task, including one running on this runtime.
+        // Without explicit shutdown, let blocking tasks finish in the background in that case.
+        if Handle::try_current().is_ok() &&
+            let Some(runtime) = self.tokio_runtime.get_mut().unwrap().take()
+        {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -823,6 +835,17 @@ impl Runtime {
         self.do_graceful_shutdown(Some(timeout))
     }
 
+    /// Shuts down the owned tokio runtime for all clones, waiting at most `timeout` for blocking
+    /// tasks. Externally supplied runtimes are left running.
+    ///
+    /// Panics if called from an async context while an owned runtime remains.
+    pub fn shutdown_timeout(self, timeout: Duration) {
+        let runtime = self.0.tokio_runtime.lock().unwrap().take();
+        if let Some(runtime) = runtime {
+            runtime.shutdown_timeout(timeout);
+        }
+    }
+
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
         let deadline = timeout.map(|t| Instant::now() + t);
@@ -981,7 +1004,7 @@ impl RuntimeBuilder {
         });
 
         let inner = RuntimeInner {
-            _tokio_runtime: owned_runtime,
+            tokio_runtime: Mutex::new(owned_runtime),
             handle,
             on_shutdown,
             task_events_tx,
@@ -1046,6 +1069,55 @@ mod tests {
             Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
+    }
+
+    #[tokio::test]
+    async fn last_runtime_clone_can_drop_on_its_worker() {
+        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+        let task_runtime = runtime.clone();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let task = runtime.handle().spawn(async move {
+            wait.await.unwrap();
+            drop(task_runtime);
+        });
+
+        thread::spawn(move || drop(runtime)).join().unwrap();
+        release.send(()).unwrap();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_live_runtime_clones() {
+        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+        let retained = runtime.clone();
+        let task_runtime = runtime.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = runtime.handle().spawn(async move {
+            let _runtime = task_runtime;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+
+        thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
+
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(retained.handle().spawn(async {}).await.unwrap_err().is_cancelled());
+        retained.shutdown_timeout(Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn shutdown_preserves_external_runtime() {
+        let runtime = RuntimeBuilder::new(
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
+        )
+        .build()
+        .unwrap();
+        let retained = runtime.clone();
+
+        runtime.shutdown_timeout(Duration::from_secs(5));
+
+        assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
     }
 
     #[test]

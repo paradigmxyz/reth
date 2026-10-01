@@ -4,6 +4,7 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_rpc_types_eth::Block;
 use reth_rpc_convert::{RpcConvert, SignableTxRequest};
 pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
+use reth_rpc_eth_types::EthApiSettings;
 use reth_storage_api::ProviderTx;
 use std::error::Error;
 
@@ -28,6 +29,9 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
     type RpcConvert: RpcConvert<Network = Self::NetworkTypes>;
+
+    /// Returns the settings shared by the `eth` RPC helpers.
+    fn eth_api_settings(&self) -> &EthApiSettings;
 
     /// Returns reference to transaction response builder.
     fn converter(&self) -> &Self::RpcConvert;

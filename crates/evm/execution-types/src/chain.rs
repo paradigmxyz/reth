@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::ExecutionOutcome;
+use crate::{DecodedRevmBal, ExecutionOutcome};
 use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Recovered, TxHashRef},
@@ -13,7 +13,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
     RecoveredBlock, SealedHeader,
 };
-use reth_trie_common::LazyTrieData;
+use reth_trie_common::BlockTrieData;
 
 /// A chain of blocks and their final state.
 ///
@@ -37,10 +37,19 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// Lazy trie data for each block in the chain, keyed by block number.
+    /// Hashed state and trie updates for each block, keyed by block number.
     ///
-    /// Contains handles to lazily-initialized sorted trie updates and hashed state.
-    trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+    /// Hashed state may still be pending; sorted trie updates are available immediately.
+    trie_data: BTreeMap<BlockNumber, BlockTrieData>,
+    /// Block access lists prepared during block validation, keyed by block number.
+    ///
+    /// A missing entry means the BAL was not available for that block, not that the block has
+    /// none: only blocks the engine validated from a payload that carried a BAL have one, so
+    /// chains built from storage or received over the wire have no entries at all. Consumers
+    /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
+    /// cache data and not part of the serialized representation.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -56,6 +65,7 @@ impl<N: NodePrimitives> Default for Chain<N> {
             blocks: Default::default(),
             execution_outcome: Default::default(),
             trie_data: Default::default(),
+            bals: Default::default(),
         }
     }
 }
@@ -69,7 +79,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item: Into<Arc<RecoveredBlock<N::Block>>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+        trie_data: BTreeMap<BlockNumber, BlockTrieData>,
     ) -> Self {
         let blocks = blocks
             .into_iter()
@@ -80,14 +90,14 @@ impl<N: NodePrimitives> Chain<N> {
             .collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_data }
+        Self { blocks, execution_outcome, trie_data, bals: Default::default() }
     }
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: LazyTrieData,
+        trie_data: BlockTrieData,
     ) -> Self {
         let block = block.into();
         let block_number = block.header().number();
@@ -110,18 +120,41 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all trie data for this chain.
-    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData> {
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, BlockTrieData> {
         &self.trie_data
     }
 
     /// Get trie data for a specific block number.
-    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&LazyTrieData> {
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&BlockTrieData> {
         self.trie_data.get(&block_number)
     }
 
     /// Remove all trie data for this chain.
     pub fn clear_trie_data(&mut self) {
         self.trie_data.clear();
+    }
+
+    /// Get all prepared block access lists for this chain.
+    ///
+    /// Blocks without an available BAL have no entry; see the `bals` field for details.
+    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
+        &self.bals
+    }
+
+    /// Get the prepared block access list for a specific block number, if one is available.
+    ///
+    /// `None` only means no BAL was attached for that block; see the `bals` field for details.
+    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
+        self.bals.get(&block_number)
+    }
+
+    /// Attach a prepared block access list to a block of this chain.
+    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedRevmBal>) {
+        debug_assert!(
+            self.blocks.contains_key(&block_number),
+            "BAL must belong to a block of this chain"
+        );
+        self.bals.insert(block_number, bal);
     }
 
     /// Get execution outcome of this chain
@@ -178,7 +211,7 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, LazyTrieData>,
+        BTreeMap<BlockNumber, BlockTrieData>,
     ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
@@ -235,6 +268,18 @@ impl<N: NodePrimitives> Chain<N> {
         &self,
     ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
+    /// Returns an iterator over the blocks of this chain that have a prepared block access list,
+    /// paired with that BAL.
+    ///
+    /// Blocks without an available BAL are skipped; see the `bals` field for details.
+    pub fn blocks_and_bals(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+        self.bals
+            .iter()
+            .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))
     }
 
     /// Finds a transaction by hash and returns it along with its corresponding receipt data.
@@ -337,7 +382,7 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: LazyTrieData,
+        trie_data: BlockTrieData,
     ) {
         let block = block.into();
         let block_number = block.header().number();
@@ -363,6 +408,7 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.extend(other.blocks);
         self.execution_outcome.extend(other.execution_outcome);
         self.trie_data.extend(other.trie_data);
+        self.bals.extend(other.bals);
 
         Ok(())
     }
@@ -513,7 +559,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::ComputedTrieData;
+    use reth_trie_common::{BlockTrieData, LazyHashedPostStateSorted};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -580,12 +626,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().sorted.trie_updates.as_ref().into()))
+                    .map(|(number, data)| (*number, data.trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(k, v)| (*k, v.get().sorted.hashed_state.as_ref().into()))
+                    .map(|(number, data)| (*number, data.hashed_state.get().as_ref().into()))
                     .collect(),
             }
         }
@@ -597,22 +643,21 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: Chain<'a, N>) -> Self {
             use reth_primitives_traits::RecoveredBlock;
-            use reth_trie_common::LazyTrieData;
 
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
-            let trie_data: BTreeMap<BlockNumber, LazyTrieData> = value
+            let trie_data = value
                 .trie_updates
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
                     (
                         k,
-                        LazyTrieData::ready(ComputedTrieData::new(
-                            hashed_state,
-                            Arc::new(v.into()),
-                        )),
+                        BlockTrieData {
+                            hashed_state: LazyHashedPostStateSorted::ready(hashed_state),
+                            trie_updates: Arc::new(v.into()),
+                        },
                     )
                 })
                 .collect();
@@ -628,7 +673,14 @@ pub(super) mod serde_bincode_compat {
                 })
                 .collect();
 
-            Self { blocks, execution_outcome: value.execution_outcome.into(), trie_data }
+            // BALs are transient cache data recovered from the BAL store, not carried over the
+            // wire.
+            Self {
+                blocks,
+                execution_outcome: value.execution_outcome.into(),
+                trie_data,
+                bals: BTreeMap::new(),
+            }
         }
     }
 

@@ -11,12 +11,17 @@
 
 extern crate alloc;
 
+// Used directly only by the `eip1186` feature and tests.
+use alloy_consensus as _;
+
 mod execution_witness;
 pub use execution_witness::ExecutionWitnessMode;
 
-/// Lazy initialization wrapper for trie data.
-mod trie_data;
-pub use trie_data::{ComputedTrieData, LazyTrieData, SortedTrieData};
+mod lazy_hashed_state;
+pub use lazy_hashed_state::{HashedPostStateSortedProducer, LazyHashedPostStateSorted};
+
+mod block_trie_data;
+pub use block_trie_data::BlockTrieData;
 
 /// In-memory hashed state.
 mod hashed_state;

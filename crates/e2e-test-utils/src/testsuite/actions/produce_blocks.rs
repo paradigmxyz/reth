@@ -92,11 +92,7 @@ where
             debug!("Latest block hash: {parent_hash}");
 
             // create a simple forkchoice state with the latest block as head
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
+            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
 
             // Try v2 first for backwards compatibility, fall back to v3 on error.
             match EngineApiClient::<Engine>::fork_choice_updated_v2(
@@ -258,11 +254,7 @@ where
             let parent_hash = latest_block.hash;
             debug!("Latest block hash: {parent_hash}");
 
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
+            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
 
             let payload_attributes = env
                 .active_node_state()?
@@ -410,47 +402,7 @@ where
                 current_head_block.header.hash
             };
 
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: head_hash,
-                safe_block_hash: head_hash,
-                // Making a block canonical does not imply finality: tests advance the finalized
-                // block explicitly via `FinalizeBlock`, and a finalized tip would reject any
-                // later forkchoice update below it as a too deep reorg.
-                finalized_block_hash: B256::ZERO,
-            };
-            debug!(
-                "Broadcasting forkchoice update to {} clients. Head: {:?}",
-                env.node_clients.len(),
-                fork_choice_state.head_block_hash
-            );
-
-            for (idx, client) in env.node_clients.iter().enumerate() {
-                match EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &client.engine.http_client(),
-                    fork_choice_state,
-                    None,
-                )
-                .await
-                {
-                    Ok(resp) => {
-                        debug!(
-                            "Client {}: Forkchoice update status: {:?}",
-                            idx, resp.payload_status.status
-                        );
-                        // validate that the forkchoice update was accepted
-                        validate_fcu_response(&resp, &format!("Client {idx}"))?;
-                    }
-                    Err(err) => {
-                        return Err(eyre::eyre!(
-                            "Client {}: Failed to broadcast forkchoice: {:?}",
-                            idx,
-                            err
-                        ));
-                    }
-                }
-            }
-            debug!("Forkchoice update broadcasted successfully");
-            Ok(())
+            broadcast_forkchoice(env, head_hash).await
         })
     }
 }
@@ -765,7 +717,7 @@ where
                     debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
 
                     // Check if this node accepted the payload
-                    if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
+                    if result.is_valid() && !first_valid_seen {
                         first_valid_seen = true;
                     } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
                         debug!(
@@ -781,8 +733,7 @@ where
                 }
 
                 // Check if at least one node accepted the payload
-                let any_valid =
-                    broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
+                let any_valid = broadcast_results.iter().any(|(_, status)| status.is_valid());
                 if !any_valid {
                     return Err(eyre::eyre!(
                         "Failed to successfully broadcast payload to any client"
@@ -875,11 +826,7 @@ where
                 .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.tag))?;
 
             let engine_client = env.node_clients[0].engine.http_client();
-            let fcu_state = ForkchoiceState {
-                head_block_hash: target_block.hash,
-                safe_block_hash: target_block.hash,
-                finalized_block_hash: target_block.hash,
-            };
+            let fcu_state = ForkchoiceState::same_hash(target_block.hash);
 
             let fcu_response =
                 EngineApiClient::<Engine>::fork_choice_updated_v2(&engine_client, fcu_state, None)
@@ -1165,4 +1112,55 @@ where
             Ok(())
         })
     }
+}
+
+/// Broadcasts a forkchoice update to all clients, using `head_hash` as the head and safe block.
+pub(super) async fn broadcast_forkchoice<Engine>(
+    env: &Environment<Engine>,
+    head_hash: B256,
+) -> Result<()>
+where
+    Engine: EngineTypes,
+{
+    let fork_choice_state = ForkchoiceState {
+        head_block_hash: head_hash,
+        safe_block_hash: head_hash,
+        // Making a block canonical does not imply finality: tests advance the finalized block
+        // explicitly via `FinalizeBlock`, and a finalized tip would reject any later forkchoice
+        // update below it as a too deep reorg.
+        finalized_block_hash: B256::ZERO,
+    };
+    debug!(
+        "Broadcasting forkchoice update to {} clients. Head: {:?}",
+        env.node_clients.len(),
+        fork_choice_state.head_block_hash
+    );
+
+    for (idx, client) in env.node_clients.iter().enumerate() {
+        match EngineApiClient::<Engine>::fork_choice_updated_v3(
+            &client.engine.http_client(),
+            fork_choice_state,
+            None,
+        )
+        .await
+        {
+            Ok(resp) => {
+                debug!(
+                    "Client {}: Forkchoice update status: {:?}",
+                    idx, resp.payload_status.status
+                );
+                // validate that the forkchoice update was accepted
+                validate_fcu_response(&resp, &format!("Client {idx}"))?;
+            }
+            Err(err) => {
+                return Err(eyre::eyre!(
+                    "Client {}: Failed to broadcast forkchoice: {:?}",
+                    idx,
+                    err
+                ));
+            }
+        }
+    }
+    debug!("Forkchoice update broadcasted successfully");
+    Ok(())
 }
