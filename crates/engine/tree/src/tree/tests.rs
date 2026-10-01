@@ -2824,24 +2824,30 @@ mod forkchoice_updated_tests {
         // Handle persistence actions until termination completes
         let mut last_persisted_number = 0;
         loop {
-            if terminate_rx.try_recv().is_ok() {
-                break;
-            }
-
-            if let Ok(PersistenceAction::SaveBlocks(input, sender)) =
-                action_rx.recv_timeout(std::time::Duration::from_millis(100))
-            {
-                let last = input.last_block();
-                last_persisted_number = last.number;
-                sender
-                    .send(PersistenceResult {
-                        last_block: last,
-                        last_state_trie_block: last,
-                        commit_duration: Some(Duration::ZERO),
-                    })
-                    .unwrap();
+            match action_rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                PersistenceAction::SaveBlocks(input, sender) => {
+                    let last = input.last_block();
+                    last_persisted_number = last.number;
+                    sender
+                        .send(PersistenceResult {
+                            last_block: last,
+                            last_state_trie_block: last,
+                            commit_duration: Some(Duration::ZERO),
+                        })
+                        .unwrap();
+                }
+                PersistenceAction::Barrier(sender) => {
+                    assert!(matches!(
+                        terminate_rx.try_recv(),
+                        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+                    ));
+                    sender.send(()).unwrap();
+                    break;
+                }
+                action => panic!("unexpected persistence action: {action:?}"),
             }
         }
+        terminate_rx.blocking_recv().unwrap();
 
         // Ensure we persisted right to the tip
         assert_eq!(last_persisted_number, canonical_tip);
@@ -2858,7 +2864,7 @@ mod forkchoice_updated_tests {
         test_harness.tree.persistence_state.last_persisted_block = database_tip;
         test_harness.tree.persistence_state.last_state_trie_persisted_block = state_trie_tip;
 
-        let (terminate_tx, terminate_rx) = oneshot::channel();
+        let (terminate_tx, mut terminate_rx) = oneshot::channel();
         let to_tree_tx = test_harness.to_tree_tx.clone();
         let action_rx = test_harness.action_rx;
         spawn_os_thread("engine", || test_harness.tree.run());
@@ -2883,6 +2889,16 @@ mod forkchoice_updated_tests {
             })
             .unwrap();
 
+        let PersistenceAction::Barrier(sender) =
+            action_rx.recv_timeout(Duration::from_secs(10)).unwrap()
+        else {
+            panic!("expected persistence drain barrier")
+        };
+        assert!(matches!(
+            terminate_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        sender.send(()).unwrap();
         terminate_rx.blocking_recv().unwrap();
     }
 }

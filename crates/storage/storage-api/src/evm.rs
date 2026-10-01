@@ -1,7 +1,7 @@
 //! State access for EVM execution.
 
 use crate::StateProvider;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, StorageKey, StorageValue, B256};
 use core::ops::Deref;
 use reth_primitives_traits::{Account, Bytecode};
@@ -25,6 +25,15 @@ pub trait EvmStateProvider {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Returns one value per key in input order, allowing backends to batch database reads.
+    fn storage_batch(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        storage_keys.iter().map(|key| self.storage(account, *key)).collect()
+    }
 }
 
 /// Type-erased provider for EVM execution.
@@ -61,6 +70,14 @@ impl<P: StateProvider> EvmStateProvider for EvmStateProviderAdapter<P> {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         self.0.storage(account, storage_key)
+    }
+
+    fn storage_batch(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        self.0.storage_batch(account, storage_keys)
     }
 }
 

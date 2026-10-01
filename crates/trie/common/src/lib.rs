@@ -63,6 +63,12 @@ pub use subnode::StoredSubNode;
 mod trie;
 pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 
+mod state_trie_builder;
+pub use state_trie_builder::StateTrieBuilder;
+
+mod state_trie;
+pub use state_trie::*;
+
 mod trie_node_v2;
 pub use trie_node_v2::*;
 

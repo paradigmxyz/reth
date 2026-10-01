@@ -12,13 +12,17 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
     HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
+use reth_trie::state_trie_cursor::StateTrieCursorFactory;
 use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
-        Provider: BlockReader
+        Provider: StateTrieCursorFactory
+                      + reth_trie::hashed_cursor::HashedCursorFactory
+                      + reth_trie::trie_cursor::TrieCursorFactory
+                      + BlockReader
                       + StageCheckpointReader
                       + PruneCheckpointReader
                       + ChangeSetReader
@@ -56,7 +60,10 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
-            Provider: BlockReader
+            Provider: StateTrieCursorFactory
+                          + reth_trie::hashed_cursor::HashedCursorFactory
+                          + reth_trie::trie_cursor::TrieCursorFactory
+                          + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader

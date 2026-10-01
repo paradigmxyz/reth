@@ -101,6 +101,9 @@ rand_08.workspace = true
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [features]
+legacy-trie-rocksdb = []
+state-trie-db = ["reth-trie-parallel/state-trie-db", "reth-storage-overlay/state-trie-db"]
+state-trie-rocksdb = ["state-trie-db"]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",

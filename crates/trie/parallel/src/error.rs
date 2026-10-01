@@ -1,5 +1,5 @@
 use reth_execution_errors::{SparseTrieError, StateProofError};
-use reth_provider::ProviderError;
+use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
 
 /// Error returned by the state-root task and the parallel proof workers.

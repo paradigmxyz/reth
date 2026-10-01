@@ -2,7 +2,7 @@ use crate::{
     backfill::{BackfillAction, BackfillSyncState},
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
-    persistence::PersistenceHandle,
+    persistence::{PersistenceAction, PersistenceHandle},
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
@@ -362,7 +362,9 @@ where
         + BalProvider
         + Clone
         + 'static,
-    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
+        + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader
@@ -1469,7 +1471,15 @@ where
         pending_termination: oneshot::Sender<()>,
     ) -> Result<(), AdvancePersistenceError> {
         trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
-        let result = self.persist_until_complete();
+        let result = self.persist_until_complete().and_then(|()| {
+            // Saves are acknowledged before pruning. Shutdown must also wait for that work
+            // before the process can tear down the database's native resources.
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.persistence
+                .send_action(PersistenceAction::Barrier(tx))
+                .map_err(|_| AdvancePersistenceError::ChannelClosed)?;
+            rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)
+        });
         let _ = pending_termination.send(());
         result
     }

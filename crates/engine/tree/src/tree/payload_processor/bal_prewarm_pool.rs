@@ -147,7 +147,8 @@ impl BalPrewarmPool {
 /// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
 ///
 /// This should explain why this particular value is picked.
-pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+pub const DEFAULT_BAL_PREWARM_THREADS: usize =
+    if cfg!(feature = "state-trie-rocksdb") { 64 } else { 128 };
 
 /// Number of storage slots carried by one warm message.
 ///
@@ -178,18 +179,23 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
+                let (addr, slots) = match target {
                     PrewarmTarget::Account(addr, slots) => {
-                        let _ = provider.basic_account(&addr);
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
+                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
+                            let Some(code_hash) = account.bytecode_hash &&
+                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
+                        {
+                            let _ = provider.bytecode_by_hash(&code_hash);
                         }
+                        (addr, slots)
                     }
-                    PrewarmTarget::Storage(addr, slots) => {
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
+                    PrewarmTarget::Storage(addr, slots) => (addr, slots),
+                };
+                #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
+                let _ = provider.prewarm_storage_batch(addr, &slots);
+                #[cfg(not(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb")))]
+                for &slot in &slots {
+                    let _ = provider.storage(addr, slot);
                 }
             }
             PrewarmMsg::EndBlock(end_tx) => {

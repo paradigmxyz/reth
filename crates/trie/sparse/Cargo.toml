@@ -20,12 +20,13 @@ tracing = { workspace = true, features = ["attributes"], optional = true }
 alloy-trie.workspace = true
 
 # alloy
+alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
-smallvec = { workspace = true, optional = true }
+smallvec = { workspace = true, features = ["union"] }
 slotmap = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -40,7 +41,6 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-tracing.workspace = true
 
 arbitrary.workspace = true
-alloy-rlp.workspace = true
 itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -54,7 +54,6 @@ std = [
     "dep:either",
     "dep:rayon",
     "dep:reth-primitives-traits",
-    "dep:smallvec",
     "dep:slotmap",
     "dep:tracing",
     "alloy-primitives/std",

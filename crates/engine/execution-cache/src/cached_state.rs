@@ -945,6 +945,40 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
     }
 }
 
+impl<S: EvmStateProvider> CachedStateProvider<S> {
+    /// Fills missing storage entries together, retaining values inserted by concurrent readers.
+    pub fn prewarm_storage_batch(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<()> {
+        if !self.should_fill_on_miss() || self.txpool_snapshot.is_some() {
+            for key in storage_keys {
+                self.storage(account, *key)?;
+            }
+            return Ok(())
+        }
+        let missing: Vec<_> = storage_keys
+            .iter()
+            .copied()
+            .filter(|key| self.caches.0.storage_cache.get(&(account, *key)).is_none())
+            .collect();
+        if let [key] = missing.as_slice() {
+            self.storage(account, *key)?;
+            return Ok(())
+        }
+        if !missing.is_empty() {
+            let values = self.state_provider.storage_batch(account, &missing)?;
+            for (key, value) in missing.into_iter().zip(values) {
+                let _ = self.caches.get_or_try_insert_storage_with(account, key, || {
+                    Ok::<_, reth_errors::ProviderError>(value.unwrap_or_default())
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Execution cache used during block processing.
 ///
 /// Optimizes state access by maintaining in-memory copies of frequently accessed
@@ -1006,9 +1040,9 @@ impl ExecutionCache {
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub fn new(total_cache_size: usize) -> Self {
-        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
-        let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
-        let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
+        let code_cache_size = (total_cache_size * 8) / 100;
+        let storage_cache_size = (total_cache_size * 82) / 100;
+        let account_cache_size = total_cache_size / 10;
 
         let code_capacity = Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE);
         let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
@@ -1374,6 +1408,29 @@ mod tests {
     }
 
     #[test]
+    fn prewarm_storage_batch_preserves_cached_values_and_caches_missing_slots() {
+        let address = Address::repeat_byte(1);
+        let keys = [B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)];
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(
+            address,
+            ExtendedAccount::new(0, U256::ZERO)
+                .extend_storage(vec![(keys[0], U256::from(1)), (keys[1], U256::from(2))]),
+        )]);
+        let caches = ExecutionCache::new(1024 * 1024);
+        caches.insert_storage(address, keys[0], Some(U256::from(9)));
+        let provider = CachedStateProvider::new_prewarm(
+            reth_storage_api::StateProvider::into_evm_state_provider(provider),
+            caches.clone(),
+        );
+        provider.prewarm_storage_batch(address, &[]).unwrap();
+        provider.prewarm_storage_batch(address, &[keys[2], keys[1], keys[0], keys[1]]).unwrap();
+        for (key, expected) in keys.into_iter().zip([9, 2, 0]) {
+            assert_eq!(caches.0.storage_cache.get(&(address, key)), Some(U256::from(expected)));
+        }
+    }
+
+    #[test]
     fn test_get_storage_empty() {
         let address = Address::random();
         let storage_key = StorageKey::random();
@@ -1576,17 +1633,17 @@ mod tests {
 
     #[test]
     fn test_code_cache_capacity_with_default_budget() {
-        // Default cross-block cache is 4 GB; code gets 5.56% = ~228 MB.
+        // Default cross-block cache is 4 GiB; code gets 8% = ~328 MiB.
         let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
-        let code_budget = (total_cache_size * 556) / 10000; // 228 MB
+        let code_budget = (total_cache_size * 8) / 100;
 
         let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
 
-        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
+        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 32768 entries.
         // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.
         assert_eq!(
-            capacity, 16384,
-            "code cache should have 16384 entries with default 4 GB budget"
+            capacity, 32768,
+            "code cache should have 32768 entries with default 4 GiB budget"
         );
     }
 }

@@ -93,6 +93,9 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
+legacy-trie-rocksdb = ["reth-provider/legacy-trie-rocksdb", "reth-engine-tree/legacy-trie-rocksdb"]
+state-trie-rocksdb = ["state-trie-db", "reth-provider/state-trie-rocksdb", "reth-engine-tree/state-trie-rocksdb"]
+state-trie-db = ["reth-engine-tree/state-trie-db"]
 default = []
 js-tracer = [
     "reth-rpc/js-tracer",

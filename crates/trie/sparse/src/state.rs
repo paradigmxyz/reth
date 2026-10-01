@@ -130,6 +130,64 @@ where
     A: SparseTrieTrait + Default,
     S: SparseTrieTrait + Default + Clone,
 {
+    /// Enable complete node updates for account and storage tries.
+    pub fn with_state_trie_updates(mut self, retain: bool) -> Self {
+        self.state.set_state_trie_updates(retain);
+        self.storage.default_trie.set_state_trie_updates(retain);
+        for trie in self.storage.tries.values_mut().chain(self.storage.cleared_tries.iter_mut()) {
+            trie.set_state_trie_updates(retain);
+        }
+        self
+    }
+
+    /// Take complete persisted nodes, decoding raw leaf values into their table types.
+    pub fn take_state_trie_updates(&mut self) -> reth_trie_common::StateTrieUpdatesSorted {
+        use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+
+        fn decode<V: alloy_rlp::Decodable>(
+            nodes: reth_trie_common::StateTrieNodes<smallvec::SmallVec<[u8; 16]>>,
+        ) -> reth_trie_common::StateTrieNodes<V> {
+            use reth_trie_common::StateTrieNode;
+            nodes
+                .into_iter()
+                .map(|(p, n)| {
+                    (
+                        p,
+                        n.map(|n| match n {
+                            StateTrieNode::Leaf { short_key_len, value } => StateTrieNode::Leaf {
+                                short_key_len,
+                                value: alloy_rlp::decode_exact(&value)
+                                    .expect("sparse trie leaf has valid RLP"),
+                            },
+                            StateTrieNode::Branch { short_key_len, state_mask, children } => {
+                                StateTrieNode::Branch { short_key_len, state_mask, children }
+                            }
+                        }),
+                    )
+                })
+                .collect()
+        }
+        let (account_nodes, storage_tries) = rayon::join(
+            || {
+                self.state
+                    .as_revealed_mut()
+                    .map(|s| decode(s.take_state_trie_updates()))
+                    .unwrap_or_default()
+            },
+            || {
+                self.storage
+                    .tries
+                    .par_iter_mut()
+                    .filter_map(|(a, t)| {
+                        let nodes = decode(t.as_revealed_mut()?.take_state_trie_updates());
+                        (!nodes.is_empty()).then_some((*a, nodes))
+                    })
+                    .collect()
+            },
+        );
+        reth_trie_common::StateTrieUpdatesSorted { account_nodes, storage_tries }
+    }
+
     /// Returns mutable reference to account trie.
     pub const fn trie_mut(&mut self) -> &mut RevealableSparseTrie<A> {
         &mut self.state

@@ -5,8 +5,8 @@ mod metrics;
 mod provider;
 
 pub use provider::{
-    OwnedRocksReadSnapshot, PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder,
-    RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
-    RocksReadSnapshot, RocksTx,
+    legacy_storage_key, OwnedRocksReadSnapshot, PruneShardOutcome, PrunedIndices, RocksDBBatch,
+    RocksDBBuilder, RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
+    RocksLegacyCursor, RocksReadSnapshot, RocksStateTrieCursor, RocksTx,
 };
 pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};

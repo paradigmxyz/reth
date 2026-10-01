@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+#[cfg(feature = "state-trie-db")]
+use alloy_rlp as _;
+
 /// Error types for the state-root task and proof computation.
 pub mod error;
 
@@ -18,6 +21,7 @@ pub mod proof_task;
 pub mod state_root_task;
 
 /// Async value encoder for V2 proofs.
+#[cfg(not(feature = "state-trie-db"))]
 pub(crate) mod value_encoder;
 
 /// Proof task manager metrics.

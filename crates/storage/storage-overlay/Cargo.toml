@@ -24,7 +24,7 @@ reth-stages-types.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }
 reth-storage-errors.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"], optional = true }
-reth-trie.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
 
@@ -51,4 +51,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
+legacy-trie-rocksdb = []
+state-trie-db = []
 rayon = ["dep:rayon", "dep:reth-tasks"]

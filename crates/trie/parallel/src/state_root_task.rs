@@ -37,6 +37,8 @@ pub enum StateRootMessage {
 /// the trie updates.
 #[derive(Debug, Clone)]
 pub struct StateRootComputeOutcome {
+    /// Complete state trie changes, when the state trie database is enabled.
+    pub state_trie_updates: Option<Arc<reth_trie::StateTrieUpdatesSorted>>,
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
@@ -942,6 +944,7 @@ mod tests {
 
         state_root_tx
             .send(Ok(StateRootComputeOutcome {
+                state_trie_updates: None,
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
                 hashed_state: Arc::new(HashedPostState::default()),

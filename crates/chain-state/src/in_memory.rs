@@ -736,6 +736,8 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: LazyTrieData,
+    /// Complete state trie changes, available immediately after root calculation.
+    pub state_trie_updates: Option<Arc<reth_trie::StateTrieUpdatesSorted>>,
     /// The prepared block access list of the block, if one is available.
     ///
     /// `None` means no BAL was available when the block was constructed, not that the block
@@ -764,6 +766,7 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: LazyTrieData::ready(ComputedTrieData::default()),
+            state_trie_updates: None,
             bal: None,
         }
     }
@@ -792,6 +795,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
             recovered_block,
             execution_output,
             trie_data: LazyTrieData::ready(trie_data),
+            state_trie_updates: None,
             bal: None,
         }
     }
@@ -814,7 +818,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data, bal: None }
+        Self { recovered_block, execution_output, trie_data, state_trie_updates: None, bal: None }
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.

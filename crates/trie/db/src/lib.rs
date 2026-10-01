@@ -8,8 +8,10 @@ mod hashed_cursor;
 mod prefix_set;
 mod proof;
 mod state;
+mod state_trie_cursor;
 mod storage;
 mod trie_cursor;
+pub use state_trie_cursor::*;
 
 pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,

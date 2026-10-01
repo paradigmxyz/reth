@@ -2,7 +2,7 @@ use super::{
     AccountReader, BlockHashReader, BlockIdReader, EvmStateProviderAdapter, StateProofProvider,
     StateRootProvider, StorageRootProvider,
 };
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
@@ -48,6 +48,15 @@ pub trait StateProvider:
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+
+    /// Returns one value per storage key in input order. Backends may combine database lookups.
+    fn storage_batch(
+        &self,
+        account: Address,
+        storage_keys: &[StorageKey],
+    ) -> ProviderResult<Vec<Option<StorageValue>>> {
+        storage_keys.iter().map(|key| self.storage(account, *key)).collect()
+    }
 
     /// Get account code by its address.
     ///

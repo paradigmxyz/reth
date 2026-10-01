@@ -565,6 +565,86 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DbTxProvider
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static>
+    reth_trie::hashed_cursor::HashedCursorFactory for MockEthProvider<T, ChainSpec>
+{
+    type AccountCursor<'a>
+        = reth_trie_db::DatabaseHashedAccountCursor<reth_db_api::mock::CursorMock>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = reth_trie_db::DatabaseHashedStorageCursor<reth_db_api::mock::CursorMock>
+    where
+        Self: 'a;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseHashedCursorFactory::new(&self.tx).hashed_account_cursor()
+    }
+    fn hashed_storage_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseHashedCursorFactory::new(&self.tx).hashed_storage_cursor(address)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> reth_trie::trie_cursor::TrieCursorFactory
+    for MockEthProvider<T, ChainSpec>
+{
+    type AccountTrieCursor<'a>
+        = reth_trie_db::DatabaseAccountTrieCursor<
+        reth_db_api::mock::CursorMock,
+        reth_trie_db::LegacyKeyAdapter,
+    >
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = reth_trie_db::DatabaseStorageTrieCursor<
+        reth_db_api::mock::CursorMock,
+        reth_trie_db::LegacyKeyAdapter,
+    >
+    where
+        Self: 'a;
+    fn account_trie_cursor(
+        &self,
+    ) -> Result<Self::AccountTrieCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseTrieCursorFactory::<_, reth_trie_db::LegacyKeyAdapter>::new(&self.tx)
+            .account_trie_cursor()
+    }
+    fn storage_trie_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseTrieCursorFactory::<_, reth_trie_db::LegacyKeyAdapter>::new(&self.tx)
+            .storage_trie_cursor(address)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static>
+    reth_trie::state_trie_cursor::StateTrieCursorFactory for MockEthProvider<T, ChainSpec>
+{
+    type AccountCursor<'a>
+        = reth_trie_db::DatabaseStateTrieAccountCursor<reth_db_api::mock::CursorMock>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = reth_trie_db::DatabaseStateTrieStorageCursor<reth_db_api::mock::CursorMock>
+    where
+        Self: 'a;
+
+    fn state_trie_account_cursor(
+        &self,
+    ) -> Result<Self::AccountCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseStateTrieCursorFactory(&self.tx).state_trie_account_cursor()
+    }
+
+    fn state_trie_storage_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageCursor<'_>, reth_db_api::DatabaseError> {
+        reth_trie_db::DatabaseStateTrieCursorFactory(&self.tx).state_trie_storage_cursor(address)
+    }
+}
+
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     for MockEthProvider<T, ChainSpec>
 {

@@ -188,3 +188,46 @@ impl<'metrics, C: TrieStorageCursor> TrieStorageCursor for InstrumentedTrieCurso
         self.cursor.set_hashed_address(hashed_address)
     }
 }
+
+impl<C: crate::state_trie_cursor::StateTrieCursor> crate::state_trie_cursor::StateTrieCursor
+    for InstrumentedTrieCursor<'_, C>
+{
+    type Value = C::Value;
+    fn get(
+        &mut self,
+        path: Nibbles,
+    ) -> Result<Option<crate::StateTrieNode<Self::Value>>, DatabaseError> {
+        let start = Instant::now();
+        self.metrics.seek_exact_count += 1;
+        let result = self.cursor.get(path);
+        self.metrics.total_duration += start.elapsed();
+        result
+    }
+    fn seek(
+        &mut self,
+        path: Nibbles,
+    ) -> Result<Option<(Nibbles, crate::StateTrieNode<Self::Value>)>, DatabaseError> {
+        let start = Instant::now();
+        self.metrics.seek_count += 1;
+        let result = self.cursor.seek(path);
+        self.metrics.total_duration += start.elapsed();
+        result
+    }
+    fn before(
+        &mut self,
+        path: Option<Nibbles>,
+    ) -> Result<Option<(Nibbles, crate::StateTrieNode<Self::Value>)>, DatabaseError> {
+        let start = Instant::now();
+        self.metrics.seek_count += 1;
+        let result = self.cursor.before(path);
+        self.metrics.total_duration += start.elapsed();
+        result
+    }
+}
+impl<C: crate::state_trie_cursor::StateTrieStorageCursor>
+    crate::state_trie_cursor::StateTrieStorageCursor for InstrumentedTrieCursor<'_, C>
+{
+    fn set_hashed_address(&mut self, address: B256) {
+        self.cursor.set_hashed_address(address);
+    }
+}

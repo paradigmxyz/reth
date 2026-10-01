@@ -35,7 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
     BranchNodeCompact, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
-    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    StateTrieNode, StateTrieStorageEntry, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    TrieAccount,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -489,6 +490,19 @@ tables! {
         type SubKey = B256;
     }
 
+    /// Complete account trie, including every leaf and branch.
+    table StateTrieAccounts {
+        type Key = PackedStoredNibbles;
+        type Value = StateTrieNode<TrieAccount>;
+    }
+
+    /// Complete storage tries, including every leaf and branch.
+    table StateTrieStorages {
+        type Key = B256;
+        type Value = StateTrieStorageEntry;
+        type SubKey = PackedStoredNibblesSubKey;
+    }
+
     /// Stores the current state's Merkle Patricia Tree.
     table AccountsTrie {
         type Key = StoredNibbles;
@@ -631,4 +645,48 @@ mod tests {
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
     }
+}
+
+/// `RocksDB` view of complete storage nodes, with the account and path in a single key.
+#[derive(Debug)]
+pub struct RocksStateTrieStorages;
+
+impl Table for RocksStateTrieStorages {
+    const NAME: &'static str = <StateTrieStorages as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = crate::models::state_trie::StateTrieStorageKey;
+    type Value = StateTrieNode<alloy_primitives::U256>;
+}
+
+/// Flattened account hash and slot hash for legacy storage in `RocksDB`.
+#[derive(Debug)]
+pub struct RocksHashedStorages;
+
+impl Table for RocksHashedStorages {
+    const NAME: &'static str = <HashedStorages as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = alloy_primitives::B512;
+    type Value = crate::models::CompactU256;
+}
+
+/// Legacy branch nodes indexed by packed path in `RocksDB`.
+#[derive(Debug)]
+pub struct RocksAccountsTrie;
+
+impl Table for RocksAccountsTrie {
+    const NAME: &'static str = <AccountsTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = PackedStoredNibbles;
+    type Value = BranchNodeCompact;
+}
+
+/// Legacy storage branch nodes indexed by account hash and packed path.
+#[derive(Debug)]
+pub struct RocksStoragesTrie;
+
+impl Table for RocksStoragesTrie {
+    const NAME: &'static str = <StoragesTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = crate::models::state_trie::StateTrieStorageKey;
+    type Value = BranchNodeCompact;
 }

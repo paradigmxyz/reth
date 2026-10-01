@@ -1,3 +1,4 @@
+#[cfg(not(feature = "state-trie-db"))]
 use crate::value_encoder::ValueEncoderStats;
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
@@ -40,6 +41,7 @@ impl ProofTaskTrieMetrics {
     }
 
     /// Record value encoder stats (deferred encoder variant counts and storage wait time).
+    #[cfg(not(feature = "state-trie-db"))]
     pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
         self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
         self.deferred_encoder_sync.record(stats.sync_count as f64);

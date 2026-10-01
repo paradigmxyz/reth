@@ -68,6 +68,13 @@ impl LeafUpdate {
 /// This trait provides a unified interface for the core trie operations needed by
 /// `RevealableSparseTrie`.
 pub trait SparseTrie: Sized + Debug + Send + Sync {
+    /// Enable tracking of all persisted leaves and branches independently of compact updates.
+    fn set_state_trie_updates(&mut self, retain: bool);
+    /// Take sorted complete-node changes with raw RLP leaf values.
+    fn take_state_trie_updates(
+        &mut self,
+    ) -> reth_trie_common::StateTrieNodes<smallvec::SmallVec<[u8; 16]>>;
+
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments

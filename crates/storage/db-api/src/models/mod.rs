@@ -17,6 +17,7 @@ pub mod integer_list;
 pub mod metadata;
 pub mod sharded_key;
 pub mod snap;
+pub mod state_trie;
 pub mod storage_sharded_key;
 
 pub use accounts::*;
@@ -99,6 +100,18 @@ impl Encode for B256 {
 }
 
 impl Decode for B256 {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
+    }
+}
+
+impl Encode for alloy_primitives::B512 {
+    type Encoded = [u8; 64];
+    fn encode(self) -> Self::Encoded {
+        self.0
+    }
+}
+impl Decode for alloy_primitives::B512 {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
     }

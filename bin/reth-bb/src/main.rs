@@ -12,8 +12,9 @@ use alloy_rpc_types::engine::ExecutionData;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_cli_runner::{CliRunner, CliRunnerConfig};
 use reth_consensus::noop::NoopConsensus;
-use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
+use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli, Commands};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
@@ -34,6 +35,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
+use reth_tasks::{RayonConfig, RuntimeConfig};
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -213,7 +215,7 @@ where
 // Main
 // ---------------------------------------------------------------------------
 
-fn main() {
+fn main() -> eyre::Result<()> {
     reth_cli_util::sigsegv_handler::install();
 
     if std::env::var_os("RUST_BACKTRACE").is_none() {
@@ -222,13 +224,25 @@ fn main() {
 
     let _ = DefaultEngineValues::default().with_bal_parallel_execution_disabled(false).try_init();
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
+    let cli = Cli::<EthereumChainSpecParser>::parse();
+    let runtime_config = match &cli.command {
+        Commands::Node(command) => RuntimeConfig::default().with_rayon(RayonConfig {
+            reserved_cpu_cores: command.engine.reserved_cpu_cores,
+            proof_storage_worker_threads: command.engine.storage_worker_count,
+            proof_account_worker_threads: command.engine.account_worker_count,
+            prewarming_threads: command.engine.prewarming_threads,
+            ..Default::default()
+        }),
+        _ => RuntimeConfig::default(),
+    };
+    // Big-block persistence can take minutes to drain after replay stops.
+    let runner = CliRunner::try_with_runtime_config(runtime_config)?.with_config(
+        CliRunnerConfig::new().with_graceful_shutdown_timeout(std::time::Duration::from_secs(900)),
+    );
+    cli.with_runner(runner, async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");
         let handle = builder.launch_node(BbNode::default()).await?;
 
         handle.wait_for_node_exit().await
-    }) {
-        eprintln!("Error: {err:?}");
-        std::process::exit(1);
-    }
+    })
 }

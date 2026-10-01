@@ -431,6 +431,8 @@ pub trait StateRootJob<N: NodePrimitives>: Send {
 /// Outcome of a per-block state-root job.
 #[derive(Debug)]
 pub struct StateRootJobOutcome {
+    /// Complete state trie changes, when the state trie database is enabled.
+    pub state_trie_updates: Option<Arc<reth_trie::StateTrieUpdatesSorted>>,
     /// Computed state root.
     pub state_root: B256,
     /// Trie updates associated with the computed state root.
@@ -445,7 +447,7 @@ pub struct StateRootJobOutcome {
 impl StateRootJobOutcome {
     /// Creates a state-root job outcome.
     pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
-        Self { state_root, trie_updates, hashed_state: None }
+        Self { state_root, trie_updates, hashed_state: None, state_trie_updates: None }
     }
 
     /// Sets the hashed post state recomputed by a fallback path.
@@ -496,8 +498,11 @@ impl DefaultStateRootStrategy {
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
+        F: DatabaseProviderROFactory<
+                Provider: TrieCursorFactory
+                              + HashedCursorFactory
+                              + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+            > + Clone
             + Send
             + Sync
             + 'static,
@@ -610,7 +615,8 @@ impl DefaultStateRootStrategy {
                 SparseStateTrie::default()
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
-                    .with_updates(true)
+                    .with_updates(!cfg!(feature = "state-trie-db"))
+                    .with_state_trie_updates(cfg!(feature = "state-trie-db"))
             };
 
             let mut sparse_trie_anchor_hash = parent_hash;
@@ -801,6 +807,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
+                          + reth_trie::state_trie_cursor::StateTrieCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -812,6 +819,13 @@ where
         &self,
         mut ctx: StateRootJobContext<'_, N, P, Evm>,
     ) -> ProviderResult<PreparedStateRootJob<N>> {
+        if cfg!(feature = "state-trie-db") &&
+            (ctx.config.skip_state_root() || !ctx.config.use_state_root_task())
+        {
+            return Err(ProviderError::other(std::io::Error::other(
+                "state-trie-db requires the sparse state root task",
+            )))
+        }
         if ctx.config.skip_state_root() {
             return Ok(PreparedStateRootJob::new(Box::new(SkippedStateRootJob {}), None))
         }
@@ -1022,6 +1036,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
+                          + reth_trie::state_trie_cursor::StateTrieCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -1098,10 +1113,14 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         outcome: StateRootComputeOutcome,
     ) -> StateRootJobOutcome {
-        let StateRootComputeOutcome { state_root, trie_updates, hashed_state: _hashed_state } =
-            outcome;
+        let StateRootComputeOutcome {
+            state_root,
+            trie_updates,
+            hashed_state: _hashed_state,
+            state_trie_updates,
+        } = outcome;
 
-        if self.compare_trie_updates {
+        if self.compare_trie_updates && !cfg!(feature = "state-trie-db") {
             compare_trie_updates_with_serial(
                 self.state_provider_factory.clone(),
                 output,
@@ -1109,7 +1128,9 @@ where
             );
         }
 
-        StateRootJobOutcome::new(state_root, trie_updates)
+        let mut outcome = StateRootJobOutcome::new(state_root, trie_updates);
+        outcome.state_trie_updates = state_trie_updates;
+        outcome
     }
 }
 
@@ -1127,6 +1148,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
+                          + reth_trie::state_trie_cursor::StateTrieCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + Send,
@@ -1143,6 +1165,10 @@ where
         output: Arc<BlockExecutionOutput<N::Receipt>>,
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
+        if cfg!(feature = "state-trie-db") {
+            let outcome = self.handle.state_root().map_err(ProviderError::other)?;
+            return Ok(self.sparse_outcome(block, &output, outcome))
+        }
         if self.timeout.is_none() {
             return match self.handle.state_root() {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
@@ -1231,6 +1257,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
         Provider: TrieCursorFactory
                       + HashedCursorFactory
+                      + reth_trie::state_trie_cursor::StateTrieCursorFactory
                       + HashedPostStateProvider
                       + StateRootProvider,
     >,

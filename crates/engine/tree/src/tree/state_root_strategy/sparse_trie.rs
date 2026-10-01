@@ -484,7 +484,12 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
+        let root = if self.trie.retains_updates() {
+            self.trie.root_with_updates(self.new_epoch)
+        } else {
+            self.trie.root(self.new_epoch).map(|root| (root, TrieUpdates::default()))
+        };
+        let (state_root, trie_updates) = match root {
             Ok(result) => result,
             Err(err)
                 if matches!(
@@ -517,7 +522,12 @@ where
         self.storage_cache_hits = 0;
         self.storage_cache_misses = 0;
 
+        let updates_start = Instant::now();
+        let state_trie_updates =
+            cfg!(feature = "state-trie-db").then(|| Arc::new(self.trie.take_state_trie_updates()));
+        debug!(target: "engine::root_timing", root_finalize_us = end.duration_since(start).as_micros(), updates_us = updates_start.elapsed().as_micros(), "State root finalization");
         Ok(StateRootComputeOutcome {
+            state_trie_updates,
             state_root,
             trie_updates: Arc::new(trie_updates),
             hashed_state: finalized_hashed_state
@@ -615,7 +625,10 @@ where
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
+                #[cfg(not(feature = "state-trie-db"))]
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
+                #[cfg(feature = "state-trie-db")]
+                self.final_hashed_state_tx.take();
                 self.finished_state_updates = true;
                 Some(hashed_state)
             }
@@ -693,6 +706,7 @@ where
             self.pending_account_updates.insert(address, Some(account.clone()));
         }
 
+        #[cfg(not(feature = "state-trie-db"))]
         self.final_hashed_state.extend(hashed_state_update);
     }
 
@@ -752,7 +766,9 @@ where
             self.in_flight_proof_batches > 0,
             "received proof result without an in-flight proof batch"
         );
-        self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
+        if message.completes_batch {
+            self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
+        }
         Ok(result)
     }
 
@@ -2499,7 +2515,18 @@ mod tests {
 
         assert!(task.ensure_not_stalled(false).is_ok());
 
+        task.on_proof_result_message(ProofResultMessage {
+            completes_batch: false,
+            result: Ok(DecodedMultiProofV2::default()),
+            elapsed: std::time::Duration::ZERO,
+            state: HashedPostState::default(),
+        })
+        .unwrap();
+        assert_eq!(task.in_flight_proof_batches, 1);
+        assert!(task.ensure_not_stalled(false).is_ok());
+
         let result = ProofResultMessage {
+            completes_batch: true,
             result: Ok(DecodedMultiProofV2::default()),
             elapsed: std::time::Duration::ZERO,
             state: HashedPostState::default(),

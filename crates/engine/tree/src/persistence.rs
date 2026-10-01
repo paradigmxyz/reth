@@ -124,6 +124,9 @@ where
                 PersistenceAction::SaveSafeBlock(safe_block) => {
                     self.pending_safe_block = Some(safe_block);
                 }
+                PersistenceAction::Barrier(sender) => {
+                    let _ = sender.send(());
+                }
             }
         }
         Ok(())
@@ -215,9 +218,8 @@ where
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
         });
-        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
-
         let elapsed = start_time.elapsed();
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, elapsed_us = elapsed.as_micros(), "Saved range of blocks");
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
@@ -278,6 +280,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+
+    /// Acknowledge all preceding work, including post-save pruning.
+    Barrier(Sender<()>),
 }
 
 /// A handle to the persistence service

@@ -29,36 +29,43 @@
 //! ProofResultMessage <-- ProofResultSender
 //! ```
 
-use crate::{
-    error::StateRootTaskError,
-    value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
-};
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
+use crate::error::StateRootTaskError;
+#[cfg(not(feature = "state-trie-db"))]
+use crate::value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats};
+use alloy_primitives::{map::B256Map, B256};
+#[cfg(not(feature = "state-trie-db"))]
+use alloy_primitives::{map::B256Set, U256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+#[cfg(not(feature = "state-trie-db"))]
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
-use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
+#[cfg(any(test, not(feature = "state-trie-db")))]
+use reth_trie::ProofTrieNodeV2;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
-    proof_v2,
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    hashed_cursor::HashedCursorFactory,
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory},
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target,
 };
+#[cfg(not(feature = "state-trie-db"))]
+use reth_trie::{
+    hashed_cursor::{HashedStorageCursor, InstrumentedHashedCursor},
+    proof_v2,
+    trie_cursor::TrieStorageCursor,
+};
+#[cfg(not(feature = "state-trie-db"))]
+use std::{cell::RefCell, rc::Rc};
 use std::{
-    cell::RefCell,
-    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, error, instrument, trace};
+#[cfg(not(feature = "state-trie-db"))]
+use tracing::trace;
+use tracing::{debug, debug_span, error, instrument};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
@@ -66,6 +73,7 @@ use crate::proof_task_metrics::{
 };
 
 /// Type alias for the V2 account proof calculator with instrumented cursors.
+#[cfg(not(feature = "state-trie-db"))]
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
     InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
@@ -76,6 +84,7 @@ type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
 >;
 
 /// Type alias for the V2 storage proof calculator with instrumented cursors.
+#[cfg(not(feature = "state-trie-db"))]
 type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
     InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
     InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
@@ -173,8 +182,11 @@ impl ProofWorkerHandle {
         proof_result_tx: ProofResultSender,
     ) -> Self
     where
-        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
+        Factory: DatabaseProviderROFactory<
+                Provider: TrieCursorFactory
+                              + HashedCursorFactory
+                              + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+            > + Clone
             + Send
             + Sync
             + 'static,
@@ -235,7 +247,7 @@ impl ProofWorkerHandle {
                         ?error,
                         "Storage worker failed"
                     );
-                    let _ = storage_result_tx.send(ProofResultMessage {
+                    let _ = storage_result_tx.send(ProofResultMessage { completes_batch: true,
                         result: Err(StateRootTaskError::ProofWorker(format!(
                             "storage worker {worker_id}: {error}"
                         ))),
@@ -247,6 +259,7 @@ impl ProofWorkerHandle {
         });
 
         let account_rt = runtime.clone();
+        #[cfg(not(feature = "state-trie-db"))]
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
         let account_result_tx = proof_result_tx;
@@ -267,6 +280,7 @@ impl ProofWorkerHandle {
                     task_ctx.clone(),
                     account_work_rx.clone(),
                     worker_id,
+                    #[cfg(not(feature = "state-trie-db"))]
                     account_tx.clone(),
                     account_avail.clone(),
                     #[cfg(feature = "metrics")]
@@ -281,7 +295,7 @@ impl ProofWorkerHandle {
                         ?error,
                         "Account worker failed"
                     );
-                    let _ = account_result_tx.send(ProofResultMessage {
+                    let _ = account_result_tx.send(ProofResultMessage { completes_batch: true,
                         result: Err(StateRootTaskError::ProofWorker(format!(
                             "account worker {worker_id}: {error}"
                         ))),
@@ -332,33 +346,10 @@ impl ProofWorkerHandle {
         self.account_worker_count
     }
 
-    /// Dispatch a storage proof computation to storage worker pool
-    ///
-    /// The result will be sent via the `proof_result_sender` channel.
-    pub fn dispatch_storage_proof(
-        &self,
-        input: StorageProofInput,
-        proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
-    ) -> Result<(), ProviderError> {
-        let hashed_address = input.hashed_address;
-        self.storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
-            .map_err(|err| {
-                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
-                let _ = proof_result_sender.send(StorageProofResultMessage {
-                    hashed_address,
-                    result: Err(
-                        DatabaseError::Other("storage workers unavailable".to_string()).into()
-                    ),
-                });
-
-                ProviderError::other(std::io::Error::other("storage workers unavailable"))
-            })
-    }
-
     /// Dispatch an account multiproof computation
     ///
     /// The result will be sent via the `result_sender` channel included in the input.
+    #[cfg(not(feature = "state-trie-db"))]
     pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
@@ -374,6 +365,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
+                    completes_batch: true,
                     result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
@@ -381,6 +373,40 @@ impl ProofWorkerHandle {
 
                 error
             })
+    }
+    /// Dispatch complete-schema account and storage work independently.
+    #[cfg(feature = "state-trie-db")]
+    pub fn dispatch_account_multiproof(
+        &self,
+        input: AccountMultiproofInput,
+    ) -> Result<(), ProviderError> {
+        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let MultiProofTargetsV2 { account_targets, storage_targets } = targets;
+        let completion = Arc::new(StreamingProofCompletion(proof_result_sender));
+        let mut storage_targets: Vec<_> = storage_targets.into_iter().collect();
+        storage_targets.sort_unstable_by_key(|(address, _)| *address);
+        for (address, targets) in storage_targets {
+            self.storage_work_tx
+                .send(StorageWorkerJob::StreamingProof {
+                    hashed_address: address,
+                    targets,
+                    completion: completion.clone(),
+                })
+                .map_err(|_| {
+                    ProviderError::other(std::io::Error::other("storage workers unavailable"))
+                })?;
+        }
+        if !account_targets.is_empty() {
+            self.account_work_tx
+                .send(AccountWorkerJob::StreamingAccountProof {
+                    targets: account_targets,
+                    completion,
+                })
+                .map_err(|_| {
+                    ProviderError::other(std::io::Error::other("account workers unavailable"))
+                })?;
+        }
+        Ok(())
     }
 }
 
@@ -414,6 +440,7 @@ impl<Factory> ProofTaskCtx<Factory> {
 
 /// This contains all information shared between account proof worker instances.
 #[derive(Debug)]
+#[cfg(not(feature = "state-trie-db"))]
 pub struct ProofTaskTx<Provider> {
     /// The provider that implements `TrieCursorFactory` and `HashedCursorFactory`.
     provider: Provider,
@@ -422,6 +449,7 @@ pub struct ProofTaskTx<Provider> {
     id: usize,
 }
 
+#[cfg(not(feature = "state-trie-db"))]
 impl<Provider> ProofTaskTx<Provider> {
     /// Initializes a [`ProofTaskTx`] with the given provider and ID.
     const fn new(provider: Provider, id: usize) -> Self {
@@ -429,9 +457,12 @@ impl<Provider> ProofTaskTx<Provider> {
     }
 }
 
+#[cfg(not(feature = "state-trie-db"))]
 impl<Provider> ProofTaskTx<Provider>
 where
-    Provider: TrieCursorFactory + HashedCursorFactory,
+    Provider: TrieCursorFactory
+        + HashedCursorFactory
+        + reth_trie::state_trie_cursor::StateTrieCursorFactory,
 {
     fn compute_v2_storage_proof<TC, HC>(
         &self,
@@ -501,6 +532,8 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
+    /// Whether all results for this dispatched batch have been published.
+    pub completes_batch: bool,
     /// The proof calculation result
     pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
@@ -535,6 +568,7 @@ impl ProofResultContext {
 }
 
 /// The results of a storage proof calculation.
+#[cfg(not(feature = "state-trie-db"))]
 #[derive(Debug)]
 pub(crate) struct StorageProofResult {
     /// The calculated V2 proof nodes
@@ -543,6 +577,7 @@ pub(crate) struct StorageProofResult {
     pub root: Option<B256>,
 }
 
+#[cfg(not(feature = "state-trie-db"))]
 impl StorageProofResult {
     /// Returns the calculated root of the trie, if one can be calculated from the proof.
     const fn root(&self) -> Option<B256> {
@@ -551,6 +586,7 @@ impl StorageProofResult {
 }
 
 /// Message containing a completed storage proof result with metadata.
+#[cfg(not(feature = "state-trie-db"))]
 #[derive(Debug)]
 pub struct StorageProofResultMessage {
     /// The hashed address this storage proof belongs to
@@ -563,7 +599,15 @@ pub struct StorageProofResultMessage {
 /// Internal message for storage workers.
 #[derive(Debug)]
 pub(crate) enum StorageWorkerJob {
+    /// Complete-schema storage proof published without waiting for account siblings.
+    #[cfg(feature = "state-trie-db")]
+    StreamingProof {
+        hashed_address: B256,
+        targets: Vec<ProofV2Target>,
+        completion: Arc<StreamingProofCompletion>,
+    },
     /// Storage proof computation request
+    #[cfg(not(feature = "state-trie-db"))]
     StorageProof {
         /// Storage proof input parameters
         input: StorageProofInput,
@@ -595,7 +639,11 @@ struct StorageProofWorker<Factory> {
 
 impl<Factory> StorageProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+    >,
 {
     /// Creates a new storage proof worker.
     const fn new(
@@ -635,6 +683,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
+    #[cfg(not(feature = "state-trie-db"))]
     fn run(mut self) -> ProviderResult<()> {
         // Create provider from factory
         let provider = self.task_ctx.factory.database_provider_ro()?;
@@ -725,6 +774,7 @@ where
     }
 
     /// Processes a storage proof request.
+    #[cfg(not(feature = "state-trie-db"))]
     fn process_storage_proof<Provider, TC, HC>(
         &self,
         proof_tx: &ProofTaskTx<Provider>,
@@ -733,7 +783,9 @@ where
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
         storage_proofs_processed: &mut u64,
     ) where
-        Provider: TrieCursorFactory + HashedCursorFactory,
+        Provider: TrieCursorFactory
+            + HashedCursorFactory
+            + reth_trie::state_trie_cursor::StateTrieCursorFactory,
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
@@ -752,6 +804,7 @@ where
 
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
+        debug!(target: "trie::proof_timing", kind = "storage", proof_time_us = proof_elapsed.as_micros(), "Proof calculated");
 
         let root = result.as_ref().ok().and_then(|result| result.root());
 
@@ -789,6 +842,7 @@ struct AccountProofWorker<Factory> {
     /// Unique identifier for this worker (used for tracing)
     worker_id: usize,
     /// Channel for dispatching storage proof work (for pre-dispatched target proofs)
+    #[cfg(not(feature = "state-trie-db"))]
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
@@ -802,14 +856,18 @@ struct AccountProofWorker<Factory> {
 
 impl<Factory> AccountProofWorker<Factory>
 where
-    Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    Factory: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+    >,
 {
     /// Creates a new account proof worker.
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
+        #[cfg(not(feature = "state-trie-db"))] storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         availability: Arc<AvailabilitySheet>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
@@ -818,6 +876,7 @@ where
             task_ctx,
             work_rx,
             worker_id,
+            #[cfg(not(feature = "state-trie-db"))]
             storage_work_tx,
             availability,
             #[cfg(feature = "metrics")]
@@ -844,6 +903,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
+    #[cfg(not(feature = "state-trie-db"))]
     fn run(mut self) -> ProviderResult<()> {
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
@@ -969,6 +1029,7 @@ where
         Ok(())
     }
 
+    #[cfg(not(feature = "state-trie-db"))]
     fn compute_v2_account_multiproof<'a, Provider>(
         &self,
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
@@ -976,7 +1037,10 @@ where
         targets: MultiProofTargetsV2,
     ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
     where
-        Provider: TrieCursorFactory + HashedCursorFactory + 'a,
+        Provider: TrieCursorFactory
+            + HashedCursorFactory
+            + reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + 'a,
     {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
 
@@ -1009,6 +1073,7 @@ where
     /// Processes an account multiproof request.
     ///
     /// Returns stats from the value encoder used during proof computation.
+    #[cfg(not(feature = "state-trie-db"))]
     fn process_account_multiproof<'a, Provider>(
         &self,
         v2_account_calculator: &mut V2AccountProofCalculator<'a, Provider>,
@@ -1017,7 +1082,10 @@ where
         account_proofs_processed: &mut u64,
     ) -> ValueEncoderStats
     where
-        Provider: TrieCursorFactory + HashedCursorFactory + 'a,
+        Provider: TrieCursorFactory
+            + HashedCursorFactory
+            + reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + 'a,
     {
         let proof_start = Instant::now();
 
@@ -1037,9 +1105,18 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
+        debug!(target: "trie::proof_timing", kind = "account", proof_time_us = proof_elapsed.as_micros(), "Proof calculated");
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx
+            .send(ProofResultMessage {
+                completes_batch: true,
+                result,
+                elapsed: total_elapsed,
+                state,
+            })
+            .is_err()
+        {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1067,6 +1144,7 @@ where
 /// computation. This enables interleaved parallelism for better performance.
 ///
 /// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+#[cfg(not(feature = "state-trie-db"))]
 fn dispatch_v2_storage_proofs(
     storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
     account_targets: &[ProofV2Target],
@@ -1110,6 +1188,7 @@ fn dispatch_v2_storage_proofs(
 }
 
 /// Input parameters for storage proof computation.
+#[cfg(not(feature = "state-trie-db"))]
 #[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
@@ -1120,6 +1199,7 @@ pub struct StorageProofInput {
     pub needs_root: bool,
 }
 
+#[cfg(not(feature = "state-trie-db"))]
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address and target slots.
     pub const fn new(hashed_address: B256, targets: Vec<ProofV2Target>, needs_root: bool) -> Self {
@@ -1138,6 +1218,7 @@ pub struct AccountMultiproofInput {
 
 impl AccountMultiproofInput {
     /// Returns the [`ProofResultContext`] for this input, consuming the input.
+    #[cfg(not(feature = "state-trie-db"))]
     fn into_proof_result_sender(self) -> ProofResultContext {
         self.proof_result_sender
     }
@@ -1146,11 +1227,153 @@ impl AccountMultiproofInput {
 /// Internal message for account workers.
 #[derive(Debug)]
 enum AccountWorkerJob {
+    /// An independent account proof over complete persisted leaves.
+    #[cfg(feature = "state-trie-db")]
+    StreamingAccountProof { targets: Vec<ProofV2Target>, completion: Arc<StreamingProofCompletion> },
     /// Account multiproof computation request
+    #[cfg(not(feature = "state-trie-db"))]
     AccountMultiproof {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
     },
+}
+
+/// Tracks one dispatched batch while its account and storage proofs finish independently.
+#[cfg(feature = "state-trie-db")]
+#[derive(Debug)]
+pub(crate) struct StreamingProofCompletion(ProofResultContext);
+
+#[cfg(feature = "state-trie-db")]
+impl StreamingProofCompletion {
+    fn send(&self, result: Result<DecodedMultiProofV2, StateRootTaskError>) {
+        let _ = self.0.sender.send(ProofResultMessage {
+            result,
+            state: Default::default(),
+            elapsed: self.0.start_time.elapsed(),
+            completes_batch: false,
+        });
+    }
+}
+
+#[cfg(feature = "state-trie-db")]
+impl Drop for StreamingProofCompletion {
+    fn drop(&mut self) {
+        // Every producer drops its reference after sending. The terminal message therefore
+        // follows all partial messages, even when workers finish in a different order.
+        let _ = self.0.sender.send(ProofResultMessage {
+            result: Ok(DecodedMultiProofV2::default()),
+            state: std::mem::take(&mut self.0.state),
+            elapsed: self.0.start_time.elapsed(),
+            completes_batch: true,
+        });
+    }
+}
+
+#[cfg(feature = "state-trie-db")]
+impl<Factory> StorageProofWorker<Factory>
+where
+    Factory: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+    >,
+{
+    fn run(mut self) -> ProviderResult<()> {
+        use reth_trie::{proof_v3, state_trie_cursor::StateTrieCursorFactory};
+        let mut cursor_metrics = ProofTaskCursorMetricsCache::default();
+        let mut idle_start = Instant::now();
+        let mut idle_time = Duration::ZERO;
+        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let mut calculator =
+            proof_v3::StorageProofCalculator::new_storage(InstrumentedTrieCursor::new(
+                provider.state_trie_storage_cursor(B256::ZERO)?,
+                &mut cursor_metrics.storage_trie_cursor,
+            ));
+        self.availability.mark_idle(self.worker_id);
+        while let Ok(StorageWorkerJob::StreamingProof { hashed_address, mut targets, completion }) =
+            self.work_rx.recv()
+        {
+            idle_time += idle_start.elapsed();
+            self.availability.mark_busy(self.worker_id);
+            let target_count = targets.len();
+            let proof_start = Instant::now();
+            let result = if targets.is_empty() {
+                calculator.storage_root_node(hashed_address).map(|node| vec![node])
+            } else {
+                calculator.storage_proof(hashed_address, &mut targets)
+            };
+            debug!(target: "trie::proof_timing", kind = "storage", target_count, proof_time_us = proof_start.elapsed().as_micros(), "Proof calculated");
+            completion.send(
+                result
+                    .map(|proof| DecodedMultiProofV2 {
+                        account_proofs: Vec::new(),
+                        storage_proofs: std::iter::once((hashed_address, proof)).collect(),
+                    })
+                    .map_err(Into::into),
+            );
+            self.availability.mark_idle(self.worker_id);
+            idle_start = Instant::now();
+        }
+        drop(calculator);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.record_storage_worker_idle_time(idle_time);
+            self.cursor_metrics.record(&mut cursor_metrics);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "state-trie-db")]
+impl<Factory> AccountProofWorker<Factory>
+where
+    Factory: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + reth_trie::state_trie_cursor::StateTrieCursorFactory,
+    >,
+{
+    fn run(mut self) -> ProviderResult<()> {
+        use reth_trie::{proof_v3, state_trie_cursor::StateTrieCursorFactory};
+        let mut cursor_metrics = ProofTaskCursorMetricsCache::default();
+        let mut idle_start = Instant::now();
+        let mut idle_time = Duration::ZERO;
+        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let mut calculator = proof_v3::ProofCalculator::new(InstrumentedTrieCursor::new(
+            provider.state_trie_account_cursor()?,
+            &mut cursor_metrics.account_trie_cursor,
+        ));
+        self.availability.mark_idle(self.worker_id);
+        while let Ok(AccountWorkerJob::StreamingAccountProof { mut targets, completion }) =
+            self.work_rx.recv()
+        {
+            idle_time += idle_start.elapsed();
+            self.availability.mark_busy(self.worker_id);
+            let target_count = targets.len();
+            let storage_jobs = 0usize;
+            let proof_start = Instant::now();
+            let result = calculator
+                .proof(&mut targets)
+                .map(|account_proofs| DecodedMultiProofV2 {
+                    account_proofs,
+                    storage_proofs: B256Map::default(),
+                })
+                .map_err(Into::into);
+            let account_time = proof_start.elapsed();
+            debug!(target: "trie::proof_timing", kind = "account", target_count, storage_jobs, proof_time_us = account_time.as_micros(), account_time_us = account_time.as_micros(), storage_wait_us = 0u64, "Proof calculated");
+            completion.send(result);
+            drop(completion);
+            self.availability.mark_idle(self.worker_id);
+            idle_start = Instant::now();
+        }
+        drop(calculator);
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.record_account_worker_idle_time(idle_time);
+            self.cursor_metrics.record(&mut cursor_metrics);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1162,6 +1385,67 @@ mod tests {
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
+    }
+
+    #[cfg(feature = "state-trie-db")]
+    #[test]
+    fn streamed_proofs_complete_after_all_partial_results() {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let runtime = reth_tasks::Runtime::test();
+        let (sender, receiver) = unbounded();
+        let handle = ProofWorkerHandle::new(&runtime, test_ctx(factory), false, sender.clone());
+        for (count, accounts) in
+            [(0u8, false), (0, true), (1, false), (1, true), (64, false), (64, true)]
+        {
+            handle
+                .dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: MultiProofTargetsV2 {
+                        account_targets: if accounts {
+                            vec![ProofV2Target::new(B256::ZERO)]
+                        } else {
+                            Vec::new()
+                        },
+                        storage_targets: (0..count)
+                            .map(|i| {
+                                (B256::with_last_byte(i), vec![ProofV2Target::new(B256::ZERO)])
+                            })
+                            .collect(),
+                    },
+                    proof_result_sender: ProofResultContext::new(
+                        sender.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                })
+                .unwrap();
+            let mut storages = B256Map::default();
+            let mut partials = 0;
+            let mut account_proof_received = false;
+            loop {
+                let message = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+                let result = message.result.unwrap();
+                if !result.account_proofs.is_empty() {
+                    assert!(!account_proof_received);
+                    assert_eq!(result.account_proofs, vec![ProofTrieNodeV2::empty()]);
+                    account_proof_received = true;
+                }
+                if message.completes_batch {
+                    assert!(result.storage_proofs.is_empty());
+                    break
+                }
+                partials += 1;
+                for (address, proof) in result.storage_proofs {
+                    assert!(storages.insert(address, proof).is_none());
+                }
+            }
+            assert_eq!(partials, usize::from(count) + usize::from(accounts));
+            assert_eq!(account_proof_received, accounts);
+            assert_eq!(storages.len(), usize::from(count));
+            for i in 0..count {
+                assert_eq!(storages[&B256::with_last_byte(i)], vec![ProofTrieNodeV2::empty()]);
+            }
+            assert!(receiver.try_recv().is_err());
+        }
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.

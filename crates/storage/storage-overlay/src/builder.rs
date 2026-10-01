@@ -19,7 +19,9 @@ use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
+#[cfg(test)]
+use reth_trie::updates::TrieUpdatesSorted;
+use reth_trie::{HashedPostStateSorted, TrieInputSorted};
 use reth_trie_db::DatabaseHashedPostState;
 use revm::{bytecode::Bytecode, database::BundleState, state::AccountInfo};
 use std::{
@@ -412,6 +414,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -444,6 +448,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Provider: ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + StageCheckpointReader
             + PruneCheckpointReader
@@ -458,8 +464,12 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             self.anchor_at_parent_with_frontiers(provider, state_trie_tip_block, finish_tip_block)?;
 
         // Collect any reverts which are required to bring the DB view back to the anchor hash.
+        let state_trie;
         let (trie_updates, hashed_post_state, prefix_sets) = match &anchor_for_parent {
             AnchorForParent::RevertsRequired { anchor, .. } => {
+                if cfg!(feature = "state-trie-db") {
+                    return Err(ProviderError::UnsupportedProvider)
+                }
                 let revert_blocks =
                     self.revert_blocks(&anchor_for_parent)?.expect("reverts are required");
 
@@ -499,7 +509,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                                 anchor_hash: state_trie_tip_block.hash,
                             })
                         })?;
-                    let (nodes, _) = self
+                    let input = self
                         .overlay_manager
                         .overlay_for_parent(
                             &finish_state,
@@ -508,7 +518,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         )
                         .map_err(ProviderError::other)?;
                     retrieve_trie_reverts_duration = start.elapsed();
-                    nodes
+                    input.nodes.clone()
                 };
 
                 let mut hashed_state_reverts = {
@@ -529,9 +539,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
                 // Resolve overlays and extend reverts with them. If reverts are empty, use overlays
                 // directly to avoid cloning.
-                let (overlay_trie, overlay_state) =
-                    self.resolve_state_trie_overlays(anchor.hash)?;
-
+                let overlay = self.resolve_state_trie_overlays(anchor.hash)?;
+                let overlay_trie = overlay.nodes.clone();
+                let overlay_state = overlay.state.clone();
+                state_trie = overlay.state_trie.clone();
                 let trie_updates = if trie_reverts.is_empty() {
                     overlay_trie
                 } else if !overlay_trie.is_empty() {
@@ -551,7 +562,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     Arc::new(hashed_state_reverts)
                 };
 
-                trie_updates_total_len = trie_updates.total_len();
+                trie_updates_total_len = trie_updates.total_len() + state_trie.total_len();
                 hashed_state_updates_total_len = hashed_state_updates.total_len();
 
                 debug!(
@@ -577,12 +588,14 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     return Ok(StateTrieOverlay::empty())
                 }
 
-                let (trie_updates, hashed_post_state) =
-                    self.resolve_state_trie_overlays(anchor.hash)?;
+                let overlay = self.resolve_state_trie_overlays(anchor.hash)?;
+                let trie_updates = overlay.nodes.clone();
+                let hashed_post_state = overlay.state.clone();
+                state_trie = overlay.state_trie.clone();
 
                 retrieve_trie_reverts_duration = Duration::ZERO;
                 retrieve_hashed_state_reverts_duration = Duration::ZERO;
-                trie_updates_total_len = trie_updates.total_len();
+                trie_updates_total_len = trie_updates.total_len() + state_trie.total_len();
                 hashed_state_updates_total_len = hashed_post_state.total_len();
 
                 debug!(
@@ -606,11 +619,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self.metrics.trie_updates_size.record(trie_updates_total_len as f64);
         self.metrics.hashed_state_size.record(hashed_state_updates_total_len as f64);
 
-        Ok(StateTrieOverlay::new(TrieInputSorted::new(
-            trie_updates,
-            hashed_post_state,
-            prefix_sets,
-        )))
+        let mut input = TrieInputSorted::new(trie_updates, hashed_post_state, prefix_sets);
+        input.state_trie = state_trie;
+        Ok(StateTrieOverlay::new(input))
     }
 
     /// Returns the in-memory execution overlay and the block for historical fallback reads.
@@ -667,9 +678,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     fn resolve_state_trie_overlays(
         &self,
         anchor_hash: BlockHash,
-    ) -> ProviderResult<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>)> {
+    ) -> ProviderResult<Arc<TrieInputSorted>> {
         if anchor_hash == self.parent_hash {
-            Ok((Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())))
+            Ok(Arc::default())
         } else {
             let parent_state = self.parent_state.as_deref().ok_or_else(|| {
                 ProviderError::other(std::io::Error::other(
@@ -1100,17 +1111,11 @@ mod tests {
                 "block {index} must resolve the cached execution overlay"
             );
 
-            let (hash_nodes, hash_state) =
-                from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
-            let (state_nodes, state_state) =
-                from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
+            let hash_overlay = from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
+            let state_overlay = from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
             assert!(
-                Arc::ptr_eq(&hash_nodes, &state_nodes),
-                "block {index} must resolve the cached trie overlay nodes"
-            );
-            assert!(
-                Arc::ptr_eq(&hash_state, &state_state),
-                "block {index} must resolve the cached trie overlay state"
+                Arc::ptr_eq(&hash_overlay, &state_overlay),
+                "block {index} must resolve the cached trie overlay"
             );
 
             // The fully built overlay folds in database reverts for anchors below Finish, so
@@ -1169,8 +1174,10 @@ mod tests {
             .build_state_trie_overlay(&provider, true)
             .unwrap();
 
+        assert!(overlay.skipped_for_reused_sparse_trie());
         assert!(overlay.input().state.is_empty());
         assert!(overlay.input().nodes.is_empty());
+        assert!(overlay.input().state_trie.is_empty());
     }
 
     #[test]
@@ -1183,7 +1190,11 @@ mod tests {
             .with_no_reverts();
         let error = builder.build_state_trie_overlay(&provider, true).unwrap_err();
 
-        assert!(error.to_string().contains("reverts are disabled"));
+        if cfg!(feature = "state-trie-db") {
+            assert!(matches!(error, ProviderError::UnsupportedProvider));
+        } else {
+            assert!(error.to_string().contains("reverts are disabled"));
+        }
     }
 
     #[test]
@@ -1226,11 +1237,14 @@ mod tests {
         let provider = factory.provider().unwrap();
         let overlay = OverlayManager::<EthPrimitives>::default()
             .overlay_builder(blocks[1].recovered_block().hash())
-            .build_state_trie_overlay(&provider, false)
-            .unwrap();
-
-        assert!(overlay.input().nodes.is_empty());
-        assert!(!overlay.input().prefix_sets.is_empty());
+            .build_state_trie_overlay(&provider, false);
+        if cfg!(feature = "state-trie-db") {
+            assert!(matches!(overlay, Err(ProviderError::UnsupportedProvider)));
+        } else {
+            let overlay = overlay.unwrap();
+            assert!(overlay.input().nodes.is_empty());
+            assert!(!overlay.input().prefix_sets.is_empty());
+        }
     }
 
     #[test]
@@ -1480,9 +1494,10 @@ mod tests {
         let parent_hash = B256::with_last_byte(1);
         let builder = OverlayManager::<EthPrimitives>::default().overlay_builder(parent_hash);
 
-        let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
-        assert!(trie.is_empty());
-        assert!(state.is_empty());
+        let input = builder.resolve_state_trie_overlays(parent_hash).unwrap();
+        assert!(input.nodes.is_empty());
+        assert!(input.state.is_empty());
+        assert!(input.state_trie.is_empty());
     }
 
     #[test]

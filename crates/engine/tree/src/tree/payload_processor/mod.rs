@@ -177,7 +177,10 @@ where
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: DatabaseProviderFactory + Clone + 'static,
-        P::Provider: BlockNumReader
+        P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
+            + BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
             + ChangeSetReader
@@ -415,7 +418,10 @@ where
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: DatabaseProviderFactory + Clone + 'static,
-        P::Provider: BlockNumReader
+        P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
+            + BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
             + ChangeSetReader
