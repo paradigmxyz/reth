@@ -480,7 +480,7 @@ mod tests {
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{Bytes, B256, U256};
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage, StorageRangesMessage},
+        snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{
@@ -961,14 +961,7 @@ mod tests {
             ScriptedSnapClient::new([
                 account_range(1, &accounts, 0..1, &[key(1)]),
                 storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
-                Ok(WithPeerId::new(
-                    PeerId::random(),
-                    SnapResponse::StorageRanges(StorageRangesMessage {
-                        request_id: 2,
-                        slots: Vec::new(),
-                        proof: Vec::new(),
-                    }),
-                )),
+                storage_ranges(2, &[], &[], &[]),
             ])
             .on_storage_request(move || on_request.cancel()),
         );
