@@ -8,7 +8,7 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::ValidTransaction,
+    validate::{ValidPoolTransaction, ValidTransaction},
     Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
@@ -24,7 +24,7 @@ use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
     eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
-use alloy_primitives::U256;
+use alloy_primitives::{TxHash, U256};
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -88,6 +88,8 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     blob_store: Box<dyn BlobStore>,
     /// tracks activated forks relevant for transaction validation
     fork_tracker: ForkTracker,
+    /// Set when the last head activated a fork, until the pool rechecks its transactions.
+    fork_activated: AtomicBool,
     /// Fork indicator whether we are using EIP-2718 type transactions.
     eip2718: bool,
     /// Fork indicator whether we are using EIP-1559 type transactions.
@@ -917,24 +919,31 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &HeaderTy<Evm::Primitives>) {
         // update all forks
+        let mut activated = false;
         if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
+            activated |=
+                !self.fork_tracker.shanghai.swap(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
+            activated |= !self.fork_tracker.cancun.swap(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if self.chain_spec().is_prague_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+            activated |= !self.fork_tracker.prague.swap(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if self.chain_spec().is_osaka_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
+            activated |= !self.fork_tracker.osaka.swap(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if self.chain_spec().is_amsterdam_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
+            activated |=
+                !self.fork_tracker.amsterdam.swap(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if activated {
+            self.fork_activated.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.fork_tracker
@@ -1033,6 +1042,24 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         Self::on_new_head_block(self, new_tip_block.header())
+    }
+
+    /// Rechecks the transactions once after a fork activated. A fork can tighten stateless rules
+    /// like the intrinsic gas, which transactions that were valid on admission may now fail.
+    fn invalidated_transactions<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a ValidPoolTransaction<Self::Transaction>>,
+    ) -> Vec<TxHash>
+    where
+        Self::Transaction: 'a,
+    {
+        if !self.fork_activated.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            return Vec::new()
+        }
+        transactions
+            .filter(|tx| self.validate_stateless(tx.origin, &tx.transaction).is_err())
+            .map(|tx| *tx.hash())
+            .collect()
     }
 }
 
@@ -1412,6 +1439,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             eip2718,
             eip1559,
             fork_tracker,
+            fork_activated: AtomicBool::new(false),
             eip4844,
             eip7702,
             block_gas_limit,
@@ -1590,8 +1618,12 @@ fn tx_gas_caps(cfg: &impl Cfg) -> (u64, u64) {
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
-        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::InMemoryBlobStore,
+        error::PoolErrorKind,
+        identifier::{SenderId, TransactionId},
+        test_utils::TransactionBuilder,
+        traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
@@ -1599,6 +1631,7 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -2303,5 +2336,120 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    #[test]
+    fn invalidated_transactions_once_per_fork_activation() {
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().osaka_activated().with_amsterdam_at(24).build());
+        let provider = MockEthProvider::default().with_chain_spec(chain_spec.clone());
+        let header = |timestamp| alloy_consensus::Header {
+            timestamp,
+            gas_limit: 30_000_000,
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        provider.add_block(
+            B256::ZERO,
+            reth_ethereum_primitives::Block { header: header(12), body: Default::default() },
+        );
+        let validator =
+            EthTransactionValidatorBuilder::new(provider, EthEvmConfig::new(chain_spec))
+                .build(InMemoryBlobStore::default());
+
+        let pooled = |nonce, tx: reth_ethereum_primitives::Transaction| {
+            let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+                tx,
+                alloy_primitives::Signature::test_signature(),
+            );
+            ValidPoolTransaction {
+                transaction: EthPooledTransaction::new(
+                    alloy_consensus::transaction::Recovered::new_unchecked(signed, Address::ZERO),
+                    200,
+                ),
+                transaction_id: TransactionId::new(SenderId::from(0), nonce),
+                propagate: true,
+                timestamp: Instant::now(),
+                origin: TransactionOrigin::External,
+                authority_ids: None,
+            }
+        };
+        let to = Address::with_last_byte(0x42);
+        let access_list = AccessList(vec![AccessListItem {
+            address: Address::with_last_byte(0x99),
+            storage_keys: vec![],
+        }]);
+        // A value transfer with one access-list address needs 23,400 gas under Osaka and 25,180
+        // under Amsterdam.
+        let transfer = |nonce, gas_limit| {
+            pooled(
+                nonce,
+                alloy_consensus::TxEip1559 {
+                    chain_id: 1,
+                    nonce,
+                    gas_limit,
+                    max_fee_per_gas: 20_000_000_000,
+                    max_priority_fee_per_gas: 1_000_000_000,
+                    to: to.into(),
+                    value: U256::from(1),
+                    access_list: access_list.clone(),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        };
+        let osaka_minimum = transfer(0, 23_400);
+        let below_amsterdam_minimum = transfer(1, 25_179);
+        let amsterdam_minimum = transfer(2, 25_180);
+        let blob = pooled(
+            3,
+            alloy_consensus::TxEip4844 {
+                chain_id: 1,
+                nonce: 3,
+                gas_limit: 100_000,
+                max_fee_per_gas: 20_000_000_000,
+                max_priority_fee_per_gas: 1_000_000_000,
+                max_fee_per_blob_gas: 1,
+                to,
+                blob_versioned_hashes: vec![B256::with_last_byte(1)],
+                ..Default::default()
+            }
+            .into(),
+        );
+        let set_code = pooled(
+            4,
+            alloy_consensus::TxEip7702 {
+                chain_id: 1,
+                nonce: 4,
+                gas_limit: 200_000,
+                max_fee_per_gas: 20_000_000_000,
+                max_priority_fee_per_gas: 1_000_000_000,
+                to,
+                authorization_list: vec![alloy_eips::eip7702::Authorization {
+                    chain_id: U256::from(1),
+                    address: to,
+                    nonce: 0,
+                }
+                .into_signed(alloy_primitives::Signature::test_signature())],
+                ..Default::default()
+            }
+            .into(),
+        );
+        let txs = [&osaka_minimum, &below_amsterdam_minimum, &amsterdam_minimum, &blob, &set_code];
+
+        validator.on_new_head_block(&header(13));
+        assert!(
+            validator.invalidated_transactions(txs.into_iter()).is_empty(),
+            "no fork activated"
+        );
+
+        validator.on_new_head_block(&header(24));
+        assert_eq!(
+            validator.invalidated_transactions(txs.into_iter()),
+            vec![*osaka_minimum.hash(), *below_amsterdam_minimum.hash()]
+        );
+
+        validator.on_new_head_block(&header(36));
+        assert!(validator.invalidated_transactions(txs.into_iter()).is_empty(), "checked once");
     }
 }

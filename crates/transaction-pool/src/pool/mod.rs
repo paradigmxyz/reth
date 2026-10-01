@@ -541,12 +541,25 @@ where
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
         // update the pool
-        let outcome = self.pool.write().on_canonical_state_change(
-            block_info,
-            mined_transactions,
-            changed_senders,
-            update_kind,
-        );
+        let outcome = {
+            let mut pool = self.pool.write();
+
+            // Remove transactions the new head made invalid, e.g. by activating a hardfork, before
+            // the update can promote them. Their descendants stay parked behind the nonce gap.
+            let invalidated = self
+                .validator
+                .invalidated_transactions(pool.all().transactions_iter().map(Arc::as_ref));
+            let invalidated = pool.remove_transactions(invalidated);
+
+            let mut outcome = pool.on_canonical_state_change(
+                block_info,
+                mined_transactions,
+                changed_senders,
+                update_kind,
+            );
+            outcome.discarded.extend(invalidated);
+            outcome
+        };
 
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());

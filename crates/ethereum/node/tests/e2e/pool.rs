@@ -1,12 +1,18 @@
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
-use alloy_primitives::{Address, TxKind, B256, U256};
+use alloy_eips::{
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
+    eip2930::{AccessList, AccessListItem},
+    Encodable2718,
+};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
+    test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext,
+    wait::poll_until, wallet::Wallet, E2ETestSetupExt,
 };
+use reth_network::{Peers, PeersInfo};
 use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
@@ -16,7 +22,7 @@ use reth_transaction_pool::{
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionPoolExt,
 };
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
@@ -317,6 +323,129 @@ async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
         assert_eq!(info.last_seen_block_number, block.header().number);
         assert!(node.inner.pool.is_empty());
     }
+
+    Ok(())
+}
+
+/// Amsterdam activation timestamp used by the fork-boundary pool tests. Genesis is at timestamp 0,
+/// so the genesis head runs Osaka rules and the first block built at this timestamp is Amsterdam.
+const AMSTERDAM_TIMESTAMP: u64 = 1_000;
+
+/// Gas limit of a value transfer with one access-list address under Osaka: 21,000 + 2,400.
+/// Amsterdam prices the same transaction at 25,180 intrinsic gas.
+const OSAKA_ACCESS_LIST_TRANSFER_GAS: u64 = 23_400;
+
+/// Returns a signed EIP-1559 transfer with one access-list address whose gas limit is its exact
+/// Osaka intrinsic cost, so it is valid before Amsterdam and invalid after.
+async fn fork_invalidated_transfer(wallet: &Wallet, signer: u32, nonce: u64) -> Bytes {
+    let tx = TransactionRequest { chain_id: Some(1), ..Default::default() }
+        .nonce(nonce)
+        .to(Address::with_last_byte(0x42))
+        .value(U256::from(1))
+        .gas_limit(OSAKA_ACCESS_LIST_TRANSFER_GAS)
+        .max_fee_per_gas(20_000_000_000)
+        .max_priority_fee_per_gas(1_000_000_000)
+        .access_list(AccessList(vec![AccessListItem {
+            address: Address::with_last_byte(0x99),
+            storage_keys: vec![],
+        }]));
+    TransactionTestContext::sign_tx_bytes(wallet.signer(signer), tx).await
+}
+
+#[tokio::test]
+async fn pending_tx_intrinsically_invalid_after_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        test_chain_spec_builder().osaka_activated().with_amsterdam_at(AMSTERDAM_TIMESTAMP).build(),
+    );
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+
+    // Both are accepted under the Osaka rules of the genesis head.
+    let stuck = *provider
+        .send_raw_transaction(&fork_invalidated_transfer(&wallet, 0, 0).await)
+        .await?
+        .tx_hash();
+    let descendant = *provider
+        .send_raw_transaction(
+            &TransactionTestContext::transfer_tx_bytes_with_nonce(1, wallet.signer(0), 1).await,
+        )
+        .await?
+        .tx_hash();
+    assert_eq!(node.inner.pool.pending_transactions().len(), 2);
+
+    node.set_next_payload_timestamp(AMSTERDAM_TIMESTAMP)?;
+    for _ in 0..3 {
+        let payload = node.advance_block_synced().await?;
+        assert!(payload.block().body().transactions.is_empty(), "nothing from the sender is mined");
+    }
+
+    // The same transaction from a fresh sender is rejected under the current rules...
+    let err = provider
+        .send_raw_transaction(&fork_invalidated_transfer(&wallet, 1, 0).await)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("intrinsic gas too low"), "{err}");
+
+    // ...so the pool removed the old one at the fork and parked its descendant behind the gap.
+    assert!(!node.inner.pool.contains(&stuck), "fork-invalidated transaction is removed");
+    let queued = node.inner.pool.queued_transactions();
+    assert!(queued.iter().any(|tx| *tx.hash() == descendant), "its descendant is queued");
+
+    // A correctly priced replacement fills the gap and both get mined.
+    let replacement = TransactionRequest { chain_id: Some(1), ..Default::default() }
+        .nonce(0)
+        .to(Address::with_last_byte(0x42))
+        .value(U256::from(1))
+        .gas_limit(30_000)
+        .max_fee_per_gas(20_000_000_000)
+        .max_priority_fee_per_gas(1_000_000_000);
+    let _ = provider
+        .send_raw_transaction(
+            &TransactionTestContext::sign_tx_bytes(wallet.signer(0), replacement).await,
+        )
+        .await?;
+    let payload = node.advance_block_synced().await?;
+    assert_eq!(payload.block().body().transactions.len(), 2, "replacement and descendant mined");
+    assert!(node.inner.pool.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn peer_not_penalized_for_txs_invalidated_by_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        test_chain_spec_builder().osaka_activated().with_amsterdam_at(AMSTERDAM_TIMESTAMP).build(),
+    );
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup(2, chain_spec).with_connect_nodes(false).build().await?;
+    let mut b = nodes.pop().unwrap();
+    let mut a = nodes.pop().unwrap();
+
+    // Four bad transactions were enough to get the announcing node banned.
+    for nonce in 0..4 {
+        let _ = a
+            .rpc_provider()
+            .send_raw_transaction(&fork_invalidated_transfer(&wallet, 0, nonce).await)
+            .await?;
+    }
+
+    // Both nodes move to the first Amsterdam block before they meet.
+    a.set_next_payload_timestamp(AMSTERDAM_TIMESTAMP)?;
+    let payload = a.advance_block_synced().await?;
+    b.import_payload(payload.clone()).await?;
+    b.wait_for_pool_head(payload.block().hash()).await?;
+    assert!(a.inner.pool.is_empty(), "A dropped the fork-invalidated transactions");
+
+    let a_id = a.network.record().id;
+    a.connect(&mut b).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert_eq!(b.inner.network.reputation_by_id(a_id).await?, Some(0));
+    assert!(b.inner.network.num_connected_peers() > 0, "A stays connected to B");
 
     Ok(())
 }

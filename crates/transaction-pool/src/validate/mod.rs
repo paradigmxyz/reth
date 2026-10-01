@@ -238,6 +238,21 @@ pub trait TransactionValidator: Debug + Send + Sync {
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
+
+    /// Returns the hashes of the given pooled transactions that the last
+    /// [`Self::on_new_head_block`] made invalid, for example by activating a hardfork that raised
+    /// their intrinsic gas. The pool removes them.
+    ///
+    /// By default no transactions are invalidated.
+    fn invalidated_transactions<'a>(
+        &self,
+        _transactions: impl Iterator<Item = &'a ValidPoolTransaction<Self::Transaction>>,
+    ) -> Vec<TxHash>
+    where
+        Self::Transaction: 'a,
+    {
+        Vec::new()
+    }
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
@@ -285,6 +300,19 @@ where
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),
+        }
+    }
+
+    fn invalidated_transactions<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a ValidPoolTransaction<Self::Transaction>>,
+    ) -> Vec<TxHash>
+    where
+        Self::Transaction: 'a,
+    {
+        match self {
+            Self::Left(v) => v.invalidated_transactions(transactions),
+            Self::Right(v) => v.invalidated_transactions(transactions),
         }
     }
 }

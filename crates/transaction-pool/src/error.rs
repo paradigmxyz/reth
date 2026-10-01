@@ -387,7 +387,11 @@ impl InvalidPoolTransactionError {
                 // local setting
                 false
             }
-            Self::IntrinsicGasTooLow => true,
+            Self::IntrinsicGasTooLow => {
+                // a fork can raise the intrinsic gas of a transaction that was valid before, like
+                // `InvalidTransactionError::GasTooLow`.
+                false
+            }
             Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
             Self::Eip2681 => true,
@@ -559,5 +563,12 @@ mod tests {
         );
 
         assert!(!err.is_bad_blob_sidecar());
+    }
+
+    #[test]
+    fn intrinsic_gas_too_low_is_not_bad() {
+        // a peer can hold a transaction whose intrinsic gas a fork raised after it was accepted.
+        let err = PoolError::new(TxHash::ZERO, InvalidPoolTransactionError::IntrinsicGasTooLow);
+        assert!(!err.is_bad_transaction());
     }
 }
