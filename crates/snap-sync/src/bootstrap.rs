@@ -287,6 +287,10 @@ where
         drop(provider);
         // A peer lacking side-chain lists says nothing of the others, so another is asked later.
         let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
+            if !self.policy.awaits_orphaned_lists(ancestor.number, head) {
+                info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists stayed unavailable, restarting");
+                return Ok(Step::Restart)
+            }
             debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
             return Ok(Step::Wait)
         };
@@ -1330,6 +1334,38 @@ mod tests {
         assert_eq!(pivot, new[6].num_hash());
         assert_ne!(attempt_id(&factory), attempt);
         assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn orphaned_lists_unserved_past_the_state_window_restart_the_attempt() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        let shared = chain(2, root);
+        let orphaned = branch(&shared[2], &orphaned_lists(), root);
+        insert_headers(&factory, &shared);
+        insert_headers(&factory, &orphaned);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
+        provider.commit().unwrap();
+        let attempt = attempt_id(&factory);
+        let mut new_lists = vec![vec![stale_changes()]];
+        new_lists.resize(129, Vec::new());
+        let new = branch(&shared[2], &new_lists, root);
+        factory.replace_headers_after(2, &new);
+        // Head 131 leaves the ancestor past the served state window, but its lists still served.
+        let responses =
+            [lists(1, &orphaned_lists(), false), account_range(1, &accounts, 0..3, &[])];
+        let (_, bootstrap) = scripted(&factory, responses, [131]);
+        let mut bootstrap = bootstrap.with_policy(policy().with_history(256));
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the new branch's state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot, new[127].num_hash());
+        assert_ne!(attempt_id(&factory), attempt);
     }
 
     #[tokio::test]
