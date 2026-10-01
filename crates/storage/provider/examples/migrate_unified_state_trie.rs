@@ -13,8 +13,11 @@ use std::{convert::Infallible, error::Error, time::Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if !(args.len() == 2 || (args.len() == 3 && args[2] == "--check")) {
-        return Err("usage: migrate_unified_state_trie DATADIR/db DATADIR/rocksdb [--check]".into())
+    if !(args.len() == 2 || (args.len() == 3 && matches!(args[2].as_str(), "--check" | "--root"))) {
+        return Err(
+            "usage: migrate_unified_state_trie DATADIR/db DATADIR/rocksdb [--check | --root]"
+                .into(),
+        )
     }
     // Check the frontier before creating a column family or writing anything.
     let db = reth_db::open_db_read_only(&args[0], DatabaseArguments::default())?;
@@ -29,6 +32,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let check = args.len() == 3;
     let rocks =
         RocksDBProvider::builder(&args[1]).with_default_tables().with_read_only(check).build()?;
+    if args.get(2).is_some_and(|arg| arg == "--root") {
+        let snapshot = rocks.snapshot();
+        let mut proof = ProofCalculator::new(snapshot.state_trie_account_cursor()?);
+        let root = proof.root_node()?;
+        println!(
+            "persisted_state_root={}",
+            proof.compute_root_hash(&[root])?.ok_or("missing root")?
+        );
+        return Ok(())
+    }
     let mut builder = StateTrieBuilder::default();
     let mut discard = |_, _| Ok::<_, Infallible>(());
     for entry in rocks.iter::<tables::StateTrieAccounts>()? {

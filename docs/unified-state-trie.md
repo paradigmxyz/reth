@@ -43,3 +43,7 @@ against the root reconstructed from the preserved account leaves. `--check` perf
 valid before executing new blocks against the unified table, while the sources
 still represent the same state. An interrupted migration can be restarted after
 recovering the snapshot; it does not silently overwrite a partial destination.
+
+`--root` only prints the durable frontier and unified trie root, without comparing
+source records. Replay harnesses can compare this with their known snapshot root
+after recovery, avoiding another full migration verification scan.
