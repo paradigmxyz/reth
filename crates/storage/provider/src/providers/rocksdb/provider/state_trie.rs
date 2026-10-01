@@ -238,16 +238,40 @@ impl super::RocksDBProvider {
             &rocksdb::Cache::new_lru_cache(0),
             false,
         );
-        let (accounts, storages) = rayon::join(
-            || -> Result<(), rocksdb::Error> {
-                if updates.account_nodes.is_empty() {
-                    return Ok(())
+        // Keep SST I/O off the Rayon pool shared with latency-sensitive sparse trie work.
+        let write_accounts = || -> Result<(), rocksdb::Error> {
+            if updates.account_nodes.is_empty() {
+                return Ok(())
+            }
+            let mut writer = SstFileWriter::create(&options);
+            writer.open(dir.path().join("accounts.sst"))?;
+            let mut buf = Vec::new();
+            for (path, node) in &updates.account_nodes {
+                let key = PackedStoredNibbles(*path).encode();
+                if let Some(node) = node {
+                    buf.clear();
+                    node.compress_to_buf(&mut buf);
+                    writer.put(key.as_ref(), &buf)?;
+                } else {
+                    writer.delete(key.as_ref())?;
                 }
-                let mut writer = SstFileWriter::create(&options);
-                writer.open(dir.path().join("accounts.sst"))?;
-                let mut buf = Vec::new();
-                for (path, node) in &updates.account_nodes {
-                    let key = PackedStoredNibbles(*path).encode();
+            }
+            writer.finish()
+        };
+        let write_storages = || -> Result<(), rocksdb::Error> {
+            let mut storages: Vec<_> =
+                updates.storage_tries.iter().filter(|(_, nodes)| !nodes.is_empty()).collect();
+            if storages.is_empty() {
+                return Ok(())
+            }
+            storages.sort_unstable_by_key(|(address, _)| **address);
+            let mut writer = SstFileWriter::create(&options);
+            writer.open(dir.path().join("storages.sst"))?;
+            let mut buf = Vec::new();
+            for (address, nodes) in storages {
+                for (path, node) in nodes {
+                    let key =
+                        StateTrieStorageKey { address: *address, path: (*path).into() }.encode();
                     if let Some(node) = node {
                         buf.clear();
                         node.compress_to_buf(&mut buf);
@@ -256,35 +280,10 @@ impl super::RocksDBProvider {
                         writer.delete(key.as_ref())?;
                     }
                 }
-                writer.finish()
-            },
-            || -> Result<(), rocksdb::Error> {
-                let mut storages: Vec<_> =
-                    updates.storage_tries.iter().filter(|(_, nodes)| !nodes.is_empty()).collect();
-                if storages.is_empty() {
-                    return Ok(())
-                }
-                storages.sort_unstable_by_key(|(address, _)| **address);
-                let mut writer = SstFileWriter::create(&options);
-                writer.open(dir.path().join("storages.sst"))?;
-                let mut buf = Vec::new();
-                for (address, nodes) in storages {
-                    for (path, node) in nodes {
-                        let key = StateTrieStorageKey { address: *address, path: (*path).into() }
-                            .encode();
-                        if let Some(node) = node {
-                            buf.clear();
-                            node.compress_to_buf(&mut buf);
-                            writer.put(key.as_ref(), &buf)?;
-                        } else {
-                            writer.delete(key.as_ref())?;
-                        }
-                    }
-                }
-                writer.finish()
-            },
-        );
-        accounts.and(storages).map_err(|e| DatabaseError::Other(e.to_string()))?;
+            }
+            writer.finish()
+        };
+        write_accounts().and(write_storages()).map_err(|e| DatabaseError::Other(e.to_string()))?;
         // SstFileWriter evicts its output from the OS page cache. These files become
         // active state immediately, so load them before publishing the new snapshot.
         let warm = |name| -> ProviderResult<u64> {
@@ -298,7 +297,8 @@ impl super::RocksDBProvider {
             std::io::copy(&mut reader, &mut std::io::sink())
                 .map_err(reth_storage_errors::provider::ProviderError::other)
         };
-        let (accounts, storages) = rayon::join(|| warm("accounts.sst"), || warm("storages.sst"));
+        let accounts = warm("accounts.sst");
+        let storages = warm("storages.sst");
         let bytes = accounts? + storages?;
         tracing::debug!(target: "engine::persistence", state_trie_sst_bytes = bytes, "Staged state trie SST files");
         Ok(dir)
