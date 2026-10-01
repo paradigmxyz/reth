@@ -10,7 +10,7 @@ use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
-use reth_revm::db::BundleState;
+use reth_revm::db::{BundleAccount, BundleState};
 use reth_storage_api::EvmStateProvider;
 use std::{
     cell::Cell,

@@ -3769,7 +3769,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
- "bitflags 2.13.1",
+ "bitflags 2.13.2",
  "objc2",
 ]
 
@@ -5051,7 +5051,7 @@ dependencies = [
  "nonzero_ext",
  "parking_lot",
  "portable-atomic",
- "quanta",
+ "quanta 0.12.6",
  "rand 0.9.4",
  "smallvec",
  "spinning_top",
@@ -7189,6 +7189,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
+ "dispatch2",
+ "objc2",
+]
+
+[[package]]
+name = "objc2-encode"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef25abbcd74fb2609453eb695bd2f860d389e457f67dc17cafc8b8cbc89d0c33"
+
+[[package]]
+name = "objc2-foundation"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2",
 ]
 
 [[package]]
@@ -8405,7 +8423,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66e3d19bcc9130ca376277d93b60767ff121ace3be06f5f95f81dd68956407d1"
 dependencies = [
  "bitflags 2.13.2",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "indoc",
  "instability",
  "itertools 0.14.0",
@@ -9240,7 +9258,7 @@ dependencies = [
 
 [[package]]
 name = "reth-dst"
-version = "2.5.2"
+version = "2.7.0"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -9250,7 +9268,7 @@ dependencies = [
 
 [[package]]
 name = "reth-dst-runner"
-version = "2.5.2"
+version = "2.7.0"
 dependencies = [
  "abi-fuzz",
  "alloy-consensus",
@@ -9513,7 +9531,6 @@ dependencies = [
  "schnellru",
  "thiserror 2.0.20",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]
@@ -10881,7 +10898,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rayon"
-version = "2.5.2"
+version = "2.7.0"
 dependencies = [
  "rayon",
 ]
@@ -14750,18 +14767,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmparser"
-version = "0.244.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe"
-dependencies = [
- "bitflags 2.13.2",
- "hashbrown 0.15.5",
- "indexmap 2.14.2",
- "semver 1.0.28",
-]
-
-[[package]]
 name = "wasmtimer"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15285,77 +15290,10 @@ version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "795ca18b3fdb5e62bf982199278341ddcf7ebf7d32e25e212ad05d496e95f6fa"
 dependencies = [
- "anyhow",
- "heck",
- "wit-parser",
-]
-
-[[package]]
-name = "wit-bindgen-rust"
-version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c566e0f4b284dd6561c786d9cb0142da491f46a9fbed79ea69cdad5db17f21"
-dependencies = [
- "anyhow",
- "heck",
- "indexmap 2.14.2",
- "prettyplease",
- "syn 2.0.118",
- "wasm-metadata",
- "wit-bindgen-core",
- "wit-component",
-]
-
-[[package]]
-name = "wit-bindgen-rust-macro"
-version = "0.51.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c0f9bfd77e6a48eccf51359e3ae77140a7f50b1e2ebfe62422d8afdaffab17a"
-dependencies = [
- "anyhow",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.118",
- "wit-bindgen-core",
- "wit-bindgen-rust",
-]
-
-[[package]]
-name = "wit-component"
-version = "0.244.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2"
-dependencies = [
- "anyhow",
- "bitflags 2.13.2",
- "indexmap 2.14.2",
- "log",
- "serde",
- "serde_derive",
- "serde_json",
- "wasm-encoder",
- "wasm-metadata",
- "wasmparser",
- "wit-parser",
-]
-
-[[package]]
-name = "wit-parser"
-version = "0.244.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecc8ac4bc1dc3381b7f59c34f00b67e18f910c2c0f50015669dde7def656a736"
-dependencies = [
- "anyhow",
- "id-arena",
- "indexmap 2.14.2",
- "log",
- "semver 1.0.28",
- "serde",
- "serde_derive",
- "serde_json",
- "unicode-xid",
- "wasmparser",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "hybrid-array",
+ "primefield",
 ]
 
 [[package]]
@@ -15461,7 +15399,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "467a4c054be41ff657a6823246b0194cd727fadc3c539b265d7bc125ac6d4884"
 dependencies = [
  "aes",
- "bitflags 2.13.1",
+ "bitflags 2.13.2",
  "cbc",
  "cmac",
  "ecdsa 0.16.9",
