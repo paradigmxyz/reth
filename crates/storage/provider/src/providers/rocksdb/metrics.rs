@@ -18,6 +18,7 @@ pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::StoragesTrie.name(),
     Tables::StateTrieAccounts.name(),
     Tables::StateTrieStorages.name(),
+    "StateTrie",
 ];
 
 /// Metrics for the `RocksDB` provider.

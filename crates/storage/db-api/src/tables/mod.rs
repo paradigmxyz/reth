@@ -690,3 +690,25 @@ impl Table for RocksStoragesTrie {
     type Key = crate::models::state_trie::StateTrieStorageKey;
     type Value = BranchNodeCompact;
 }
+
+/// Account view of the unified RocksDB state trie. Storage records share this column family.
+#[derive(Debug)]
+pub struct UnifiedStateTrieAccounts;
+
+impl Table for UnifiedStateTrieAccounts {
+    const NAME: &'static str = "StateTrie";
+    const DUPSORT: bool = false;
+    type Key = PackedStoredNibbles;
+    type Value = StateTrieNode<TrieAccount>;
+}
+
+/// Storage view of the same unified RocksDB column family.
+#[derive(Debug)]
+pub struct UnifiedStateTrieStorages;
+
+impl Table for UnifiedStateTrieStorages {
+    const NAME: &'static str = <UnifiedStateTrieAccounts as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = crate::models::state_trie::UnifiedStateTrieStorageKey;
+    type Value = StateTrieNode<alloy_primitives::U256>;
+}

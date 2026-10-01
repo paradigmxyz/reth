@@ -118,3 +118,7 @@ account-ext = [
     "reth-trie/account-ext",
     "reth-trie-db/account-ext",
 ]
+
+[[example]]
+name = "migrate_unified_state_trie"
+required-features = ["state-trie-rocksdb"]

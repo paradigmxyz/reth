@@ -38,3 +38,36 @@ impl Decode for StateTrieStorageKey {
         })
     }
 }
+
+/// Storage path below its full account-leaf key in the unified state trie.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct UnifiedStateTrieStorageKey {
+    /// Account's hashed address.
+    pub address: B256,
+    /// Path within the account's storage trie.
+    pub path: PackedStoredNibbles,
+}
+
+impl Encode for UnifiedStateTrieStorageKey {
+    type Encoded = [u8; 66];
+
+    fn encode(self) -> Self::Encoded {
+        let mut key = [0; 66];
+        key[..32].copy_from_slice(self.address.as_slice());
+        key[32] = 64;
+        key[33..].copy_from_slice(self.path.encode().as_ref());
+        key
+    }
+}
+
+impl Decode for UnifiedStateTrieStorageKey {
+    fn decode(key: &[u8]) -> Result<Self, DatabaseError> {
+        if key.len() != 66 || key[32] != 64 {
+            return Err(DatabaseError::Decode)
+        }
+        Ok(Self {
+            address: B256::from_slice(&key[..32]),
+            path: PackedStoredNibbles::decode(&key[33..])?,
+        })
+    }
+}

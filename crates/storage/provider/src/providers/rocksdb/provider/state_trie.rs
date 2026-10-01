@@ -2,7 +2,7 @@
 use super::{RocksDBBatch, RocksDBRawIterEnum, RocksReadSnapshot, RocksReadSnapshotInner};
 use alloy_primitives::{B256, U256};
 use reth_db_api::{
-    models::state_trie::StateTrieStorageKey,
+    models::state_trie::UnifiedStateTrieStorageKey,
     table::{Decode, Decompress, Encode, Table},
     tables, DatabaseError,
 };
@@ -14,6 +14,11 @@ use reth_trie::{
     Nibbles, PackedStoredNibbles, StateTrieNode, StateTrieUpdatesSorted, TrieAccount,
 };
 use std::{fmt, marker::PhantomData};
+
+#[cfg(feature = "state-trie-rocksdb")]
+use reth_db_api::table::Compress;
+#[cfg(feature = "state-trie-rocksdb")]
+use rocksdb::SstFileWriter;
 
 /// A cursor pinned to its provider's state trie snapshot.
 /// Parent lookups use `RocksDB` Get; only neighbor lookups reposition the iterator.
@@ -46,11 +51,12 @@ impl<'a, 'db, V> RocksStateTrieCursor<'a, 'db, V> {
         self.iter.get_or_insert_with(|| self.snapshot.new_raw_iterator_cf(self.cf))
     }
 
-    fn key(&self, path: Nibbles) -> ([u8; 65], usize) {
-        let mut key = [0; 65];
+    fn key(&self, path: Nibbles) -> ([u8; 66], usize) {
+        let mut key = [0; 66];
         let offset = if let Some(address) = self.address {
             key[..32].copy_from_slice(address.as_slice());
-            32
+            key[32] = 64;
+            33
         } else {
             0
         };
@@ -63,15 +69,39 @@ impl<V: Clone + fmt::Debug> RocksStateTrieCursor<'_, '_, V>
 where
     StateTrieNode<V>: Decompress,
 {
+    fn account_neighbor(&mut self, backwards: bool) -> Result<(), DatabaseError> {
+        if self.address.is_some() {
+            return Ok(())
+        }
+        while let Some(key) = self.iter().key() {
+            if key.len() == 33 {
+                break
+            }
+            if key.len() != 66 || key[32] != 64 {
+                return Err(DatabaseError::Decode)
+            }
+            let mut account = [0; 33];
+            account.copy_from_slice(&key[..33]);
+            if backwards {
+                self.iter().seek_for_prev(account);
+            } else {
+                // All storage keys extend this account key; the next length byte skips them.
+                account[32] = 65;
+                self.iter().seek(account);
+            }
+        }
+        Ok(())
+    }
+
     fn current(&self) -> StateTrieCursorResult<V> {
         let Some(iter) = &self.iter else { return Ok(None) };
         iter.status().map_err(|e| DatabaseError::Other(e.to_string()))?;
         let Some(key) = iter.key() else { return Ok(None) };
         let key = if let Some(address) = self.address {
-            if !key.starts_with(address.as_slice()) {
+            if key.len() != 66 || key[32] != 64 || !key.starts_with(address.as_slice()) {
                 return Ok(None)
             }
-            &key[32..]
+            &key[33..]
         } else {
             key
         };
@@ -147,6 +177,7 @@ where
         }
         let (key, len) = self.key(path);
         self.iter().seek(&key[..len]);
+        self.account_neighbor(false)?;
         self.current()
     }
 
@@ -158,12 +189,14 @@ where
                 self.iter().prev();
             }
         } else if let Some(address) = self.address {
-            let mut end = [0xff; 65];
+            let mut end = [0xff; 66];
             end[..32].copy_from_slice(address.as_slice());
+            end[32] = 64;
             self.iter().seek_for_prev(end);
         } else {
             self.iter().seek_to_last();
         }
+        self.account_neighbor(true)?;
         self.current()
     }
 }
@@ -185,14 +218,14 @@ impl<'db> StateTrieCursorFactory for RocksReadSnapshot<'db> {
         Self: 'a;
 
     fn state_trie_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        RocksStateTrieCursor::new::<tables::StateTrieAccounts>(self, None)
+        RocksStateTrieCursor::new::<tables::UnifiedStateTrieAccounts>(self, None)
     }
 
     fn state_trie_storage_cursor(
         &self,
         address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        RocksStateTrieCursor::new::<tables::RocksStateTrieStorages>(self, Some(address))
+        RocksStateTrieCursor::new::<tables::UnifiedStateTrieStorages>(self, Some(address))
     }
 }
 
@@ -204,16 +237,16 @@ impl RocksDBBatch<'_> {
     ) -> ProviderResult<()> {
         for (path, node) in &updates.account_nodes {
             match node {
-                Some(node) => self.put::<tables::StateTrieAccounts>((*path).into(), node)?,
-                None => self.delete::<tables::StateTrieAccounts>((*path).into())?,
+                Some(node) => self.put::<tables::UnifiedStateTrieAccounts>((*path).into(), node)?,
+                None => self.delete::<tables::UnifiedStateTrieAccounts>((*path).into())?,
             }
         }
         for (address, nodes) in &updates.storage_tries {
             for (path, node) in nodes {
-                let key = StateTrieStorageKey { address: *address, path: (*path).into() };
+                let key = UnifiedStateTrieStorageKey { address: *address, path: (*path).into() };
                 match node {
-                    Some(node) => self.put::<tables::RocksStateTrieStorages>(key, node)?,
-                    None => self.delete::<tables::RocksStateTrieStorages>(key)?,
+                    Some(node) => self.put::<tables::UnifiedStateTrieStorages>(key, node)?,
+                    None => self.delete::<tables::UnifiedStateTrieStorages>(key)?,
                 }
             }
         }
@@ -228,8 +261,6 @@ impl super::RocksDBProvider {
         &self,
         updates: &StateTrieUpdatesSorted,
     ) -> ProviderResult<tempfile::TempDir> {
-        use reth_db_api::table::Compress;
-        use rocksdb::SstFileWriter;
         let dir = tempfile::Builder::new()
             .prefix("state-trie-")
             .tempdir_in(self.0.path())
@@ -238,53 +269,49 @@ impl super::RocksDBProvider {
             &rocksdb::Cache::new_lru_cache(0),
             false,
         );
-        let (accounts, storages) = rayon::join(
-            || -> Result<(), rocksdb::Error> {
-                if updates.account_nodes.is_empty() {
-                    return Ok(())
+        let mut storages: Vec<_> =
+            updates.storage_tries.iter().filter(|(_, nodes)| !nodes.is_empty()).collect();
+        if updates.account_nodes.is_empty() && storages.is_empty() {
+            return Ok(dir)
+        }
+        storages.sort_unstable_by_key(|(address, _)| **address);
+        let write = || -> Result<(), rocksdb::Error> {
+            let mut writer = SstFileWriter::create(&options);
+            writer.open(dir.path().join("state.sst"))?;
+            let mut buf = Vec::new();
+            let mut accounts = updates.account_nodes.iter().peekable();
+            for (address, nodes) in storages {
+                let prefix = PackedStoredNibbles(Nibbles::unpack(address)).encode();
+                while accounts
+                    .peek()
+                    .is_some_and(|(path, _)| PackedStoredNibbles(*path).encode() <= prefix)
+                {
+                    let (path, node) = accounts.next().expect("peeked account");
+                    write_node(
+                        &mut writer,
+                        &mut buf,
+                        &PackedStoredNibbles(*path).encode(),
+                        node.as_ref(),
+                    )?;
                 }
-                let mut writer = SstFileWriter::create(&options);
-                writer.open(dir.path().join("accounts.sst"))?;
-                let mut buf = Vec::new();
-                for (path, node) in &updates.account_nodes {
-                    let key = PackedStoredNibbles(*path).encode();
-                    if let Some(node) = node {
-                        buf.clear();
-                        node.compress_to_buf(&mut buf);
-                        writer.put(key.as_ref(), &buf)?;
-                    } else {
-                        writer.delete(key.as_ref())?;
-                    }
-                }
-                writer.finish()
-            },
-            || -> Result<(), rocksdb::Error> {
-                let mut storages: Vec<_> =
-                    updates.storage_tries.iter().filter(|(_, nodes)| !nodes.is_empty()).collect();
-                if storages.is_empty() {
-                    return Ok(())
-                }
-                storages.sort_unstable_by_key(|(address, _)| **address);
-                let mut writer = SstFileWriter::create(&options);
-                writer.open(dir.path().join("storages.sst"))?;
-                let mut buf = Vec::new();
-                for (address, nodes) in storages {
-                    for (path, node) in nodes {
-                        let key = StateTrieStorageKey { address: *address, path: (*path).into() }
+                for (path, node) in nodes {
+                    let key =
+                        UnifiedStateTrieStorageKey { address: *address, path: (*path).into() }
                             .encode();
-                        if let Some(node) = node {
-                            buf.clear();
-                            node.compress_to_buf(&mut buf);
-                            writer.put(key.as_ref(), &buf)?;
-                        } else {
-                            writer.delete(key.as_ref())?;
-                        }
-                    }
+                    write_node(&mut writer, &mut buf, &key, node.as_ref())?;
                 }
-                writer.finish()
-            },
-        );
-        accounts.and(storages).map_err(|e| DatabaseError::Other(e.to_string()))?;
+            }
+            for (path, node) in accounts {
+                write_node(
+                    &mut writer,
+                    &mut buf,
+                    &PackedStoredNibbles(*path).encode(),
+                    node.as_ref(),
+                )?;
+            }
+            writer.finish()
+        };
+        write().map_err(|e| DatabaseError::Other(e.to_string()))?;
         // SstFileWriter evicts its output from the OS page cache. These files become
         // active state immediately, so load them before publishing the new snapshot.
         let warm = |name| -> ProviderResult<u64> {
@@ -298,8 +325,7 @@ impl super::RocksDBProvider {
             std::io::copy(&mut reader, &mut std::io::sink())
                 .map_err(reth_storage_errors::provider::ProviderError::other)
         };
-        let (accounts, storages) = rayon::join(|| warm("accounts.sst"), || warm("storages.sst"));
-        let bytes = accounts? + storages?;
+        let bytes = warm("state.sst")?;
         tracing::debug!(target: "engine::persistence", state_trie_sst_bytes = bytes, "Staged state trie SST files");
         Ok(dir)
     }
@@ -314,10 +340,7 @@ impl super::RocksDBProvider {
         options.set_snapshot_consistency(true);
         options.set_allow_global_seqno(true);
         for dir in files {
-            for (table, name) in [
-                (tables::StateTrieAccounts::NAME, "accounts.sst"),
-                (tables::RocksStateTrieStorages::NAME, "storages.sst"),
-            ] {
+            for (table, name) in [(tables::UnifiedStateTrieAccounts::NAME, "state.sst")] {
                 let path = dir.path().join(name);
                 if !path
                     .try_exists()
@@ -375,7 +398,7 @@ mod tests {
         let path = Nibbles::unpack(B256::repeat_byte(1));
         let removed = Nibbles::unpack(B256::repeat_byte(2));
         let address = B256::repeat_byte(3);
-        let storage_key = StateTrieStorageKey { address, path: path.into() };
+        let storage_key = UnifiedStateTrieStorageKey { address, path: path.into() };
         let old_slot = StateTrieNode::Leaf { short_key_len: 64, value: U256::from(7) };
         let account = |nonce| StateTrieNode::Leaf {
             short_key_len: 64,
@@ -388,9 +411,9 @@ mod tests {
                 .unwrap();
             let mut batch = rocks.batch();
             for key in [path, removed] {
-                batch.put::<tables::StateTrieAccounts>(key.into(), &account(1)).unwrap();
+                batch.put::<tables::UnifiedStateTrieAccounts>(key.into(), &account(1)).unwrap();
             }
-            batch.put::<tables::RocksStateTrieStorages>(storage_key, &old_slot).unwrap();
+            batch.put::<tables::UnifiedStateTrieStorages>(storage_key, &old_slot).unwrap();
             batch.commit().unwrap();
             let old = rocks.snapshot();
             let updates = |nonce| StateTrieUpdatesSorted {
@@ -419,7 +442,7 @@ mod tests {
             let first = rocks.stage_state_trie_ssts(&updates(2)).unwrap();
             let second = rocks.stage_state_trie_ssts(&updates(3)).unwrap();
             assert_eq!(
-                rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(),
+                rocks.get::<tables::UnifiedStateTrieAccounts>(path.into()).unwrap(),
                 Some(account(1))
             );
             rocks.ingest_state_trie_ssts(vec![first, second]).unwrap();
@@ -437,10 +460,13 @@ mod tests {
             );
             assert_eq!(old.state_trie_storage_cursor(address).unwrap().get(removed).unwrap(), None);
             assert_eq!(
-                rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(),
+                rocks.get::<tables::UnifiedStateTrieAccounts>(path.into()).unwrap(),
                 Some(account(3))
             );
-            assert_eq!(rocks.get::<tables::StateTrieAccounts>(removed.into()).unwrap(), None);
+            assert_eq!(
+                rocks.get::<tables::UnifiedStateTrieAccounts>(removed.into()).unwrap(),
+                None
+            );
             // No provider/destructor flush: ingestion must already be durable.
             std::process::exit(0);
         }
@@ -453,12 +479,15 @@ mod tests {
             .with_default_tables()
             .build()
             .unwrap();
-        assert_eq!(rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(), Some(account(3)));
-        assert_eq!(rocks.get::<tables::StateTrieAccounts>(removed.into()).unwrap(), None);
-        assert_eq!(rocks.get::<tables::RocksStateTrieStorages>(storage_key).unwrap(), None);
+        assert_eq!(
+            rocks.get::<tables::UnifiedStateTrieAccounts>(path.into()).unwrap(),
+            Some(account(3))
+        );
+        assert_eq!(rocks.get::<tables::UnifiedStateTrieAccounts>(removed.into()).unwrap(), None);
+        assert_eq!(rocks.get::<tables::UnifiedStateTrieStorages>(storage_key).unwrap(), None);
         assert_eq!(
             rocks
-                .get::<tables::RocksStateTrieStorages>(StateTrieStorageKey {
+                .get::<tables::UnifiedStateTrieStorages>(UnifiedStateTrieStorageKey {
                     address,
                     path: removed.into(),
                 })
@@ -513,12 +542,18 @@ mod tests {
         let tx = db.tx_mut().unwrap();
         write_state_trie_updates(&tx, &updates).unwrap();
         tx.commit().unwrap();
-        let mut batch = rocks.batch();
-        batch.write_state_trie_updates(&updates).unwrap();
-        batch.commit().unwrap();
-        rocks
-            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
-            .unwrap();
+        #[cfg(feature = "state-trie-rocksdb")]
+        {
+            let files = rocks.stage_state_trie_ssts(&updates).unwrap();
+            rocks.ingest_state_trie_ssts(vec![files]).unwrap();
+        }
+        #[cfg(not(feature = "state-trie-rocksdb"))]
+        {
+            let mut batch = rocks.batch();
+            batch.write_state_trie_updates(&updates).unwrap();
+            batch.commit().unwrap();
+        }
+        rocks.flush(&[tables::UnifiedStateTrieAccounts::NAME]).unwrap();
         let tx = db.tx().unwrap();
         let mdbx = DatabaseStateTrieCursorFactory(&tx);
         let snapshot = rocks.snapshot();
@@ -596,8 +631,8 @@ mod tests {
             short_key_len: 64,
             value: TrieAccount { nonce, ..Default::default() },
         };
-        primary.put::<tables::StateTrieAccounts>(path.into(), &leaf(1)).unwrap();
-        primary.flush(&[tables::StateTrieAccounts::NAME]).unwrap();
+        primary.put::<tables::UnifiedStateTrieAccounts>(path.into(), &leaf(1)).unwrap();
+        primary.flush(&[tables::UnifiedStateTrieAccounts::NAME]).unwrap();
         let secondary = super::super::RocksDBProvider::builder(dir.path())
             .with_default_tables()
             .with_read_only(true)
@@ -607,8 +642,8 @@ mod tests {
         let mut cursor = snapshot.state_trie_account_cursor().unwrap();
         assert_eq!(cursor.get(path).unwrap(), Some(leaf(1)));
         assert_eq!(cursor.get_batch(&[path, path]).unwrap(), vec![Some(leaf(1)), Some(leaf(1))]);
-        primary.put::<tables::StateTrieAccounts>(path.into(), &leaf(2)).unwrap();
-        primary.flush(&[tables::StateTrieAccounts::NAME]).unwrap();
+        primary.put::<tables::UnifiedStateTrieAccounts>(path.into(), &leaf(2)).unwrap();
+        primary.flush(&[tables::UnifiedStateTrieAccounts::NAME]).unwrap();
         secondary.try_catch_up_with_primary().unwrap();
         assert_eq!(cursor.get(path).unwrap(), Some(leaf(2)));
         assert_eq!(cursor.get_batch(&[path, path]).unwrap(), vec![Some(leaf(2)), Some(leaf(2))]);
@@ -632,9 +667,7 @@ mod tests {
         let mut batch = rocks.batch();
         batch.write_state_trie_updates(&updates).unwrap();
         batch.commit().unwrap();
-        rocks
-            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
-            .unwrap();
+        rocks.flush(&[tables::UnifiedStateTrieAccounts::NAME]).unwrap();
         let snapshot = rocks.snapshot();
         let mut cursor = snapshot.state_trie_storage_cursor(B256::ZERO).unwrap();
         let paths = [path, Nibbles::unpack(B256::with_last_byte(1)), path];
@@ -649,9 +682,7 @@ mod tests {
         let mut batch = rocks.batch();
         batch.write_state_trie_updates(&updates).unwrap();
         batch.commit().unwrap();
-        rocks
-            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
-            .unwrap();
+        rocks.flush(&[tables::UnifiedStateTrieAccounts::NAME]).unwrap();
         assert_eq!(rocks.snapshot().state_trie_account_cursor().unwrap().get(path).unwrap(), None);
         assert_eq!(
             rocks.snapshot().state_trie_storage_cursor(B256::ZERO).unwrap().get(path).unwrap(),
@@ -690,5 +721,21 @@ mod tests {
             rocks.snapshot().state_trie_storage_cursor(B256::ZERO).unwrap().before(None).unwrap(),
             None
         );
+    }
+}
+
+#[cfg(feature = "state-trie-rocksdb")]
+fn write_node(
+    writer: &mut SstFileWriter<'_>,
+    buf: &mut Vec<u8>,
+    key: &[u8],
+    node: Option<&impl Compress>,
+) -> Result<(), rocksdb::Error> {
+    if let Some(node) = node {
+        buf.clear();
+        node.compress_to_buf(buf);
+        writer.put(key, buf)
+    } else {
+        writer.delete(key)
     }
 }

@@ -1,5 +1,7 @@
 mod legacy_trie;
 mod state_trie;
+#[cfg(feature = "state-trie-rocksdb")]
+mod unified_migration;
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
@@ -371,6 +373,7 @@ impl RocksDBBuilder {
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::StateTrieAccounts>()
             .with_table::<tables::RocksStateTrieStorages>()
+            .with_table::<tables::UnifiedStateTrieAccounts>()
             .with_table::<tables::BlockAccessLists>()
             .with_table::<tables::BlockAccessListBlockNumbers>();
         if cfg!(feature = "legacy-trie-rocksdb") {
@@ -452,6 +455,7 @@ impl RocksDBBuilder {
                 } else if name == tables::BlockAccessLists::NAME {
                     Self::block_access_lists_column_family_options(&self.block_cache)
                 } else if [
+                    tables::UnifiedStateTrieAccounts::NAME,
                     tables::StateTrieAccounts::NAME,
                     tables::StateTrieStorages::NAME,
                     tables::HashedAccounts::NAME,
@@ -464,15 +468,23 @@ impl RocksDBBuilder {
                     Self::state_trie_column_family_options(
                         &self.block_cache,
                         !(cfg!(feature = "state-trie-rocksdb") &&
-                            [tables::StateTrieAccounts::NAME, tables::StateTrieStorages::NAME]
-                                .contains(&name.as_str())),
+                            [
+                                tables::UnifiedStateTrieAccounts::NAME,
+                                tables::StateTrieAccounts::NAME,
+                                tables::StateTrieStorages::NAME,
+                            ]
+                            .contains(&name.as_str())),
                     )
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
                 if cfg!(feature = "state-trie-rocksdb") &&
-                    [tables::StateTrieAccounts::NAME, tables::StateTrieStorages::NAME]
-                        .contains(&name.as_str())
+                    [
+                        tables::UnifiedStateTrieAccounts::NAME,
+                        tables::StateTrieAccounts::NAME,
+                        tables::StateTrieStorages::NAME,
+                    ]
+                    .contains(&name.as_str())
                 {
                     cf_options.set_write_buffer_size(512 << 20);
                     cf_options.set_target_file_size_base(256 << 20);
