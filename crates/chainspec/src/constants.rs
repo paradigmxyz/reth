@@ -5,6 +5,12 @@ use alloy_primitives::b256;
 /// Gas per transaction not creating a contract.
 pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 
+/// The maximum total gas limit of a transaction from Amsterdam on, `2^32 - 1`.
+///
+/// [EIP-8037](https://eips.ethereum.org/EIPS/eip-8037) limits only regular gas by the EIP-7825 cap,
+/// so this bounds the gas limit as a whole, state gas reservoir included.
+pub const MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM: u64 = u32::MAX as u64;
+
 /// Mainnet prune delete limit.
 pub const MAINNET_PRUNE_DELETE_LIMIT: usize = 20000;
 

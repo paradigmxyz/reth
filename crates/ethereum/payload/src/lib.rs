@@ -17,7 +17,9 @@ use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{
+    ChainSpecProvider, EthChainSpec, EthereumHardforks, MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM,
+};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -277,6 +279,11 @@ where
         // The V1 FOCIL endpoint deliberately does not produce blob transactions, and payload
         // building cannot source a sidecar from an inclusion-list byte string.
         if transaction.is_eip4844() {
+            continue
+        }
+        // EIP-8037 bounds the gas limit as a whole, and the list check judges such a
+        // transaction unappendable.
+        if is_amsterdam && transaction.gas_limit() > MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM {
             continue
         }
         inclusion_list.push(Some(transaction));

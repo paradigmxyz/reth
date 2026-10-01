@@ -128,9 +128,10 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, Transaction as _};
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chainspec::MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM;
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -1128,6 +1129,12 @@ where
                         &transaction,
                     ))
                 }) {
+                    continue
+                }
+                // The executor does not enforce the EIP-8037 cap on the total gas limit, which the
+                // spec's `validate_transaction` applies. Inclusion lists only exist from Bogota
+                // on, so the Amsterdam cap is always in force here.
+                if transaction.gas_limit() > MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM {
                     continue
                 }
                 let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {

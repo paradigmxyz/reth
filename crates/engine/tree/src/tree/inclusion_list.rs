@@ -12,6 +12,7 @@ use alloy_primitives::{
     map::{AddressMap, B256Map, B256Set},
     Bytes, B256, U256,
 };
+use reth_chainspec::MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM;
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{BlockBody as _, NodePrimitives, RecoveredBlock, SignedTransaction};
 use reth_provider::StateProviderBox;
@@ -136,6 +137,13 @@ fn could_append_transaction<N: NodePrimitives>(
     // Block gas capacity. The EIP-7825 cap is not a bound on the gas limit itself; it bounds
     // regular gas only, and is checked against intrinsic gas below.
     if transaction.gas_limit() > ctx.available_gas {
+        return Ok(false)
+    }
+
+    // EIP-8037 bounds the gas limit as a whole, state gas reservoir included.
+    if ctx.spec_id >= SpecId::AMSTERDAM &&
+        transaction.gas_limit() > MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM
+    {
         return Ok(false)
     }
 
@@ -419,6 +427,16 @@ mod inclusion_list_tests {
             ..context()
         };
         assert!(!could_append(legacy_tx(Some(CHAIN_ID), 0, 200_000), funded(0), ctx));
+    }
+
+    #[test]
+    fn gas_limit_over_the_total_cap_is_not_appendable() {
+        // EIP-8037 does bound the gas limit as a whole, at `2^32 - 1`.
+        let ctx = InclusionListContext { available_gas: u64::MAX, ..context() };
+        let at_cap = legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM);
+        let above_cap = legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM + 1);
+        assert!(could_append(at_cap, funded(0), ctx));
+        assert!(!could_append(above_cap, funded(0), ctx));
     }
 
     #[test]
