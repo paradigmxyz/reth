@@ -14,6 +14,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. Test binaries report a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
 
 name: compact-codec
 permissions: {}
