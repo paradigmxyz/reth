@@ -89,7 +89,6 @@ where
     let (account_work_tx, account_work_rx) = unbounded();
     let storage_availability = Arc::new(AvailabilitySheet::new(WORKERS));
     let account_availability = Arc::new(AvailabilitySheet::new(WORKERS));
-    let cached_storage_roots = Arc::<DashMap<_, _>>::default();
     let stop_accounts = Arc::new(AtomicBool::new(false));
     let stop_storage = Arc::new(AtomicBool::new(false));
     let mut storage = Vec::with_capacity(WORKERS);
@@ -104,7 +103,6 @@ where
                         task_ctx.clone(),
                         storage_work_rx.clone(),
                         Arc::clone(&storage_availability),
-                        Arc::clone(&cached_storage_roots),
                         Arc::clone(&stop_storage),
                         worker_index,
                     ),
@@ -123,7 +121,6 @@ where
                         account_work_rx.clone(),
                         storage_work_tx.clone(),
                         Arc::clone(&account_availability),
-                        Arc::clone(&cached_storage_roots),
                         Arc::clone(&stop_accounts),
                         worker_index,
                     ),
@@ -172,7 +169,6 @@ async fn run_storage<Factory>(
     task_ctx: ProofTaskCtx<Factory>,
     receiver: CrossbeamReceiver<StorageWorkerJob>,
     availability: Arc<AvailabilitySheet>,
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
     stopped: Arc<AtomicBool>,
     worker_index: usize,
 ) where
@@ -202,23 +198,18 @@ async fn run_storage<Factory>(
             .unwrap_or_else(|error| {
                 Err(StateProofError::Database(DatabaseError::Other(error.to_string())))
             });
-        if let Some(root) = result.as_ref().ok().and_then(StorageProofResult::root) {
-            cached_storage_roots.insert(hashed_address, root);
-        }
         let _ = proof_result_sender.send(StorageProofResultMessage { hashed_address, result });
         availability.mark_idle(worker_index);
         runtime.yield_now().await;
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 async fn run_accounts<Factory>(
     runtime: TaskRuntime,
     task_ctx: ProofTaskCtx<Factory>,
     receiver: CrossbeamReceiver<AccountWorkerJob>,
     storage_sender: CrossbeamSender<StorageWorkerJob>,
     availability: Arc<AvailabilitySheet>,
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
     stopped: Arc<AtomicBool>,
     worker_index: usize,
 ) where
@@ -239,14 +230,8 @@ async fn run_accounts<Factory>(
             runtime.sleep(delay).await;
         }
         let AccountMultiproofInput { targets, proof_result_sender } = *input;
-        let result = account_proof(
-            &runtime,
-            task_ctx.factory.clone(),
-            &storage_sender,
-            targets,
-            Arc::clone(&cached_storage_roots),
-        )
-        .await;
+        let result =
+            account_proof(&runtime, task_ctx.factory.clone(), &storage_sender, targets).await;
         let ProofResultContext { sender, state, .. } = proof_result_sender;
         let elapsed = runtime.now().duration_since(start).unwrap_or_default();
         let _ = sender.send(ProofResultMessage { result, elapsed, state });
@@ -260,7 +245,6 @@ async fn account_proof<Factory>(
     factory: Factory,
     storage_sender: &CrossbeamSender<StorageWorkerJob>,
     targets: MultiProofTargetsV2,
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
 ) -> Result<DecodedMultiProofV2, StateRootTaskError>
 where
     Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -304,14 +288,8 @@ where
                     provider.storage_trie_cursor(B256::ZERO).map_err(ProviderError::from)?,
                     provider.hashed_storage_cursor(B256::ZERO).map_err(ProviderError::from)?,
                 )));
-            compute_account_proof(
-                &mut calculator,
-                storage_calculator,
-                account_targets,
-                completed,
-                cached_storage_roots,
-            )
-            .map(|(proof, _)| proof)
+            compute_account_proof(&mut calculator, storage_calculator, account_targets, completed)
+                .map(|(proof, _)| proof)
         })
         .abort_on_drop()
         .await

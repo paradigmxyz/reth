@@ -39,7 +39,7 @@ use alloy_primitives::{
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_execution_errors::StateProofError;
-use reth_primitives_traits::FastInstant as Instant;
+use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::{Runtime, TaskRuntime};
@@ -1022,7 +1022,7 @@ where
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
-        let MultiProofTargetsV2 { account_targets, storage_targets } = targets;
+        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -1110,7 +1110,6 @@ fn compute_account_proof<TC, HC, STC, SHC>(
     storage_calculator: Rc<RefCell<proof_v2::StorageProofCalculator<STC, SHC>>>,
     mut account_targets: Vec<ProofV2Target>,
     storage_proof_receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
 ) -> Result<(DecodedMultiProofV2, ValueEncoderStats), StateRootTaskError>
 where
     TC: TrieCursor,
@@ -1118,11 +1117,8 @@ where
     STC: TrieStorageCursor,
     SHC: HashedStorageCursor<Value = U256>,
 {
-    let mut value_encoder = AsyncAccountValueEncoder::new(
-        storage_proof_receivers,
-        cached_storage_roots,
-        storage_calculator,
-    );
+    let mut value_encoder =
+        AsyncAccountValueEncoder::new(storage_proof_receivers, storage_calculator);
     let account_proofs = calculator.proof(&mut value_encoder, &mut account_targets)?;
     let (storage_proofs, stats) = value_encoder.finalize()?;
     Ok((DecodedMultiProofV2 { account_proofs, storage_proofs }, stats))
