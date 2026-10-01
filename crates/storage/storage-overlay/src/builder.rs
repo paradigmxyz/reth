@@ -976,11 +976,8 @@ mod tests {
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
         let account = AccountInfo {
-            nonce: 4,
-            balance: U256::from(5),
-            code_hash,
-            code: Some(code.clone()),
             account_id: AccountId::new(6),
+            ..AccountInfo::new(U256::from(5), 4, code_hash, code.clone())
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
@@ -1037,10 +1034,7 @@ mod tests {
 
         let mut overlay = ExecutionOverlay::default();
         overlay.block_hashes.push(first_block);
-        overlay.accounts.insert(
-            address,
-            Some(AccountInfo { nonce: 1, account_id: None, ..Default::default() }),
-        );
+        overlay.accounts.insert(address, Some(AccountInfo { nonce: 1, ..Default::default() }));
         overlay.accounts.insert(retained_address, Some(AccountInfo::default()));
         overlay.storage.entry(address).or_default().insert(slot, U256::from(9));
         overlay.storage.entry(address).or_default().insert(retained_slot, U256::from(10));
@@ -1426,6 +1420,32 @@ mod tests {
                 panic!("persisted parent below Finish must require reverts")
             }
         }
+    }
+
+    #[test]
+    fn builder_appends_block_to_parent_state() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks[2..=4] {
+            manager.insert_block(block.clone());
+        }
+
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(
+            blocks[4].recovered_block().number() + 1,
+            blocks[4].recovered_block().hash(),
+        );
+        let builder = manager
+            .overlay_builder(block.recovered_block().parent_hash())
+            .with_appended_block(block.clone());
+
+        assert_eq!(builder.parent_hash, block.recovered_block().hash());
+        assert_eq!(
+            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+            std::iter::once(&block)
+                .chain(blocks[2..=4].iter().rev())
+                .map(|block| block.recovered_block().hash())
+                .collect::<Vec<_>>(),
+        );
     }
 
     #[test]

@@ -21,6 +21,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -720,13 +721,13 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         self.provider()?.pending_block()
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -1231,5 +1232,19 @@ mod tests {
         let local_head = provider.local_tip_header(checkpoint).unwrap();
 
         assert_eq!(local_head, head);
+    }
+
+    #[test]
+    fn snap_sync_requires_the_hashed_state_layout() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.database_provider_ro().unwrap().ensure_snap_sync_layout().is_ok());
+
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        assert_matches!(
+            factory.database_provider_ro().unwrap().ensure_snap_sync_layout(),
+            Err(ProviderError::SnapStorageLayoutUnsupported)
+        );
     }
 }

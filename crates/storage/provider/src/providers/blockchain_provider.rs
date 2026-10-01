@@ -16,12 +16,12 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    PersistedBlockNotifications, PersistedBlockSubscriptions,
+    BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -521,13 +521,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         self.consistent_provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -729,6 +729,8 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
@@ -740,6 +742,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
         }
+    }
+
+    fn state_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
+        );
+        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -902,6 +916,8 @@ where
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
@@ -1036,6 +1052,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 }
 
 #[cfg(test)]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use super::SNAPSHOT_STATE_RETENTION;
     use crate::{
@@ -1121,8 +1138,8 @@ mod tests {
                 (
                     HashedPostState::default()
                         .with_accounts([
-                            (hashed_address, Some(account)),
-                            (keccak256(other_address), Some(account)),
+                            (hashed_address, Some(account.clone())),
+                            (keccak256(other_address), Some(account.clone())),
                         ])
                         .with_storages([(
                             hashed_address,
@@ -1163,8 +1180,8 @@ mod tests {
             let mut updates = TrieUpdates::default();
             updates.storage_tries.insert(hashed_address, storage_updates);
             let state_root = reth_trie::test_utils::state_root([
-                (address, (account, storage.clone())),
-                (other_address, (account, BTreeMap::new())),
+                (address, (account.clone(), storage.clone())),
+                (other_address, (account.clone(), BTreeMap::new())),
             ]);
             storage_roots.push(reth_trie::test_utils::storage_root(storage.clone()));
             let block = Block {
@@ -1638,15 +1655,15 @@ mod tests {
 
         // Assertions related to the pending block
 
+        let pending_block = provider.pending_block()?.unwrap();
         assert_eq!(
-            provider.pending_block()?,
-            Some(RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()))
+            *pending_block,
+            RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap())
         );
 
-        assert_eq!(
-            provider.pending_block_and_receipts()?,
-            Some((RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()), vec![]))
-        );
+        let pending = provider.pending_block_and_receipts()?.unwrap();
+        assert!(Arc::ptr_eq(&pending_block, pending.block()));
+        assert!(pending.execution_output().receipts.is_empty());
 
         Ok(())
     }
@@ -2093,9 +2110,9 @@ mod tests {
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            database_state
-                .iter()
-                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
+            database_state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.clone()))
+            }),
             0..0,
             0..0,
         );
@@ -2115,7 +2132,7 @@ mod tests {
                     }),
                     database_changesets.iter().map(|block_changesets| {
                         block_changesets.iter().map(|(address, account, _)| {
-                            (*address, Some(Some((*account).into())), [])
+                            (*address, Some(Some((account.clone()).into())), [])
                         })
                     }),
                     Vec::new(),
@@ -2146,7 +2163,7 @@ mod tests {
                                     (address, None, Some(account.into()), Default::default())
                                 }),
                                 [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
+                                    (*address, Some(Some((account.clone()).into())), Vec::new())
                                 })],
                                 [],
                             ),
@@ -3028,7 +3045,7 @@ mod tests {
     }
 
     fn random_account(nonce: u64) -> (Address, Account) {
-        (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+        (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
     /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
@@ -3052,14 +3069,16 @@ mod tests {
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
         provider_rw.insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
 
-        let mut expected: Vec<_> =
-            accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+        let mut expected: Vec<_> = accounts
+            .iter()
+            .map(|(address, account)| (keccak256(address), account.clone()))
+            .collect();
         expected.sort_by_key(|(hash, _)| *hash);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
@@ -3083,7 +3102,7 @@ mod tests {
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
         provider_rw.insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )?;
         provider_rw.commit()?;
 
@@ -3254,7 +3273,7 @@ mod tests {
         let value = U256::from(42);
 
         let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
+        hashed_state.accounts.insert(hashed_address, Some(account.clone()));
         hashed_state
             .storages
             .insert(hashed_address, HashedStorage::from_iter([(keccak256(slot_key), value)]));
@@ -3279,7 +3298,7 @@ mod tests {
                 blob_gas_used: 0,
             },
             state: BundleState::new(
-                [(address, None, Some(account.into()), storage)],
+                [(address, None, Some(account.clone().into()), storage)],
                 [[(address, Some(None), [])]],
                 [],
             ),
@@ -3309,7 +3328,7 @@ mod tests {
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
         ] {
-            assert_eq!(state.basic_account(&address)?, Some(account));
+            assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
         }
 
@@ -3325,7 +3344,7 @@ mod tests {
         let (address, account) = random_account(1);
         let hashed_address = keccak256(address);
         let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
+        hashed_state.accounts.insert(hashed_address, Some(account.clone()));
 
         // A root only the in-memory block carries, so a match proves the in-memory path (not
         // persisted history, which has no block with this root) resolved it.
@@ -3381,7 +3400,7 @@ mod tests {
         let (target_address, target_account) = random_account(1);
         let target_hashed = keccak256(target_address);
         let mut target_state = HashedPostState::default();
-        target_state.accounts.insert(target_hashed, Some(target_account));
+        target_state.accounts.insert(target_hashed, Some(target_account.clone()));
 
         let unique_root = B256::repeat_byte(0x77);
         let mut block = random_block(
@@ -3426,7 +3445,7 @@ mod tests {
         .try_recover()
         .expect("failed to seal block with senders");
         let mut noise_state = HashedPostState::default();
-        noise_state.accounts.insert(keccak256(noise_address), Some(noise_account));
+        noise_state.accounts.insert(keccak256(noise_address), Some(noise_account.clone()));
         let provider_rw = provider.database.provider_rw()?;
         provider_rw.append_blocks_with_state(
             vec![noise_block],
@@ -3470,7 +3489,7 @@ mod tests {
 
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_account_for_hashing([(address, Some(account_a))])?;
+        provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
         provider_rw.insert_storage_for_hashing([(
             address,
             [StorageEntry { key: slot_key, value: value_a }],
@@ -3496,14 +3515,14 @@ mod tests {
         provider_rw.commit()?;
 
         // State B: a later block changes both the account and its storage slot.
-        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a };
+        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a.clone() };
         let value_b = U256::from(2);
 
         let mut storage = HashMap::default();
         storage.insert(slot, (value_a, value_b));
 
         let mut state_b = HashedPostState::default();
-        state_b.accounts.insert(hashed_address, Some(account_b));
+        state_b.accounts.insert(hashed_address, Some(account_b.clone()));
         state_b.storages.insert(hashed_address, HashedStorage::from_iter([(hashed_slot, value_b)]));
 
         let state_b_root = factory.latest()?.state_root(state_b.clone())?;
@@ -3522,8 +3541,8 @@ mod tests {
             vec![later_block],
             &ExecutionOutcome {
                 bundle: BundleState::new(
-                    [(address, Some(account_a.into()), Some(account_b.into()), storage)],
-                    [[(address, Some(Some(account_a.into())), [(slot, value_a)])]],
+                    [(address, Some(account_a.clone().into()), Some(account_b.into()), storage)],
+                    [[(address, Some(Some(account_a.clone().into())), [(slot, value_a)])]],
                     [],
                 ),
                 first_block: 2,
