@@ -2,7 +2,7 @@
 //!
 //! Ethereum block transaction and receipt roots are ordered trie roots keyed by the RLP encoding of
 //! each item index.
-//! [`OrderedTrieRootEncodedBuilder`](crate::ordered_root::OrderedTrieRootEncodedBuilder) accepts
+//! [`OrderedTrieRootEncodedBuilder`] accepts
 //! items in their final contiguous order, without requiring the final item count until the stream
 //! ends.
 //!

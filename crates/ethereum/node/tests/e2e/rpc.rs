@@ -279,8 +279,7 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     node.advance_block().await?;
     let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
     let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
-    node.advance_block().await?;
-    node.advance_block().await?;
+    node.advance_blocks(2).await?;
 
     let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
     let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
@@ -1056,6 +1055,46 @@ async fn test_admin_node_info_discv5_enr_uses_nat_extip_when_discv4_is_disabled(
     assert_eq!(admin_enr.udp4(), Some(discv5_port));
     assert_eq!(info.ip, IpAddr::V4(external_ip));
     assert_eq!(info.ports.discovery, discv5_port);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_advance_until_receipt() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let payloads = node.advance_blocks(2).await?;
+    assert_eq!(payloads.iter().map(|payload| payload.block().number).collect::<Vec<_>>(), [1, 2]);
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
+    let hash = node.rpc.inject_tx(raw_tx).await?;
+    let receipt = node.advance_until_receipt(hash).await?;
+    assert!(receipt.status());
+    assert_eq!(receipt.block_number, Some(3));
+
+    // The transaction is already included, so the chain does not advance.
+    assert_eq!(node.advance_until_receipt(hash).await?, receipt);
+    assert_eq!(node.rpc_provider().get_block_number().await?, 3);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_advance_while_send_raw_transaction_sync() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
+
+    // The request only returns once the transaction is mined.
+    let receipt = node.advance_while(provider.send_raw_transaction_sync(&raw_tx)).await??;
+    assert_eq!(receipt.transaction_hash, keccak256(&raw_tx));
+    assert!(receipt.status());
+    assert_eq!(node.rpc.transaction_receipt(receipt.transaction_hash).await?, Some(receipt));
 
     Ok(())
 }
