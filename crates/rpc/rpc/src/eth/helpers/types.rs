@@ -87,6 +87,7 @@ mod tests {
     #[test]
     fn test_typed_request_fee_defaults() {
         let converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+        // Default blob fee caps must retain values beyond u64 without truncation.
         for blob_fee in [u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX] {
             let mut env = EthEvmEnv::default();
             env.block.blob_basefee = U256::from(blob_fee);
@@ -101,8 +102,10 @@ mod tests {
             let tx = converter.tx_env(request.clone(), &env).unwrap();
 
             assert_eq!(tx.max_fee_per_blob_gas(), Some(blob_fee));
+            // Flat gasPrice must not be reduced to the base fee for a blob request.
             assert_eq!(tx.effective_gas_price(Some(30)), 100);
 
+            // An authorization list selects EIP-7702, which must preserve the same flat price.
             let request = TransactionRequest {
                 authorization_list: Some(vec![]),
                 blob_versioned_hashes: None,
@@ -111,6 +114,7 @@ mod tests {
             let tx = converter.tx_env(request.clone(), &env).unwrap();
             assert_eq!(tx.effective_gas_price(Some(30)), 100);
 
+            // An explicit zero priority fee still opts into base-fee pricing.
             let request = TransactionRequest {
                 gas_price: None,
                 max_fee_per_gas: Some(100),
