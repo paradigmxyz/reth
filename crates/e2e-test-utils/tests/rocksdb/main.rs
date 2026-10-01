@@ -9,7 +9,8 @@ use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
-use reth_provider::RocksDBProviderFactory;
+use reth_provider::{PruneCheckpointReader, RocksDBProviderFactory};
+use reth_prune_types::PruneSegment;
 use std::time::Duration;
 
 /// Polls RPC until the given `tx_hash` is visible as pending (not yet mined).
@@ -36,6 +37,25 @@ async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B2
     poll_until(format!("transaction {tx_hash} in RocksDB"), || async move {
         // Re-acquire handle each iteration to avoid stale snapshot reads
         Ok(provider.rocksdb_provider().get::<tables::TransactionHashNumbers>(tx_hash)?)
+    })
+    .await
+}
+
+/// Polls until the pruner has pruned `segment` up to at least `block`.
+///
+/// The persistence service acknowledges saved blocks before it runs the pruner in a separate
+/// commit, so a block being visible in `RocksDB` does not mean the pruner has run for it yet.
+async fn wait_for_prune_checkpoint<P: PruneCheckpointReader>(
+    provider: &P,
+    segment: PruneSegment,
+    block: u64,
+) -> Result<()> {
+    poll_until(format!("{segment} to be pruned up to block {block}"), || async move {
+        let checkpoint = provider.get_prune_checkpoint(segment)?;
+        Ok(checkpoint
+            .and_then(|checkpoint| checkpoint.block_number)
+            .is_some_and(|n| n >= block)
+            .then_some(()))
     })
     .await
 }
@@ -665,11 +685,20 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         let payload = node.advance_block().await?;
         assert_eq!(payload.block().number(), nonce + 1);
 
-        // Let the persistence cycle (save_blocks → pruner → commit) complete before
-        // producing the next block, so each cycle processes exactly one block. The
-        // transaction becomes visible in RocksDB with the commit.
+        // Wait for the block's save to commit before producing the next block, so each save
+        // processes exactly one block. The transaction becomes visible in RocksDB with the
+        // commit, and the persistence service runs the pruner before it handles the next save.
         poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     }
+
+    // The pruner runs after the save of the last block is acknowledged, so wait for it to prune
+    // the blocks outside the retention window.
+    wait_for_prune_checkpoint(
+        &node.inner.provider,
+        PruneSegment::AccountHistory,
+        TOTAL_BLOCKS - PRUNE_DISTANCE,
+    )
+    .await?;
 
     // Read the AccountsHistory shard for `sender` directly from RocksDB.
     // This is the data structure corrupted by the race.
@@ -842,6 +871,15 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         // Let the persistence cycle complete before the next block
         poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     }
+
+    // The pruner runs after the save of the last block is acknowledged, so wait for it to prune
+    // the blocks outside the retention window.
+    wait_for_prune_checkpoint(
+        &node.inner.provider,
+        PruneSegment::StorageHistory,
+        TOTAL_BLOCKS - PRUNE_DISTANCE,
+    )
+    .await?;
 
     // Read StoragesHistory shard for (contract_address, slot 0) directly from RocksDB
     let rocksdb = node.inner.provider.rocksdb_provider();

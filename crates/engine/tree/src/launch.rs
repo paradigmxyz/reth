@@ -1,9 +1,9 @@
 //! Engine orchestrator launch helper.
 //!
-//! Provides [`EngineOrchestratorBuilder`](crate::launch::EngineOrchestratorBuilder) which wires
+//! Provides [`EngineOrchestratorBuilder`] which wires
 //! together all engine components and builds a
-//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`, with
-//! the staged pipeline or a caller-supplied [`BackfillSync`](crate::backfill::BackfillSync) as
+//! [`ChainOrchestrator`] ready to be polled as a `Stream`, with
+//! the staged pipeline or a caller-supplied [`BackfillSync`] as
 //! backfill.
 
 use crate::{

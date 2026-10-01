@@ -28,7 +28,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
@@ -164,6 +164,9 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
