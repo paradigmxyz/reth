@@ -1651,20 +1651,22 @@ impl Discv4Service {
             }
         }
 
-        let mut failed_lookups = Vec::new();
-        self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
+        let mut unanswered_lookups = Vec::new();
+        self.pending_lookup.retain(|node_id, (lookup_sent_at, ctx)| {
             if now.duration_since(*lookup_sent_at) > self.config.request_timeout {
-                failed_lookups.push(*node_id);
+                unanswered_lookups.push((*node_id, ctx.clone()));
                 return false
             }
             true
         });
 
-        if !failed_lookups.is_empty() {
-            // remove nodes that failed the e2e lookup process, so we can restart it
-            trace!(target: "discv4", num=%failed_lookups.len(), "evicting nodes due to failed lookup");
-            for node_id in failed_lookups {
-                self.remove_node(node_id);
+        // These nodes answered our ping but did not ping us back. A node only pings back if it has
+        // no recent bond with us, so it can already serve our `FindNode` request.
+        for (node_id, ctx) in unanswered_lookups {
+            if let Some(record) = self.on_entry(node_id, |entry| entry.record) &&
+                !self.pending_find_nodes.contains_key(&node_id)
+            {
+                self.find_node(&record, ctx);
             }
         }
 
@@ -2923,6 +2925,54 @@ mod tests {
         // assert that we've added the find_node req here after both sides of the endpoint proof is
         // done
         assert_eq!(service.pending_find_nodes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_completes_when_bonded_peer_does_not_ping_back() {
+        reth_tracing::init_test_tracing();
+
+        let config = Discv4Config::builder().request_timeout(Duration::from_millis(200)).build();
+        let (_discv4, mut service) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, mut service2) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+        service.lookup_self();
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        // service2 already knows service, so it answers our ping with a pong but has no reason to
+        // ping back.
+        let _ = service2.kbuckets.insert_or_update(
+            &kad_key(service.local_node_record.id),
+            NodeEntry::new_proven(service.local_node_record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        let expire = service.send_neighbours_expiration();
+        let msg = Neighbours { nodes: vec![service2.local_node_record], expire };
+        service.on_neighbours(msg, record.tcp_addr(), id);
+
+        while poll_fn(|cx| service2.poll(cx)).await != Discv4Event::Ping {}
+        while poll_fn(|cx| service.poll(cx)).await != Discv4Event::Pong {}
+        let id2 = service2.local_node_record.id;
+        assert!(service.pending_lookup.contains_key(&id2));
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        service.evict_expired_requests(Instant::now());
+
+        // service2 proved its endpoint, so it must be queried rather than dropped from the table.
+        assert!(service.pending_find_nodes.contains_key(&id2));
     }
 
     #[tokio::test]
