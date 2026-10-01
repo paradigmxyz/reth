@@ -123,11 +123,11 @@ if [ "$MODE" = "release" ]; then
 
   # --- Step 1: Resolve feature ref from latest nightly Docker build ---
   echo "::group::Querying latest nightly docker build"
+  # Do not combine --event with --status: GitHub then returns stale runs.
   RUNS_JSON=$(gh run list \
     -R "$REPO" \
     --workflow=docker.yml \
     --event=schedule \
-    --status=completed \
     --limit 5 \
     --json headSha,createdAt,conclusion)
 
@@ -217,11 +217,11 @@ fi
 # --- Step 1: Query latest successful scheduled docker.yml run ---
 echo "::group::Querying latest nightly docker build"
 
+# Do not combine --event with --status: GitHub then returns stale runs.
 RUNS_JSON=$(gh run list \
   -R "$REPO" \
   --workflow=docker.yml \
   --event=schedule \
-  --status=completed \
   --limit 5 \
   --json headSha,createdAt,conclusion)
 
