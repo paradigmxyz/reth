@@ -354,6 +354,16 @@ mod tests {
         (client, catch_up.with_max_blocks(max_blocks))
     }
 
+    // Blocks of `chain` after the pivot, kept as a reorg orphaning it finds them, with their
+    // hashes.
+    fn orphaned(chain: &BalChain) -> (Vec<KeptBlock>, Vec<B256>) {
+        let headers = &chain.headers[PIVOT as usize + 1..];
+        (
+            headers.iter().map(KeptBlock::of).collect(),
+            headers.iter().map(SealedHeader::hash).collect(),
+        )
+    }
+
     async fn applied(catch_up: &mut CatchUp, write: SnapWrite, target: u64) -> CatchUpProgress {
         match catch_up.next(write, target).await.unwrap() {
             CatchUpStep::Applied { progress, .. } => progress,
@@ -749,8 +759,7 @@ mod tests {
     #[tokio::test]
     async fn orphaned_lists_are_fetched_in_order_across_requests() {
         let chain = chain();
-        let headers = &chain.headers[PIVOT as usize + 1..];
-        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
+        let (orphaned, hashes) = orphaned(&chain);
         let responses = [chain.response(1, [Some(1), Some(2)]), chain.response(2, [Some(3)])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 2);
 
@@ -758,15 +767,13 @@ mod tests {
 
         let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
         assert_eq!(lists, [credit(10), credit(20), credit(30)]);
-        let hashes: Vec<_> = headers.iter().map(SealedHeader::hash).collect();
         assert_eq!(*client.block_requests(), [hashes[..2].to_vec(), hashes[2..].to_vec()]);
     }
 
     #[tokio::test]
     async fn a_missing_orphaned_list_fetches_nothing() {
         let chain = chain();
-        let headers = &chain.headers[PIVOT as usize + 1..];
-        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
+        let (orphaned, _) = orphaned(&chain);
         // No peer holds the last orphaned block's list any more.
         let responses = [chain.response(1, [Some(1), Some(2), None]), chain.response(2, [None])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
@@ -778,8 +785,7 @@ mod tests {
     #[tokio::test]
     async fn a_response_cut_short_keeps_its_lists_and_fetches_the_rest() {
         let chain = chain();
-        let headers = &chain.headers[PIVOT as usize + 1..];
-        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
+        let (orphaned, hashes) = orphaned(&chain);
         // The first response stops at the byte limit after one list.
         let responses = [chain.response(1, [Some(1)]), chain.response(2, [Some(2), Some(3)])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
@@ -788,7 +794,6 @@ mod tests {
 
         let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
         assert_eq!(lists, [credit(10), credit(20), credit(30)]);
-        let hashes: Vec<_> = headers.iter().map(SealedHeader::hash).collect();
         assert_eq!(*client.block_requests(), [hashes.clone(), hashes[1..].to_vec()]);
     }
 }
