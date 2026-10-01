@@ -71,12 +71,9 @@ pub trait SnapAttemptStore {
     /// is on.
     ///
     /// `Ok(None)` when the kept headers do not reach back to where the branches part.
-    fn snap_reorg(
-        &self,
-        write: SnapWrite,
-    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
+    fn snap_reorg(&self, write: SnapWrite) -> Result<Option<SnapReorg>, SnapSyncError>
     where
-        Self: HeaderProvider + BlockHashReader;
+        Self: BlockHashReader;
 
     /// Schedules what `lists`, those of the orphaned blocks, changed in the downloaded state for
     /// repair, and moves the attempt to `generation` with catch-up back at `ancestor` at most.
@@ -221,12 +218,9 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         Ok(())
     }
 
-    fn snap_reorg(
-        &self,
-        write: SnapWrite,
-    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
+    fn snap_reorg(&self, write: SnapWrite) -> Result<Option<SnapReorg>, SnapSyncError>
     where
-        Self: HeaderProvider + BlockHashReader,
+        Self: BlockHashReader,
     {
         StoredAncestry::reorg(self, &self.authorize_snap_write(write)?)
     }

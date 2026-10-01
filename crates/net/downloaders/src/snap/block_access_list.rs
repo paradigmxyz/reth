@@ -41,19 +41,13 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
         headers: &[SealedHeader<H>],
         runtime: Runtime,
     ) -> Result<Self, InvalidBlockAccessListRequest> {
-        if request.block_hashes.is_empty() {
-            return Err(InvalidBlockAccessListRequest::NoBlocks)
-        }
         if request.block_hashes.len() != headers.len() {
             return Err(InvalidBlockAccessListRequest::HeaderCount {
                 requested: request.block_hashes.len(),
                 supplied: headers.len(),
             })
         }
-
-        // Only authenticated block identities cross into blocking work, so the verifier stays
-        // free of the caller's header type.
-        let mut blocks = Vec::with_capacity(headers.len());
+        let mut commitments = Vec::with_capacity(headers.len());
         for (index, (requested, header)) in request.block_hashes.iter().zip(headers).enumerate() {
             if *requested != header.hash() {
                 return Err(InvalidBlockAccessListRequest::HashMismatch {
@@ -68,13 +62,34 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
                     block_hash: *requested,
                 })
             };
-            blocks.push((*requested, commitment));
+            commitments.push(commitment);
         }
+        Self::with_commitments(client, request, commitments, runtime)
+    }
 
+    /// Creates a downloader that verifies each requested block's list against the commitment at
+    /// the same position of `commitments`.
+    pub fn with_commitments(
+        client: C,
+        request: GetBlockAccessListsMessage,
+        commitments: Vec<B256>,
+        runtime: Runtime,
+    ) -> Result<Self, InvalidBlockAccessListRequest> {
+        if request.block_hashes.is_empty() {
+            return Err(InvalidBlockAccessListRequest::NoBlocks)
+        }
+        if request.block_hashes.len() != commitments.len() {
+            return Err(InvalidBlockAccessListRequest::HeaderCount {
+                requested: request.block_hashes.len(),
+                supplied: commitments.len(),
+            })
+        }
+        // Only authenticated block identities cross into blocking work, so the verifier stays
+        // free of the caller's header type.
         let verifier = BlockAccessListVerifier {
             request_id: request.request_id,
             response_bytes: request.response_bytes,
-            blocks,
+            blocks: request.block_hashes.iter().copied().zip(commitments).collect(),
         };
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
     }
@@ -632,6 +647,17 @@ mod tests {
         assert!(matches!(
             downloader(Arc::clone(&client), request(&headers), &uncommitted).unwrap_err(),
             InvalidBlockAccessListRequest::MissingCommitment { index: 0, .. }
+        ));
+
+        let uncounted = BlockAccessListDownloader::with_commitments(
+            Arc::clone(&client),
+            request(&headers),
+            Vec::new(),
+            Runtime::test(),
+        );
+        assert!(matches!(
+            uncounted.unwrap_err(),
+            InvalidBlockAccessListRequest::HeaderCount { requested: 1, supplied: 0 }
         ));
 
         // Nothing reached the network.

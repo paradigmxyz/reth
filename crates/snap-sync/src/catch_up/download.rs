@@ -3,13 +3,15 @@
 //! Headers are read again each request, so a reorged anchor is caught before peers are asked.
 
 use crate::{
-    common::DownloadContext, CatchUpProgress, SnapAttemptStore, SnapCatchUpStore, SnapSyncError,
-    SnapWrite,
+    common::DownloadContext, CatchUpProgress, KeptBlock, SnapAttemptStore, SnapCatchUpStore,
+    SnapSyncError, SnapWrite,
 };
 use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
 use alloy_primitives::Sealable;
 use reth_db_api::transaction::DbTxMut;
-use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
+use reth_downloaders::snap::{
+    BlockAccessListDownloader, BlockAccessListOutcome, InvalidBlockAccessListRequest,
+};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
 use reth_network_p2p::snap::client::SnapClient;
 use reth_network_peers::PeerId;
@@ -125,20 +127,20 @@ where
         Ok(CatchUpStep::Applied { progress, blocks })
     }
 
-    /// Fetches the lists of `headers`, blocks a reorg orphaned, in order.
+    /// Fetches the lists of `blocks`, which a reorg orphaned, in order.
     ///
     /// A response cut short at the byte limit keeps the lists it served and the rest is asked for
     /// again. `Ok(None)` once a request serves none of the remaining lists, since repairing the
     /// state needs every one.
-    pub async fn orphaned_lists<H: AlloyBlockHeader + Sealable>(
+    pub async fn orphaned_lists(
         &mut self,
-        headers: &[SealedHeader<H>],
+        blocks: &[KeptBlock],
     ) -> Result<Option<Vec<DecodedBal>>, SnapSyncError> {
-        let mut lists = Vec::with_capacity(headers.len());
-        while lists.len() < headers.len() {
-            let end = headers.len().min(lists.len() + self.max_blocks as usize);
+        let mut lists = Vec::with_capacity(blocks.len());
+        while lists.len() < blocks.len() {
+            let end = blocks.len().min(lists.len() + self.max_blocks as usize);
             let BlockAccessListOutcome::Verified(verified) =
-                self.request(&headers[lists.len()..end]).await?
+                self.request_kept(&blocks[lists.len()..end]).await?
             else {
                 return Ok(None)
             };
@@ -166,6 +168,33 @@ where
             self.context.client().clone(),
             request,
             headers,
+            self.context.runtime().clone(),
+        )?;
+        Ok(downloader.await?)
+    }
+
+    // Requests the lists of `blocks`, each authenticated against its kept commitment.
+    async fn request_kept(
+        &mut self,
+        blocks: &[KeptBlock],
+    ) -> Result<BlockAccessListOutcome, SnapSyncError> {
+        let mut commitments = Vec::with_capacity(blocks.len());
+        for (index, block) in blocks.iter().enumerate() {
+            let block_hash = block.num_hash().hash;
+            let commitment = block
+                .commitment()
+                .ok_or(InvalidBlockAccessListRequest::MissingCommitment { index, block_hash })?;
+            commitments.push(commitment);
+        }
+        let request = GetBlockAccessListsMessage {
+            request_id: self.context.next_request_id(),
+            block_hashes: blocks.iter().map(|block| block.num_hash().hash).collect(),
+            response_bytes: self.context.response_bytes(),
+        };
+        let downloader = BlockAccessListDownloader::with_commitments(
+            self.context.client().clone(),
+            request,
+            commitments,
             self.context.runtime().clone(),
         )?;
         Ok(downloader.await?)
@@ -739,43 +768,46 @@ mod tests {
     #[tokio::test]
     async fn orphaned_lists_are_fetched_in_order_across_requests() {
         let chain = chain();
-        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        let headers = &chain.headers[PIVOT as usize + 1..];
+        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
         let responses = [chain.response(1, [Some(1), Some(2)]), chain.response(2, [Some(3)])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 2);
 
-        let lists = catch_up.orphaned_lists(orphaned).await.unwrap().unwrap();
+        let lists = catch_up.orphaned_lists(&orphaned).await.unwrap().unwrap();
 
         let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
         assert_eq!(lists, [credit(10), credit(20), credit(30)]);
-        let hashes: Vec<_> = orphaned.iter().map(SealedHeader::hash).collect();
+        let hashes: Vec<_> = headers.iter().map(SealedHeader::hash).collect();
         assert_eq!(*client.block_requests(), [hashes[..2].to_vec(), hashes[2..].to_vec()]);
     }
 
     #[tokio::test]
     async fn a_missing_orphaned_list_fetches_nothing() {
         let chain = chain();
-        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        let headers = &chain.headers[PIVOT as usize + 1..];
+        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
         // No peer holds the last orphaned block's list any more.
         let responses = [chain.response(1, [Some(1), Some(2), None]), chain.response(2, [None])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
 
-        assert!(catch_up.orphaned_lists(orphaned).await.unwrap().is_none());
+        assert!(catch_up.orphaned_lists(&orphaned).await.unwrap().is_none());
         assert_eq!(client.block_requests().len(), 2);
     }
 
     #[tokio::test]
     async fn a_response_cut_short_keeps_its_lists_and_fetches_the_rest() {
         let chain = chain();
-        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        let headers = &chain.headers[PIVOT as usize + 1..];
+        let orphaned: Vec<_> = headers.iter().map(KeptBlock::of).collect();
         // The first response stops at the byte limit after one list.
         let responses = [chain.response(1, [Some(1)]), chain.response(2, [Some(2), Some(3)])];
         let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
 
-        let lists = catch_up.orphaned_lists(orphaned).await.unwrap().unwrap();
+        let lists = catch_up.orphaned_lists(&orphaned).await.unwrap().unwrap();
 
         let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
         assert_eq!(lists, [credit(10), credit(20), credit(30)]);
-        let hashes: Vec<_> = orphaned.iter().map(SealedHeader::hash).collect();
+        let hashes: Vec<_> = headers.iter().map(SealedHeader::hash).collect();
         assert_eq!(*client.block_requests(), [hashes.clone(), hashes[1..].to_vec()]);
     }
 }
