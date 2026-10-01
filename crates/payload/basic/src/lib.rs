@@ -467,6 +467,7 @@ where
         let mut state_root_handle = self.state_root_handle.take();
         let on_payload_built =
             state_root_handle.as_mut().and_then(PayloadStateRootHandle::take_on_payload_built);
+        let state_provider_factory = self.state_provider_factory.clone();
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
@@ -497,8 +498,8 @@ where
                 }
                 drop(leases);
                 let _ = tx.send(result);
-            }));
-        }));
+            });
+        });
 
         self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
     }
@@ -650,6 +651,7 @@ where
                     let (tx, rx) = oneshot::channel();
                     let args = self.empty_payload_arguments();
                     let builder = self.builder.clone();
+                    let leases = self.leases.clone();
                     let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
@@ -658,11 +660,11 @@ where
                             let _span =
                                 debug_span!(target: "payload_builder", "build_empty_payload")
                                     .entered();
-                            let res = builder.build_empty_payload(config);
+                            let res = builder.build_empty_payload_with_args(args);
                             drop(leases);
                             let _ = tx.send(res);
                         },
-                    ));
+                    );
 
                     empty_payload = Some(rx);
                 }
@@ -670,6 +672,7 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
+                    let leases = self.leases.clone();
                     let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
@@ -678,9 +681,11 @@ where
                             let _span =
                                 debug_span!(target: "payload_builder", "build_fallback_payload")
                                     .entered();
-                            let _ = tx.send(job());
+                            let result = job();
+                            drop(leases);
+                            let _ = tx.send(result);
                         },
-                    ));
+                    );
                     empty_payload = Some(rx);
                 }
             };
