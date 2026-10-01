@@ -1256,11 +1256,11 @@ impl Discv4Service {
             self.try_ping(record, PingReason::InitialInsert);
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
-        } else if is_proven {
+        } else {
             // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
-            if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
+            if is_proven && let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
                 if self.pending_find_nodes.contains_key(&record.id) {
                     // there's already another pending request, unmark it so the next round can
                     // try to send it
@@ -1271,7 +1271,7 @@ impl Discv4Service {
                     self.find_node(&record, ctx);
                 }
             }
-        } else {
+
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
                 (Some(new), Some(old)) if new > old => {
@@ -1630,9 +1630,23 @@ impl Discv4Service {
     }
 
     fn evict_expired_requests(&mut self, now: Instant) {
-        self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.enr_expiration
+        let mut failed_enr_requests = Vec::new();
+        self.pending_enr_requests.retain(|node_id, enr_request| {
+            if now.duration_since(enr_request.sent_at) < self.config.enr_expiration {
+                return true
+            }
+            failed_enr_requests.push(*node_id);
+            false
         });
+
+        // forget the announced enr seq, so the next ping or pong requests the ENR again.
+        for node_id in failed_enr_requests {
+            match self.kbuckets.entry(&kad_key(node_id)) {
+                kbucket::Entry::Present(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                kbucket::Entry::Pending(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                _ => {}
+            }
+        }
 
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
@@ -2686,6 +2700,42 @@ mod tests {
         let mut encoded = Vec::with_capacity(expected.len());
         original.encode(&mut encoded);
         assert_eq!(&expected[..], encoded.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_request_enr_of_proven_node() {
+        reth_tracing::init_test_tracing();
+        let mut rng = rand_08::thread_rng();
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let addr: SocketAddr = (Ipv4Addr::new(10, 0, 0, 1), DEFAULT_DISCOVERY_PORT).into();
+        let mut entry = NodeEntry::new_proven(NodeRecord::new(addr, id));
+        entry.last_enr_seq = Some(1);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            entry,
+            NodeStatus {
+                direction: ConnectionDirection::Outgoing,
+                state: ConnectionState::Connected,
+            },
+        );
+        let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
+            from: rng_endpoint(rng),
+            to: rng_endpoint(rng),
+            expire: service.ping_expiration(),
+            enr_sq: Some(2),
+        };
+
+        // the node announces a newer record.
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
+
+        // the request goes unanswered, so the next ping has to ask again.
+        service.evict_expired_requests(Instant::now() + service.config.enr_expiration * 2);
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
     }
 
     #[test]
