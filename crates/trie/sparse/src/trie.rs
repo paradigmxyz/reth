@@ -335,10 +335,8 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] with two bits set.
     pub fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
-        let state_mask = TrieMask::new(
-            // set bits for both children
-            (1u16 << bit_a) | (1u16 << bit_b),
-        );
+        // set bits for both children
+        let state_mask = TrieMask::from_nibble(bit_a) | TrieMask::from_nibble(bit_b);
         Self::Branch {
             state_mask,
             state: SparseNodeState::Dirty,
@@ -457,18 +455,4 @@ pub struct RlpNodeStackItem {
     pub rlp_node: RlpNode,
     /// Type of the node.
     pub node_type: SparseNodeType,
-}
-
-impl SparseTrieUpdates {
-    /// Clears the updates, but keeps the backing data structures allocated.
-    pub fn clear(&mut self) {
-        self.updated_nodes.clear();
-        self.removed_nodes.clear();
-    }
-
-    /// Extends the updates with another set of updates.
-    pub fn extend(&mut self, other: Self) {
-        self.updated_nodes.extend(other.updated_nodes);
-        self.removed_nodes.extend(other.removed_nodes);
-    }
 }

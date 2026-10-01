@@ -155,6 +155,12 @@
       "unit": "seconds"
     },
     {
+      "query": "reth_sparse_state_trie_take_updates_duration_seconds",
+      "target": "decrease",
+      "floor_pct": 2.5,
+      "min_value_pct_total_latency": 0.0
+    },
+    {
       "query": "reth_executor_named_worker_queue_wait_duration_seconds",
       "target": "decrease",
       "floor_pct": 10.0,

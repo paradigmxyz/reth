@@ -54,6 +54,9 @@ use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 ///
 /// The ordered commit loop applies Ethereum block-level gas admission. Executors with different
 /// admission rules, such as segment-scoped gas budgets, must align those checks before using it.
+///
+/// Returns the execution output, the recovered senders, the BAL rebuilt from this execution, and
+/// the received BAL in the revm representation the workers consumed.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -66,7 +69,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -109,7 +112,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -221,6 +224,7 @@ where
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
         built_bal,
+        input_bal_revm,
     ))
 }
 
@@ -379,7 +383,7 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
@@ -405,33 +409,17 @@ mod tests {
         let mut db = CacheDB::<EmptyDB>::new(Default::default());
         db.insert_account_info(
             BEACON_ROOTS_ADDRESS,
-            AccountInfo {
-                balance: U256::ZERO,
-                nonce: 1,
-                code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
-                code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-                account_id: None,
-            },
+            AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
         );
         db.insert_account_info(
             WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-            AccountInfo {
-                balance: U256::ZERO,
-                nonce: 1,
-                code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-                code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-                account_id: None,
-            },
+            AccountInfo::from_bytecode(Bytecode::new_raw(
+                WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone(),
+            )),
         );
         db.insert_account_info(
             HISTORY_STORAGE_ADDRESS,
-            AccountInfo {
-                balance: U256::ZERO,
-                nonce: 1,
-                code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
-                code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
-                account_id: None,
-            },
+            AccountInfo::from_bytecode(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
         );
         db
     }
@@ -608,14 +596,14 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal, _)| (output, built_bal))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
     fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
         db.insert_account_info(
             addr,
-            AccountInfo { nonce: 0, balance, code_hash: B256::ZERO, code: None, account_id: None },
+            AccountInfo { balance, code_hash: B256::ZERO, code: None, ..Default::default() },
         );
     }
 
@@ -725,21 +713,19 @@ mod tests {
                 db.insert_account_info(
                     alice,
                     AccountInfo {
-                        nonce: 0,
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     },
                 );
                 db.insert_account_info(
                     bob,
                     AccountInfo {
-                        nonce: 0,
                         balance: sender_balance,
                         code_hash: B256::ZERO,
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     },
                 );
                 db
@@ -1283,7 +1269,7 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{keccak256, Bytes, TxKind};
+        use alloy_primitives::{Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
@@ -1299,18 +1285,11 @@ mod tests {
 
         // Deploy the revert contract bytecode.
         let revert_code: Bytes = Bytes::from_static(&[0x60, 0x00, 0x60, 0x00, 0xfd]);
-        let code_hash = keccak256(&revert_code);
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         db.insert_account_info(
             revert_contract,
-            AccountInfo {
-                nonce: 1,
-                balance: U256::ZERO,
-                code_hash,
-                code: Some(Bytecode::new_raw(revert_code)),
-                account_id: None,
-            },
+            AccountInfo::from_bytecode(Bytecode::new_raw(revert_code)),
         );
 
         let tx = Recovered::new_unchecked(
@@ -1340,7 +1319,7 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         use alloy_consensus::TxLegacy;
-        use alloy_primitives::{keccak256, Bytes, TxKind};
+        use alloy_primitives::{Bytes, TxKind};
         use reth_chainspec::MAINNET;
         use reth_ethereum_primitives::Transaction;
         use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
@@ -1356,18 +1335,11 @@ mod tests {
 
         // Deploy the SSTORE contract.
         let sstore_code: Bytes = Bytes::from_static(&[0x60, 0x42, 0x60, 0x00, 0x55, 0x00]);
-        let code_hash = keccak256(&sstore_code);
         let mut db = system_contracts_db();
         insert_funded(&mut db, alice, sender_balance);
         db.insert_account_info(
             sstore_contract,
-            AccountInfo {
-                nonce: 1,
-                balance: U256::ZERO,
-                code_hash,
-                code: Some(Bytecode::new_raw(sstore_code)),
-                account_id: None,
-            },
+            AccountInfo::from_bytecode(Bytecode::new_raw(sstore_code)),
         );
 
         let tx = Recovered::new_unchecked(

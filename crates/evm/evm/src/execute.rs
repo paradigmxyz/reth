@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -21,7 +21,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostState};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
     state::bal::Bal,
@@ -310,12 +310,13 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub execution_result: BlockExecutionResult<N::Receipt>,
     /// Hashed state after execution.
     pub hashed_state: HashedPostState,
-    /// Trie updates collected during state root calculation.
-    pub trie_updates: TrieUpdates,
+    /// Sorted trie updates collected during state root calculation.
+    pub trie_updates: Arc<TrieUpdatesSorted>,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
+    /// Block access list built during execution (EIP-7928, Amsterdam), with its RLP bytes and
+    /// hash.
+    pub block_access_list: Option<DecodedBal>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -370,12 +371,12 @@ pub trait BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`].
     ///
     /// When `state_root_precomputed` is `None`, the state root is computed internally via
-    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
-    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
+    /// `state_root_with_updates()` and its updates are sorted. When `Some`, the provided root
+    /// and shared sorted updates are used directly (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
         state_provider: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
+        state_root_precomputed: Option<(B256, Arc<TrieUpdatesSorted>)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
@@ -502,7 +503,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
-        state_root_precomputed: Option<(B256, TrieUpdates)>,
+        state_root_precomputed: Option<(B256, Arc<TrieUpdatesSorted>)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -510,17 +511,24 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        let block_access_list = db.take_built_alloy_bal();
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+        // Encode the built BAL once and keep the bytes, so callers don't re-encode it.
+        let block_access_list = db.take_built_alloy_bal().map(|bal| {
+            let mut raw = Vec::new();
+            let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
+            DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
+        });
+        let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
 
         let hashed_state =
             state.hashed_post_state(&db.bundle_state).map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
-            None => state
-                .state_root_with_updates(hashed_state.clone())
-                .map_err(BlockExecutionError::other)?,
+            None => {
+                let (root, updates) = state
+                    .state_root_with_updates(hashed_state.clone())
+                    .map_err(BlockExecutionError::other)?;
+                (root, Arc::new(updates.into_sorted()))
+            }
         };
 
         let (transactions, senders) =
@@ -654,7 +662,7 @@ where
     }
 
     fn size_hint(&self) -> usize {
-        self.db.bundle_state.size_hint()
+        self.db.bundle_size_hint()
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {

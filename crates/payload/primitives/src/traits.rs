@@ -4,13 +4,12 @@ use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostState};
 
 /// Represents an executed block for payload building purposes.
 ///
@@ -24,8 +23,8 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
     pub execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
     /// Block's hashed state (unsorted).
     pub hashed_state: Arc<HashedPostState>,
-    /// Trie updates that result from calculating the state root for the block (unsorted).
-    pub trie_updates: Arc<TrieUpdates>,
+    /// Sorted trie updates that result from calculating the state root for the block.
+    pub trie_updates: Arc<TrieUpdatesSorted>,
 }
 
 /// Represents a successfully built execution payload (block).
@@ -203,9 +202,7 @@ pub fn payload_id(
     hasher.update(attributes.prev_randao.as_slice());
     hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
-        let mut buf = Vec::new();
-        withdrawals.encode(&mut buf);
-        hasher.update(buf);
+        hasher.update(alloy_rlp::encode(withdrawals));
     }
 
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {

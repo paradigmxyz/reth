@@ -112,3 +112,6 @@ mod full;
 pub use full::*;
 
 pub mod macros;
+
+mod evm;
+pub use evm::*;

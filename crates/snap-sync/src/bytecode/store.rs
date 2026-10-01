@@ -98,7 +98,10 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{account, generation, hashed_factory, key, state_root, verified_range};
+    use crate::test_utils::{
+        account, generation, hashed_factory, insert_generation_headers, key, state_root,
+        verified_range,
+    };
     use alloy_primitives::bytes;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
@@ -120,6 +123,7 @@ mod tests {
 
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.commit().unwrap();
