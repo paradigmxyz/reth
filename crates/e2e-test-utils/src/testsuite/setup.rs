@@ -37,7 +37,9 @@ pub struct Setup<I> {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
-    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    /// Whether to force v2 storage mode (hashed keys, static file changesets, rocksdb history).
+    ///
+    /// v2 is already the default, so `false` does not mean v1.
     pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
@@ -128,7 +130,10 @@ where
         self
     }
 
-    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history).
+    ///
+    /// See [`E2ETestSetupBuilder::with_storage_v2`]: v2 is already the default, so this is kept
+    /// for explicitness.
     pub const fn with_storage_v2(mut self) -> Self {
         self.storage_v2 = true;
         self

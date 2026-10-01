@@ -85,14 +85,19 @@ where
         self
     }
 
-    /// Sets a modifier function for the node configuration.
+    /// Adds a modifier function for the node configuration.
     ///
-    /// The closure receives the base node config and returns a modified version.
+    /// The closure receives the node config and returns a modified version. Modifiers compose:
+    /// each one runs after all previously added modifiers, including those added by helpers such
+    /// as [`Self::with_pruning`].
     pub fn with_node_config_modifier<G>(mut self, modifier: G) -> Self
     where
         G: Fn(NodeConfig<N::ChainSpec>) -> NodeConfig<N::ChainSpec> + Send + Sync + 'static,
     {
-        self.node_config_modifier = Some(Box::new(modifier));
+        self.node_config_modifier = Some(match self.node_config_modifier.take() {
+            Some(prev) => Box::new(move |config| modifier(prev(config))),
+            None => Box::new(modifier),
+        });
         self
     }
 
@@ -103,6 +108,10 @@ where
 
     /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
     /// indices, etc. to `RocksDB` and changesets/senders to static files.
+    ///
+    /// `--storage.v2` is already the default, so this is a no-op unless the global default was
+    /// changed via [`DefaultStorageValues`](reth_node_core::args::DefaultStorageValues). It is
+    /// kept so tests that depend on v2 storage state that explicitly.
     pub fn with_storage_v2(self) -> Self {
         self.with_node_config_modifier(|mut config| {
             config.storage.v2 = true;
@@ -220,5 +229,29 @@ where
             .field("tree_config_modifier", &self.tree_config_modifier.as_ref().map(|_| "<closure>"))
             .field("node_config_modifier", &self.node_config_modifier.as_ref().map(|_| "<closure>"))
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_chainspec::MAINNET;
+    use reth_node_core::args::PruningArgs;
+    use reth_node_ethereum::EthereumNode;
+
+    #[test]
+    fn node_config_modifiers_compose() {
+        let builder = E2ETestSetupBuilder::<EthereumNode, _>::new(1, MAINNET.clone(), |_| {
+            PayloadAttributes::default()
+        })
+        .with_node_config_modifier(|config| config.set_dev(true))
+        .with_pruning(PruningArgs { full: true, ..Default::default() });
+
+        let modifier = builder.node_config_modifier.expect("node config modifier is set");
+        let config = modifier(NodeConfig::new(MAINNET.clone()));
+
+        assert!(config.dev.dev);
+        assert!(config.pruning.full);
     }
 }
