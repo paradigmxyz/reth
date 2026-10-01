@@ -269,17 +269,21 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
                 self.remove::<tables::HashedStorages>(*hashed_address..=*hashed_address)?;
             }
         }
-        self.commit_bytecodes(write, bytecodes.into_iter().collect())?;
-        self.write_hashed_state(&state.into_sorted())?;
-        // A canonical list overwrites the stale values of the fields it changes.
+        // A canonical list overwrites the stale values of the fields it changes, in the accounts it
+        // writes.
         let mut repairs = self.snap_repairs(write)?;
         let mut resolved = false;
         for changes in bal {
             if repairs.is_empty() {
                 break
             }
-            resolved |= repairs.resolve_changes(keccak256(changes.address()), changes);
+            let hashed_address = keccak256(changes.address());
+            if state.accounts.contains_key(&hashed_address) {
+                resolved |= repairs.resolve_changes(hashed_address, changes);
+            }
         }
+        self.commit_bytecodes(write, bytecodes.into_iter().collect())?;
+        self.write_hashed_state(&state.into_sorted())?;
         if resolved {
             StoredRepairs::store(self, write.attempt(), repairs)?;
         }
@@ -791,5 +795,21 @@ mod tests {
             &AccountChanges::new(CHANGED).with_nonce_change(NonceChange::new(index(1), 1)),
         );
         assert_eq!(provider.snap_repairs(write).unwrap(), expected);
+    }
+
+    #[test]
+    fn repairs_of_an_account_outside_the_coverage_stay_scheduled() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, changed_index(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(keccak256(CHANGED));
+        provider.schedule_snap_repairs(write, repairs.clone()).unwrap();
+        let (block, parent) = block(2);
+
+        // The list changes the balance, but leaves the account to its range.
+        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
+
+        assert_eq!(provider.snap_repairs(write).unwrap(), repairs);
     }
 }
