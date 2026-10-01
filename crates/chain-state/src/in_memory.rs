@@ -18,7 +18,9 @@ use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, LazyHashedPostStateSorted};
+use reth_trie::{
+    updates::TrieUpdatesSorted, BlockTrieData, HashedPostStateSorted, LazyHashedPostStateSorted,
+};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -834,6 +836,14 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
+    /// Returns shared trie data without waiting for hashed-state sorting.
+    pub fn trie_data(&self) -> BlockTrieData {
+        BlockTrieData {
+            hashed_state: self.hashed_state.clone(),
+            trie_updates: Arc::clone(&self.trie_updates),
+        }
+    }
+
     /// Returns the hashed state result of the execution outcome.
     ///
     /// May wait for hashed-state sorting if the deferred task has not completed.
@@ -939,7 +949,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         first.execution_outcome().clone(),
                         first.block_number(),
                     )),
-                    (first.hashed_state.clone(), first.trie_updates()),
+                    first.trie_data(),
                 );
                 for exec in rest {
                     chain.append_block(
@@ -948,7 +958,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                             exec.execution_outcome().clone(),
                             exec.block_number(),
                         )),
-                        (exec.hashed_state.clone(), exec.trie_updates()),
+                        exec.trie_data(),
                     );
                 }
                 chain
@@ -1009,7 +1019,7 @@ mod tests {
         );
         let (tx, rx) = std::sync::mpsc::channel();
         let reader = std::thread::spawn(move || {
-            let count = block.trie_updates_ref().total_len();
+            let count = block.trie_data().trie_updates.total_len();
             tx.send((count, block.trie_updates())).unwrap();
             block
         });
@@ -1389,8 +1399,8 @@ mod tests {
 
         // Build expected trie data map
         let mut expected_trie_data = BTreeMap::new();
-        expected_trie_data.insert(0, (block0.hashed_state.clone(), block0.trie_updates()));
-        expected_trie_data.insert(1, (block1.hashed_state.clone(), block1.trie_updates()));
+        expected_trie_data.insert(0, block0.trie_data());
+        expected_trie_data.insert(1, block1.trie_data());
 
         // Build expected execution outcome (first_block matches first block number)
         let commit_execution_outcome = ExecutionOutcome {
@@ -1419,13 +1429,13 @@ mod tests {
 
         // Build expected trie data for old chain
         let mut old_trie_data = BTreeMap::new();
-        old_trie_data.insert(1, (block1.hashed_state.clone(), block1.trie_updates()));
-        old_trie_data.insert(2, (block2.hashed_state.clone(), block2.trie_updates()));
+        old_trie_data.insert(1, block1.trie_data());
+        old_trie_data.insert(2, block2.trie_data());
 
         // Build expected trie data for new chain
         let mut new_trie_data = BTreeMap::new();
-        new_trie_data.insert(1, (block1a.hashed_state.clone(), block1a.trie_updates()));
-        new_trie_data.insert(2, (block2a.hashed_state.clone(), block2a.trie_updates()));
+        new_trie_data.insert(1, block1a.trie_data());
+        new_trie_data.insert(2, block2a.trie_data());
 
         // Build expected execution outcome for reorg chains (first_block matches first block
         // number)

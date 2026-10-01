@@ -13,7 +13,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
     RecoveredBlock, SealedHeader,
 };
-use reth_trie_common::{updates::TrieUpdatesSorted, LazyHashedPostStateSorted};
+use reth_trie_common::BlockTrieData;
 
 /// A chain of blocks and their final state.
 ///
@@ -40,7 +40,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Hashed state and trie updates for each block, keyed by block number.
     ///
     /// Hashed state may still be pending; sorted trie updates are available immediately.
-    trie_data: BTreeMap<BlockNumber, (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>)>,
+    trie_data: BTreeMap<BlockNumber, BlockTrieData>,
     /// Block access lists prepared during block validation, keyed by block number.
     ///
     /// A missing entry means the BAL was not available for that block, not that the block has
@@ -79,7 +79,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item: Into<Arc<RecoveredBlock<N::Block>>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BTreeMap<BlockNumber, (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>)>,
+        trie_data: BTreeMap<BlockNumber, BlockTrieData>,
     ) -> Self {
         let blocks = blocks
             .into_iter()
@@ -97,7 +97,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>),
+        trie_data: BlockTrieData,
     ) -> Self {
         let block = block.into();
         let block_number = block.header().number();
@@ -120,17 +120,12 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all trie data for this chain.
-    pub const fn trie_data(
-        &self,
-    ) -> &BTreeMap<BlockNumber, (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>)> {
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, BlockTrieData> {
         &self.trie_data
     }
 
     /// Get trie data for a specific block number.
-    pub fn trie_data_at(
-        &self,
-        block_number: BlockNumber,
-    ) -> Option<&(LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>)> {
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&BlockTrieData> {
         self.trie_data.get(&block_number)
     }
 
@@ -216,7 +211,7 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>)>,
+        BTreeMap<BlockNumber, BlockTrieData>,
     ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
@@ -387,7 +382,7 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: (LazyHashedPostStateSorted, Arc<TrieUpdatesSorted>),
+        trie_data: BlockTrieData,
     ) {
         let block = block.into();
         let block_number = block.header().number();
@@ -564,7 +559,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::LazyHashedPostStateSorted;
+    use reth_trie_common::{BlockTrieData, LazyHashedPostStateSorted};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -631,12 +626,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(number, (_, updates))| (*number, updates.as_ref().into()))
+                    .map(|(number, data)| (*number, data.trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(number, (state, _))| (*number, state.get().as_ref().into()))
+                    .map(|(number, data)| (*number, data.hashed_state.get().as_ref().into()))
                     .collect(),
             }
         }
@@ -657,7 +652,13 @@ pub(super) mod serde_bincode_compat {
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
-                    (k, (LazyHashedPostStateSorted::ready(hashed_state), Arc::new(v.into())))
+                    (
+                        k,
+                        BlockTrieData {
+                            hashed_state: LazyHashedPostStateSorted::ready(hashed_state),
+                            trie_updates: Arc::new(v.into()),
+                        },
+                    )
                 })
                 .collect();
 

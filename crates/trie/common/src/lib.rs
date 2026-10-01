@@ -20,6 +20,9 @@ pub use execution_witness::ExecutionWitnessMode;
 mod lazy_hashed_state;
 pub use lazy_hashed_state::{HashedPostStateSortedProducer, LazyHashedPostStateSorted};
 
+mod block_trie_data;
+pub use block_trie_data::BlockTrieData;
+
 /// In-memory hashed state.
 mod hashed_state;
 pub use hashed_state::*;
