@@ -317,6 +317,10 @@ where
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
     }
+
+    fn check_block_gas_limit(&self) -> bool {
+        self.validator.check_block_gas_limit()
+    }
 }
 
 /// Decrements the pending-send count even if the send future is cancelled.

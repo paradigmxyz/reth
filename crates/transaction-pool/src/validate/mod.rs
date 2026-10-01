@@ -238,6 +238,15 @@ pub trait TransactionValidator: Debug + Send + Sync {
     ///
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
+
+    /// Whether total transaction gas must fit within the current block gas limit.
+    ///
+    /// The pool applies this policy again when inserting validated transactions. Chains with
+    /// separate execution and state gas can disable this check while enforcing their execution
+    /// limits during validation and block building. Refreshed after each head notification.
+    fn check_block_gas_limit(&self) -> bool {
+        true
+    }
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
@@ -278,6 +287,13 @@ where
         match self {
             Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
             Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
+        }
+    }
+
+    fn check_block_gas_limit(&self) -> bool {
+        match self {
+            Self::Left(v) => v.check_block_gas_limit(),
+            Self::Right(v) => v.check_block_gas_limit(),
         }
     }
 
