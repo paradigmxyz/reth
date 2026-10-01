@@ -313,21 +313,6 @@ mod tests {
         stored_slots(&factory.database_provider_ro().unwrap(), account)
     }
 
-    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
-    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
-        let (factory, _) = started(accounts);
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.active_snap_write().unwrap().unwrap();
-        let mut repairs = StateRepairs::default();
-        for slot in slots {
-            repairs.insert_slot(key(2), *slot);
-        }
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let range = verified_repair(accounts, 1..2, key(2), &[key(2)]);
-        (factory, VerifiedRange::new(write, range))
-    }
-
     #[tokio::test]
     async fn a_contract_spanning_responses_is_committed_response_by_response() {
         let accounts = accounts();
@@ -548,6 +533,21 @@ mod tests {
 
         assert!(next <= key(2));
         assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
+    }
+
+    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
+    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
+        let (factory, _) = started(accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let mut repairs = StateRepairs::default();
+        for slot in slots {
+            repairs.insert_slot(key(2), *slot);
+        }
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let range = verified_repair(accounts, 1..2, key(2), &[key(2)]);
+        (factory, VerifiedRange::new(write, range))
     }
 
     #[tokio::test]

@@ -485,7 +485,7 @@ impl<C, F, X> fmt::Debug for SnapBootstrap<C, F, X> {
 /// How a [`SnapBootstrap`] run ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SnapBootstrapOutcome {
-    /// The downloaded state is complete and handed to the merkle stage. Once the stage reaches
+    /// The downloaded state is complete and handed to the merkle stage; once the stage reaches
     /// `pivot`, [`SnapStateVerifier::verify_state_root`] accepts it under `write`.
     TrieRebuild {
         /// Write the state was downloaded under.
@@ -531,13 +531,13 @@ enum Resolved {
 // What one pass over the attempt left to do.
 enum Step {
     HandedOff(SnapWrite),
-    // The range budget ran out, so the pivot is checked again before more ranges.
+    // The range budget ran out; the pivot is checked again before more ranges.
     Continue,
     // Peers or headers are missing until the node progresses.
     Wait,
     // The attempt's state can no longer be carried forward.
     Restart,
-    // The run was cancelled, and committed progress stays for the next one.
+    // The run was cancelled; committed progress stays for the next one.
     Stop,
 }
 
@@ -547,8 +547,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, account_range, hashed_factory, header, key, policy, state_root,
-            storage_ranges, storage_root_of, stored_slots, verified_range, ReorgFactoryExt,
-            ScriptedSnapClient,
+            storage_ranges, storage_root_of, verified_range, ReorgFactoryExt, ScriptedSnapClient,
         },
         StateRepairs, VerifiedSnapState,
     };
@@ -558,7 +557,7 @@ mod tests {
     };
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage, StorageRangesMessage},
+        snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{
@@ -587,6 +586,386 @@ mod tests {
     // Untouched by the orphaned branch.
     const KEPT: Address = Address::repeat_byte(0x52);
 
+    fn accounts() -> Vec<(B256, TrieAccount)> {
+        vec![(key(1), account(1)), (key(2), account(2)), (FAR, account(3))]
+    }
+
+    // Blocks `0..=tip`, each committing to an empty list and to `root`, so any of them anchors
+    // the same state.
+    fn insert_chain(factory: &Factory, tip: u64, root: B256) {
+        insert_headers(factory, &chain(tip, root));
+    }
+
+    // A peer serving `blocks` empty lists.
+    fn empty_lists(request_id: u64, blocks: usize) -> PeerRequestResult<SnapResponse> {
+        lists(request_id, &vec![Vec::new(); blocks], true)
+    }
+
+    // A peer holding no list for the first block it is asked for.
+    fn no_lists(request_id: u64) -> PeerRequestResult<SnapResponse> {
+        lists(request_id, &[Vec::new()], false)
+    }
+
+    fn scripted(
+        factory: &Factory,
+        responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>,
+        heads: impl IntoIterator<Item = u64>,
+    ) -> (Arc<ScriptedSnapClient>, Bootstrap) {
+        let client = Arc::new(ScriptedSnapClient::new(responses));
+        let context = TestContext { heads: RefCell::new(heads.into_iter().collect()), waits: 0 };
+        let bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy());
+        (client, bootstrap)
+    }
+
+    fn attempt_id(factory: &Factory) -> SnapAttemptId {
+        factory.database_provider_ro().unwrap().snap_attempt().unwrap().unwrap().id()
+    }
+
+    #[tokio::test]
+    async fn downloads_the_state_and_hands_it_to_the_trie_rebuild() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let (client, mut bootstrap) =
+            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 2);
+        assert_eq!(*client.origins(), [B256::ZERO]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn pending_repairs_follow_the_pivot_once_the_accounts_are_complete() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        // No peer serves the repair at pivot 2 any more.
+        let unserved =
+            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
+        let (_, mut bootstrap) = scripted(&factory, [unserved], [3]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        // Once the head moves on, the pivot advances and the repair is fetched there.
+        let responses = [empty_lists(1, 5), account_range(1, &accounts, 1..2, &[key(2)])];
+        let (client, mut bootstrap) = scripted(&factory, responses, [8]);
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(2)]);
+    }
+
+    #[tokio::test]
+    async fn scheduled_repairs_are_fetched_at_the_pivot_before_ranges() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let responses =
+            // One download fetches the repair and then the ranges, numbering both requests.
+            [account_range(1, &accounts, 1..2, &[key(2)]), account_range(2, &accounts, 0..3, &[])];
+        let (client, mut bootstrap) = scripted(&factory, responses, [3]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }), "{outcome:?}");
+        assert_eq!(*client.origins(), [key(2), B256::ZERO]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn repairs_yield_to_pivot_checks_between_batches() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(1));
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let responses = [
+            account_range(1, &accounts, 0..1, &[key(1)]),
+            // The head moved past the advance window meanwhile, so the pivot moves to block 7.
+            empty_lists(1, 5),
+            account_range(2, &accounts, 1..2, &[key(2)]),
+        ];
+        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(1), key(2)]);
+        assert_eq!(client.block_requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_lagging_pivot_advances_before_more_ranges_download() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let responses = [
+            account_range(1, &accounts, 0..1, &[key(1)]),
+            // Blocks 3 through 7 carry the first account from pivot 2 to pivot 7.
+            empty_lists(1, 5),
+            account_range(2, &accounts, 1..3, &[key(2), FAR]),
+        ];
+        // The head moves past the advance window after the first range.
+        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [B256::ZERO, key(2)]);
+        assert_eq!(client.block_requests().len(), 1);
+
+        // The merkle stage rebuilds the trie, which the pivot's header then accepts.
+        let verified = rebuild_and_verify(&factory, write, 7);
+        assert_eq!((verified.target(), verified.state_root()), (pivot, root));
+    }
+
+    #[tokio::test]
+    async fn peers_without_the_state_wait_and_the_next_run_resumes() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let responses = [
+            account_range(1, &accounts, 0..1, &[key(1)]),
+            Err(RequestError::UnsupportedCapability),
+        ];
+        let (_, mut bootstrap) = scripted(&factory, responses, [3]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(bootstrap.context.waits, 1);
+        let attempt = attempt_id(&factory);
+
+        let (client, mut resumed) =
+            scripted(&factory, [account_range(1, &accounts, 1..3, &[key(2), FAR])], [3]);
+        let outcome = resumed.run().await.unwrap();
+
+        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }));
+        assert_eq!(attempt_id(&factory), attempt);
+        assert_eq!(*client.origins(), [key(2)]);
+    }
+
+    #[tokio::test]
+    async fn no_eligible_pivot_waits_without_starting_an_attempt() {
+        let factory = hashed_factory();
+        insert_chain(&factory, 0, state_root(&accounts()));
+        let (client, mut bootstrap) = scripted(&factory, [], [0]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        assert_eq!(bootstrap.context.waits, 1);
+        assert!(client.origins().is_empty());
+        assert!(factory.database_provider_ro().unwrap().snap_attempt().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_reorged_pivot_without_kept_headers_restarts_the_attempt() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        // A previous run anchored to a block the canonical chain no longer holds.
+        let provider = factory.database_provider_rw().unwrap();
+        let orphaned = SnapGeneration::new(
+            BlockNumHash::new(2, B256::repeat_byte(0xee)),
+            state_root(&accounts),
+        );
+        provider.start_snap_attempt(orphaned).unwrap();
+        provider.commit().unwrap();
+        let orphaned = attempt_id(&factory);
+        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_ne!(pivot.hash, B256::repeat_byte(0xee));
+        assert_ne!(attempt_id(&factory), orphaned);
+    }
+
+    #[tokio::test]
+    async fn a_handed_off_attempt_is_not_downloaded_again() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let first = bootstrap.run().await.unwrap();
+
+        let (client, mut resumed) = scripted(&factory, [], [3]);
+
+        assert_eq!(resumed.run().await.unwrap(), first);
+        assert!(client.origins().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_run_stops_before_any_work() {
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts()));
+        let cancel = CancellationToken::new();
+        let (client, bootstrap) = scripted(&factory, [], [3]);
+        let mut bootstrap = bootstrap.with_cancellation(cancel.clone());
+        cancel.cancel();
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert!(client.origins().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_stalled_past_the_served_lists_restarts() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 11, state_root(&accounts));
+        // The pivot moves from 2 to 7, but no peer serves block 3's list.
+        let responses = [account_range(1, &accounts, 0..1, &[key(1)]), no_lists(1)];
+        let (_, stalled) = scripted(&factory, responses, [3, 8]);
+        let mut stalled = stalled.with_ranges_per_check(1);
+        assert_eq!(stalled.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        let attempt = attempt_id(&factory);
+
+        // Pivot 7 is still recent under head 11, but block 3's list is past the served history.
+        let (client, mut restarted) =
+            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [11]);
+        let outcome = restarted.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 10);
+        assert_ne!(attempt_id(&factory), attempt);
+        assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn complete_state_is_handed_off_past_the_served_lists() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 11, state_root(&accounts));
+        // A run committed every range at pivot 2, then stopped before the hand-off.
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap();
+        let generation = SnapGeneration::new(pivot.num_hash(), pivot.state_root);
+        let downloaded = provider.start_snap_attempt(generation).unwrap();
+        provider.start_account_coverage(downloaded).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(downloaded, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+
+        // Block 3's list is past the served history under head 11, but nothing needs it.
+        let (client, mut resumed) = scripted(&factory, [], [11]);
+        let outcome = resumed.run().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            SnapBootstrapOutcome::TrieRebuild { write: downloaded, pivot: pivot.num_hash() }
+        );
+        assert!(client.origins().is_empty());
+        assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unreadable_progress_restarts_the_attempt() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
+        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        // Another build rewrote the coverage the attempt resumes from.
+        let provider = factory.database_provider_rw().unwrap();
+        let stale = provider.active_snap_write().unwrap().unwrap();
+        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
+        provider.commit().unwrap();
+
+        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let outcome = restarted.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_ne!(write.attempt(), stale.attempt());
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(matches!(
+            provider.authorize_snap_write(stale),
+            Err(SnapSyncError::StaleWrite { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_between_storage_responses_stops_the_run() {
+        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let cancel = CancellationToken::new();
+        let on_request = cancel.clone();
+        // The contract's storage takes two responses, and shutdown fires during the first.
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[]),
+                storage_ranges(1, &[&slots[..1]], &slots, &[B256::ZERO, key(1)]),
+            ])
+            .on_storage_request(move || on_request.cancel()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy())
+                .with_cancellation(cancel);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(client.storage_requests().len(), 1);
+    }
+
     // Serves heads in order, repeating the last, and ends the run at the first wait.
     struct TestContext {
         heads: RefCell<VecDeque<u64>>,
@@ -604,16 +983,6 @@ mod tests {
             self.waits += 1;
             std::future::ready(false)
         }
-    }
-
-    fn accounts() -> Vec<(B256, TrieAccount)> {
-        vec![(key(1), account(1)), (key(2), account(2)), (FAR, account(3))]
-    }
-
-    // Blocks `0..=tip`, each committing to an empty list and to `root`, so any of them anchors
-    // the same state.
-    fn insert_chain(factory: &Factory, tip: u64, root: B256) {
-        insert_headers(factory, &chain(tip, root));
     }
 
     // Blocks `0..=tip`, each committing to an empty list and to `root`.
@@ -679,33 +1048,6 @@ mod tests {
             }
         }
         provider.verify_state_root(write).unwrap()
-    }
-
-    // A peer serving `blocks` empty lists.
-    fn empty_lists(request_id: u64, blocks: usize) -> PeerRequestResult<SnapResponse> {
-        lists(request_id, &vec![Vec::new(); blocks], true)
-    }
-
-    // A peer holding no list for the first block it is asked for.
-    fn no_lists(request_id: u64) -> PeerRequestResult<SnapResponse> {
-        lists(request_id, &[Vec::new()], false)
-    }
-
-    fn scripted(
-        factory: &Factory,
-        responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>,
-        heads: impl IntoIterator<Item = u64>,
-    ) -> (Arc<ScriptedSnapClient>, Bootstrap) {
-        let client = Arc::new(ScriptedSnapClient::new(responses));
-        let context = TestContext { heads: RefCell::new(heads.into_iter().collect()), waits: 0 };
-        let bootstrap =
-            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
-                .with_policy(policy());
-        (client, bootstrap)
-    }
-
-    fn attempt_id(factory: &Factory) -> SnapAttemptId {
-        factory.database_provider_ro().unwrap().snap_attempt().unwrap().unwrap().id()
     }
 
     // The accounts at every block of the new branch, which never credits `STALE`.
@@ -813,324 +1155,6 @@ mod tests {
 
         assert!(client.block_requests().is_empty());
         assert_eq!(attempt_id(&factory), attempt);
-    }
-
-    #[tokio::test]
-    async fn no_eligible_pivot_waits_without_starting_an_attempt() {
-        let factory = hashed_factory();
-        insert_chain(&factory, 0, state_root(&accounts()));
-        let (client, mut bootstrap) = scripted(&factory, [], [0]);
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-
-        assert_eq!(bootstrap.context.waits, 1);
-        assert!(client.origins().is_empty());
-        assert!(factory.database_provider_ro().unwrap().snap_attempt().unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn a_cancelled_run_stops_before_any_work() {
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts()));
-        let cancel = CancellationToken::new();
-        let (client, bootstrap) = scripted(&factory, [], [3]);
-        let mut bootstrap = bootstrap.with_cancellation(cancel.clone());
-        cancel.cancel();
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert!(client.origins().is_empty());
-    }
-
-    #[tokio::test]
-    async fn downloads_the_state_and_hands_it_to_the_trie_rebuild() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (client, mut bootstrap) =
-            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_eq!(pivot.number, 2);
-        assert_eq!(*client.origins(), [B256::ZERO]);
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider.is_trie_rebuild_started(write).unwrap());
-    }
-
-    #[tokio::test]
-    async fn peers_without_the_state_wait_and_the_next_run_resumes() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let responses = [
-            account_range(1, &accounts, 0..1, &[key(1)]),
-            Err(RequestError::UnsupportedCapability),
-        ];
-        let (_, mut bootstrap) = scripted(&factory, responses, [3]);
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(bootstrap.context.waits, 1);
-        let attempt = attempt_id(&factory);
-
-        let (client, mut resumed) =
-            scripted(&factory, [account_range(1, &accounts, 1..3, &[key(2), FAR])], [3]);
-        let outcome = resumed.run().await.unwrap();
-
-        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }));
-        assert_eq!(attempt_id(&factory), attempt);
-        assert_eq!(*client.origins(), [key(2)]);
-    }
-
-    #[tokio::test]
-    async fn cancellation_between_storage_responses_stops_the_run() {
-        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
-        let mut contract = account(1);
-        contract.storage_root = storage_root_of(&slots);
-        let accounts = vec![(key(1), contract)];
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let cancel = CancellationToken::new();
-        let on_request = cancel.clone();
-        // The contract's storage takes two responses, and shutdown fires during the first.
-        let client = Arc::new(
-            ScriptedSnapClient::new([
-                account_range(1, &accounts, 0..1, &[]),
-                storage_ranges(1, &[&slots[..1]], &slots, &[B256::ZERO, key(1)]),
-            ])
-            .on_storage_request(move || on_request.cancel()),
-        );
-        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
-        let mut bootstrap =
-            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
-                .with_policy(policy())
-                .with_cancellation(cancel);
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(client.storage_requests().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn unreadable_progress_restarts_the_attempt() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
-        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        // Another build rewrote the coverage the attempt resumes from.
-        let provider = factory.database_provider_rw().unwrap();
-        let stale = provider.active_snap_write().unwrap().unwrap();
-        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
-        provider.commit().unwrap();
-
-        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-        let outcome = restarted.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_ne!(write.attempt(), stale.attempt());
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(matches!(
-            provider.authorize_snap_write(stale),
-            Err(SnapSyncError::StaleWrite { .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn repairs_yield_to_pivot_checks_between_batches() {
-        let accounts = accounts();
-        let root = state_root(&accounts);
-        let factory = hashed_factory();
-        insert_chain(&factory, 8, root);
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
-        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_account(key(1));
-        repairs.insert_account(key(2));
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let responses = [
-            account_range(1, &accounts, 0..1, &[key(1)]),
-            // The head moved past the advance window meanwhile, so the pivot moves to block 7.
-            empty_lists(1, 5),
-            account_range(2, &accounts, 1..2, &[key(2)]),
-        ];
-        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
-        let mut bootstrap = bootstrap.with_ranges_per_check(1);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
-            panic!("the state is repaired: {outcome:?}")
-        };
-        assert_eq!(pivot.number, 7);
-        assert_eq!(*client.origins(), [key(1), key(2)]);
-        assert_eq!(client.block_requests().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_lagging_pivot_advances_before_more_ranges_download() {
-        let accounts = accounts();
-        let root = state_root(&accounts);
-        let factory = hashed_factory();
-        insert_chain(&factory, 8, root);
-        let responses = [
-            account_range(1, &accounts, 0..1, &[key(1)]),
-            // Blocks 3 through 7 carry the first account from pivot 2 to pivot 7.
-            empty_lists(1, 5),
-            account_range(2, &accounts, 1..3, &[key(2), FAR]),
-        ];
-        // The head moves past the advance window after the first range.
-        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
-        let mut bootstrap = bootstrap.with_ranges_per_check(1);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_eq!(pivot.number, 7);
-        assert_eq!(*client.origins(), [B256::ZERO, key(2)]);
-        assert_eq!(client.block_requests().len(), 1);
-
-        // The merkle stage rebuilds the trie, which the pivot's header then accepts.
-        let verified = rebuild_and_verify(&factory, write, 7);
-        assert_eq!((verified.target(), verified.state_root()), (pivot, root));
-    }
-
-    #[tokio::test]
-    async fn a_catch_up_stalled_past_the_served_lists_restarts() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 11, state_root(&accounts));
-        // The pivot moves from 2 to 7, but no peer serves block 3's list.
-        let responses = [account_range(1, &accounts, 0..1, &[key(1)]), no_lists(1)];
-        let (_, stalled) = scripted(&factory, responses, [3, 8]);
-        let mut stalled = stalled.with_ranges_per_check(1);
-        assert_eq!(stalled.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        let attempt = attempt_id(&factory);
-
-        // Pivot 7 is still recent under head 11, but block 3's list is past the served history.
-        let (client, mut restarted) =
-            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [11]);
-        let outcome = restarted.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_eq!(pivot.number, 10);
-        assert_ne!(attempt_id(&factory), attempt);
-        assert!(client.block_requests().is_empty());
-    }
-
-    #[tokio::test]
-    async fn complete_state_is_handed_off_past_the_served_lists() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 11, state_root(&accounts));
-        // A run committed every range at pivot 2, then stopped before the hand-off.
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap();
-        let generation = SnapGeneration::new(pivot.num_hash(), pivot.state_root);
-        let downloaded = provider.start_snap_attempt(generation).unwrap();
-        provider.start_account_coverage(downloaded).unwrap();
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        provider.commit_account_range(downloaded, &range, Default::default(), Vec::new()).unwrap();
-        provider.commit().unwrap();
-
-        // Block 3's list is past the served history under head 11, but nothing needs it.
-        let (client, mut resumed) = scripted(&factory, [], [11]);
-        let outcome = resumed.run().await.unwrap();
-
-        assert_eq!(
-            outcome,
-            SnapBootstrapOutcome::TrieRebuild { write: downloaded, pivot: pivot.num_hash() }
-        );
-        assert!(client.origins().is_empty());
-        assert!(client.block_requests().is_empty());
-    }
-
-    #[tokio::test]
-    async fn scheduled_repairs_are_fetched_at_the_pivot_before_ranges() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
-        let write =
-            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_account(key(2));
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let responses =
-            // One download fetches the repair and then the ranges, numbering both requests.
-            [account_range(1, &accounts, 1..2, &[key(2)]), account_range(2, &accounts, 0..3, &[])];
-        let (client, mut bootstrap) = scripted(&factory, responses, [3]);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }), "{outcome:?}");
-        assert_eq!(*client.origins(), [key(2), B256::ZERO]);
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider.snap_repairs(write).unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn pending_repairs_follow_the_pivot_once_the_accounts_are_complete() {
-        let accounts = accounts();
-        let root = state_root(&accounts);
-        let factory = hashed_factory();
-        insert_chain(&factory, 8, root);
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
-        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_account(key(2));
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        // No peer serves the repair at pivot 2 any more.
-        let unserved =
-            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
-        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
-        let (_, mut bootstrap) = scripted(&factory, [unserved], [3]);
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-
-        // Once the head moves on, the pivot advances and the repair is fetched there.
-        let responses = [empty_lists(1, 5), account_range(1, &accounts, 1..2, &[key(2)])];
-        let (client, mut bootstrap) = scripted(&factory, responses, [8]);
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_eq!(pivot.number, 7);
-        assert_eq!(*client.origins(), [key(2)]);
-    }
-
-    #[tokio::test]
-    async fn a_handed_off_attempt_is_not_downloaded_again() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-        let first = bootstrap.run().await.unwrap();
-
-        let (client, mut resumed) = scripted(&factory, [], [3]);
-
-        assert_eq!(resumed.run().await.unwrap(), first);
-        assert!(client.origins().is_empty());
     }
 
     #[tokio::test]
@@ -1366,94 +1390,5 @@ mod tests {
         };
         assert_eq!(pivot, new[127].num_hash());
         assert_ne!(attempt_id(&factory), attempt);
-    }
-
-    #[tokio::test]
-    async fn a_reorged_pivot_without_kept_headers_restarts_the_attempt() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        // A previous run anchored to a block the canonical chain no longer holds.
-        let provider = factory.database_provider_rw().unwrap();
-        let orphaned = SnapGeneration::new(
-            BlockNumHash::new(2, B256::repeat_byte(0xee)),
-            state_root(&accounts),
-        );
-        provider.start_snap_attempt(orphaned).unwrap();
-        provider.commit().unwrap();
-        let orphaned = attempt_id(&factory);
-        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-
-        let outcome = bootstrap.run().await.unwrap();
-
-        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_ne!(pivot.hash, B256::repeat_byte(0xee));
-        assert_ne!(attempt_id(&factory), orphaned);
-    }
-
-    #[tokio::test]
-    async fn cancelled_storage_repairs_resume_after_the_last_committed_slot() {
-        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
-        let mut contract = account(1);
-        contract.storage_root = storage_root_of(&slots);
-        let accounts = vec![(key(1), contract)];
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
-        let write =
-            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_slot(key(1), key(1));
-        repairs.insert_slot(key(1), key(2));
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let cancel = CancellationToken::new();
-        let on_request = cancel.clone();
-        let client = Arc::new(
-            ScriptedSnapClient::new([
-                account_range(1, &accounts, 0..1, &[key(1)]),
-                storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
-                Ok(WithPeerId::new(
-                    PeerId::random(),
-                    SnapResponse::StorageRanges(StorageRangesMessage {
-                        request_id: 2,
-                        slots: Vec::new(),
-                        proof: Vec::new(),
-                    }),
-                )),
-            ])
-            .on_storage_request(move || on_request.cancel()),
-        );
-        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
-        let mut bootstrap =
-            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
-                .with_policy(policy())
-                .with_cancellation(cancel);
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(client.storage_requests().len(), 2);
-        let provider = factory.database_provider_ro().unwrap();
-        let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
-        assert_eq!(pending, [key(2)]);
-        assert_eq!(stored_slots(&provider, key(1)), slots[..1]);
-        drop(provider);
-
-        let (client, mut resumed) = scripted(
-            &factory,
-            [
-                account_range(1, &accounts, 0..1, &[key(1)]),
-                storage_ranges(1, &[&slots[1..]], &slots, &[key(2)]),
-                Err(RequestError::UnsupportedCapability),
-            ],
-            [3],
-        );
-        assert_eq!(resumed.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(*client.storage_requests(), [(vec![key(1)], key(2))]);
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider.snap_repairs(write).unwrap().is_empty());
-        assert_eq!(stored_slots(&provider, key(1)), slots);
     }
 }
