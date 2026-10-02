@@ -546,13 +546,9 @@ where
     )
     .await
     .unwrap_err();
-    TraceApiClient::<TransactionRequest>::trace_call_many(
-        client,
-        vec![],
-        Some(alloy_eips::BlockId::latest()),
-    )
-    .await
-    .unwrap_err();
+    TraceApiClient::<TransactionRequest>::trace_call_many(client, vec![], Some(BlockId::latest()))
+        .await
+        .unwrap_err();
     assert!(TraceApiClient::<TransactionRequest>::replay_transaction(
         client,
         B256::default(),

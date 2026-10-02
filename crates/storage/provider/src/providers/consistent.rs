@@ -1419,7 +1419,7 @@ mod tests {
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::B256;
+    use alloy_primitives::{b256, B256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
@@ -1978,9 +1978,7 @@ mod tests {
         let db_changeset = consistent_provider.storage_changeset(0)?;
         let mem_changeset = consistent_provider.storage_changeset(1)?;
 
-        let slot_b256 = alloy_primitives::b256!(
-            "0000000000000000000000000000000000000000000000000000000000000102"
-        );
+        let slot_b256 = b256!("0000000000000000000000000000000000000000000000000000000000000102");
 
         assert_eq!(db_changeset.len(), 1);
         assert_eq!(mem_changeset.len(), 1);
@@ -2087,9 +2085,7 @@ mod tests {
 
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
-        let slot_b256 = alloy_primitives::b256!(
-            "0000000000000000000000000000000000000000000000000000000000000102"
-        );
+        let slot_b256 = b256!("0000000000000000000000000000000000000000000000000000000000000102");
         let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key).collect();
 
         assert_eq!(

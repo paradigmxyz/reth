@@ -60,7 +60,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     /// identify the block by its hash (latest block).
     pub fn state_block_id(&self) -> BlockId {
         match self {
-            Self::ActualPending(_, _) => alloy_eips::BlockId::pending(),
+            Self::ActualPending(_, _) => BlockId::pending(),
             Self::DerivedFromLatest(latest) => BlockId::Hash(latest.hash().into()),
         }
     }

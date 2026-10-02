@@ -227,7 +227,7 @@ pub fn payload_id(
 mod tests {
     use super::*;
     use alloy_eips::eip4895::Withdrawal;
-    use alloy_primitives::{Address, B64};
+    use alloy_primitives::{address, b256, Address, B64};
     use core::str::FromStr;
 
     #[test]
@@ -239,17 +239,13 @@ mod tests {
     #[test]
     fn test_payload_id_basic() {
         // Create a parent block and payload attributes
-        let parent = alloy_primitives::b256!(
-            "0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a"
-        );
+        let parent = b256!("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a");
         let attributes = EthPayloadAttributes {
             timestamp: 0x5,
-            prev_randao: alloy_primitives::b256!(
+            prev_randao: b256!(
                 "0x0000000000000000000000000000000000000000000000000000000000000000"
             ),
-            suggested_fee_recipient: alloy_primitives::address!(
-                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-            ),
+            suggested_fee_recipient: address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
@@ -266,15 +262,11 @@ mod tests {
     #[test]
     fn test_payload_id_with_withdrawals() {
         // Set up the parent and attributes with withdrawals
-        let parent = alloy_primitives::b256!(
-            "0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef"
-        );
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: alloy_primitives::address!(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-            ),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![
                 Withdrawal {
                     index: 1,
@@ -304,19 +296,15 @@ mod tests {
     #[test]
     fn test_payload_id_with_parent_beacon_block_root() {
         // Set up the parent and attributes with a parent beacon block root
-        let parent = alloy_primitives::b256!(
-            "0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef"
-        );
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
-            prev_randao: alloy_primitives::b256!(
+            prev_randao: b256!(
                 "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234"
             ),
-            suggested_fee_recipient: alloy_primitives::address!(
-                "0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-            ),
+            suggested_fee_recipient: address!("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: None,
-            parent_beacon_block_root: Some(alloy_primitives::b256!(
+            parent_beacon_block_root: Some(b256!(
                 "0x2222222222222222222222222222222222222222222222222222222222222222"
             )),
             slot_number: None,
@@ -332,15 +320,11 @@ mod tests {
 
     #[test]
     fn test_payload_id_with_slot_number() {
-        let parent = alloy_primitives::b256!(
-            "0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef"
-        );
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: alloy_primitives::address!(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-            ),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
@@ -355,16 +339,12 @@ mod tests {
 
     #[test]
     fn test_payload_id_with_target_gas_limit() {
-        let parent = alloy_primitives::b256!(
-            "0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef"
-        );
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         #[allow(clippy::needless_update)]
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: alloy_primitives::address!(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"
-            ),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),

@@ -10,6 +10,7 @@
 
 #![warn(unused_crate_dependencies)]
 
+use alloy_eips::BlockId;
 use alloy_evm::Evm;
 use alloy_primitives::Address;
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
@@ -67,7 +68,7 @@ fn main() {
                         let result = eth_api
                             .spawn_with_call_at(
                                 call_request,
-                                alloy_eips::BlockId::latest(),
+                                BlockId::latest(),
                                 EvmOverrides::default(),
                                 move |db, evm_env, tx_env| {
                                     let mut dummy_inspector = DummyInspector::default();

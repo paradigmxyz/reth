@@ -119,6 +119,7 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
 
     #[test]
     fn parse_address_arg() {
@@ -127,9 +128,6 @@ mod tests {
             "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
         ])
         .unwrap();
-        assert_eq!(
-            cmd.address,
-            alloy_primitives::address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
-        );
+        assert_eq!(cmd.address, address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"));
     }
 }
