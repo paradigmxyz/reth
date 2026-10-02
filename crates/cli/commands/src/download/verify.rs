@@ -62,7 +62,7 @@ impl<'a> OutputVerifier<'a> {
     }
 
     /// Resolves archive paths consistently for verification and retry cleanup.
-    fn output_path(&self, path: &str) -> std::path::PathBuf {
+    pub(crate) fn output_path(&self, path: &str) -> std::path::PathBuf {
         if let Some(static_files_dir) = self.static_files_dir &&
             let Some(relative_path) = super::extract::static_file_relative_path(Path::new(path))
         {
