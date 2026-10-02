@@ -108,10 +108,10 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses four times the resolved CPU pool thread count.
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, uses four times the resolved CPU pool thread count.
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
@@ -286,6 +286,12 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: WorkerPool,
+    /// Proof storage worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_storage_worker_threads_override: Option<usize>,
+    /// Proof account worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_account_worker_threads_override: Option<usize>,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
@@ -384,6 +390,22 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
+    }
+
+    /// Returns the proof storage worker thread count the operator configured explicitly, if any.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_storage_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_storage_worker_threads_override
+    }
+
+    /// Returns the proof account worker thread count the operator configured explicitly, if any.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_account_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_account_worker_threads_override
     }
 
     /// Get the prewarming pool.
@@ -945,13 +967,23 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+            // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
+            // cpu pool is built; size the proof pools from that resolved count so a zero never
+            // reaches the per-block worker budget.
+            let default_proof_worker_threads = cpu_pool.current_num_threads() * 4;
+
+            let proof_storage_worker_threads = config
+                .rayon
+                .proof_storage_worker_threads
+                .unwrap_or(default_proof_worker_threads)
+                .max(1);
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
-
-            let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+            let proof_account_worker_threads = config
+                .rayon
+                .proof_account_worker_threads
+                .unwrap_or(default_proof_worker_threads)
+                .max(1);
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
@@ -1023,6 +1055,10 @@ impl RuntimeBuilder {
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
             #[cfg(feature = "rayon")]
+            proof_storage_worker_threads_override: config.rayon.proof_storage_worker_threads,
+            #[cfg(feature = "rayon")]
+            proof_account_worker_threads_override: config.rayon.proof_account_worker_threads,
+            #[cfg(feature = "rayon")]
             prewarming_pool,
             #[cfg(feature = "rayon")]
             bal_streaming_pool,
@@ -1060,6 +1096,40 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn zero_cpu_threads_still_size_the_proof_pools() {
+        let rt = TokioRuntime::new().unwrap();
+        let mut config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+        config.rayon.cpu_threads = Some(0);
+        config.rayon.proof_storage_worker_threads = None;
+        config.rayon.proof_account_worker_threads = None;
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
+
+        let resolved = runtime.cpu_pool().current_num_threads();
+        assert!(resolved >= 1);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 4);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn proof_worker_threads_keep_pinned_counts() {
+        let rt = TokioRuntime::new().unwrap();
+        for configured in [0, 1, 8, 16, 17, 64] {
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.proof_storage_worker_threads = Some(configured);
+            config.rayon.proof_account_worker_threads = Some(configured);
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
+            assert_eq!(runtime.proof_storage_worker_pool().num_threads(), configured.max(1));
+            assert_eq!(runtime.proof_account_worker_pool().num_threads(), configured.max(1));
+            assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
+            assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
+        }
     }
 
     #[test]
