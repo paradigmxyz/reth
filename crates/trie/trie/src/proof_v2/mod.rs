@@ -828,19 +828,16 @@ where
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         let dirty_range = |prefix_set: &mut PrefixSet, upper_bound: Option<Nibbles>| {
             let uncalculated_lower_bound = uncalculated_lower_bound?;
-
-            if upper_bound.as_ref().is_some_and(|upper| uncalculated_lower_bound >= upper) {
+            // Stop at the cached path so the normal traversal can reuse its descendants.
+            // Revisiting a cached ancestor leaves no gap to scan.
+            let upper_bound = upper_bound.unwrap_or(*next_path).min(*next_path);
+            if uncalculated_lower_bound >= &upper_bound {
                 return None
             }
 
-            match upper_bound {
-                Some(upper_bound) => prefix_set
-                    .contains_range(uncalculated_lower_bound..&upper_bound)
-                    .then_some((*uncalculated_lower_bound, Some(upper_bound))),
-                None => prefix_set
-                    .contains_from(uncalculated_lower_bound)
-                    .then_some((*uncalculated_lower_bound, None)),
-            }
+            prefix_set
+                .contains_range(uncalculated_lower_bound..&upper_bound)
+                .then_some((*uncalculated_lower_bound, Some(upper_bound)))
         };
 
         let mut popped_child_path_upper = None;
@@ -2263,6 +2260,43 @@ mod tests {
 
                 harness.assert_proof(targets).expect("Proof generation failed");
             }
+
+            #[test]
+            fn proptest_proof_with_dirty_prefixes(
+                before in prop::collection::btree_map(prop::array::uniform4(0u8..4), 1u64..100, 0..40),
+                after in prop::collection::btree_map(prop::array::uniform4(0u8..4), 1u64..100, 0..40),
+            ) {
+                // Small nibble alphabets exercise shared prefixes, extensions and branch collapse.
+                let before = before.into_iter()
+                    .map(|(key, value)| (B256::right_padding_from(&key), U256::from(value)))
+                    .collect::<BTreeMap<_, _>>();
+                let after = after.into_iter()
+                    .map(|(key, value)| (B256::right_padding_from(&key), U256::from(value)))
+                    .collect::<BTreeMap<_, _>>();
+                let prefix_set = PrefixSetMut::from(
+                    before.keys().chain(after.keys())
+                        .filter(|key| before.get(*key) != after.get(*key))
+                        .map(Nibbles::unpack),
+                ).freeze();
+                let expected_root = crate::test_utils::storage_root_prehashed(
+                    after.iter().map(|(key, value)| (*key, *value)),
+                );
+                let harness = TrieTestHarness::new(before);
+                let hashed_factory = MockHashedCursorFactory::new(
+                    BTreeMap::new(),
+                    [(harness.hashed_address(), after)].into_iter().collect(),
+                );
+                let trie_cursor = harness.trie_cursor_factory()
+                    .storage_trie_cursor(harness.hashed_address()).unwrap();
+                let hashed_cursor = hashed_factory
+                    .hashed_storage_cursor(harness.hashed_address()).unwrap();
+                let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+                    .with_prefix_set(prefix_set);
+                let mut targets = [ProofV2Target::new(B256::ZERO)];
+                let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+
+                prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
+            }
         }
     }
 
@@ -2821,6 +2855,42 @@ mod tests {
             Some(expected_root),
             harness.root_with_prefix_set(prefix_set.freeze()),
         );
+    }
+
+    #[test]
+    fn test_prefix_set_preserves_cached_siblings() {
+        let storage = (0..4096u16)
+            .map(|key| (B256::right_padding_from(&key.to_be_bytes()), U256::from(1)))
+            .collect();
+        let harness = TrieTestHarness::new(storage);
+        let changes = BTreeMap::from([
+            (B256::right_padding_from(&[0x04, 0x00]), U256::from(2)),
+            (B256::right_padding_from(&[0x04, 0xf0]), U256::from(2)),
+        ]);
+        let (expected_root, _) = harness.get_root_with_updates(&changes);
+        let mut updated_storage = harness.storage().clone();
+        updated_storage.extend(changes.clone());
+        let hashed_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            [(harness.hashed_address(), updated_storage)].into_iter().collect(),
+        );
+        let prefix_set = PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze();
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(prefix_set);
+        let mut targets = [ProofV2Target::new(B256::ZERO)];
+        let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+
+        assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
+
+        // Returning from 0x040 to cached parent 0x04 must not scan all leaves up to 0x05.
+        let clean_key = B256::right_padding_from(&[0x04, 0x88]);
+        assert!(!hashed_factory
+            .visited_storage_keys(harness.hashed_address())
+            .iter()
+            .any(|visit| visit.visited_key == Some(clean_key)));
     }
 
     /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
