@@ -1057,7 +1057,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{hex, Bytes, Signature, U256};
+    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1231,7 +1231,7 @@ mod tests {
                     types: vec![0x00],
                     sizes: vec![0x00],
                     hashes: vec![
-                        alloy_primitives::b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                        b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
                     ],
                 },
                 &hex!(
@@ -1243,8 +1243,8 @@ mod tests {
                     types: vec![0x00, 0x00],
                     sizes: vec![0x00, 0x00],
                     hashes: vec![
-                        alloy_primitives::b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
-                        alloy_primitives::b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                        b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                        b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
                     ],
                 },
                 &hex!(
@@ -1256,7 +1256,7 @@ mod tests {
                     types: vec![0x02],
                     sizes: vec![0xb6],
                     hashes: vec![
-                        alloy_primitives::b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
+                        b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
                     ],
                 },
                 &hex!(
@@ -1268,8 +1268,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        alloy_primitives::b256!("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-                        alloy_primitives::b256!("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+                        b256!("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+                        b256!("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
                     ],
                 },
                 &hex!(
@@ -1281,8 +1281,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        alloy_primitives::b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
-                        alloy_primitives::b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
                     ],
                 },
                 &hex!(
@@ -1294,8 +1294,8 @@ mod tests {
                     types: vec![0x10, 0x10],
                     sizes: vec![0xdeadc0de, 0xdeadc0de],
                     hashes: vec![
-                        alloy_primitives::b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
-                        alloy_primitives::b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
                     ],
                 },
                 &hex!(
@@ -1307,8 +1307,8 @@ mod tests {
                     types: vec![0x6f, 0x6f],
                     sizes: vec![0x7fffffff, 0x7fffffff],
                     hashes: vec![
-                        alloy_primitives::b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
-                        alloy_primitives::b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
+                        b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
+                        b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
                     ],
                 },
                 &hex!(

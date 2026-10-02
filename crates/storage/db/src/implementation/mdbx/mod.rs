@@ -694,7 +694,6 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-
     use tempfile::TempDir;
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
@@ -1421,7 +1420,7 @@ mod tests {
             balance: U256::MAX,
             ..Default::default()
         };
-        let key = alloy_primitives::address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         {
             let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
@@ -1447,7 +1446,7 @@ mod tests {
     #[test]
     fn db_dup_sort() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = alloy_primitives::address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1490,7 +1489,7 @@ mod tests {
     #[test]
     fn db_walk_dup_with_not_existing_key() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = alloy_primitives::address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1517,8 +1516,8 @@ mod tests {
     #[test]
     fn db_iterate_over_all_dup_values() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = alloy_primitives::address!("0x1111111111111111111111111111111111111111");
-        let key2 = alloy_primitives::address!("0x2222222222222222222222222222222222222222");
+        let key1 = address!("0x1111111111111111111111111111111111111111");
+        let key2 = address!("0x2222222222222222222222222222222222222222");
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();

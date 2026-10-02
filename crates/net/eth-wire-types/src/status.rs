@@ -481,9 +481,7 @@ mod tests {
             version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: alloy_primitives::b256!(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
-            ),
+            blockhash: b256!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
             genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
@@ -502,9 +500,7 @@ mod tests {
             version: EthVersion::Eth67,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(36206751599115524359527u128),
-            blockhash: alloy_primitives::b256!(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
-            ),
+            blockhash: b256!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
             genesis: MAINNET_GENESIS_HASH,
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
         };
@@ -602,9 +598,7 @@ mod tests {
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
             earliest: 15_537_394,
             latest: 18_000_000,
-            blockhash: alloy_primitives::b256!(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
-            ),
+            blockhash: b256!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
         };
 
         let mut rlp_status = vec![];
@@ -637,9 +631,7 @@ mod tests {
             forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
             earliest: 15_537_394,
             latest: 18_000_000,
-            blockhash: alloy_primitives::b256!(
-                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
-            ),
+            blockhash: b256!("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"),
         };
         let status = StatusEth69::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
@@ -673,12 +665,8 @@ mod tests {
             version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: alloy_primitives::b256!(
-                "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"
-            ),
-            genesis: alloy_primitives::b256!(
-                "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"
-            ),
+            blockhash: b256!("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"),
+            genesis: b256!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
             forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
 
@@ -696,12 +684,8 @@ mod tests {
             version: EthVersion::Eth66,
             chain: Chain::from_named(NamedChain::BinanceSmartChain),
             total_difficulty: U256::from(37851386u64),
-            blockhash: alloy_primitives::b256!(
-                "f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"
-            ),
-            genesis: alloy_primitives::b256!(
-                "0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"
-            ),
+            blockhash: b256!("f8514c4680ef27700751b08f37645309ce65a449616a3ea966bf39dd935bb27b"),
+            genesis: b256!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
             forkid: ForkId { hash: ForkHash([0x5d, 0x43, 0xd2, 0xfd]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();
@@ -720,12 +704,8 @@ mod tests {
                 "0x000000000000000000000000006d68fcffffffffffffffffffffffffdeab81b8",
             )
             .unwrap(),
-            blockhash: alloy_primitives::b256!(
-                "523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c"
-            ),
-            genesis: alloy_primitives::b256!(
-                "6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd"
-            ),
+            blockhash: b256!("523e8163a6d620a4cc152c547a05f28a03fec91a2a615194cb86df9731372c0c"),
+            genesis: b256!("6499dccdc7c7def3ebb1ce4c6ee27ec6bd02aee570625ca391919faf77ef27bd"),
             forkid: ForkId { hash: ForkHash([0x1a, 0x67, 0xcc, 0xd8]), next: 0 },
         };
         let status = Status::decode(&mut &data[..]).unwrap();

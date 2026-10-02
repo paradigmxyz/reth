@@ -629,7 +629,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Bytes, U256};
+    use alloy_primitives::{b256, Bytes, U256};
     use reth_ethereum_primitives::{Receipt, TxType};
 
     #[test]
@@ -843,15 +843,12 @@ mod tests {
     fn test_accumulator_from_header_records_known_vectors() {
         // Known-answer vectors computed from the SSZ spec:
         //   hash_tree_root(List[HeaderRecord, 8192])
-        let expected_empty: B256 = alloy_primitives::b256!(
-            "4a8c3a07c8d23adc5bac61157555c3c784d53d9bc110c1370809bd23cd93777d"
-        );
-        let expected_single_zero: B256 = alloy_primitives::b256!(
-            "81fd641249670887a731386e756a7a1538dc781b1b0bf016889045d350812817"
-        );
-        let expected_single_nonzero: B256 = alloy_primitives::b256!(
-            "ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799"
-        );
+        let expected_empty: B256 =
+            b256!("4a8c3a07c8d23adc5bac61157555c3c784d53d9bc110c1370809bd23cd93777d");
+        let expected_single_zero: B256 =
+            b256!("81fd641249670887a731386e756a7a1538dc781b1b0bf016889045d350812817");
+        let expected_single_nonzero: B256 =
+            b256!("ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799");
 
         // Empty list
         let acc_empty = Accumulator::from_header_records(&[]).unwrap();

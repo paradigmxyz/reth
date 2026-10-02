@@ -484,7 +484,7 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Signature};
+    use alloy_primitives::{b256, hex, Signature};
     use reth_primitives_traits::{
         crypto::secp256k1::{public_key_to_address, sign_message},
         SignerRecoverable,
@@ -541,14 +541,10 @@ mod tests {
         assert_eq!(expected.as_slice(), &alloy_rlp::encode(tx));
 
         let hash = transaction.signature_hash();
-        let expected = alloy_primitives::b256!(
-            "daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53"
-        );
+        let expected = b256!("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53");
         assert_eq!(expected, hash);
 
-        let secret = alloy_primitives::b256!(
-            "4646464646464646464646464646464646464646464646464646464646464646"
-        );
+        let secret = b256!("4646464646464646464646464646464646464646464646464646464646464646");
         let signature = sign_message(secret, hash).unwrap();
 
         let expected = Signature::new(

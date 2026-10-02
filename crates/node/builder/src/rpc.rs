@@ -17,6 +17,7 @@ use crate::{
     ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::{Stream, StreamExt};
@@ -1693,7 +1694,7 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
     mut events: impl Stream<Item = CanonStateNotification<N>> + Unpin,
     startup_blocks: usize,
 ) {
-    let mut startup = match eth_api.recovered_block(alloy_eips::BlockId::latest()).await {
+    let mut startup = match eth_api.recovered_block(BlockId::latest()).await {
         Ok(Some(head)) => {
             if head.block_access_list_hash().is_some() {
                 debug!(target: "reth::cli", block_hash = ?head.hash(), "Stopping BAL prewarming: native BALs available");

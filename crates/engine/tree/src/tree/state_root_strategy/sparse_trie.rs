@@ -1784,7 +1784,7 @@ mod tests {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let address = keccak256(Address::random());
-        let slot = keccak256(alloy_primitives::B256::with_last_byte(42).0);
+        let slot = keccak256(B256::with_last_byte(42));
         let value = U256::from(999);
 
         let mut hashed_state = HashedPostState::default();

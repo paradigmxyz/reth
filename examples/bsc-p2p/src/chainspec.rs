@@ -1,6 +1,6 @@
 //! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/examples/bsc-p2p/src/chainspec.rs>
 
-use alloy_primitives::U256;
+use alloy_primitives::{b256, U256};
 use reth_chainspec::{
     hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
     ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
@@ -117,9 +117,7 @@ pub fn bsc_chain_spec() -> Arc<ChainSpec> {
         prune_delete_limit: 3500,
         genesis_header: SealedHeader::new(
             make_genesis_header(&genesis, &hardforks),
-            alloy_primitives::b256!(
-                "0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"
-            ),
+            b256!("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
         ),
         ..Default::default()
     }
