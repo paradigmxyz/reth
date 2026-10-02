@@ -10,10 +10,10 @@ use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
-    StateRoot,
+    HashedPostStateSorted, StateRoot,
 };
 use reth_trie_common::updates::TrieUpdatesSorted;
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -38,7 +38,7 @@ where
     compute_range_trie_changesets(
         provider,
         state_trie_provider,
-        Arc::default(),
+        &BTreeMap::new(),
         block_number..=block_number,
         db_tip_block,
     )
@@ -48,10 +48,12 @@ where
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
 /// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
-/// `base_nodes` are the trie updates layered over the underlying database to construct that view.
-/// The result contains both range-relative reverts and an overlay applicable to that database.
-/// An empty range returns no range-relative reverts, but still completes and rewinds the database
-/// trie to `range.end()`. `db_tip_block` must be the current database tip for `provider`.
+/// `forward_updates` contains original executed-block trie updates on that same chain. Consecutive
+/// available blocks are reverted together, preserving forward paths omitted by the aggregate
+/// calculation. Missing blocks are reverted individually so transient nodes are retained.
+/// The result applies at any trie frontier between the target and the range end (or database tip
+/// for `overlay`). An empty range returns no range reverts, but still rewinds the tail.
+/// `db_tip_block` must be the current database tip for `provider`.
 ///
 /// # Errors
 ///
@@ -60,7 +62,7 @@ where
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
-    base_nodes: Arc<TrieUpdatesSorted>,
+    forward_updates: &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
 ) -> Result<ComputedTrieChangesets, ProviderError>
@@ -86,97 +88,76 @@ where
         "Computing range trie changesets from database state"
     );
 
-    // Collect the state revert for the requested range.
-    let range_state_revert = if start_block > end_block {
-        Default::default()
-    } else {
-        reth_trie::HashedPostStateSorted::from_reverts(provider, range)?
-    };
-    let range_prefix_sets = range_state_revert.construct_prefix_sets();
+    let mut state = HashedPostStateSorted::default();
+    let mut overlay = TrieUpdatesSorted::default();
+    let mut reverts = TrieUpdatesSorted::default();
 
-    let (range_nodes, range_state) = if end_block == db_tip_block {
-        debug!(
-            target: "trie::changesets",
-            start_block,
-            end_block,
-            db_tip_block,
-            "Skipping tail trie revert computation for tip-ended range"
-        );
+    // Rewind the tail first, then the requested range, keeping the current trie and state views.
+    let tail = end_block.checked_add(1).map(|start| start..=db_tip_block);
+    for (is_range, blocks) in tail.into_iter().map(|tail| (false, tail)).chain([(true, range)]) {
+        let mut next = (!blocks.is_empty()).then_some(*blocks.end());
+        while let Some(end) = next {
+            let mut start = end;
+            let mut forward = Vec::new();
+            if let Some(updates) = forward_updates.get(&end) {
+                forward.push(updates);
+                while start > *blocks.start() {
+                    let Some(updates) = forward_updates.get(&(start - 1)) else { break };
+                    forward.push(updates);
+                    start -= 1;
+                }
+            }
 
-        (TrieUpdatesSorted::default(), range_state_revert)
-    } else {
-        // Collect the state revert from the database tip to just after the range.
-        let tail_state_revert = end_block
-            .checked_add(1)
-            .map(|next_block| {
-                reth_trie::HashedPostStateSorted::from_reverts(provider, next_block..)
-            })
-            .transpose()?
-            .unwrap_or_default();
+            // Without the original updates, reverting one block at a time preserves nodes that
+            // appear and disappear inside the range. An endpoint-only calculation would omit them.
+            let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
+            let prefixes = segment_state.construct_prefix_sets().freeze();
+            state.extend_ref_and_sort(&segment_state);
+            let updates = StateRoot::new(
+                InMemoryTrieCursorFactory::new(state_trie_provider, &overlay),
+                HashedPostStateCursorFactory::new(state_trie_provider, &state),
+            )
+            .with_prefix_sets(prefixes)
+            .root_with_updates()
+            .map_err(ProviderError::other)?
+            .1
+            .into_sorted();
 
-        // Compute trie reverts from the database tip to just after the range.
-        let tail_prefix_sets = tail_state_revert.construct_prefix_sets().freeze();
-        let tail_trie_revert = StateRoot::new(
-            state_trie_provider,
-            HashedPostStateCursorFactory::new(state_trie_provider, &tail_state_revert),
-        )
-        .with_prefix_sets(tail_prefix_sets)
-        .root_with_updates()
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
-
-        // Overlay the post-range trie and compute the trie revert to the pre-range state.
-        let mut pre_range_state_revert = tail_state_revert;
-        pre_range_state_revert.extend_ref_and_sort(&range_state_revert);
-
-        (tail_trie_revert, pre_range_state_revert)
-    };
-
-    let range_trie_revert = if start_block > end_block {
-        TrieUpdatesSorted::default()
-    } else {
-        StateRoot::new(
-            InMemoryTrieCursorFactory::new(state_trie_provider, &range_nodes),
-            HashedPostStateCursorFactory::new(state_trie_provider, &range_state),
-        )
-        .with_prefix_sets(range_prefix_sets.freeze())
-        .root_with_updates()
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted()
-    };
+            // Newest forward values win; the calculated target values override them.
+            let segment = if forward.is_empty() {
+                updates
+            } else {
+                let mut segment = TrieUpdatesSorted::merge_slice(&forward);
+                segment.extend_ref_and_sort(&updates);
+                segment
+            };
+            overlay.extend_ref_and_sort(&segment);
+            if is_range {
+                reverts.extend_ref_and_sort(&segment);
+            }
+            next = (start > *blocks.start()).then(|| start - 1);
+        }
+    }
 
     debug!(
         target: "trie::changesets",
         start_block,
         end_block,
-        num_account_nodes = range_trie_revert.account_nodes_ref().len(),
-        num_storage_tries = range_trie_revert.storage_tries_ref().len(),
+        num_account_nodes = reverts.account_nodes_ref().len(),
+        num_storage_tries = reverts.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
 
-    let reverts = Arc::new(range_trie_revert);
-    let mut overlay = base_nodes;
-    if !range_nodes.is_empty() {
-        Arc::make_mut(&mut overlay).extend_ref_and_sort(&range_nodes);
-    }
-    if overlay.is_empty() {
-        overlay = Arc::clone(&reverts);
-    } else if !reverts.is_empty() {
-        Arc::make_mut(&mut overlay).extend_ref_and_sort(&reverts);
-    }
-
+    let reverts = Arc::new(reverts);
+    let overlay = if end_block == db_tip_block { Arc::clone(&reverts) } else { Arc::new(overlay) };
     Ok(ComputedTrieChangesets { reverts, overlay })
 }
 
-/// Trie reverts for a block range and the corresponding overlay for the underlying database.
+/// Complete trie reverts for a block range and for the range plus its tail.
 #[derive(Debug, Clone, Default)]
 pub struct ComputedTrieChangesets {
-    /// Updates from the trie after the range to the trie before it. Their keys identify nodes
-    /// affected by the range, without the updates used to reconstruct its starting trie.
+    /// Target values for paths affected by the range, including transient nodes.
     pub reverts: Arc<TrieUpdatesSorted>,
-    /// Updates from the underlying database trie to the trie before the range, including the
-    /// input overlay and any rewind from the database tip to the range end.
+    /// Target values for paths affected from the range start through the database tip.
     pub overlay: Arc<TrieUpdatesSorted>,
 }
