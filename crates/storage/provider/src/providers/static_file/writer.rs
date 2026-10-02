@@ -783,8 +783,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             header.block_range().is_some() ||
             self.writer.rows() != 0
         {
-            return Err(ProviderError::other(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(ProviderError::other(StaticFileWriterError::new(
                 "pruned anchor requires a fresh non-header segment",
             )))
         }
