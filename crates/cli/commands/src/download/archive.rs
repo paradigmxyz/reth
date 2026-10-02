@@ -75,6 +75,10 @@ impl ModularDownloadJob {
             self.ctx.session().progress().expect("modular downloads always use shared progress"),
         );
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
+        for reused in &planned_downloads.reused {
+            info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
+            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+        }
         let ctx = self.ctx.clone();
         let results: Vec<Result<()>> = stream::iter(planned_downloads.archives)
             .map(move |archive| {
@@ -132,13 +136,10 @@ impl ArchiveProcessor {
     }
 
     /// Runs the archive retry state machine until outputs are verified or retries are exhausted.
+    ///
+    /// Callers only pass archives that failed the startup reuse check.
     fn run(self) -> Result<()> {
         let archive = self.archive();
-        if self.try_reuse_outputs()? {
-            info!(target: "reth::cli", file = %archive.file_name, component = %self.archive.component, "Skipping already verified plain files");
-            return Ok(());
-        }
-
         let mode = ArchiveMode::new(&self.ctx)?;
         let format = CompressionFormat::from_url(&archive.file_name)?;
         let mut attempt = 1;
@@ -224,31 +225,9 @@ impl ArchiveProcessor {
         OutputVerifier::new(self.ctx.target_dir(), self.ctx.static_files_dir())
     }
 
-    /// Returns `true` if this archive can be reused from existing verified outputs.
-    /// Returns `false` if a fresh archive attempt is still needed.
-    fn try_reuse_outputs(&self) -> Result<bool> {
-        if self.verify_outputs()? {
-            self.mark_complete();
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
     /// Removes any partial outputs before a fresh archive attempt.
     fn cleanup_outputs(&self) {
         self.output_verifier().cleanup(&self.archive().output_files);
-    }
-
-    /// Returns `true` if all declared plain outputs verify.
-    /// Returns `false` if any output is missing or does not match.
-    fn verify_outputs(&self) -> Result<bool> {
-        self.output_verifier().verify(&self.archive().output_files)
-    }
-
-    /// Records archive completion in shared progress once outputs verify.
-    fn mark_complete(&self) {
-        self.ctx.session().record_reused_archive(self.archive().size, self.archive().output_size());
     }
 
     /// Executes one archive attempt according to the selected cache-vs-stream mode.
@@ -332,7 +311,7 @@ impl ArchiveProcessor {
             ArchiveVerificationProgress::new(self.ctx.session().progress());
         let verified = self
             .output_verifier()
-            .verify_with_progress(&self.archive().output_files, Some(&mut verification_progress))?;
+            .verify_with_progress(&self.archive().output_files, Some(&verification_progress))?;
         if verified {
             verification_progress.complete(self.archive().output_size());
         }

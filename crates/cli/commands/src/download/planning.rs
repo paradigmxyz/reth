@@ -1,5 +1,6 @@
 use super::{manifest::*, verify::OutputVerifier};
 use eyre::Result;
+use rayon::prelude::*;
 use serde::Serialize;
 use std::{collections::BTreeMap, io::Write, path::Path};
 use tracing::info;
@@ -116,8 +117,10 @@ pub(crate) struct PlannedArchive {
 /// The archive list for a modular snapshot download.
 #[derive(Debug)]
 pub(crate) struct PlannedDownloads {
-    /// Concrete archives that still need reuse checks or processing.
+    /// Concrete archives that still need processing.
     pub(crate) archives: Vec<PlannedArchive>,
+    /// Archives whose declared outputs already verified on disk at startup.
+    pub(crate) reused: Vec<PlannedArchive>,
     /// Total compressed download size of all planned archives.
     pub(crate) total_download_size: u64,
     /// Total extracted plain-output size of all planned archives.
@@ -127,7 +130,31 @@ pub(crate) struct PlannedDownloads {
 impl PlannedDownloads {
     /// Returns the number of concrete archives queued for this snapshot selection.
     pub(crate) const fn total_archives(&self) -> usize {
-        self.archives.len()
+        self.archives.len() + self.reused.len()
+    }
+
+    /// Verifies every archive's existing outputs in parallel and moves archives that already
+    /// match into [`Self::reused`], so each output file is hashed at most once before work
+    /// begins.
+    pub(crate) fn partition_reusable(
+        mut self,
+        target_dir: &Path,
+        static_files_dir: Option<&Path>,
+    ) -> Result<Self> {
+        let verifier = OutputVerifier::new(target_dir, static_files_dir);
+        let checked = std::mem::take(&mut self.archives)
+            .into_par_iter()
+            .map(|planned| Ok((verifier.verify(&planned.archive.output_files)?, planned)))
+            .collect::<Result<Vec<_>>>()?;
+
+        for (reusable, planned) in checked {
+            if reusable {
+                self.reused.push(planned);
+            } else {
+                self.archives.push(planned);
+            }
+        }
+        Ok(self)
     }
 }
 
@@ -138,35 +165,6 @@ pub(crate) const fn archive_priority_rank(ty: SnapshotComponentType) -> u8 {
         SnapshotComponentType::RocksdbIndices => 1,
         _ => 2,
     }
-}
-
-/// Startup summary showing how much of the selected work can be reused.
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct DownloadStartupSummary {
-    /// Archives whose declared outputs already verify on disk.
-    pub(crate) reusable: usize,
-    /// Archives that still need to be downloaded or retried.
-    pub(crate) needs_download: usize,
-}
-
-/// Checks selected archives against existing output files before work begins.
-pub(crate) fn summarize_download_startup(
-    all_downloads: &[PlannedArchive],
-    target_dir: &Path,
-    static_files_dir: Option<&Path>,
-) -> Result<DownloadStartupSummary> {
-    let mut summary = DownloadStartupSummary::default();
-    let verifier = OutputVerifier::new(target_dir, static_files_dir);
-
-    for planned in all_downloads {
-        if verifier.verify(&planned.archive.output_files)? {
-            summary.reusable += 1;
-        } else {
-            summary.needs_download += 1;
-        }
-    }
-
-    Ok(summary)
 }
 
 /// Converts a selection into the manifest distance form used for archive lookup.
@@ -244,7 +242,7 @@ pub(crate) fn collect_planned_archives(
     }
 
     sort_planned_archives(&mut archives);
-    Ok(PlannedDownloads { archives, total_download_size, total_output_size })
+    Ok(PlannedDownloads { archives, reused: Vec::new(), total_download_size, total_output_size })
 }
 
 #[cfg(test)]
@@ -253,7 +251,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn summarize_download_startup_counts_reusable_and_needs_download() {
+    fn partition_reusable_moves_only_verified_archives() {
         let dir = tempdir().unwrap();
         let target_dir = dir.path();
         let ok_file = target_dir.join("ok.bin");
@@ -304,9 +302,21 @@ mod tests {
             },
         ];
 
-        let summary = summarize_download_startup(&planned, target_dir, None).unwrap();
-        assert_eq!(summary.reusable, 1);
-        assert_eq!(summary.needs_download, 2);
+        let planned = PlannedDownloads {
+            archives: planned,
+            reused: Vec::new(),
+            total_download_size: 30,
+            total_output_size: 5,
+        }
+        .partition_reusable(target_dir, None)
+        .unwrap();
+        assert_eq!(planned.total_archives(), 3);
+
+        let names = |archives: &[PlannedArchive]| {
+            archives.iter().map(|planned| planned.archive.file_name.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(names(&planned.reused), ["ok.tar.zst"]);
+        assert_eq!(names(&planned.archives), ["missing.tar.zst", "bad-size.tar.zst"]);
     }
 
     #[test]

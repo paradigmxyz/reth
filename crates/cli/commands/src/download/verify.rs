@@ -1,8 +1,15 @@
 use super::{manifest::OutputFileChecksum, progress::ArchiveVerificationProgress};
 use blake3::Hasher;
 use eyre::Result;
-use reth_fs_util as fs;
-use std::{io::Read, path::Path};
+use rayon::prelude::*;
+use reth_fs_util::{self as fs, FsPathError};
+use std::{
+    io::{ErrorKind, Read},
+    path::Path,
+};
+
+/// Read size per hash update. Large enough for `update_rayon` to split across threads.
+const HASH_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 
 /// Verifies and cleans up extracted output files in one target directory.
 pub(crate) struct OutputVerifier<'a> {
@@ -19,39 +26,53 @@ impl<'a> OutputVerifier<'a> {
     }
 
     /// Returns `true` only when every declared output file exists and matches size and BLAKE3.
-    /// Returns `false` if any file is missing, mismatched, or no outputs were declared.
+    /// Returns `false` if any file is missing, mismatched, or no outputs were declared, and an
+    /// error if a file exists but cannot be inspected or read.
     pub(crate) fn verify(&self, output_files: &[OutputFileChecksum]) -> Result<bool> {
         self.verify_with_progress(output_files, None)
     }
 
     /// Returns `true` only when every declared output file exists and matches size and BLAKE3,
     /// updating the optional verification progress as file bytes are hashed.
+    ///
+    /// Sizes are checked before any file is hashed, then files are hashed in parallel.
     pub(crate) fn verify_with_progress(
         &self,
         output_files: &[OutputFileChecksum],
-        mut progress: Option<&mut ArchiveVerificationProgress<'_>>,
+        progress: Option<&ArchiveVerificationProgress<'_>>,
     ) -> Result<bool> {
         if output_files.is_empty() {
             return Ok(false);
         }
 
+        let mut paths = Vec::with_capacity(output_files.len());
         for expected in output_files {
             let output_path = self.output_path(&expected.path);
-            let meta = match fs::metadata(&output_path) {
-                Ok(meta) => meta,
-                Err(_) => return Ok(false),
-            };
-            if meta.len() != expected.size {
-                return Ok(false);
-            }
-
-            let actual = Self::file_blake3_hex(&output_path, progress.as_deref_mut())?;
-            if !actual.eq_ignore_ascii_case(&expected.blake3) {
-                return Ok(false);
+            match fs::metadata(&output_path) {
+                Ok(meta) if meta.len() == expected.size => paths.push(output_path),
+                Ok(_) => return Ok(false),
+                Err(FsPathError::Metadata { source, .. })
+                    if source.kind() == ErrorKind::NotFound =>
+                {
+                    return Ok(false)
+                }
+                Err(error) => return Err(error.into()),
             }
         }
 
-        Ok(true)
+        let failure = output_files.par_iter().zip(paths).find_map_any(|(expected, path)| {
+            match Self::file_blake3_hex(&path, expected.size, progress) {
+                Ok(actual) if actual.eq_ignore_ascii_case(&expected.blake3) => None,
+                Ok(_) => Some(Ok(())),
+                Err(error) => Some(Err(error)),
+            }
+        });
+
+        match failure {
+            None => Ok(true),
+            Some(Ok(())) => Ok(false),
+            Some(Err(error)) => Err(error),
+        }
     }
 
     /// Removes any declared output files so a fresh archive attempt can restart cleanly.
@@ -74,19 +95,20 @@ impl<'a> OutputVerifier<'a> {
     /// Computes the hex-encoded BLAKE3 checksum for one plain output file.
     fn file_blake3_hex(
         path: &Path,
-        mut progress: Option<&mut ArchiveVerificationProgress<'_>>,
+        size: u64,
+        progress: Option<&ArchiveVerificationProgress<'_>>,
     ) -> Result<String> {
         let mut file = fs::open(path)?;
         let mut hasher = Hasher::new();
-        let mut buf = [0_u8; 64 * 1024];
+        let mut buf = vec![0_u8; size.min(HASH_BUFFER_SIZE as u64) as usize];
 
         loop {
             let n = file.read(&mut buf)?;
             if n == 0 {
                 break;
             }
-            hasher.update(&buf[..n]);
-            if let Some(progress) = progress.as_deref_mut() {
+            hasher.update_rayon(&buf[..n]);
+            if let Some(progress) = progress {
                 progress.record_verified(n as u64);
             }
         }
@@ -98,6 +120,58 @@ impl<'a> OutputVerifier<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checksum(path: &str, data: &[u8]) -> OutputFileChecksum {
+        OutputFileChecksum {
+            path: path.into(),
+            size: data.len() as u64,
+            blake3: blake3::hash(data).to_hex().to_string(),
+        }
+    }
+
+    #[test]
+    fn verify_detects_each_kind_of_output_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let large: Vec<u8> = (0..2 * HASH_BUFFER_SIZE + 123).map(|i| (i % 251) as u8).collect();
+        let small = b"small".to_vec();
+        fs::write(dir.path().join("large"), &large).unwrap();
+        fs::write(dir.path().join("small"), &small).unwrap();
+        let outputs = vec![checksum("large", &large), checksum("small", &small)];
+        let verifier = OutputVerifier::new(dir.path(), None);
+
+        assert!(verifier.verify(&outputs).unwrap(), "matching multi-buffer outputs verify");
+
+        let mut uppercase = outputs.clone();
+        uppercase[0].blake3 = uppercase[0].blake3.to_ascii_uppercase();
+        assert!(verifier.verify(&uppercase).unwrap(), "checksums compare case-insensitively");
+
+        let mut flipped = large.clone();
+        flipped[HASH_BUFFER_SIZE + 7] ^= 1;
+        fs::write(dir.path().join("large"), &flipped).unwrap();
+        assert!(!verifier.verify(&outputs).unwrap(), "one flipped byte fails verification");
+
+        fs::write(dir.path().join("large"), &large[1..]).unwrap();
+        assert!(!verifier.verify(&outputs).unwrap(), "size mismatch fails verification");
+
+        fs::remove_file(dir.path().join("large")).unwrap();
+        assert!(!verifier.verify(&outputs).unwrap(), "missing file fails verification");
+
+        assert!(!verifier.verify(&[]).unwrap(), "archives without outputs never verify");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_returns_metadata_errors_other_than_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("file"), b"data").unwrap();
+        let verifier = OutputVerifier::new(dir.path(), None);
+
+        assert!(!verifier.verify(&[checksum("missing", b"data")]).unwrap());
+        assert!(
+            verifier.verify(&[checksum("file/child", b"data")]).is_err(),
+            "a path through a regular file is an error, not a missing output"
+        );
+    }
 
     #[test]
     fn custom_static_files_verification_and_cleanup() {

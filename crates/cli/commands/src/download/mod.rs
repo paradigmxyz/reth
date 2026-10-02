@@ -99,7 +99,7 @@ use config_gen::{config_for_selections, write_config};
 use extract::stream_and_extract;
 use eyre::Result;
 use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
-use planning::{collect_planned_archives, summarize_download_startup, PlannedDownloads};
+use planning::{collect_planned_archives, PlannedDownloads};
 use progress::{DownloadProgress, DownloadRequestLimiter};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
@@ -530,11 +530,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
         }
         fs::create_dir_all(target_dir)?;
-        let startup_summary =
-            summarize_download_startup(&planned.archives, target_dir, static_files_dir.as_deref())?;
+        let planned = {
+            let (target_dir, static_files_dir) =
+                (target_dir.to_path_buf(), static_files_dir.clone());
+            tokio::task::spawn_blocking(move || {
+                planned.partition_reusable(&target_dir, static_files_dir.as_deref())
+            })
+            .await??
+        };
         info!(target: "reth::cli",
-            reusable = startup_summary.reusable,
-            needs_download = startup_summary.needs_download,
+            reusable = planned.reused.len(),
+            needs_download = planned.archives.len(),
             "Startup integrity summary (plain output files)"
         );
 
