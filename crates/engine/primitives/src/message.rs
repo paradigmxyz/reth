@@ -233,6 +233,10 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
         self.env_switches.iter().map(|data| data.gas_limit()).sum()
     }
 
+    fn blob_gas_used(&self) -> Option<u64> {
+        self.env_switches.iter().map(|data| data.blob_gas_used()).sum()
+    }
+
     fn transaction_count(&self) -> usize {
         self.env_switches.iter().map(|data| data.transaction_count()).sum()
     }
