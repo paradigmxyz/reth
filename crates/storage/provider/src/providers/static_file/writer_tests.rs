@@ -1010,4 +1010,32 @@ mod tests {
         assert_eq!(header.block_range(), Some((10..=11).into()));
         assert_eq!(header.tx_range(), Some((100..=101).into()));
     }
+
+    #[test]
+    fn test_unwind_within_anchor_in_later_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=753 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(751).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((750..=751).into()));
+        assert_eq!(provider.account_block_changeset(751).unwrap().len(), 2);
+        assert!(!provider.directory().join(segment.filename(&(0..=499).into())).exists());
+    }
 }
