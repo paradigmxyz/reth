@@ -27,8 +27,10 @@ use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateNotificationStream,
-    CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
+    CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader,
+    StageCheckpointReader,
 };
+use reth_prune_types::PruneSegment;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::{
@@ -419,6 +421,62 @@ where
         .await
     }
 
+    /// Waits until the node has persisted at least the block with the given number to disk.
+    ///
+    /// The engine keeps the most recent blocks in memory, so tests that inspect the database
+    /// directly, e.g. via [`assert_trie_consistency`], must first advance the chain far enough
+    /// and wait for the persistence service to catch up. This checks the `Finish` stage checkpoint
+    /// of the database, which is committed together with the saved blocks, so all blocks up to
+    /// `number` are readable from disk once this returns. Their state and trie are committed in
+    /// the same transaction, unless the engine keeps the state of the most recently persisted
+    /// blocks masked by its in-memory suffix (`TreeConfig::num_state_masking_blocks`, disabled by a
+    /// persistence threshold of 0), in which case the persisted state can lag behind `number`. The
+    /// pruner runs after the save in a separate commit, so pruning of the saved blocks can still be
+    /// pending, wait for it with [`Self::wait_for_prune_checkpoint`].
+    ///
+    /// Unlike [`Self::wait_block`], this does not check the block hash, so it also returns if the
+    /// persisted block at `number` is not canonical anymore.
+    ///
+    /// Returns an error if the block is not persisted within [`WAIT_TIMEOUT`].
+    ///
+    /// [`assert_trie_consistency`]: crate::trie::assert_trie_consistency
+    pub async fn wait_for_persisted_block(&self, number: BlockNumber) -> eyre::Result<()> {
+        let provider = &self.inner.provider;
+        poll_until(format!("block {number} to be persisted"), move || async move {
+            let persisted = provider.database_provider_ro()?.best_block_number()?;
+            Ok((persisted >= number).then_some(()))
+        })
+        .await
+    }
+
+    /// Waits until the pruner has pruned `segment` of the node up to at least the block with the
+    /// given number.
+    ///
+    /// The persistence service acknowledges a save before it runs the pruner for the new database
+    /// tip in a separate commit, so a block being persisted, e.g. awaited with
+    /// [`Self::wait_for_persisted_block`], does not mean the pruner has run for it yet. The
+    /// pruner saves the checkpoint of a segment in the same provider commit as the pruned data,
+    /// which commits static files and `RocksDB` before the database transaction, so the data of
+    /// `segment` up to `block` is pruned once this returns.
+    ///
+    /// Returns an error if the segment is not pruned within [`WAIT_TIMEOUT`], e.g. because the
+    /// node is not configured to prune it or `block` is within its retention window.
+    pub async fn wait_for_prune_checkpoint(
+        &self,
+        segment: PruneSegment,
+        block: BlockNumber,
+    ) -> eyre::Result<()> {
+        let provider = &self.inner.provider;
+        poll_until(format!("{segment} to be pruned up to block {block}"), move || async move {
+            let checkpoint = provider.get_prune_checkpoint(segment)?;
+            Ok(checkpoint
+                .and_then(|checkpoint| checkpoint.block_number)
+                .is_some_and(|pruned| pruned >= block)
+                .then_some(()))
+        })
+        .await
+    }
+
     /// Asserts that a new block has been added to the blockchain and the tx has been included in
     /// the block, at any position.
     ///
@@ -729,6 +787,8 @@ mod tests {
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
         assert_send(node.wait_for_pool_head(B256::ZERO));
+        assert_send(node.wait_for_persisted_block(0));
+        assert_send(node.wait_for_prune_checkpoint(PruneSegment::SenderRecovery, 0));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
         assert_send(node.import_payload(payload));
