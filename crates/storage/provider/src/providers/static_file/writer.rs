@@ -789,8 +789,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             )))
         }
         if !header.expected_block_range().contains(block) {
-            return Err(ProviderError::other(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(ProviderError::other(StaticFileWriterError::new(
                 "pruned anchor is outside the static file range",
             )))
         }

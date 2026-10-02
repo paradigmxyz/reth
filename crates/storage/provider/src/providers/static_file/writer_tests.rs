@@ -969,4 +969,14 @@ mod tests {
         assert_eq!(header.block_range(), Some((10..=12).into()));
         assert_eq!(get_nippy_row_count(&provider, 10), 4);
     }
+
+    #[test]
+    fn test_anchor_outside_file_range_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        let mut writer = provider.get_writer(10, StaticFileSegment::AccountChangeSets).unwrap();
+        assert!(writer.initialize_pruned_anchor(150).is_err());
+        assert_eq!(writer.user_header().block_range(), None);
+    }
 }
