@@ -1197,7 +1197,7 @@ mod tests {
                 ..Default::default()
             };
             blocks.push(ExecutedBlock::new(
-                Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
+                Arc::new(reth_primitives_traits::Block::into_recovered_with_signers(block, vec![])),
                 Arc::new(output),
                 Arc::new(state.into_sorted()),
                 Arc::new(updates.into_sorted()),
@@ -1656,10 +1656,7 @@ mod tests {
         // Assertions related to the pending block
 
         let pending_block = provider.pending_block()?.unwrap();
-        assert_eq!(
-            *pending_block,
-            RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap())
-        );
+        assert_eq!(*pending_block, block.clone().with_senders(block.senders().unwrap()));
 
         let pending = provider.pending_block_and_receipts()?.unwrap();
         assert!(Arc::ptr_eq(&pending_block, pending.block()));
@@ -2404,19 +2401,19 @@ mod tests {
         // Verify the pending block number and hash
         assert_eq!(
             provider.pending_block_num_hash()?,
-            Some(BlockNumHash { number: pending_block.number, hash: pending_block.hash() })
+            Some(BlockNumHash::new(pending_block.number, pending_block.hash()))
         );
 
         // Verify the safe block number and hash
         assert_eq!(
             provider.safe_block_num_hash()?,
-            Some(BlockNumHash { number: safe_block.number, hash: safe_block.hash() })
+            Some(BlockNumHash::new(safe_block.number, safe_block.hash()))
         );
 
         // Verify the finalized block number and hash
         assert_eq!(
             provider.finalized_block_num_hash()?,
-            Some(BlockNumHash { number: finalized_block.number, hash: finalized_block.hash() })
+            Some(BlockNumHash::new(finalized_block.number, finalized_block.hash()))
         );
 
         Ok(())
@@ -3126,8 +3123,8 @@ mod tests {
         let hashed_address = keccak256(address);
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
         let slots = [
-            StorageEntry { key: B256::with_last_byte(1), value: U256::from(10) },
-            StorageEntry { key: B256::with_last_byte(2), value: U256::from(20) },
+            StorageEntry::new(B256::with_last_byte(1), U256::from(10)),
+            StorageEntry::new(B256::with_last_byte(2), U256::from(20)),
         ];
         provider_rw.insert_storage_for_hashing([(address, slots)])?;
         provider_rw.commit()?;
@@ -3172,7 +3169,7 @@ mod tests {
         provider_rw.insert_account_for_hashing([(address, Some(account))])?;
         provider_rw.insert_storage_for_hashing([(
             address,
-            [StorageEntry { key: B256::with_last_byte(1), value: U256::from(10) }],
+            [StorageEntry::new(B256::with_last_byte(1), U256::from(10))],
         )])?;
         provider_rw.commit()?;
 
@@ -3209,7 +3206,7 @@ mod tests {
                 number,
                 BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
             )
-            .unseal();
+            .into_block();
             block.header.state_root = match number {
                 0 => expired_root,
                 64 => recent_root,
@@ -3355,7 +3352,7 @@ mod tests {
             parent.number + 1,
             BlockParams { parent: Some(parent.hash()), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
 
@@ -3408,7 +3405,7 @@ mod tests {
             genesis.number + 1,
             BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
         let (hashed_state, trie_updates) =
@@ -3490,10 +3487,8 @@ mod tests {
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
-        provider_rw.insert_storage_for_hashing([(
-            address,
-            [StorageEntry { key: slot_key, value: value_a }],
-        )])?;
+        provider_rw
+            .insert_storage_for_hashing([(address, [StorageEntry::new(slot_key, value_a)])])?;
         provider_rw.commit()?;
         let anchor_root = factory.latest()?.state_root(HashedPostState::default())?;
 
@@ -3503,7 +3498,7 @@ mod tests {
             1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         anchor_block.header.state_root = anchor_root;
         let anchor_block =
             anchor_block.seal_slow().try_recover().expect("failed to seal block with senders");
@@ -3531,7 +3526,7 @@ mod tests {
             2,
             BlockParams { parent: Some(anchor_hash), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         later_block.header.state_root = state_b_root;
         let later_block =
             later_block.seal_slow().try_recover().expect("failed to seal block with senders");

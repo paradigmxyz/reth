@@ -285,7 +285,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
     fn commit_unwind(self) -> ProviderResult<()> {
-        let storage_v2 = self.cached_storage_settings().storage_v2;
+        let storage_v2 = self.cached_storage_settings().is_v2();
         let reader_txn_tracker = self.reader_txn_tracker.clone();
         self.tx.commit()?;
 
@@ -619,8 +619,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             })
             .transpose()?;
         let rocksdb_ctx = first_number.map(|first_number| self.rocksdb_write_ctx(first_number));
-        let rocksdb_enabled =
-            rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.storage_v2);
+        let rocksdb_enabled = rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.is_v2());
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -666,7 +665,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Collect all transaction hashes across all blocks, sort them, and write in batch
             if !blocks.is_empty() &&
-                !self.cached_storage_settings().storage_v2 &&
+                !self.cached_storage_settings().is_v2() &&
                 self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
             {
                 let start = Instant::now();
@@ -1527,7 +1526,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX,
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
         if let Some(highest) = highest_static_block &&
-            self.cached_storage_settings().storage_v2
+            self.cached_storage_settings().is_v2()
         {
             let start = *range.start();
             let static_end = (*range.end()).min(highest);
@@ -1568,7 +1567,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.static_file_provider.storage_changeset(block_number)
         } else {
             let range = block_number..=block_number;
@@ -1590,7 +1589,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         address: Address,
         storage_key: B256,
     ) -> ProviderResult<Option<StorageEntry>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.static_file_provider.get_storage_before_block(block_number, address, storage_key)
         } else {
             Ok(self
@@ -1605,7 +1604,7 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.static_file_provider.storage_changesets_range(range)
         } else {
             self.tx
@@ -1625,7 +1624,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             let static_changesets =
                 self.static_file_provider.account_block_changeset(block_number)?;
             Ok(static_changesets)
@@ -1647,7 +1646,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
         } else {
             self.tx
@@ -1663,7 +1662,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.static_file_provider.account_changesets_range(range)
         } else {
             self.tx
@@ -1692,7 +1691,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         self.rocksdb_history_snapshot
             .get_or_init(|| {
                 self.cached_storage_settings()
-                    .storage_v2
+                    .is_v2()
                     .then(|| self.rocksdb_provider.owned_snapshot())
             })
             .as_ref()
@@ -2189,7 +2188,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             } else {
                 let receipts = self.receipts_by_tx_range(tx_range)?;
 
-                if receipts.len() != body.tx_count as usize {
+                if receipts.len() != body.tx_count() as usize {
                     return Ok(None)
                 }
 
@@ -2238,7 +2237,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // find blocks with transactions to determine transaction range
         let non_empty_blocks: Vec<_> =
-            block_body_indices.iter().filter(|indices| indices.tx_count > 0).collect();
+            block_body_indices.iter().filter(|indices| indices.tx_count() > 0).collect();
 
         if non_empty_blocks.is_empty() {
             // all blocks are empty
@@ -2260,7 +2259,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
                 result.push(Vec::new());
             } else {
                 let block_receipts =
-                    receipts_iter.by_ref().take(indices.tx_count as usize).collect();
+                    receipts_iter.by_ref().take(indices.tx_count() as usize).collect();
                 result.push(block_receipts);
             }
         }
@@ -2443,7 +2442,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, BTreeSet<B256>>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut accounts: BTreeMap<Address, BTreeSet<B256>>, entry| {
@@ -2473,7 +2472,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>> {
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             self.storage_changesets_range(range)?.into_iter().try_fold(
                 BTreeMap::new(),
                 |mut storages: BTreeMap<(Address, B256), Vec<u64>>, (index, storage)| {
@@ -2556,7 +2555,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let block_indices: Vec<_> = self
             .block_body_indices_range(block_range)?
             .into_iter()
-            .map(|b| b.first_tx_num)
+            .map(|b| b.first_tx_num())
             .collect();
 
         // Ensure all expected blocks are present.
@@ -2845,7 +2844,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
-        let storage_changeset = if self.cached_storage_settings().storage_v2 {
+        let storage_changeset = if self.cached_storage_settings().is_v2() {
             let changesets = self.storage_changesets_range(range.clone())?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
@@ -2854,7 +2853,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             self.take::<tables::StorageChangeSets>(storage_range)?.into_iter().collect()
         };
-        let account_changeset = if self.cached_storage_settings().storage_v2 {
+        let account_changeset = if self.cached_storage_settings().is_v2() {
             let changesets = self.account_changesets_range(range)?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
@@ -2994,7 +2993,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
-            self.cached_storage_settings().storage_v2
+            self.cached_storage_settings().is_v2()
         {
             let changesets = self.storage_changesets_range(block + 1..=highest_block)?;
             let mut changeset_writer =
@@ -3010,7 +3009,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
         let account_changeset = if let Some(highest_block) = highest_changeset_block &&
-            self.cached_storage_settings().storage_v2
+            self.cached_storage_settings().is_v2()
         {
             // TODO: add a `take` method that removes and returns the items instead of doing this
             let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
@@ -3135,7 +3134,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for block_body in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count() as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
                     block_receipts.push(receipts_iter.next().unwrap().1);
@@ -3404,7 +3403,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         last_indices.sort_unstable_by_key(|(a, _)| *a);
 
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             let batch = self.rocksdb_provider.unwind_account_history_indices(&last_indices)?;
             self.pending_rocksdb_batches.lock().push(batch);
         } else {
@@ -3461,7 +3460,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             .collect::<Vec<_>>();
         storage_changesets.sort_unstable_by_key(|(address, key, _)| (*address, *key));
 
-        if self.cached_storage_settings().storage_v2 {
+        if self.cached_storage_settings().is_v2() {
             let batch =
                 self.rocksdb_provider.unwind_storage_history_indices(&storage_changesets)?;
             self.pending_rocksdb_batches.lock().push(batch);
@@ -3517,12 +3516,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
-        if !storage_settings.storage_v2 {
+        if !storage_settings.is_v2() {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        if !storage_settings.storage_v2 {
+        if !storage_settings.is_v2() {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
@@ -3827,7 +3826,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Note: For MDBX we use insert_*_history_index. For RocksDB we use
         // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
-        if storage_settings.storage_v2 {
+        if storage_settings.is_v2() {
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
                     batch.append_account_history_shard(address, blocks)?;
@@ -3837,7 +3836,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         } else {
             self.insert_account_history_index(account_transitions)?;
         }
-        if storage_settings.storage_v2 {
+        if storage_settings.is_v2() {
             self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
                     batch.append_storage_history_shard(address, key, blocks)?;
@@ -4813,7 +4812,7 @@ mod tests {
         let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(finish_checkpoint.block_number, 2);
         assert_eq!(
-            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(),
             Some(1)
         );
         assert!(provider.block_hash(2).unwrap().is_some());
@@ -4925,7 +4924,7 @@ mod tests {
         let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(finish_checkpoint.block_number, 4);
         assert_eq!(
-            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie,
+            finish_checkpoint.finish_stage_checkpoint().unwrap().partial_state_trie(),
             Some(2)
         );
 
@@ -5136,13 +5135,11 @@ mod tests {
             .tx
             .cursor_dup_write::<tables::HashedStorages>()
             .unwrap()
-            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: current_value })
+            .upsert(hashed_address, &StorageEntry::new(hashed_slot, current_value))
             .unwrap();
 
-        let changesets = vec![(
-            BlockNumberAddress((1, address)),
-            StorageEntry { key: plain_slot, value: old_value },
-        )];
+        let changesets =
+            vec![(BlockNumberAddress((1, address)), StorageEntry::new(plain_slot, old_value))];
 
         let result = provider_rw.unwind_storage_hashing(changesets.into_iter()).unwrap();
 
@@ -5209,10 +5206,7 @@ mod tests {
         let mut block_reverts: AddressMap<AccountRevertInit> = AddressMap::default();
         block_reverts.insert(
             address,
-            (
-                Some(Some(Account::default())),
-                vec![StorageEntry { key: slot_key, value: U256::ZERO }],
-            ),
+            (Some(Some(Account::default())), vec![StorageEntry::new(slot_key, U256::ZERO)]),
         );
         reverts_init.insert(1, block_reverts);
 
@@ -5348,13 +5342,11 @@ mod tests {
             .tx
             .cursor_dup_write::<tables::HashedStorages>()
             .unwrap()
-            .upsert(hashed_address, &StorageEntry { key: hashed_slot, value: current_value })
+            .upsert(hashed_address, &StorageEntry::new(hashed_slot, current_value))
             .unwrap();
 
-        let changesets = vec![(
-            BlockNumberAddress((1, address)),
-            StorageEntry { key: plain_slot, value: old_value },
-        )];
+        let changesets =
+            vec![(BlockNumberAddress((1, address)), StorageEntry::new(plain_slot, old_value))];
 
         let result = provider_rw.unwind_storage_hashing(changesets.into_iter()).unwrap();
 
@@ -5923,14 +5915,8 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
 
         let changesets = vec![
-            (
-                BlockNumberAddress((7, address)),
-                StorageEntry { key: slot_key, value: U256::from(5) },
-            ),
-            (
-                BlockNumberAddress((10, address)),
-                StorageEntry { key: slot_key, value: U256::from(8) },
-            ),
+            (BlockNumberAddress((7, address)), StorageEntry::new(slot_key, U256::from(5))),
+            (BlockNumberAddress((10, address)), StorageEntry::new(slot_key, U256::from(8))),
         ];
 
         let count = provider_rw.unwind_storage_history_indices(changesets.into_iter()).unwrap();

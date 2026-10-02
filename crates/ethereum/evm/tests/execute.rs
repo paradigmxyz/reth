@@ -31,7 +31,7 @@ use revm::{
 use std::sync::{mpsc, Arc};
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+    let mut db = <CacheDB<EmptyDB> as Default>::default();
 
     let beacon_root_contract_account =
         AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone()));
@@ -42,7 +42,7 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
 }
 
 fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+    let mut db = <CacheDB<EmptyDB> as Default>::default();
 
     let withdrawal_requests_contract_account =
         AccountInfo::from_bytecode(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()));
@@ -76,10 +76,10 @@ fn eip_4788_non_genesis_call() {
     // attempt to execute a block without parent beacon block root, expect err
     let err = executor
         .execute_one(&RecoveredBlock::new_unhashed(
-            Block {
-                header: header.clone(),
-                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-            },
+            Block::new(
+                header.clone(),
+                BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            ),
             vec![],
         ))
         .expect_err("Executing cancun block without parent beacon block root field should fail");
@@ -95,10 +95,10 @@ fn eip_4788_non_genesis_call() {
     // Now execute a block with the fixed header, ensure that it does not fail
     executor
         .execute_one(&RecoveredBlock::new_unhashed(
-            Block {
-                header: header.clone(),
-                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-            },
+            Block::new(
+                header.clone(),
+                BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            ),
             vec![],
         ))
         .unwrap();
@@ -139,7 +139,7 @@ fn eip_4788_no_code_cancun() {
         ..Header::default()
     };
 
-    let db = CacheDB::new(EmptyDB::default());
+    let db = <CacheDB<EmptyDB> as Default>::default();
 
     // DON'T deploy the contract at genesis
     let chain_spec = Arc::new(
@@ -155,10 +155,10 @@ fn eip_4788_no_code_cancun() {
     provider
         .batch_executor(db)
         .execute_one(&RecoveredBlock::new_unhashed(
-            Block {
+            Block::new(
                 header,
-                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-            },
+                BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            ),
             vec![],
         ))
         .expect("Executing a block with no transactions while cancun is active should not fail");
@@ -197,10 +197,10 @@ fn eip_4788_empty_account_call() {
     // attempt to execute an empty block with parent beacon block root, this should not fail
     executor
         .execute_one(&RecoveredBlock::new_unhashed(
-            Block {
+            Block::new(
                 header,
-                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-            },
+                BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            ),
             vec![],
         ))
         .expect("Executing a block with no transactions while cancun is active should not fail");
@@ -321,7 +321,7 @@ fn eip_4788_high_base_fee() {
 
 /// Create a state provider with blockhashes and the EIP-2935 system contract.
 fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+    let mut db = <CacheDB<EmptyDB> as Default>::default();
     for block_number in 0..=latest_block {
         db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
     }
@@ -654,7 +654,7 @@ fn eip_7002() {
 
     let BlockExecutionResult { receipts, requests, .. } = executor
         .execute_one(
-            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+            &Block::new(header, BlockBody { transactions: vec![tx], ..Default::default() })
                 .try_into_recovered()
                 .unwrap(),
         )
@@ -729,7 +729,7 @@ fn block_gas_limit_error() {
 
     // Execute the block and capture the result
     let exec_result = executor.execute_one(
-        &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+        &Block::new(header, BlockBody { transactions: vec![tx], ..Default::default() })
             .try_into_recovered()
             .unwrap(),
     );
@@ -759,7 +759,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = CacheDB::new(EmptyDB::default());
+    let mut db = <CacheDB<EmptyDB> as Default>::default();
     let initial_balance = 100;
     db.insert_account_info(
         withdrawal_recipient,
@@ -778,14 +778,14 @@ fn test_balance_increment_not_duplicated() {
     };
 
     let block = &RecoveredBlock::new_unhashed(
-        Block {
+        Block::new(
             header,
-            body: BlockBody {
+            BlockBody {
                 transactions: vec![],
                 ommers: vec![],
                 withdrawals: Some(vec![withdrawal].into()),
             },
-        },
+        ),
         vec![],
     );
 

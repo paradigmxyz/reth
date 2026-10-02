@@ -27,7 +27,7 @@ impl<R: Read + Seek> E2StoreReader<R> {
         // Reset reader to beginning
         self.reader.seek(SeekFrom::Start(0))?;
 
-        match Entry::read(&mut self.reader)? {
+        match self.read_next_entry()? {
             Some(entry) if entry.is_version() => Ok(Some(entry)),
             Some(_) => Err(E2sError::Ssz("First entry must be a Version entry".to_string())),
             None => Ok(None),

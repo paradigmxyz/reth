@@ -406,7 +406,7 @@ mod tests {
     /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
     /// (EIP-7002), and historical block hashes (EIP-2935).
     fn system_contracts_db() -> CacheDB<EmptyDB> {
-        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+        let mut db = <reth_revm::db::CacheDB<EmptyDB> as Default>::default();
         db.insert_account_info(
             BEACON_ROOTS_ADDRESS,
             AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
@@ -445,14 +445,10 @@ mod tests {
             block_access_list_hash: Some(header_bal_hash),
             ..Header::default()
         };
-        let block = Block {
+        let block = Block::new(
             header,
-            body: BlockBody {
-                transactions: vec![],
-                ommers: vec![],
-                withdrawals: Some(vec![].into()),
-            },
-        };
+            BlockBody { transactions: vec![], ommers: vec![], withdrawals: Some(vec![].into()) },
+        );
         block.seal_slow()
     }
 
@@ -700,8 +696,8 @@ mod tests {
                 input: Default::default(),
             }),
         );
-        let recovered1 = Recovered::new_unchecked(tx1, alice);
-        let recovered2 = Recovered::new_unchecked(tx2, bob);
+        let recovered1 = reth_primitives_traits::SignedTransaction::with_signer(tx1, alice);
+        let recovered2 = reth_primitives_traits::SignedTransaction::with_signer(tx2, bob);
 
         // Reference BAL: run the block canonically through a separate executor.
         let block_for_ref = empty_amsterdam_block(B256::ZERO);
@@ -915,8 +911,14 @@ mod tests {
                 }),
             )
         };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, carol, 100u64, 0), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, carol, 200u64, 0), bob);
+        let tx1 = reth_primitives_traits::SignedTransaction::with_signer(
+            make_tx(alice_kp, carol, 100u64, 0),
+            alice,
+        );
+        let tx2 = reth_primitives_traits::SignedTransaction::with_signer(
+            make_tx(bob_kp, carol, 200u64, 0),
+            bob,
+        );
 
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx1, tx2]);
     }
@@ -964,8 +966,12 @@ mod tests {
                 }),
             )
         };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+        let tx1 = reth_primitives_traits::SignedTransaction::with_signer(
+            make_tx(alice_kp, 100u64),
+            alice,
+        );
+        let tx2 =
+            reth_primitives_traits::SignedTransaction::with_signer(make_tx(bob_kp, 200u64), bob);
 
         // Build the reference BAL under a generous gas limit so both workers can execute.
         // Replaying the same BAL under `block_gas_limit` below should reject in the ordered
@@ -1045,8 +1051,12 @@ mod tests {
                 }),
             )
         };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+        let tx1 = reth_primitives_traits::SignedTransaction::with_signer(
+            make_tx(alice_kp, 100u64),
+            alice,
+        );
+        let tx2 =
+            reth_primitives_traits::SignedTransaction::with_signer(make_tx(bob_kp, 200u64), bob);
 
         let reference_block = empty_amsterdam_block(B256::ZERO);
         let covered = if bal_covers_first { vec![tx1.clone()] } else { vec![] };

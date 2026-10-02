@@ -181,7 +181,7 @@ mod tests {
         let block: BlockTuple = create_test_block_with_compressed_data(30);
 
         // Decode and decompress the block header
-        let header: alloy_consensus::Header = block.header.decode().unwrap();
+        let header: alloy_consensus::Header = block.header.decode_header().unwrap();
         assert_eq!(header.number, 30, "Header block number should match");
         assert_eq!(header.difficulty, U256::from(30 * 1000), "Header difficulty should match");
         assert_eq!(header.gas_limit, 5000000, "Gas limit should match");

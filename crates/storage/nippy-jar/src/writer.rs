@@ -177,7 +177,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             .into_iter();
 
         for _ in 0..num_rows {
-            let mut iterators = Vec::with_capacity(self.jar.columns);
+            let mut iterators = Vec::with_capacity(self.jar.columns());
 
             for mut column_iter in column_iterators {
                 self.append_column(column_iter.next())?;
@@ -214,7 +214,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             }
             None => {
                 return Err(NippyJarError::UnexpectedMissingValue(
-                    self.jar.rows as u64,
+                    self.jar.rows() as u64,
                     self.column as u64,
                 ))
             }
@@ -239,7 +239,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         self.column += 1;
 
-        if self.jar.columns == self.column {
+        if self.jar.columns() == self.column {
             self.finalize_row();
         }
 
@@ -254,7 +254,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.data_file.flush()?;
 
         // Each column of a row is one offset
-        let num_offsets = num_rows * self.jar.columns;
+        let num_offsets = num_rows * self.jar.columns();
 
         // Calculate the number of offsets to prune from in-memory list
         let offsets_prune_count = num_offsets.min(self.offsets.len().saturating_sub(1)); // last element is the expected size of the data file
@@ -325,8 +325,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         self.offsets_file.seek(SeekFrom::End(0))?;
         self.data_file.seek(SeekFrom::End(0))?;
 
-        self.jar.rows = self.jar.rows.saturating_sub(num_rows);
-        if self.jar.rows == 0 {
+        self.jar.rows = self.jar.rows().saturating_sub(num_rows);
+        if self.jar.rows() == 0 {
             self.jar.max_row_size = 0;
         }
         self.jar.freeze_config()?;

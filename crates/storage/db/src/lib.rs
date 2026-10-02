@@ -291,7 +291,7 @@ mod tests {
     fn db_version() {
         let path = tempdir().unwrap();
 
-        let args = DatabaseArguments::new(ClientVersion::default())
+        let args = DatabaseArguments::default()
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
 
         // Database is empty
@@ -336,7 +336,7 @@ mod tests {
 
         // Empty client version is not recorded
         {
-            let db = init_db(&path, DatabaseArguments::new(ClientVersion::default())).unwrap();
+            let db = init_db(&path, DatabaseArguments::default()).unwrap();
             let tx = db.tx().unwrap();
             let mut cursor = tx.cursor_read::<tables::VersionHistory>().unwrap();
             assert_matches!(cursor.first(), Ok(None));

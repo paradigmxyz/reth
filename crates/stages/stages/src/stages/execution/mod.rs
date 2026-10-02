@@ -305,8 +305,9 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db =
-            StateProviderDatabase(LatestStateProviderRef::new(provider).into_evm_state_provider());
+        let db = StateProviderDatabase::new(
+            LatestStateProviderRef::new(provider).into_evm_state_provider(),
+        );
         let mut executor = self.evm_config.batch_executor(db);
 
         // Progress tracking
@@ -507,7 +508,7 @@ where
 
         if provider.cached_storage_settings().use_hashed_state() {
             let hashed_state =
-                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
+                LatestStateProviderRef::new(provider).hashed_post_state(state.state())?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -836,14 +837,14 @@ mod tests {
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: first_slot, value: U256::from(2) },
+                StorageEntry::new(first_slot, U256::from(2)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: second_slot, value: U256::from(3) },
+                StorageEntry::new(second_slot, U256::from(3)),
             )
             .unwrap();
 
@@ -858,7 +859,7 @@ mod tests {
             ),
         );
 
-        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
+        let hashed_state = provider.latest().hashed_post_state(state.state()).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
         assert_eq!(storage.storage[&first_slot], U256::ZERO);
@@ -1275,7 +1276,7 @@ mod tests {
             0,
             generators::BlockParams { tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         genesis.header.timestamp = 0;
         let genesis = genesis.seal_slow();
 
@@ -1288,7 +1289,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .unseal();
+        .into_block();
         block_1.header.timestamp = 10;
         let block_1 = block_1.seal_slow();
 
@@ -1301,7 +1302,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .unseal();
+        .into_block();
         block_2.header.timestamp = 20;
         let block_2 = block_2.seal_slow();
 
@@ -1386,14 +1387,14 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::ZERO, value: U256::ZERO },
+                StorageEntry::new(B256::ZERO, U256::ZERO),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry::new(B256::with_last_byte(1), U256::from(1u64)),
             )
             .unwrap();
 
@@ -1460,11 +1461,11 @@ mod tests {
             vec![
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::ZERO, value: U256::ZERO }
+                    StorageEntry::new(B256::ZERO, U256::ZERO)
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry::new(B256::with_last_byte(1), U256::from(1u64))
                 )
             ]
         );

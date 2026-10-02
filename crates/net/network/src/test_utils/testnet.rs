@@ -12,7 +12,7 @@ use crate::{
         policy::NetworkPolicies,
         TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfigBuilder, NetworkHandle, NetworkManager, PeersConfig,
+    NetworkHandle, NetworkManager, PeersConfig,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -341,7 +341,7 @@ where
     /// Returns a handle to the peer's network.
     pub fn peer_handle(&self) -> PeerHandle<Pool> {
         PeerHandle {
-            network: self.network.handle().clone(),
+            network: self.handle(),
             pool: self.pool.clone(),
             transactions: self.transactions_manager.as_ref().map(|mgr| mgr.handle()),
         }
@@ -567,7 +567,7 @@ impl<C> PeerConfig<C> {
         C: BlockNumReader + ChainSpecProvider<ChainSpec: Hardforks> + Clone + 'static,
     {
         let Self { client, secret_key, protocols, peers_config } = self;
-        let mut builder = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let mut builder = crate::config::NetworkConfig::builder(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_dns_discovery()

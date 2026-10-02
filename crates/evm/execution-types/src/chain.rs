@@ -642,8 +642,6 @@ pub(super) mod serde_bincode_compat {
         N: NodePrimitives,
     {
         fn from(value: Chain<'a, N>) -> Self {
-            use reth_primitives_traits::RecoveredBlock;
-
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
@@ -669,7 +667,7 @@ pub(super) mod serde_bincode_compat {
                     let block = N::Block::decode(&mut repr.rlp.as_ref())
                         .expect("invalid RLP for block in serde_bincode_compat");
                     let sealed = SealedBlock::new_unhashed(block);
-                    (num, Arc::new(RecoveredBlock::new_sealed(sealed, repr.senders)))
+                    (num, Arc::new(sealed.with_senders(repr.senders)))
                 })
                 .collect();
 

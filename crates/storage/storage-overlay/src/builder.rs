@@ -153,7 +153,7 @@ impl ExecutionOverlay {
                 }
                 let account_storage = storage.entry(*address).or_default();
                 for (slot, value) in &account.storage {
-                    account_storage.insert(*slot, value.present_value);
+                    account_storage.insert(*slot, value.present_value());
                 }
             }
         };
@@ -1266,7 +1266,7 @@ mod tests {
                 .tx_ref()
                 .put::<tables::StorageChangeSets>(
                     BlockNumberAddress((block_number, address)),
-                    StorageEntry { key: B256::from(slot), value: U256::from(value) },
+                    StorageEntry::new(B256::from(slot), U256::from(value)),
                 )
                 .unwrap();
         }
@@ -1338,7 +1338,7 @@ mod tests {
                 .tx_ref()
                 .put::<tables::StorageChangeSets>(
                     BlockNumberAddress((block_number, address)),
-                    StorageEntry { key: B256::from(slot), value: U256::from(storage_value) },
+                    StorageEntry::new(B256::from(slot), U256::from(storage_value)),
                 )
                 .unwrap();
         }

@@ -65,21 +65,21 @@ impl RocksDBProvider {
         let mut unwind_target: Option<BlockNumber> = None;
 
         // Heal TransactionHashNumbers if stored in RocksDB
-        if provider.cached_storage_settings().storage_v2 &&
+        if provider.cached_storage_settings().is_v2() &&
             let Some(target) = self.heal_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storage_v2 &&
+        if provider.cached_storage_settings().is_v2() &&
             let Some(target) = self.heal_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Heal AccountsHistory if stored in RocksDB
-        if provider.cached_storage_settings().storage_v2 &&
+        if provider.cached_storage_settings().is_v2() &&
             let Some(target) = self.heal_accounts_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
@@ -479,7 +479,7 @@ mod tests {
     use super::*;
     use crate::{
         init::insert_genesis_history,
-        providers::{rocksdb::RocksDBBuilder, static_file::StaticFileWriter},
+        providers::static_file::StaticFileWriter,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
         BlockWriter, DatabaseProviderFactory, RocksDBProviderFactory, StageCheckpointWriter,
         TransactionsProvider,
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn test_first_last_empty_rocksdb() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::StoragesHistory>()
             .build()
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn test_first_last_with_data() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .build()
             .unwrap();
@@ -534,7 +534,10 @@ mod tests {
     #[test]
     fn test_check_consistency_empty_rocksdb_no_checkpoint_is_ok() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
@@ -554,7 +557,10 @@ mod tests {
     #[test]
     fn test_check_consistency_checkpoint_zero_empty_rocksdb_returns_early() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -578,7 +584,10 @@ mod tests {
     #[test]
     fn test_check_consistency_empty_rocksdb_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
@@ -606,7 +615,10 @@ mod tests {
     #[test]
     fn test_check_consistency_checkpoint_zero_with_rocksdb_data_prunes_all() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -674,7 +686,10 @@ mod tests {
     #[test]
     fn test_check_consistency_storages_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
@@ -734,7 +749,10 @@ mod tests {
     #[test]
     fn test_check_consistency_mdbx_behind_checkpoint_needs_unwind() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -791,7 +809,10 @@ mod tests {
     #[test]
     fn test_check_consistency_rocksdb_ahead_of_checkpoint_prunes_excess() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
@@ -894,7 +915,10 @@ mod tests {
     #[test]
     fn test_check_consistency_storages_history_sentinel_only_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         // This simulates a scenario where history tracking started but no shards were completed
@@ -934,7 +958,10 @@ mod tests {
         use reth_db_api::models::ShardedKey;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
         let key_sentinel_1 = ShardedKey::new(Address::ZERO, u64::MAX);
@@ -974,7 +1001,7 @@ mod tests {
     #[test]
     fn test_prune_transaction_hash_numbers_by_range() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .build()
             .unwrap();
@@ -1085,7 +1112,10 @@ mod tests {
     #[test]
     fn test_check_consistency_accounts_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
@@ -1144,7 +1174,10 @@ mod tests {
         use reth_static_file_types::StaticFileSegment;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Insert some AccountsHistory entries with various highest_block_numbers
         let key1 = ShardedKey::new(Address::ZERO, 50);
@@ -1243,7 +1276,10 @@ mod tests {
         const CHECKPOINT_BLOCK: u64 = 5_000;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -1360,7 +1396,10 @@ mod tests {
         const SF_TIP: u64 = 200;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -1458,7 +1497,10 @@ mod tests {
         use reth_static_file_types::StaticFileSegment;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Create test provider factory
         let factory = create_test_provider_factory();
@@ -1573,7 +1615,10 @@ mod tests {
         const SF_TIP: u64 = 200;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -1643,7 +1688,10 @@ mod tests {
         use reth_static_file_types::StaticFileSegment;
 
         let temp_dir = TempDir::new().unwrap();
-        let rocksdb = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Insert StoragesHistory entries into RocksDB
         let key1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);

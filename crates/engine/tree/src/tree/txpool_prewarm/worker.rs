@@ -323,7 +323,7 @@ fn entry_counts(reads: &CachedReads) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{super::Transaction as PoolTransaction, *};
-    use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
+    use alloy_consensus::{Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind, U256};
     use crossbeam_channel::{unbounded, Sender};
     use parking_lot::{Mutex, RwLock};
@@ -484,7 +484,11 @@ mod tests {
             hash,
         ));
         let sender = Address::repeat_byte(0xAA);
-        PoolTransaction { hash, sender, transaction: Recovered::new_unchecked(signed, sender) }
+        PoolTransaction {
+            hash,
+            sender,
+            transaction: reth_primitives_traits::SignedTransaction::with_signer(signed, sender),
+        }
     }
 
     fn wait_until(what: &str, condition: impl Fn() -> bool) {

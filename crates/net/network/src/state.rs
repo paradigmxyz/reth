@@ -454,7 +454,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     (request, response)
                 }
             };
-            let _ = peer.request_tx.to_session_tx.try_send(request);
+            let _ = peer.request_tx.try_send(request);
             peer.pending_response = Some(response);
         }
     }

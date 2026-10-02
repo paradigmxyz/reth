@@ -110,10 +110,10 @@ pub enum MerkleStage {
 impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
-        Self::Execution {
-            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
-            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
-        }
+        Self::new_execution(
+            MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+            MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
+        )
     }
 
     /// Stage default for the [`MerkleStage::Unwind`].
@@ -461,7 +461,7 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
         error!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
         Err(StageError::Block {
             error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
-                GotExpected { got, expected: expected.state_root() }.into(),
+                GotExpected::new(got, expected.state_root()).into(),
             )),
             block: Box::new(expected.block_with_parent()),
         })
@@ -828,7 +828,7 @@ mod tests {
                             }
 
                             if !value.is_zero() {
-                                let storage_entry = StorageEntry { key: hashed_slot, value };
+                                let storage_entry = StorageEntry::new(hashed_slot, value);
                                 storage_cursor.upsert(hashed_address, &storage_entry).unwrap();
                             }
                         }

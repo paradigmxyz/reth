@@ -616,7 +616,7 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         notification: ExExNotification<N>,
     ) -> Result<(), SendError<(ExExNotificationSource, ExExNotification<N>)>> {
         self.ready().await;
-        self.exex_tx.send((source, notification))
+        self.send(source, notification)
     }
 
     /// Get the current capacity of the `ExEx` manager's internal notification buffer.
@@ -1087,19 +1087,13 @@ mod tests {
         // Send notifications to go over the max capacity
         exex_manager
             .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
+            .send(ExExNotificationSource::BlockchainTree, notification.clone())
             .unwrap();
         exex_manager
             .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification.clone()))
+            .send(ExExNotificationSource::BlockchainTree, notification.clone())
             .unwrap();
-        exex_manager
-            .handle
-            .exex_tx
-            .send((ExExNotificationSource::BlockchainTree, notification))
-            .unwrap();
+        exex_manager.handle.send(ExExNotificationSource::BlockchainTree, notification).unwrap();
 
         // Pin the ExExManager to call the poll method
         let mut pinned_manager = std::pin::pin!(exex_manager);

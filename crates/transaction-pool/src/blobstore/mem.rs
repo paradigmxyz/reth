@@ -319,11 +319,7 @@ mod tests {
         let commitment = Bytes48::from([1u8; 48]);
         let proof = Bytes48::default();
         let versioned_hash = kzg_to_versioned_hash(commitment.as_slice());
-        let sidecar = BlobTransactionSidecar {
-            blobs: vec![blob],
-            commitments: vec![commitment],
-            proofs: vec![proof],
-        };
+        let sidecar = BlobTransactionSidecar::new(vec![blob], vec![commitment], vec![proof]);
 
         (BlobTransactionSidecarVariant::Eip4844(sidecar), versioned_hash)
     }

@@ -156,7 +156,7 @@ pub struct ResolveNatInterval {
 impl fmt::Debug for ResolveNatInterval {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResolveNatInterval")
-            .field("resolver", &self.resolver)
+            .field("resolver", self.resolver())
             .field("future", &self.future.as_ref().map(drop))
             .field("interval", &self.interval)
             .finish()

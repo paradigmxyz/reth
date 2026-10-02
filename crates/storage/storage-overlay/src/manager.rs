@@ -1517,7 +1517,7 @@ mod tests {
         let anchor_hash = B256::with_last_byte(3);
 
         manager.store_sparse_trie(PreservedSparseTrie::anchored(
-            SparseTrie::default(),
+            SparseTrie::new(),
             block_hash,
             anchor_hash,
         ));

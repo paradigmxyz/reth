@@ -195,7 +195,7 @@ mod tests {
 
     impl CountingDatabaseRef {
         fn new(address: Address, account: Option<AccountInfo>, bytecode: Bytecode) -> Self {
-            let code_hash = account.as_ref().map(|account| account.code_hash).unwrap_or_default();
+            let code_hash = account.as_ref().map(|account| account.code_hash()).unwrap_or_default();
             Self {
                 address,
                 code_hash,

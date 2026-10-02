@@ -534,17 +534,17 @@ where
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
-        let block = self.assembler.assemble_block(BlockAssemblerInput {
+        let block = self.assembler.assemble_block(BlockAssemblerInput::new(
             evm_env,
-            execution_ctx: self.ctx,
-            parent: self.parent,
+            self.ctx,
+            self.parent,
             transactions,
-            output: &result,
-            bundle_state: &db.bundle_state,
-            state_provider: &state,
+            &result,
+            &db.bundle_state,
+            &state,
             state_root,
             block_access_list_hash,
-        })?;
+        ))?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 

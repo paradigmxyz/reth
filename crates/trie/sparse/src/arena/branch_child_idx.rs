@@ -45,7 +45,7 @@ impl BranchChildIdx {
 
     /// Computes the dense index for `nibble` without checking whether the bit is set.
     const fn new_unchecked(state_mask: TrieMask, nibble: u8) -> Self {
-        Self(Self::count_below(state_mask, nibble))
+        Self::insertion_point(state_mask, nibble)
     }
 }
 

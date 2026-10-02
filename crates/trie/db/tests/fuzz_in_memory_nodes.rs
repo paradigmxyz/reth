@@ -91,7 +91,7 @@ proptest! {
         // Insert init state into database
         for (hashed_slot, value) in init_storage.clone() {
             hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
+                .upsert(hashed_address, &StorageEntry::new(hashed_slot, value))
                 .unwrap();
         }
 
@@ -106,7 +106,7 @@ proptest! {
                 let mut hashed_storage = HashedStorage::default();
                 for (hashed_slot, value) in storage_update.clone() {
                     hashed_storage_cursor
-                        .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
+                        .upsert(hashed_address, &StorageEntry::new(hashed_slot, value))
                         .unwrap();
                     hashed_storage.storage.insert(hashed_slot, value);
                 }

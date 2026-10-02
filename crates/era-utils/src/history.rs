@@ -775,17 +775,17 @@ impl<P: BlockBodyIndicesProvider> BlockReceiptsWriterExt for P {
             .block_body_indices(number)?
             .ok_or_else(|| eyre::eyre!("missing block body indices for block {number}"))?;
 
-        if block_receipts.len() as u64 != indices.tx_count {
+        if block_receipts.len() as u64 != indices.tx_count() {
             eyre::bail!(
                 "receipt count mismatch for block {number}: {} receipt(s) for {} transaction(s)",
                 block_receipts.len(),
-                indices.tx_count,
+                indices.tx_count(),
             );
         }
 
         receipts_writer.increment_block(number)?;
         receipts_writer.append_receipts(
-            (indices.first_tx_num..).zip(block_receipts.iter()).map(Ok::<_, ProviderError>),
+            (indices.first_tx_num()..).zip(block_receipts.iter()).map(Ok::<_, ProviderError>),
         )?;
 
         Ok(())
@@ -1709,13 +1709,13 @@ mod tests {
         )];
         let slim = vec![
             SlimReceipt {
-                tx_type: TxType::Eip2930,
+                tx_type: alloy_consensus::TxEip2930::tx_type(),
                 status: Eip658Value::Eip658(true),
                 cumulative_gas_used: 21_000,
                 logs: logs.clone(),
             },
             SlimReceipt {
-                tx_type: TxType::Eip1559,
+                tx_type: alloy_consensus::TxEip1559::tx_type(),
                 status: Eip658Value::Eip658(false),
                 cumulative_gas_used: 42_000,
                 logs: vec![],
@@ -1731,13 +1731,13 @@ mod tests {
             receipts,
             Some(vec![
                 Receipt {
-                    tx_type: TxType::Eip2930,
+                    tx_type: alloy_consensus::TxEip2930::tx_type(),
                     success: true,
                     cumulative_gas_used: 21_000,
                     logs,
                 },
                 Receipt {
-                    tx_type: TxType::Eip1559,
+                    tx_type: alloy_consensus::TxEip1559::tx_type(),
                     success: false,
                     cumulative_gas_used: 42_000,
                     logs: vec![],

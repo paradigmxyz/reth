@@ -379,7 +379,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcHandle")
-            .field("rpc_server_handles", &self.rpc_server_handles)
+            .field("rpc_server_handles", self.rpc_server_handles())
             .field("rpc_registry", &self.rpc_registry)
             .field("engine_shutdown", &self.engine_shutdown)
             .finish()
@@ -1769,15 +1769,15 @@ mod tests {
             let blocks: Vec<_> = (0..=3)
                 .map(|number| {
                     let block = RecoveredBlock::new_unhashed(
-                        Block {
-                            header: Header {
+                        Block::new(
+                            Header {
                                 number,
                                 block_access_list_hash: (native && number == 3)
                                     .then_some(B256::ZERO),
                                 ..Default::default()
                             },
-                            body: BlockBody::default(),
-                        },
+                            BlockBody::default(),
+                        ),
                         Vec::new(),
                     );
                     provider.add_block(block.hash(), block.clone_block());
@@ -1814,7 +1814,10 @@ mod tests {
                 block.header.block_access_list_hash = Some(B256::ZERO);
                 CanonStateNotification::Commit {
                     new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(
-                        [RecoveredBlock::new_unhashed(block, Vec::new())],
+                        [reth_primitives_traits::Block::into_recovered_with_signers(
+                            block,
+                            Vec::new(),
+                        )],
                         Default::default(),
                         Default::default(),
                     )),

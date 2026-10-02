@@ -562,7 +562,7 @@ mod tests {
             vec![],
         );
         let chain = reth_execution_types::Chain::new(
-            [reth_primitives_traits::RecoveredBlock::new_unhashed(block, vec![])],
+            [reth_primitives_traits::Block::into_recovered_with_signers(block, vec![])],
             outcome,
             Default::default(),
         );
@@ -631,13 +631,13 @@ mod tests {
     #[tokio::test]
     async fn block_details_loads_ommer_headers() {
         let provider = MockEthProvider::default();
-        let block = reth_ethereum_primitives::Block {
-            header: Header { number: 126, ..Default::default() },
-            body: alloy_consensus::BlockBody {
+        let block = reth_ethereum_primitives::Block::new(
+            Header { number: 126, ..Default::default() },
+            alloy_consensus::BlockBody {
                 ommers: vec![Header { number: 123, ..Default::default() }],
                 ..Default::default()
             },
-        };
+        );
         let hash = block.header.hash_slow();
         provider.add_block(hash, block.clone());
         provider.add_receipts(126, vec![]);

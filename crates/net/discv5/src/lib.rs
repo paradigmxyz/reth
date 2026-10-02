@@ -369,7 +369,7 @@ impl Discv5 {
 
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        let tcp_port = (match self.rlpx_ip_mode {
+        let tcp_port = (match self.ip_mode() {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
             IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),

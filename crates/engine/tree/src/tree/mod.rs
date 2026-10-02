@@ -27,9 +27,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
-use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
@@ -894,7 +892,7 @@ where
     /// given head.
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+        let Some(new_head_block) = self.state.tree_state.executed_block_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
@@ -1871,7 +1869,7 @@ where
         let Some(backfill_num_hash) = self
             .provider
             .block_hash(backfill_height)?
-            .map(|hash| BlockNumHash { hash, number: backfill_height })
+            .map(|hash| BlockNumHash::new(backfill_height, hash))
         else {
             debug!(target: "engine::tree", ?ctrl, "Backfill block not found");
             return Ok(())
@@ -2288,7 +2286,7 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+        while let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
             if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
@@ -2416,7 +2414,7 @@ where
         });
 
         Ok(ExecutedBlock::new(
-            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            Arc::new(block.with_senders(senders)),
             execution_output,
             sorted_hashed_state,
             sorted_trie_updates,
@@ -3629,7 +3627,7 @@ where
         // first fetch the finalized block number and then call the remove_before method on
         // tree_state
         let num = if let Some(hash) = finalized_hash {
-            self.provider.block_number(hash)?.map(|number| BlockNumHash { number, hash })
+            self.provider.block_number(hash)?.map(|number| BlockNumHash::new(number, hash))
         } else {
             None
         };

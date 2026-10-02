@@ -5,10 +5,7 @@
 //! response per [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070).
 
 use crate::utils::funded_transaction;
-use alloy_consensus::{
-    constants::EIP4844_TX_TYPE_ID, transaction::TxEip4844WithSidecar, Header, SignableTransaction,
-    TxEip4844,
-};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, Header, SignableTransaction, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::VERSIONED_HASH_VERSION_KZG,
@@ -77,15 +74,13 @@ fn blob_tx_without_blobs() -> PooledTransactionVariant {
     };
 
     let signature = sign_message(B256::random(), tx.signature_hash()).unwrap();
-    let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594 {
-        blobs: vec![],
-        commitments: vec![Default::default()],
-        cell_proofs: vec![],
-    });
+    let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::new(
+        vec![],
+        vec![Default::default()],
+        vec![],
+    ));
 
-    PooledTransactionVariant::Eip4844(
-        TxEip4844WithSidecar::from_tx_and_sidecar(tx, sidecar).into_signed(signature),
-    )
+    PooledTransactionVariant::Eip4844(tx.with_sidecar(sidecar).into_signed(signature))
 }
 
 #[tokio::test(flavor = "multi_thread")]

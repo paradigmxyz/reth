@@ -224,19 +224,17 @@ where
                 Err(Box::new(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTip(
-                        GotExpected { got: header.hash(), expected: hash }.into(),
-                    ),
+                    error: DownloadError::InvalidTip(GotExpected::new(header.hash(), hash).into()),
                 }))
             }
             SyncTargetBlock::Number(number) if header.number() != number => {
                 Err(Box::new(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTipNumber(GotExpected {
-                        got: header.number(),
-                        expected: number,
-                    }),
+                    error: DownloadError::InvalidTipNumber(GotExpected::new(
+                        header.number(),
+                        number,
+                    )),
                 }))
             }
             _ => Ok(()),
@@ -407,7 +405,7 @@ where
                                 request,
                                 peer_id: Some(peer_id),
                                 error: DownloadError::InvalidTip(
-                                    GotExpected { got: target.hash(), expected: hash }.into(),
+                                    GotExpected::new(target.hash(), hash).into(),
                                 ),
                             }
                             .into())
@@ -418,10 +416,10 @@ where
                             return Err(HeadersResponseError {
                                 request,
                                 peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTipNumber(GotExpected {
-                                    got: target.number(),
-                                    expected: number,
-                                }),
+                                error: DownloadError::InvalidTipNumber(GotExpected::new(
+                                    target.number(),
+                                    number,
+                                )),
                             }
                             .into())
                         }
@@ -479,10 +477,10 @@ where
                 if received_headers > request.limit {
                     return Err(HeadersResponseError {
                         peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseTooLong(GotExpected {
-                            got: received_headers,
-                            expected: request.limit,
-                        }),
+                        error: DownloadError::HeadersResponseTooLong(GotExpected::new(
+                            received_headers,
+                            request.limit,
+                        )),
                         request,
                     }
                     .into())
@@ -501,10 +499,10 @@ where
                     return Err(HeadersResponseError {
                         request,
                         peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseStartBlockMismatch(GotExpected {
-                            got: highest.number(),
-                            expected: requested_block_number,
-                        }),
+                        error: DownloadError::HeadersResponseStartBlockMismatch(GotExpected::new(
+                            highest.number(),
+                            requested_block_number,
+                        )),
                     }
                     .into())
                 }

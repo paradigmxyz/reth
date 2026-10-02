@@ -756,7 +756,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let test_msg = RawCapabilityMessage { id: 0x1234, payload: Bytes::from(vec![1, 2, 3, 4]) };
+        let test_msg = RawCapabilityMessage::new(0x1234, Bytes::from(vec![1, 2, 3, 4]));
 
         let test_msg_clone = test_msg.clone();
         let handle = tokio::spawn(async move {

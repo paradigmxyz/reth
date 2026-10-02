@@ -54,10 +54,7 @@ impl StorageShardedKey {
     /// Creates a new key with the highest block number set to maximum.
     /// This is useful when we want to search the last value for a given key.
     pub const fn last(address: Address, storage_key: B256) -> Self {
-        Self {
-            address,
-            sharded_key: ShardedKey { key: storage_key, highest_block_number: u64::MAX },
-        }
+        Self::new(address, storage_key, u64::MAX)
     }
 }
 

@@ -65,7 +65,9 @@ impl Command {
     ) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
-            let chain_name = tool.provider_factory.chain_spec().chain().to_string();
+            let chain_name = reth_node_core::dirs::config_path_prefix(
+                tool.provider_factory.chain_spec().chain(),
+            );
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 

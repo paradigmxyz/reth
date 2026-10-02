@@ -1871,7 +1871,7 @@ mod tests {
 
         provider_rw.tx_ref().put::<tables::PlainStorageState>(
             address,
-            StorageEntry { key: slot_b256, value: U256::from(100) },
+            StorageEntry::new(slot_b256, U256::from(100)),
         )?;
         provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account)?;
 
@@ -1880,14 +1880,14 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
-        let state = &outcome.bundle.state;
+        let state = outcome.bundle.state();
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
         let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.present_value,
+            storage_slot.present_value(),
             U256::from(100),
             "present_value should be 100 (the actual value in PlainStorageState)"
         );

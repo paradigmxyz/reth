@@ -374,7 +374,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         .by_id
                         .range((
                             id.sender.start_bound(),
-                            std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
+                            std::ops::Bound::Included(id.sender.into_transaction_id(u64::MAX)),
                         ))
                         .next_back()
                     {
@@ -756,7 +756,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
-    use alloy_consensus::{Transaction, TxType};
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
     use std::collections::HashSet;
 
@@ -889,7 +889,7 @@ mod tests {
         );
 
         // truncate pool with max size = 1, ensure it's the same transaction
-        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 1, max_size: usize::MAX });
+        let removed = pool.truncate_pool(SubPoolLimit::new(1, usize::MAX));
         assert_eq!(removed.len(), 1);
         assert_eq!(removed[0].hash(), t.hash());
     }
@@ -906,17 +906,24 @@ mod tests {
         let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
+        let mut tx_set =
+            MockTransactionSet::dependent(a_sender, 0, 4, alloy_consensus::TxEip1559::tx_type());
         let a = tx_set.clone().into_vec();
 
-        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxType::Eip1559).into_vec();
+        let b =
+            MockTransactionSet::dependent(b_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxType::Eip1559).into_vec();
+        let c =
+            MockTransactionSet::dependent(c_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         tx_set.extend(c.clone());
 
-        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxType::Eip1559).into_vec();
+        let d =
+            MockTransactionSet::dependent(d_sender, 0, 1, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         tx_set.extend(d.clone());
 
         // add all the transactions to the pool
@@ -955,10 +962,26 @@ mod tests {
         let d = address!("0x000000000000000000000000000000000000000d");
 
         // Create transaction chains for senders A, B, C, and D.
-        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
-        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 3, TxType::Eip1559);
-        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 3, TxType::Eip1559);
-        let d_txs = MockTransactionSet::sequential_transactions_by_sender(d, 1, TxType::Eip1559);
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(
+            a,
+            4,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(
+            b,
+            3,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(
+            c,
+            3,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
+        let d_txs = MockTransactionSet::sequential_transactions_by_sender(
+            d,
+            1,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
 
         // Set up expected pending transactions.
         let expected_pending = vec![
@@ -1006,7 +1029,7 @@ mod tests {
         // * a1, a2
         // * b1
         // * c1
-        let pool_limit = SubPoolLimit { max_txs: 4, max_size: usize::MAX };
+        let pool_limit = SubPoolLimit::new(4, usize::MAX);
 
         // Truncate the pool based on the defined limit.
         let removed = pool.truncate_pool(pool_limit);
@@ -1081,7 +1104,7 @@ mod tests {
         assert_eq!(pool.size(), 0);
 
         // Verify that attempting to truncate an empty pool does not panic and returns an empty vec
-        let removed = pool.truncate_pool(SubPoolLimit { max_txs: 10, max_size: 1000 });
+        let removed = pool.truncate_pool(SubPoolLimit::new(10, 1000));
         assert!(removed.is_empty());
 
         // Verify that retrieving transactions from an empty pool yields nothing
@@ -1186,9 +1209,21 @@ mod tests {
         // sender C (external) - 2 transactions
 
         // Create transaction chains for senders A, B, C
-        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 11, TxType::Eip1559);
-        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 2, TxType::Eip1559);
-        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 2, TxType::Eip1559);
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(
+            a,
+            11,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(
+            b,
+            2,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(
+            c,
+            2,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
 
         // create local txs for sender A
         for tx in a_txs.into_vec() {
@@ -1208,7 +1243,7 @@ mod tests {
         // Sanity check, ensuring everything is consistent.
         pool.assert_invariants();
 
-        let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
+        let pool_limit = SubPoolLimit::new(10, usize::MAX);
         pool.truncate_pool(pool_limit);
 
         let sender_a = f.ids.sender_id(&a).unwrap();
@@ -1225,13 +1260,15 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
         let sender = address!("0x00000000000000000000000000000000000000aa");
-        let txs = MockTransactionSet::dependent(sender, 0, 3, TxType::Eip1559).into_vec();
+        let txs =
+            MockTransactionSet::dependent(sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let mid_id = TransactionId::new(sender_id, 1);
+        let mid_id = sender_id.into_transaction_id(1);
         let _ = pool.remove_transaction(&mid_id);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 2);
@@ -1243,17 +1280,19 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
         let sender = address!("0x00000000000000000000000000000000000000bb");
-        let txs = MockTransactionSet::dependent(sender, 0, 4, TxType::Eip1559).into_vec();
+        let txs =
+            MockTransactionSet::dependent(sender, 0, 4, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let id3 = TransactionId::new(sender_id, 3);
+        let id3 = sender_id.into_transaction_id(3);
         let _ = pool.remove_transaction(&id3);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 2);
-        let id2 = TransactionId::new(sender_id, 2);
+        let id2 = sender_id.into_transaction_id(2);
         let _ = pool.remove_transaction(&id2);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 1);
@@ -1265,13 +1304,15 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
         let sender = address!("0x00000000000000000000000000000000000000cc");
-        let txs = MockTransactionSet::dependent(sender, 0, 1, TxType::Eip1559).into_vec();
+        let txs =
+            MockTransactionSet::dependent(sender, 0, 1, alloy_consensus::TxEip1559::tx_type())
+                .into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let id0 = TransactionId::new(sender_id, 0);
+        let id0 = sender_id.into_transaction_id(0);
         let _ = pool.remove_transaction(&id0);
         assert!(!pool.highest_nonces.contains_key(&sender_id));
         pool.assert_invariants();

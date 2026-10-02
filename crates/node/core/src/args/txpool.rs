@@ -513,22 +513,22 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 local_addresses: self.locals.iter().copied().collect(),
                 propagate_local_transactions: !self.no_local_transactions_propagation,
             },
-            pending_limit: SubPoolLimit {
-                max_txs: self.pending_max_count,
-                max_size: self.pending_max_size.saturating_mul(1024 * 1024),
-            },
-            basefee_limit: SubPoolLimit {
-                max_txs: self.basefee_max_count,
-                max_size: self.basefee_max_size.saturating_mul(1024 * 1024),
-            },
-            queued_limit: SubPoolLimit {
-                max_txs: self.queued_max_count,
-                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
-            },
-            blob_limit: SubPoolLimit {
-                max_txs: self.blobpool_max_count,
-                max_size: self.blobpool_max_size.saturating_mul(1024 * 1024),
-            },
+            pending_limit: SubPoolLimit::new(
+                self.pending_max_count,
+                self.pending_max_size.saturating_mul(1024 * 1024),
+            ),
+            basefee_limit: SubPoolLimit::new(
+                self.basefee_max_count,
+                self.basefee_max_size.saturating_mul(1024 * 1024),
+            ),
+            queued_limit: SubPoolLimit::new(
+                self.queued_max_count,
+                self.queued_max_size.saturating_mul(1024 * 1024),
+            ),
+            blob_limit: SubPoolLimit::new(
+                self.blobpool_max_count,
+                self.blobpool_max_size.saturating_mul(1024 * 1024),
+            ),
             blob_cache_size: self.blob_cache_size,
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {

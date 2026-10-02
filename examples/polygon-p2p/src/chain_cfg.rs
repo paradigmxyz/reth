@@ -9,7 +9,7 @@ const SHANGHAI_BLOCK: u64 = 50523000;
 pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
     let genesis: Genesis =
         serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis");
-    Arc::new(genesis.into())
+    Arc::new(ChainSpec::from_genesis(genesis))
 }
 
 /// Polygon mainnet boot nodes <https://github.com/maticnetwork/bor/blob/master/params/bootnodes.go#L79>

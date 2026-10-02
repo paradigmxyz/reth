@@ -9,7 +9,7 @@ use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
-use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
+use alloy_rpc_types_eth::{Block, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
@@ -242,7 +242,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     Ok(Block {
                         uncles: vec![],
                         header,
-                        transactions: BlockTransactions::Uncle,
+                        transactions: alloy_network::primitives::BlockTransactions::uncle(),
                         withdrawals: None,
                     })
                 })

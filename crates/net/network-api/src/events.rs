@@ -432,7 +432,7 @@ impl<R> PeerRequestSender<R> {
 
 impl<R> fmt::Debug for PeerRequestSender<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PeerRequestSender").field("peer_id", &self.peer_id).finish_non_exhaustive()
+        f.debug_struct("PeerRequestSender").field("peer_id", self.peer_id()).finish_non_exhaustive()
     }
 }
 

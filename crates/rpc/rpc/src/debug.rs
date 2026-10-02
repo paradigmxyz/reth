@@ -155,7 +155,10 @@ where
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
+                    results.push(alloy_rpc_types_trace::common::TraceResult::new_success(
+                        result,
+                        Some(*tx.tx_hash()),
+                    ));
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
@@ -191,10 +194,12 @@ where
                     Ok(inspector) => inspector,
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
-                            results.push(Some(TraceResult::Error {
-                                error: err.to_string(),
-                                tx_hash: Some(*tx.tx_hash()),
-                            }));
+                            results.push(Some(
+                                alloy_rpc_types_trace::common::TraceResult::new_error(
+                                    err.to_string(),
+                                    Some(*tx.tx_hash()),
+                                ),
+                            ));
                         }
                         results.resize(tx_count, None);
                         return Ok(results)
@@ -209,10 +214,12 @@ where
                     let res = match evm.transact(tx_env.clone()) {
                         Ok(res) => res,
                         Err(err) => {
-                            results.push(Some(TraceResult::Error {
-                                error: err.to_string(),
-                                tx_hash: Some(tx_hash),
-                            }));
+                            results.push(Some(
+                                alloy_rpc_types_trace::common::TraceResult::new_error(
+                                    err.to_string(),
+                                    Some(tx_hash),
+                                ),
+                            ));
                             break
                         }
                     };
@@ -231,21 +238,28 @@ where
                     ) {
                         Ok(result) => result,
                         Err(err) => {
-                            results.push(Some(TraceResult::Error {
-                                error: err.to_string(),
-                                tx_hash: Some(tx_hash),
-                            }));
+                            results.push(Some(
+                                alloy_rpc_types_trace::common::TraceResult::new_error(
+                                    err.to_string(),
+                                    Some(tx_hash),
+                                ),
+                            ));
                             break
                         }
                     };
 
-                    results.push(Some(TraceResult::Success { result, tx_hash: Some(tx_hash) }));
+                    results.push(Some(alloy_rpc_types_trace::common::TraceResult::new_success(
+                        result,
+                        Some(tx_hash),
+                    )));
                     if let Some((_, next_tx)) = transactions.peek() {
                         if let Err(err) = inspector.fuse() {
-                            results.push(Some(TraceResult::Error {
-                                error: err.to_string(),
-                                tx_hash: Some(*next_tx.tx_hash()),
-                            }));
+                            results.push(Some(
+                                alloy_rpc_types_trace::common::TraceResult::new_error(
+                                    err.to_string(),
+                                    Some(*next_tx.tx_hash()),
+                                ),
+                            ));
                             break
                         }
                         db.commit(res.state);
@@ -771,7 +785,7 @@ where
         } else if let Some(code) = account.code {
             code.original_bytes()
         } else {
-            db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
+            db.code_by_hash(account.code_hash()).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
         Ok(AccountInfo {
@@ -910,7 +924,7 @@ where
             .get_raw_block_access_list(block_id)
             .await
             .map_err(Into::into)?
-            .ok_or_else(|| EthApiError::HeaderNotFound(block_id).into())
+            .ok_or_else(|| EthApiError::HeaderNotFound(block_id).into_rpc_err())
     }
 
     /// Handler for `debug_getRawTransaction`
@@ -1299,10 +1313,12 @@ where
                 "Key must be 33 bytes, got {}",
                 key_bytes.len()
             ))
-            .into());
+            .into_rpc_err());
         }
         if key_bytes[0] != 0x63 {
-            return Err(EthApiError::InvalidParams("Key prefix must be 0x63".to_string()).into());
+            return Err(
+                EthApiError::InvalidParams("Key prefix must be 0x63".to_string()).into_rpc_err()
+            );
         }
 
         let code_hash = B256::from_slice(&key_bytes[1..33]);
@@ -1595,7 +1611,7 @@ mod tests {
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: hashed_old_slot, value: old_value },
+                StorageEntry::new(hashed_old_slot, old_value),
             )
             .unwrap();
         provider_rw.commit().unwrap();

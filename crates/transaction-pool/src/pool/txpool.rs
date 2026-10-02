@@ -971,7 +971,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         let mut count = 0;
         for id in txs_by_sender {
-            if id == &transaction.transaction_id {
+            if id == transaction.id() {
                 // Transaction replacement is supported
                 return Ok(())
             }
@@ -1874,7 +1874,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         tx_hash: &B256,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
-        let internal = self.txs.remove(&tx.transaction_id)?;
+        let internal = self.txs.remove(tx.id())?;
         self.remove_auths(&internal);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
@@ -2129,11 +2129,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // identifier of the ancestor transaction, will be None if the transaction is the next tx of
         // the sender
-        let ancestor = TransactionId::ancestor(
-            transaction.transaction.nonce(),
-            on_chain_nonce,
-            inserted_tx_id.sender,
-        );
+        let ancestor =
+            TransactionId::ancestor(transaction.nonce(), on_chain_nonce, inserted_tx_id.sender);
 
         // before attempting to insert a blob transaction, we need to ensure that additional
         // constraints are met that only apply to blob transactions
@@ -2142,7 +2139,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
             transaction =
                 self.ensure_valid_blob_transaction(transaction, on_chain_balance, ancestor)?;
-            let blob_fee_cap = transaction.transaction.max_fee_per_blob_gas().unwrap_or_default();
+            let blob_fee_cap = transaction.max_fee_per_blob_gas().unwrap_or_default();
             if blob_fee_cap >= self.pending_fees.blob_fee {
                 state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
             }
@@ -2227,7 +2224,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut updates = std::mem::take(&mut self.update_buffer);
 
         // The next transaction of this sender
-        let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
+        let on_chain_id = transaction.sender_id().into_transaction_id(on_chain_nonce);
         let pending_fees = self.pending_fees;
         {
             // Tracks the next nonce we expect if the transactions are gapless
@@ -2512,7 +2509,7 @@ mod tests {
         traits::TransactionOrigin,
         SubPoolLimit,
     };
-    use alloy_consensus::{Transaction, TxType};
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
 
     #[test]
@@ -2532,7 +2529,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(valid_tx.id()).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
@@ -2553,7 +2550,7 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let _ = pool.txs.get(valid_tx.id()).unwrap();
     }
 
     #[test]
@@ -2574,8 +2571,8 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
-        pool.remove_transaction(&valid_tx.transaction_id);
+        let _ = pool.txs.get(valid_tx.id()).unwrap();
+        pool.remove_transaction(valid_tx.id());
 
         pool.pending_fees.blob_fee = tx.max_fee_per_blob_gas().unwrap();
         let InsertOk { state, .. } =
@@ -2589,7 +2586,7 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
         // set block info so the tx is initially underpriced w.r.t. blob fee
@@ -2629,7 +2626,7 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
         // set block info so the tx is initially underpriced w.r.t. blob fee
@@ -2669,7 +2666,7 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let tx = MockTransaction::eip4844().inc_price().inc_limit();
 
         // set block info so the tx is underpriced w.r.t. blob fee and lands in the blob pool
@@ -2854,7 +2851,7 @@ mod tests {
         let expected_promotions = expected_promotions.into_iter().collect::<HashSet<_>>();
 
         for promotion_test in &expected_promotions {
-            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+            let mut pool = TxPool::mock();
 
             // set block info so the tx is initially underpriced w.r.t. blob fee
             let mut block_info = pool.block_info();
@@ -2910,7 +2907,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BALANCE));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(valid_tx.id()).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
@@ -2964,7 +2961,7 @@ mod tests {
     // when both fee and account updates would affect the same transaction
     fn test_on_canonical_state_change_no_double_processing() {
         let mut tx_factory = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Setup: Create a sender with a transaction in basefee pool
         let tx = MockTransaction::eip1559().with_gas_price(50).with_gas_limit(30_000);
@@ -3016,7 +3013,7 @@ mod tests {
     // decreases and account is updated. This test would fail before the fix.
     fn test_canonical_state_change_with_basefee_update_regression() {
         let mut tx_factory = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Create transactions from different senders to test independently
         let sender_balance = U256::from(100_000_000);
@@ -3108,7 +3105,7 @@ mod tests {
         // Test that fee promotions still occur when basefee decreases
         // even with no changed_senders
         let mut tx_factory = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Create transaction that will be promoted when fee drops
         let tx = MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000);
@@ -3145,7 +3142,7 @@ mod tests {
         // Test that when basefee decreases but account update makes tx unfundable,
         // we don't get transient promote-then-discard double counting
         let mut tx_factory = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000);
         let sender = tx.sender();
@@ -3197,7 +3194,7 @@ mod tests {
         let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
         let tx = f.validated(tx);
         pool.add_transaction(tx.clone(), on_chain_balance, on_chain_nonce, None).unwrap();
@@ -3580,7 +3577,7 @@ mod tests {
     #[test]
     fn update_only_visits_changed_senders_when_fees_are_unchanged() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // two senders, each with one transaction
         let a = f.validated(MockTransaction::eip1559().inc_price_by(10));
@@ -3689,7 +3686,7 @@ mod tests {
     #[test]
     fn update_visits_every_sender_when_the_base_fee_moved() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559().inc_price_by(10);
         let validated = f.validated(tx.clone());
@@ -3837,7 +3834,7 @@ mod tests {
     #[test]
     fn blob_fee_update_unparks_all_descendants() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let sender = address!("0x000000000000000000000000000000000000000f");
         let mut block_info = pool.block_info();
         block_info.pending_blob_fee = Some(200);
@@ -3871,7 +3868,7 @@ mod tests {
     #[test]
     fn update_basefee_subpools() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559().inc_price_by(10);
         let validated = f.validated(tx.clone());
@@ -3891,7 +3888,7 @@ mod tests {
     #[test]
     fn update_basefee_subpools_setting_block_info() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559().inc_price_by(10);
         let validated = f.validated(tx.clone());
@@ -3915,7 +3912,7 @@ mod tests {
     fn basefee_decrease_promotes_affordable_and_keeps_unaffordable() {
         use alloy_primitives::address;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Create transactions that will be in basefee pool (can't afford initial high fee)
         // Use different senders to avoid nonce gap issues
@@ -4006,7 +4003,7 @@ mod tests {
     #[test]
     fn apply_fee_updates_records_promotions_after_basefee_drop() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559()
             .with_gas_limit(21_000)
@@ -4047,7 +4044,7 @@ mod tests {
     #[test]
     fn update_blob_fee_parks_pending_when_base_fee_falls_in_the_same_block() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
         let initial_base_fee = 100u64;
@@ -4083,7 +4080,7 @@ mod tests {
     #[test]
     fn update_blob_fee_demotes_and_promotes_when_base_fee_falls() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
         let initial_base_fee = 600;
@@ -4126,7 +4123,7 @@ mod tests {
     #[test]
     fn apply_fee_updates_records_promotions_after_blob_fee_drop() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
 
@@ -4168,7 +4165,7 @@ mod tests {
     #[test]
     fn apply_fee_updates_promotes_blob_after_basefee_drop() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
 
@@ -4213,7 +4210,7 @@ mod tests {
     #[test]
     fn queued_transactions_include_blob_pool() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
         let tx = MockTransaction::eip4844()
@@ -4241,7 +4238,7 @@ mod tests {
     #[test]
     fn apply_fee_updates_demotes_after_basefee_rise() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559()
             .with_gas_limit(21_000)
@@ -4278,7 +4275,7 @@ mod tests {
     fn get_highest_transaction_by_sender_and_nonce() {
         // Set up a mock transaction factory and a new transaction pool.
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Create a mock transaction and add it to the pool.
         let tx = MockTransaction::eip1559();
@@ -4309,7 +4306,7 @@ mod tests {
     #[test]
     fn get_highest_consecutive_transaction_by_sender() {
         // Set up a mock transaction factory and a new transaction pool.
-        let mut pool = TxPool::new(MockOrdering::default(), PoolConfig::default());
+        let mut pool = TxPool::mock();
         let mut f = MockTransactionFactory::default();
 
         // Create transactions with nonces 0, 1, 2, 4, 5.
@@ -4350,7 +4347,7 @@ mod tests {
     #[test]
     fn discard_nonce_too_low() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx = MockTransaction::eip1559().inc_price_by(10);
         let validated = f.validated(tx.clone());
@@ -4384,7 +4381,7 @@ mod tests {
     #[test]
     fn stale_validation_accepted_by_default() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let template = MockTransaction::eip1559();
         let first = f.validated(template.clone().with_nonce(0).rng_hash());
@@ -4531,7 +4528,7 @@ mod tests {
 
         // this test adds large txs to the parked pool, then attempting to discard worst
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let default_limits = pool.config.blob_limit;
 
         // create a chain of transactions by sender A
@@ -4547,14 +4544,19 @@ mod tests {
         pool.set_block_info(block_info);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip4844)
-            .into_iter()
-            .map(|mut tx| {
-                tx.set_size(default_limits.max_size / 2 + 1);
-                tx.set_max_fee((block_info.pending_basefee - 1).into());
-                tx
-            })
-            .collect::<Vec<_>>();
+        let a_txs = MockTransactionSet::dependent(
+            a_sender,
+            0,
+            2,
+            alloy_consensus::TxEip4844Variant::<()>::tx_type(),
+        )
+        .into_iter()
+        .map(|mut tx| {
+            tx.set_size(default_limits.max_size / 2 + 1);
+            tx.set_max_fee((block_info.pending_basefee - 1).into());
+            tx
+        })
+        .collect::<Vec<_>>();
 
         // add all the transactions to the parked pool
         for tx in a_txs {
@@ -4573,7 +4575,7 @@ mod tests {
 
         // this test adds large txs to the parked pool, then attempting to discard worst
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
         let default_limits = pool.config.queued_limit;
 
         // create a chain of transactions by sender A
@@ -4585,14 +4587,15 @@ mod tests {
         pool.update_basefee(pool_base_fee, |_| {});
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
-            .into_iter()
-            .map(|mut tx| {
-                tx.set_size(default_limits.max_size / 2 + 1);
-                tx.set_max_fee((pool_base_fee - 1).into());
-                tx
-            })
-            .collect::<Vec<_>>();
+        let a_txs =
+            MockTransactionSet::dependent(a_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
+                .into_iter()
+                .map(|mut tx| {
+                    tx.set_size(default_limits.max_size / 2 + 1);
+                    tx.set_max_fee((pool_base_fee - 1).into());
+                    tx
+                })
+                .collect::<Vec<_>>();
 
         // add all the transactions to the parked pool
         for tx in a_txs {
@@ -4735,7 +4738,7 @@ mod tests {
         let mut on_chain_balance = U256::from(100);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4780,7 +4783,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let mut on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4827,7 +4830,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4856,7 +4859,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4895,7 +4898,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4937,7 +4940,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -4974,7 +4977,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -5010,7 +5013,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -5050,7 +5053,7 @@ mod tests {
         let on_chain_balance = U256::from(10_000);
         let mut on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -5113,7 +5116,7 @@ mod tests {
         let on_chain_balance = U256::MAX;
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let base_fee: u128 = 100;
         let blob_fee: u128 = 100;
@@ -5236,7 +5239,7 @@ mod tests {
     #[test]
     fn test_pending_ordering() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let tx_0 = MockTransaction::eip1559().with_nonce(1).set_gas_price(100).inc_limit();
         let tx_1 = tx_0.next();
@@ -5308,7 +5311,7 @@ mod tests {
     #[test]
     fn test_insertion_disorder() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let sender = address!("0x1234567890123456789012345678901234567890");
         let tx0 = f.validated_arc(
@@ -5368,7 +5371,7 @@ mod tests {
     #[test]
     fn test_non_4844_blob_fee_bit_invariant() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let non_4844_tx = MockTransaction::eip1559().set_max_fee(200).inc_limit();
         let validated = f.validated(non_4844_tx.clone());
@@ -5385,7 +5388,7 @@ mod tests {
     #[test]
     fn test_blob_fee_enforcement_only_applies_to_eip4844() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Set blob fee higher than EIP-4844 tx can afford
         let mut block_info = pool.block_info();
@@ -5425,7 +5428,7 @@ mod tests {
     #[test]
     fn test_basefee_decrease_preserves_non_4844_blob_fee_bit() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         // Create non-4844 transaction with fee that initially can't afford high basefee
         let non_4844_tx = MockTransaction::eip1559()
@@ -5477,7 +5480,7 @@ mod tests {
     #[test]
     fn best_transactions_nonce_order_on_balance_unlock() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let sender = Address::random();
         let on_chain_balance = U256::from(10_000);
@@ -5539,7 +5542,7 @@ mod tests {
     #[test]
     fn best_transactions_nonce_order_on_gap_fill() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let sender = Address::random();
         let balance = U256::MAX;
@@ -5575,7 +5578,7 @@ mod tests {
     #[test]
     fn best_transactions_nonce_order_mixed_promotions() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let mut pool = TxPool::mock();
 
         let sender = Address::random();
         let low_balance = U256::from(10_000);

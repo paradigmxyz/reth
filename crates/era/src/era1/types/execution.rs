@@ -600,7 +600,7 @@ impl BlockTuple {
 
     /// Convert to an `alloy_consensus::Block`
     pub fn to_alloy_block<T: Decodable>(&self) -> Result<Block<T>, E2sError> {
-        let header: Header = self.header.decode()?;
+        let header: Header = self.header.decode_header()?;
         let body: BlockBody<T> = self.body.decode()?;
 
         Ok(Block::new(header, body))
@@ -629,7 +629,7 @@ mod tests {
     use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{Bytes, U256};
-    use reth_ethereum_primitives::{Receipt, TxType};
+    use reth_ethereum_primitives::Receipt;
 
     #[test]
     fn test_header_conversion_roundtrip() {
@@ -716,7 +716,7 @@ mod tests {
 
         let transactions = vec![Bytes::from(vec![1, 2, 3, 4]), Bytes::from(vec![5, 6, 7, 8])];
 
-        let withdrawals = Some(Withdrawals(vec![]));
+        let withdrawals = Some(Withdrawals::new(vec![]));
 
         let block_body = BlockBody { transactions, ommers: vec![], withdrawals };
 
@@ -740,7 +740,8 @@ mod tests {
 
     #[test]
     fn test_single_receipt_compression_roundtrip() {
-        let test_receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+        let test_receipt =
+            create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
 
         // Compress the receipt
         let compressed_receipts =

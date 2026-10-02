@@ -74,7 +74,7 @@ where
         let range_end = *range.end();
 
         // Check where account history indices are stored
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 

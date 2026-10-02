@@ -338,7 +338,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         Ok(self
             .inner
-            .db_stat_with_dbi(self.get_dbi::<T>()?)
+            .db_stat(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::Stats(e.into()))?
             .entries())
     }
@@ -450,7 +450,7 @@ impl DbTxMut for Tx<RW> {
 #[cfg(test)]
 mod tests {
     use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
-    use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
+    use reth_db_api::{database::Database, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
@@ -461,10 +461,9 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default())
-            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
-                MAX_DURATION,
-            )));
+        let args = DatabaseArguments::default().with_max_read_transaction_duration(Some(
+            MaxReadTransactionDuration::Set(MAX_DURATION),
+        ));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
@@ -486,10 +485,9 @@ mod tests {
         const MAX_DURATION: Duration = Duration::from_secs(1);
 
         let dir = tempdir().unwrap();
-        let args = DatabaseArguments::new(ClientVersion::default())
-            .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
-                MAX_DURATION,
-            )));
+        let args = DatabaseArguments::default().with_max_read_transaction_duration(Some(
+            MaxReadTransactionDuration::Set(MAX_DURATION),
+        ));
         let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();

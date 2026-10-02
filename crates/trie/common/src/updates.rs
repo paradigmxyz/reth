@@ -76,7 +76,7 @@ impl TrieUpdates {
             other.account_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
         self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().copied()));
-        for (hashed_address, storage_trie) in &other.storage_tries {
+        for (hashed_address, storage_trie) in other.storage_tries_ref() {
             self.storage_tries.entry(*hashed_address).or_default().extend_ref(storage_trie);
         }
     }
@@ -1301,8 +1301,8 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::TrieUpdates> for TrieUpdates<'a> {
         fn from(value: &'a super::TrieUpdates) -> Self {
             Self {
-                account_nodes: Cow::Borrowed(&value.account_nodes),
-                removed_nodes: Cow::Borrowed(&value.removed_nodes),
+                account_nodes: Cow::Borrowed(value.account_nodes_ref()),
+                removed_nodes: Cow::Borrowed(value.removed_nodes_ref()),
                 storage_tries: value.storage_tries.iter().map(|(k, v)| (*k, v.into())).collect(),
             }
         }
@@ -1364,8 +1364,8 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::StorageTrieUpdates> for StorageTrieUpdates<'a> {
         fn from(value: &'a super::StorageTrieUpdates) -> Self {
             Self {
-                storage_nodes: Cow::Borrowed(&value.storage_nodes),
-                removed_nodes: Cow::Borrowed(&value.removed_nodes),
+                storage_nodes: Cow::Borrowed(value.storage_nodes_ref()),
+                removed_nodes: Cow::Borrowed(value.removed_nodes_ref()),
             }
         }
     }

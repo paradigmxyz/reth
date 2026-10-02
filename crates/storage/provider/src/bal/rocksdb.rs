@@ -341,12 +341,15 @@ struct RocksDBBalEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::RocksDBBuilder;
+
     use alloy_primitives::B256;
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         (dir, RocksDBBalStore::new(rocksdb))
     }
 
@@ -435,7 +438,10 @@ mod tests {
     #[test]
     fn configured_buffer_retention_distance_is_used() {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = crate::providers::RocksDBProvider::builder(dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         let store = RocksDBBalStore::with_buffer_retention_distance(rocksdb, 64);
         let old = NumHash::new(1, B256::with_last_byte(1));
         let tip = NumHash::new(34, B256::with_last_byte(2));
@@ -579,7 +585,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let hash = B256::with_last_byte(1);
-        let rocksdb = RocksDBBuilder::new(&path)
+        let rocksdb = crate::providers::RocksDBProvider::builder(&path)
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -588,7 +594,7 @@ mod tests {
         rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
         drop(rocksdb);
 
-        let rocksdb = RocksDBBuilder::new(&path)
+        let rocksdb = crate::providers::RocksDBProvider::builder(&path)
             .with_default_tables()
             .with_table::<tables::BlockAccessLists>()
             .with_table::<tables::BlockAccessListBlockNumbers>()
@@ -605,7 +611,7 @@ mod tests {
         drop(store);
 
         // The secondary open must not add tables to the primary database.
-        let rocksdb = RocksDBBuilder::new(&path)
+        let rocksdb = crate::providers::RocksDBProvider::builder(&path)
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -619,7 +625,7 @@ mod tests {
     fn read_only_database_reads_persisted_bals() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let rocksdb = RocksDBBuilder::new(&path)
+        let rocksdb = crate::providers::RocksDBProvider::builder(&path)
             .with_default_tables()
             .with_table::<tables::BlockAccessLists>()
             .with_table::<tables::BlockAccessListBlockNumbers>()
@@ -632,7 +638,7 @@ mod tests {
         store.flush(&[block]).unwrap();
         drop(store);
 
-        let rocksdb = RocksDBBuilder::new(&path)
+        let rocksdb = crate::providers::RocksDBProvider::builder(&path)
             .with_default_tables()
             .with_table::<tables::BlockAccessLists>()
             .with_table::<tables::BlockAccessListBlockNumbers>()

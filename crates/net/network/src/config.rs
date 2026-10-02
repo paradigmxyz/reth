@@ -242,7 +242,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
     /// Creates the `NetworkConfigBuilder` with [`EthNetworkPrimitives`] types.
     pub fn eth(secret_key: SecretKey, executor: Runtime) -> Self {
-        Self::new(secret_key, executor)
+        crate::config::NetworkConfig::builder(secret_key, executor)
     }
 }
 
@@ -252,7 +252,7 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key(executor: Runtime) -> Self {
-        Self::new(rng_secret_key(), executor)
+        crate::config::NetworkConfig::builder(rng_secret_key(), executor)
     }
 
     /// Create a new builder instance with the given secret key.
@@ -260,7 +260,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         Self {
             secret_key,
             dns_discovery_config: Some(Default::default()),
-            discovery_v4_builder: Some(Default::default()),
+            discovery_v4_builder: Some(reth_discv4::Discv4Config::builder()),
             discovery_v5_builder: None,
             boot_nodes: Default::default(),
             discovery_addr: None,
@@ -787,9 +787,7 @@ mod tests {
     use alloy_eips::eip2124::ForkHash;
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
-    use reth_chainspec::{
-        Chain, ChainSpecBuilder, EthereumHardfork, ForkCondition, ForkId, MAINNET,
-    };
+    use reth_chainspec::{Chain, EthereumHardfork, ForkCondition, ForkId, MAINNET};
     use reth_discv5::build_local_enr;
     use reth_dns_discovery::tree::LinkEntry;
     use reth_storage_api::noop::NoopProvider;
@@ -876,7 +874,7 @@ mod tests {
         let active_fork = (EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME));
         let future_fork = (EthereumHardfork::Cancun, ForkCondition::Timestamp(GENESIS_TIME + 1));
 
-        let chain_spec = ChainSpecBuilder::default()
+        let chain_spec = reth_chainspec::ChainSpec::builder()
             .chain(Chain::dev())
             .genesis(genesis)
             .with_fork(active_fork.0, active_fork.1)
@@ -931,7 +929,7 @@ mod tests {
 
         let genesis = Genesis::default().with_timestamp(GENESIS_TIME);
 
-        let chain_spec = ChainSpecBuilder::default()
+        let chain_spec = reth_chainspec::ChainSpec::builder()
             .chain(Chain::from_id(3151908))
             .genesis(genesis)
             .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(GENESIS_TIME))

@@ -137,10 +137,7 @@ where
         }
 
         if response_len > request_len {
-            return Err(DownloadError::TooManyBodies(GotExpected {
-                got: response_len,
-                expected: request_len,
-            }))
+            return Err(DownloadError::TooManyBodies(GotExpected::new(response_len, request_len)))
         }
 
         // Buffer block responses

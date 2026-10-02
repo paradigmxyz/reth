@@ -41,7 +41,7 @@ use tracing::instrument;
 
 /// Returns [`WriteOptions`] with WAL sync enabled for crash durability.
 fn synced_write_options() -> WriteOptions {
-    let mut opts = WriteOptions::default();
+    let mut opts = WriteOptions::new();
     opts.set_sync(true);
     opts
 }
@@ -820,7 +820,7 @@ impl DatabaseMetrics for RocksDBProvider {
 impl RocksDBProvider {
     /// Creates a new `RocksDB` provider.
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        RocksDBBuilder::new(path).build()
+        Self::builder(path).build()
     }
 
     /// Creates a new `RocksDB` provider builder.
@@ -888,7 +888,7 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     pub fn tx(&self) -> RocksTx<'_> {
         let write_options = synced_write_options();
-        let txn_options = OptimisticTransactionOptions::default();
+        let txn_options = OptimisticTransactionOptions::new();
         let inner = self.0.db_rw().transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
     }
@@ -1431,7 +1431,7 @@ impl RocksDBProvider {
         ctx: RocksDBWriteCtx,
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
-        if !ctx.storage_settings.storage_v2 {
+        if !ctx.storage_settings.is_v2() {
             return Ok(());
         }
 
@@ -1440,9 +1440,9 @@ impl RocksDBProvider {
         let mut r_storage_history = None;
 
         let write_tx_hash =
-            ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.storage_v2;
-        let write_storage_history = ctx.storage_settings.storage_v2;
+            ctx.storage_settings.is_v2() && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.is_v2();
+        let write_storage_history = ctx.storage_settings.is_v2();
 
         // Propagate tracing context into rayon-spawned threads so that RocksDB
         // write spans appear as children of write_blocks_data in traces.
@@ -3170,7 +3170,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Build with default tables
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         // Should be able to write/read TransactionHashNumbers
         let tx_hash = TxHash::from(B256::from([1u8; 32]));
@@ -3206,7 +3209,10 @@ mod tests {
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         let bal_key =
             reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
@@ -3239,7 +3245,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let value = b"test_value".to_vec();
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_default_tables()
             .with_table::<TestTable>()
             .build()
@@ -3247,7 +3253,10 @@ mod tests {
         provider.put::<TestTable>(42, &value).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(value));
     }
 
@@ -3262,7 +3271,10 @@ mod tests {
                 1
         ]));
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider
             .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
@@ -3270,7 +3282,7 @@ mod tests {
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -3287,7 +3299,7 @@ mod tests {
     fn test_basic_operations() {
         let temp_dir = TempDir::new().unwrap();
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<TestTable>() // Type-safe!
             .build()
             .unwrap();
@@ -3312,8 +3324,10 @@ mod tests {
     #[test]
     fn test_batch_operations() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Write multiple entries in a batch
         provider
@@ -3351,7 +3365,7 @@ mod tests {
     #[test]
     fn test_with_real_table() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_metrics()
             .build()
@@ -3388,7 +3402,7 @@ mod tests {
     fn test_statistics_enabled() {
         let temp_dir = TempDir::new().unwrap();
         // Just verify that building with statistics doesn't panic
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<TestTable>()
             .with_statistics()
             .build()
@@ -3427,8 +3441,10 @@ mod tests {
     #[test]
     fn test_data_persistence() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Insert data - OptimisticTransactionDB writes are immediately visible
         let value = vec![42u8; 1000];
@@ -3445,8 +3461,10 @@ mod tests {
     #[test]
     fn test_transaction_read_your_writes() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Create a transaction
         let tx = provider.tx();
@@ -3479,8 +3497,10 @@ mod tests {
     #[test]
     fn test_transaction_rollback() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // First, put some initial data
         let key = 100u64;
@@ -3506,8 +3526,10 @@ mod tests {
     #[test]
     fn test_transaction_iterator() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Create a transaction
         let tx = provider.tx();
@@ -3534,8 +3556,10 @@ mod tests {
     #[test]
     fn test_batch_manual_commit() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Create a batch via provider.batch()
         let mut batch = provider.batch();
@@ -3566,8 +3590,10 @@ mod tests {
     #[test]
     fn test_first_and_last_entry() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Empty table should return None for both
         assert_eq!(provider.first::<TestTable>().unwrap(), None);
@@ -3590,7 +3616,10 @@ mod tests {
     #[test]
     fn test_owned_history_snapshot_outlives_provider() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         let address = Address::repeat_byte(0x42);
         let slot = B256::repeat_byte(0x43);
         let chunk = IntegerList::new([100, 200, 300]).unwrap();
@@ -3638,7 +3667,10 @@ mod tests {
     #[test]
     fn test_history_snapshot_cached_and_private_iterators_keep_same_view() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         let address = Address::repeat_byte(0x42);
         let slot = B256::repeat_byte(0x43);
         let account_key = ShardedKey::new(address, u64::MAX);
@@ -3682,7 +3714,10 @@ mod tests {
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -3709,12 +3744,14 @@ mod tests {
         let shard_key = ShardedKey::new(address, u64::MAX);
 
         // Write data with a read-write provider
-        let rw_provider =
-            RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let rw_provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
         rw_provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
 
         // Open read-only provider — it sees the initial data.
-        let ro_provider = RocksDBBuilder::new(temp_dir.path())
+        let ro_provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_default_tables()
             .with_read_only(true)
             .build()
@@ -3754,7 +3791,10 @@ mod tests {
     #[test]
     fn test_account_history_info_ignores_blocks_above_visible_tip() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -3778,7 +3818,10 @@ mod tests {
     #[test]
     fn test_account_history_info_mixed_shard_respects_visible_tip() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         provider
@@ -3798,7 +3841,10 @@ mod tests {
     #[test]
     fn test_account_history_info_only_stale_entries_use_fallback() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         provider
@@ -3819,7 +3865,10 @@ mod tests {
     #[test]
     fn test_account_history_shard_split_at_boundary() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         let limit = NUM_OF_INDICES_IN_SHARD;
@@ -3850,7 +3899,10 @@ mod tests {
     #[test]
     fn test_account_history_multiple_shard_splits() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x43; 20]);
         let limit = NUM_OF_INDICES_IN_SHARD;
@@ -3894,7 +3946,10 @@ mod tests {
     #[test]
     fn test_storage_history_shard_split_at_boundary() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x44; 20]);
         let slot = B256::from([0x55; 32]);
@@ -3926,7 +3981,10 @@ mod tests {
     #[test]
     fn test_storage_history_multiple_shard_splits() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x46; 20]);
         let slot = B256::from([0x57; 32]);
@@ -3971,7 +4029,10 @@ mod tests {
     #[test]
     fn test_clear_table() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         let key = ShardedKey::new(address, u64::MAX);
@@ -3995,7 +4056,10 @@ mod tests {
     #[test]
     fn test_clear_empty_table() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         assert!(provider.first::<tables::AccountsHistory>().unwrap().is_none());
 
@@ -4007,7 +4071,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_basic() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4038,7 +4105,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_removes_all() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4061,7 +4131,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_no_op() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4086,7 +4159,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_block_zero() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4112,7 +4188,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_multi_shard() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4155,7 +4234,10 @@ mod tests {
     #[test]
     fn test_unwind_account_history_to_multi_shard_boundary_empty() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4187,7 +4269,10 @@ mod tests {
     #[test]
     fn test_account_history_shards_iterator() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         let other_address = Address::from([0x43; 20]);
@@ -4217,7 +4302,10 @@ mod tests {
     #[test]
     fn test_clear_account_history() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4239,7 +4327,10 @@ mod tests {
     #[test]
     fn test_unwind_non_sentinel_boundary() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
 
@@ -4285,8 +4376,10 @@ mod tests {
     #[test]
     fn test_batch_auto_commit_on_threshold() {
         let temp_dir = TempDir::new().unwrap();
-        let provider =
-            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_table::<TestTable>()
+            .build()
+            .unwrap();
 
         // Create batch with tiny threshold (1KB) to force auto-commits
         let mut batch = RocksDBBatch {
@@ -4447,8 +4540,10 @@ mod tests {
 
         for case in CASES {
             let temp_dir = TempDir::new().unwrap();
-            let provider =
-                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+                .with_default_tables()
+                .build()
+                .unwrap();
 
             // Setup initial shards
             let mut batch = provider.batch();
@@ -4584,8 +4679,10 @@ mod tests {
 
         for case in CASES {
             let temp_dir = TempDir::new().unwrap();
-            let provider =
-                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+                .with_default_tables()
+                .build()
+                .unwrap();
 
             // Setup initial shards
             let mut batch = provider.batch();
@@ -4639,7 +4736,10 @@ mod tests {
     #[test]
     fn test_prune_storage_history_does_not_affect_other_slots() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let address = Address::from([0x42; 20]);
         let slot1 = B256::from([0x01; 32]);
@@ -4697,8 +4797,10 @@ mod tests {
             // Test account history invariants
             {
                 let temp_dir = TempDir::new().unwrap();
-                let provider =
-                    RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+                let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+                    .with_default_tables()
+                    .build()
+                    .unwrap();
 
                 let mut batch = provider.batch();
                 for (highest, blocks) in *initial_shards {
@@ -4738,8 +4840,10 @@ mod tests {
             // Test storage history invariants
             {
                 let temp_dir = TempDir::new().unwrap();
-                let provider =
-                    RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+                let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+                    .with_default_tables()
+                    .build()
+                    .unwrap();
 
                 let mut batch = provider.batch();
                 for (highest, blocks) in *initial_shards {
@@ -4784,7 +4888,10 @@ mod tests {
     #[test]
     fn test_prune_account_history_batch_multiple_sorted_targets() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr1 = Address::from([0x01; 20]);
         let addr2 = Address::from([0x02; 20]);
@@ -4839,7 +4946,10 @@ mod tests {
     #[test]
     fn test_prune_account_history_batch_target_with_no_shards() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr1 = Address::from([0x01; 20]);
         let addr2 = Address::from([0x02; 20]); // No shards for this one
@@ -4885,7 +4995,10 @@ mod tests {
     #[test]
     fn test_prune_storage_history_batch_multiple_sorted_targets() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr = Address::from([0x42; 20]);
         let slot1 = B256::from([0x01; 32]);
@@ -4976,7 +5089,10 @@ mod tests {
     #[test]
     fn test_prune_storage_history_batch_leaves_shards_above_target_untouched() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr = Address::from([0x42; 20]);
         let slot = B256::from([0x01; 32]);
@@ -4999,7 +5115,10 @@ mod tests {
     #[test]
     fn test_prune_storage_history_batch_trims_sentinel_once_earlier_shards_expire() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr = Address::from([0x42; 20]);
         let slot = B256::from([0x01; 32]);
@@ -5017,7 +5136,10 @@ mod tests {
     #[test]
     fn test_prune_account_history_batch_leaves_shards_above_target_untouched() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr = Address::from([0x42; 20]);
 
@@ -5050,7 +5172,10 @@ mod tests {
     #[test]
     fn test_prune_account_history_batch_seeks_after_stopping_early() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr1 = Address::from([0x01; 20]);
         let addr2 = Address::from([0x02; 20]);
@@ -5093,7 +5218,10 @@ mod tests {
     #[test]
     fn test_prune_storage_history_batch_seeks_after_stopping_early() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
 
         let addr = Address::from([0x42; 20]);
         let slot1 = B256::from([0x01; 32]);

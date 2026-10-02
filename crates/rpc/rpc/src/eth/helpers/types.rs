@@ -62,7 +62,7 @@ mod tests {
 
         let result = resolve_transaction(tx, 21000, 0, 1, false, &mut db, &rpc_converter).unwrap();
 
-        assert_eq!(result.tx_type(), TxType::Eip1559);
+        assert_eq!(result.tx_type(), alloy_consensus::TxEip1559::tx_type());
         let tx = result.into_inner();
         assert_eq!(tx.max_fee_per_gas(), 200);
         assert_eq!(tx.max_priority_fee_per_gas(), Some(10));

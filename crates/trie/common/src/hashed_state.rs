@@ -51,12 +51,10 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_iter(
-                    account
-                        .storage
-                        .iter()
-                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
-                );
+                let hashed_storage =
+                    HashedStorage::from_iter(account.storage.iter().map(|(slot, value)| {
+                        (keccak256(B256::from(*slot)), value.present_value())
+                    }));
 
                 (
                     hashed_address,
@@ -233,7 +231,7 @@ impl HashedPostState {
         self.accounts.reserve(sorted.accounts.len());
 
         // Insert accounts (Some = updated, None = destroyed)
-        for (address, account) in &sorted.accounts {
+        for (address, account) in sorted.accounts() {
             self.accounts.insert(*address, account.clone());
         }
 
@@ -241,7 +239,7 @@ impl HashedPostState {
         self.storages.reserve(sorted.storages.len());
 
         // Extend storages
-        for (hashed_address, sorted_storage) in &sorted.storages {
+        for (hashed_address, sorted_storage) in sorted.account_storages() {
             match self.storages.entry(*hashed_address) {
                 hash_map::Entry::Vacant(entry) => {
                     let mut new_storage = HashedStorage::default();
@@ -266,7 +264,7 @@ impl HashedPostState {
             .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
             .collect();
 
-        HashedPostStateSorted { accounts, storages }
+        HashedPostStateSorted::new(accounts, storages)
     }
 
     /// Creates a sorted copy without consuming self.
@@ -282,7 +280,7 @@ impl HashedPostState {
             .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
             .collect();
 
-        HashedPostStateSorted { accounts, storages }
+        HashedPostStateSorted::new(accounts, storages)
     }
 
     /// Clears the account and storage maps of this `HashedPostState`.
@@ -467,7 +465,7 @@ impl HashedPostStateSorted {
     pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, account) in &self.accounts {
+        for (hashed_address, account) in self.accounts() {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             if account.is_none() {
                 destroyed_accounts.insert(*hashed_address);
@@ -476,7 +474,7 @@ impl HashedPostStateSorted {
 
         let mut storage_prefix_sets =
             B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
-        for (hashed_address, hashed_storage) in &self.storages {
+        for (hashed_address, hashed_storage) in self.account_storages() {
             // Ensure account trie covers storage overlays even if account map is empty.
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage_slots.len());
@@ -499,10 +497,10 @@ impl HashedPostStateSorted {
     /// Sorts the accounts after extending. Sorts the storage after extending, for each account.
     pub fn extend_ref_and_sort(&mut self, other: &Self) {
         // Extend accounts
-        extend_sorted_vec(&mut self.accounts, &other.accounts);
+        extend_sorted_vec(&mut self.accounts, other.accounts());
 
         // Extend storages
-        for (hashed_address, other_storage) in &other.storages {
+        for (hashed_address, other_storage) in other.account_storages() {
             self.storages
                 .entry(*hashed_address)
                 .and_modify(|existing| existing.extend_ref(other_storage))
@@ -560,7 +558,7 @@ impl HashedPostStateSorted {
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
         for item in items {
-            for (addr, storage) in &item.as_ref().storages {
+            for (addr, storage) in item.as_ref().account_storages() {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc { slices: Vec::new() });
                 entry.slices.push(storage.storage_slots.as_slice());
             }
@@ -608,7 +606,7 @@ impl HashedPostStateSorted {
         );
 
         for item in batch.iter().rev() {
-            for (hashed_address, storage) in &item.storages {
+            for (hashed_address, storage) in item.account_storages() {
                 let entry = storages
                     .entry(*hashed_address)
                     .or_insert_with(|| StorageAcc { slot_count: 0, slices: Vec::new() });
@@ -622,7 +620,7 @@ impl HashedPostStateSorted {
             Default::default(),
         );
         for item in mask {
-            for (hashed_address, storage) in &item.storages {
+            for (hashed_address, storage) in item.account_storages() {
                 let entry = storage_masks.entry(*hashed_address).or_default();
                 entry.slices.push(storage.storage_slots.as_slice());
             }
@@ -1169,24 +1167,24 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_extend_ref() {
         // Test extending accounts
-        let mut state1 = HashedPostStateSorted {
-            accounts: vec![
+        let mut state1 = HashedPostStateSorted::new(
+            vec![
                 (B256::from([1; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account::default())),
                 (B256::from([5; 32]), None),
             ],
-            storages: B256Map::default(),
-        };
+            B256Map::default(),
+        );
 
-        let state2 = HashedPostStateSorted {
-            accounts: vec![
+        let state2 = HashedPostStateSorted::new(
+            vec![
                 (B256::from([2; 32]), Some(Account::default())),
                 (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), /* Override */
                 (B256::from([4; 32]), Some(Account::default())),
                 (B256::from([6; 32]), None),
             ],
-            storages: B256Map::default(),
-        };
+            B256Map::default(),
+        );
 
         state1.extend_ref_and_sort(&state2);
 
@@ -1225,7 +1223,7 @@ mod tests {
 
         storage1.extend_ref(&storage2);
 
-        assert_eq!(storage1.storage_slots.len(), 6);
+        assert_eq!(storage1.len(), 6);
         assert_eq!(storage1.storage_slots[0].0, B256::from([1; 32]));
         assert_eq!(storage1.storage_slots[0].1, U256::from(10));
         assert_eq!(storage1.storage_slots[1].0, B256::from([2; 32]));
@@ -1491,33 +1489,27 @@ mod tests {
             storages: B256Map::from_iter([
                 (
                     addr1,
-                    HashedStorage {
-                        storage: B256Map::from_iter([
-                            (slot1, U256::ZERO),
-                            (slot2, U256::ZERO),
-                            (slot3, U256::ZERO),
-                        ]),
-                    },
+                    HashedStorage::from_iter([
+                        (slot1, U256::ZERO),
+                        (slot2, U256::ZERO),
+                        (slot3, U256::ZERO),
+                    ]),
                 ),
                 (
                     addr2,
-                    HashedStorage {
-                        storage: B256Map::from_iter([
-                            (slot1, U256::ZERO),
-                            (slot2, U256::ZERO),
-                            (slot3, U256::ZERO),
-                        ]),
-                    },
+                    HashedStorage::from_iter([
+                        (slot1, U256::ZERO),
+                        (slot2, U256::ZERO),
+                        (slot3, U256::ZERO),
+                    ]),
                 ),
                 (
                     addr3,
-                    HashedStorage {
-                        storage: B256Map::from_iter([
-                            (slot1, U256::ZERO),
-                            (slot2, U256::ZERO),
-                            (slot3, U256::ZERO),
-                        ]),
-                    },
+                    HashedStorage::from_iter([
+                        (slot1, U256::ZERO),
+                        (slot2, U256::ZERO),
+                        (slot3, U256::ZERO),
+                    ]),
                 ),
             ]),
         };
@@ -1552,14 +1544,9 @@ mod tests {
             storages: B256Map::from_iter([
                 (
                     addr1,
-                    HashedStorage {
-                        storage: B256Map::from_iter([
-                            (slot1, U256::from(10)),
-                            (slot2, U256::from(20)),
-                        ]),
-                    },
+                    HashedStorage::from_iter([(slot1, U256::from(10)), (slot2, U256::from(20))]),
                 ),
-                (addr2, HashedStorage { storage: B256Map::from_iter([(slot3, U256::ZERO)]) }),
+                (addr2, HashedStorage::from_iter([(slot3, U256::ZERO)])),
             ]),
         };
 
@@ -1580,13 +1567,11 @@ mod tests {
         let slot2 = B256::from([2; 32]);
         let slot3 = B256::from([3; 32]);
 
-        let storage = HashedStorage {
-            storage: B256Map::from_iter([
-                (slot1, U256::from(100)),
-                (slot2, U256::ZERO),
-                (slot3, U256::from(300)),
-            ]),
-        };
+        let storage = HashedStorage::from_iter([
+            (slot1, U256::from(100)),
+            (slot2, U256::ZERO),
+            (slot3, U256::from(300)),
+        ]);
 
         // clone_into_sorted should produce the same result as clone().into_sorted()
         let sorted_via_clone = storage.clone().into_sorted();
@@ -1746,7 +1731,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
         fn from(value: &'a super::HashedPostStateSorted) -> Self {
             Self {
-                accounts: Cow::Borrowed(&value.accounts),
+                accounts: Cow::Borrowed(value.accounts()),
                 storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
             }
         }

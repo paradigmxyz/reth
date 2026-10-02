@@ -435,10 +435,10 @@ mod tests {
                                 .unwrap();
 
                             for _ in 0..2 {
-                                let new_entry = StorageEntry {
-                                    key: keccak256([rng.random::<u8>()]),
-                                    value: U256::from(rng.random::<u8>() % 30 + 1),
-                                };
+                                let new_entry = StorageEntry::new(
+                                    keccak256([rng.random::<u8>()]),
+                                    U256::from(rng.random::<u8>() % 30 + 1),
+                                );
                                 self.insert_storage_entry(
                                     tx,
                                     (block_number, *addr).into(),
@@ -458,10 +458,7 @@ mod tests {
                         self.insert_storage_entry(
                             tx,
                             (block_number, Address::random()).into(),
-                            StorageEntry {
-                                key: keccak256("mining"),
-                                value: U256::from(rng.random::<u32>()),
-                            },
+                            StorageEntry::new(keccak256("mining"), U256::from(rng.random::<u32>())),
                             progress.number == stage_progress,
                         )?;
                     }
@@ -557,13 +554,13 @@ mod tests {
                             .expect("failed to delete entry");
                         e
                     }
-                    _ => StorageEntry { key: entry.key, value: U256::from(0) },
+                    _ => StorageEntry::new(entry.key, U256::from(0)),
                 };
             tx.put::<tables::PlainStorageState>(bn_address.address(), entry)?;
 
             if hash {
                 let hashed_address = keccak256(bn_address.address());
-                let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
+                let hashed_entry = StorageEntry::new(keccak256(entry.key), entry.value);
 
                 if let Some(e) = tx
                     .cursor_dup_write::<tables::HashedStorages>()?

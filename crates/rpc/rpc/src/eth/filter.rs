@@ -1059,7 +1059,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             err @ EthFilterError::InternalError => {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
-            EthFilterError::EthAPIError(err) => err.into(),
+            EthFilterError::EthAPIError(err) => err.into_rpc_err(),
             err @ EthFilterError::ReceiptsUnavailable(_) => {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), err.to_string())
             }
@@ -1581,13 +1581,13 @@ mod tests {
             success: true,
         };
         let mock_receipt_2 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             cumulative_gas_used: 200_000,
             logs: vec![],
             success: true,
         };
         let mock_receipt_3 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip2930,
+            tx_type: alloy_consensus::TxEip2930::tx_type(),
             cumulative_gas_used: 150_000,
             logs: vec![],
             success: false, // Different success status
@@ -1725,13 +1725,13 @@ mod tests {
             success: true,
         };
         let receipt_100_2 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             cumulative_gas_used: 42_000,
             logs: vec![mock_log.clone()],
             success: true,
         };
         let receipt_101_1 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip2930,
+            tx_type: alloy_consensus::TxEip2930::tx_type(),
             cumulative_gas_used: 30_000,
             logs: vec![mock_log.clone()],
             success: false,
@@ -1995,13 +1995,13 @@ mod tests {
             let hash = header.hash_slow();
             prev_hash = hash;
 
-            let block = reth_ethereum_primitives::Block {
+            let block = reth_ethereum_primitives::Block::new(
                 header,
-                body: reth_ethereum_primitives::BlockBody {
+                reth_ethereum_primitives::BlockBody {
                     transactions: vec![tx.clone()],
                     ..Default::default()
                 },
-            };
+            );
             provider.add_block(hash, block);
             provider.add_receipts(block_number, vec![receipt.clone()]);
             provider.add_block_body_indices(
@@ -2016,7 +2016,7 @@ mod tests {
             .inner
             .clone()
             .get_logs_in_block_range(
-                Filter::default(),
+                Filter::new(),
                 100,
                 102,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
@@ -2077,10 +2077,10 @@ mod tests {
             // Add transaction to blocks that will have receipts (100 and 102)
             let transactions = if i == 100 || i == 102 { vec![tx.clone()] } else { vec![] };
 
-            let block = reth_ethereum_primitives::Block {
+            let block = reth_ethereum_primitives::Block::new(
                 header,
-                body: reth_ethereum_primitives::BlockBody { transactions, ..Default::default() },
-            };
+                reth_ethereum_primitives::BlockBody { transactions, ..Default::default() },
+            );
             provider.add_block(hash, block);
         }
 
@@ -2117,7 +2117,7 @@ mod tests {
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         // Use default filter which will match any non-empty bloom
-        let filter = Filter::default();
+        let filter = Filter::new();
 
         // Get logs in the range - this will trigger the bloom filtering
         let logs = eth_filter
@@ -2155,7 +2155,7 @@ mod tests {
 
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let scan = eth_filter.inner.clone().get_logs_in_block_range(
-            Filter::default(),
+            Filter::new(),
             0,
             0,
             QueryLimits::default(),
@@ -2214,7 +2214,7 @@ mod tests {
             let transactions = if matches { vec![tx.clone()] } else { Vec::new() };
             provider.add_block(
                 parent_hash,
-                Block { header, body: BlockBody { transactions, ..Default::default() } },
+                Block::new(header, BlockBody { transactions, ..Default::default() }),
             );
             if matches {
                 let tx_num = matching_blocks.iter().position(|b| *b == number).unwrap() as u64;
@@ -2236,7 +2236,7 @@ mod tests {
         let logs = eth_filter
             .inner
             .clone()
-            .get_logs_in_block_range(Filter::default(), 0, 2_500, QueryLimits::default())
+            .get_logs_in_block_range(Filter::new(), 0, 2_500, QueryLimits::default())
             .await
             .unwrap();
         let blocks = logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>();
@@ -2248,7 +2248,7 @@ mod tests {
             .inner
             .clone()
             .get_logs_in_block_range(
-                Filter::default(),
+                Filter::new(),
                 0,
                 2_500,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },

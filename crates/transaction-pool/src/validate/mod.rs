@@ -488,7 +488,7 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
-            .field("id", &self.transaction_id)
+            .field("id", self.id())
             .field("propagate", &self.propagate)
             .field("origin", &self.origin)
             .field("hash", self.transaction.hash())

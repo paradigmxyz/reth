@@ -312,10 +312,10 @@ where
     let expected = tx_range.end - tx_range.start;
     if processed_transactions != expected {
         return Err(StageError::Fatal(
-            SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
-                got: processed_transactions,
+            SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected::new(
+                processed_transactions,
                 expected,
-            })
+            ))
             .into(),
         ));
     }

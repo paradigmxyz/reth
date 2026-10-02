@@ -422,7 +422,7 @@ where
             Ok(Some(_)) => (),
             Ok(None) => {
                 let _: Result<Option<((), ())>> = self.last();
-                return Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT)
+                return self.iter()
             }
             Err(error) => return Iter::Err(Some(error)),
         };

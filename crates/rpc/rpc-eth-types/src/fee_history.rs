@@ -410,7 +410,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxEip1559, TxType};
+    use alloy_consensus::TxEip1559;
     use alloy_primitives::Signature;
     use reth_ethereum_primitives::{Receipt, Transaction as EthTransaction, TransactionSigned};
 
@@ -445,6 +445,11 @@ mod tests {
     }
 
     fn receipt(cumulative_gas_used: u64) -> Receipt {
-        Receipt { tx_type: TxType::Eip1559, success: true, cumulative_gas_used, logs: Vec::new() }
+        Receipt {
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
+            success: true,
+            cumulative_gas_used,
+            logs: Vec::new(),
+        }
     }
 }

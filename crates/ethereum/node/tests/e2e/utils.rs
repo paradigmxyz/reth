@@ -26,7 +26,7 @@ pub(crate) async fn advance_with_random_transactions(
     finalize: bool,
 ) -> eyre::Result<()> {
     let provider = node.rpc_provider();
-    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
+    let signers = Wallet::default().with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
     // simple contract which writes to storage on any call
     let dummy_bytecode = bytes!(
@@ -50,8 +50,9 @@ pub(crate) async fn advance_with_random_transactions(
             let mut tx =
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
-            let should_create =
-                rng.random::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
+            let should_create = rng.random::<bool>() &&
+                tx_type != alloy_consensus::TxEip4844Variant::<()>::tx_type() &&
+                tx_type != alloy_consensus::TxEip7702::tx_type();
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
@@ -64,7 +65,7 @@ pub(crate) async fn advance_with_random_transactions(
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.random::<bool>() || tx_type == TxType::Eip2930 {
+            if rng.random::<bool>() || tx_type == alloy_consensus::TxEip2930::tx_type() {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
@@ -74,7 +75,7 @@ pub(crate) async fn advance_with_random_transactions(
                 );
             }
 
-            if tx_type == TxType::Eip7702 {
+            if tx_type == alloy_consensus::TxEip7702::tx_type() {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
                     chain_id: U256::from(provider.get_chain_id().await?),

@@ -847,7 +847,7 @@ enum BestPeerRequirements {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{peers::PeersManager, PeersConfig};
+    use crate::peers::PeersManager;
     use alloy_consensus::Header;
     use alloy_primitives::B512;
     use reth_eth_wire::Capability;
@@ -856,7 +856,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -878,7 +878,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_rotation() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
@@ -919,7 +919,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_prioritization() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
@@ -970,7 +970,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_on_block_headers_response() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
@@ -1001,7 +1001,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_header_response_outcome() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
@@ -1479,7 +1479,7 @@ mod tests {
 
     /// Creates a `StateFetcher` with a single idle peer and returns both.
     fn fetcher_with_peer() -> (StateFetcher<EthNetworkPrimitives>, PeerId) {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
@@ -1747,7 +1747,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_next_best_peer_eth71_no_support() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1775,7 +1775,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_best_peer_eth71_supported() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1802,7 +1802,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_best_peer_eth71_filters_correctly() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1848,7 +1848,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1909,7 +1909,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1949,7 +1949,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -1989,7 +1989,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2044,7 +2044,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_best_peer_snap_no_support() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2064,7 +2064,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_best_peer_snap_supported() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2084,7 +2084,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_best_peer_snap_filters_correctly() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2122,7 +2122,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2163,7 +2163,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_snap_response_triggers_followup() {
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
@@ -2212,7 +2212,7 @@ mod tests {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
 
-        let manager = PeersManager::new(PeersConfig::default());
+        let manager = PeersManager::default();
         let mut fetcher =
             StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 

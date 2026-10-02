@@ -271,13 +271,13 @@ where
     // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
                 .set_expected_block_start(genesis_block_number);
         }
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
@@ -316,7 +316,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.storage_v2 {
+    if genesis_storage_settings.is_v2() {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -569,10 +569,10 @@ where
             ?expected_state_root,
             "State root from state dump does not match state root in current header."
         );
-        return Err(InitStorageError::StateRootMismatch(GotExpected {
-            got: dump_state_root,
-            expected: expected_state_root,
-        })
+        return Err(InitStorageError::StateRootMismatch(GotExpected::new(
+            dump_state_root,
+            expected_state_root,
+        ))
         .into())
     }
 
@@ -606,10 +606,10 @@ where
             "Computed state root does not match state root in state dump"
         );
 
-        return Err(InitStorageError::StateRootMismatch(GotExpected {
-            got: computed_state_root,
-            expected: expected_state_root,
-        })
+        return Err(InitStorageError::StateRootMismatch(GotExpected::new(
+            computed_state_root,
+            expected_state_root,
+        ))
         .into())
     }
 
@@ -688,7 +688,7 @@ where
         + NodePrimitivesProvider,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
-    if storage_settings.storage_v2 {
+    if storage_settings.is_v2() {
         return dump_state_v2(collector, provider_factory, block)
     }
 
@@ -1370,7 +1370,7 @@ mod tests {
             reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address_with_storage)),
-                StorageEntry { key: storage_key, value: U256::ZERO }
+                StorageEntry::new(storage_key, U256::ZERO)
             )]
         );
 
@@ -1471,7 +1471,7 @@ mod tests {
             reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address)),
-                StorageEntry { key: storage_key, value: U256::ZERO }
+                StorageEntry::new(storage_key, U256::ZERO)
             )]
         );
 
@@ -1642,7 +1642,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.storage_v2 {
+            let (accounts, storages) = if settings.is_v2() {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)

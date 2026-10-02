@@ -9,7 +9,7 @@ use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
-use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
+use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
@@ -175,8 +175,8 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
                         account
                             .storage
                             .iter()
-                            .filter(|(_, value)| !value.present_value.is_zero())
-                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                            .filter(|(_, value)| !value.present_value().is_zero())
+                            .map(|(slot, value)| ((*slot).into(), value.present_value())),
                     )),
                 )
             })
@@ -203,7 +203,7 @@ fn block1(
             .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
         vec![vec![Receipt {
-            tx_type: TxType::Eip2930,
+            tx_type: alloy_consensus::TxEip2930::tx_type(),
             success: true,
             cumulative_gas_used: 300,
             logs: vec![Log::new_unchecked(
@@ -229,7 +229,10 @@ fn block1(
     header.parent_hash = B256::ZERO;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
+    (
+        reth_primitives_traits::SealedBlock::with_senders(block, vec![Address::new([0x30; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block two that points to block 1
@@ -257,7 +260,7 @@ fn block2(
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
         vec![vec![Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             success: false,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
@@ -287,7 +290,10 @@ fn block2(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        reth_primitives_traits::SealedBlock::with_senders(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block three that points to block 2
@@ -320,7 +326,7 @@ fn block3(
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
@@ -345,7 +351,10 @@ fn block3(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        reth_primitives_traits::SealedBlock::with_senders(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block four that points to block 3
@@ -403,7 +412,7 @@ fn block4(
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
@@ -428,7 +437,10 @@ fn block4(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        reth_primitives_traits::SealedBlock::with_senders(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block five that points to block 4
@@ -483,7 +495,7 @@ fn block5(
     let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Receipt {
-            tx_type: TxType::Eip1559,
+            tx_type: alloy_consensus::TxEip1559::tx_type(),
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
@@ -508,5 +520,8 @@ fn block5(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (
+        reth_primitives_traits::SealedBlock::with_senders(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }

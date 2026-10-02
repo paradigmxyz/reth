@@ -112,7 +112,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
             .collect();
 
         // Use `new_unchecked` to preserve the hash
-        Ok(SealedBlock::new_unchecked(block, hash))
+        Ok(reth_primitives_traits::Block::seal_unchecked(block, hash))
     }
 }
 

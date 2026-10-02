@@ -120,7 +120,7 @@ async fn my_exex<Node: FullNodeComponents>(
                         let execution_outcome = new.execution_outcome();
 
                         for (address, senders) in subscriptions.iter_mut() {
-                            for change in &execution_outcome.bundle.state {
+                            for change in execution_outcome.bundle.state() {
                                 if change.0 == address {
                                     for (key, slot) in &change.1.storage {
                                         let diff = StorageDiff {

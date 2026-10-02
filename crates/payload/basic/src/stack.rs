@@ -179,47 +179,47 @@ where
 
         match attributes {
             Either::Left(left_attr) => {
-                let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
+                let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments::new(
                     cached_reads,
                     execution_cache,
                     state_root_handle,
-                    config: PayloadConfig {
+                    PayloadConfig {
                         parent_header,
                         parent_block_info,
                         attributes: left_attr,
                         payload_id,
                     },
                     cancel,
-                    best_payload: best_payload.and_then(|payload| {
+                    best_payload.and_then(|payload| {
                         if let Either::Left(p) = payload {
                             Some(p)
                         } else {
                             None
                         }
                     }),
-                };
+                );
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
             }
             Either::Right(right_attr) => {
-                let right_args = BuildArguments {
+                let right_args = BuildArguments::new(
                     cached_reads,
                     execution_cache,
                     state_root_handle,
-                    config: PayloadConfig {
+                    PayloadConfig {
                         parent_header,
                         parent_block_info,
                         attributes: right_attr,
                         payload_id,
                     },
                     cancel,
-                    best_payload: best_payload.and_then(|payload| {
+                    best_payload.and_then(|payload| {
                         if let Either::Right(p) = payload {
                             Some(p)
                         } else {
                             None
                         }
                     }),
-                };
+                );
                 self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))
             }
         }

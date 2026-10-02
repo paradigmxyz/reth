@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_zero_hit_eviction_threshold_effectively_disables_cache() {
         let mut cache = InvalidHeaderCache::new(10, 0);
-        let header = SealedHeader::seal_slow(Header::default());
+        let header = <SealedHeader as Default>::default();
         cache.insert(header.block_with_parent());
 
         assert!(cache.get(&header.hash()).is_none());

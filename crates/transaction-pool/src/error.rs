@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn other_downcast() {
-        let err = InvalidPoolTransactionError::Other(Box::new(E));
+        let err = InvalidPoolTransactionError::other(E);
         assert!(err.is_other::<E>());
 
         assert!(err.downcast_other_ref::<E>().is_some());

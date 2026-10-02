@@ -20,7 +20,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock<Block>, f: F) -> 
     // Recalculate roots
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
-    transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
+    transformed.header.ommers_hash = transformed.body.calculate_ommers_root();
 
     ExecutionPayload::from_block_slow(&transformed).0
 }

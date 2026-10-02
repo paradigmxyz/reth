@@ -46,8 +46,8 @@ async fn txpool_listener_pending_promotions_propagate_only() {
     tx_local.transaction.set_nonce(0);
     tx_external.transaction.set_nonce(1);
 
-    let hash_local = *tx_local.transaction.hash();
-    let hash_external = *tx_external.transaction.hash();
+    let hash_local = *tx_local.hash();
+    let hash_external = *tx_external.hash();
 
     // Listeners: propagate-only and all
     let mut listener_network = txpool.pending_transactions_listener();

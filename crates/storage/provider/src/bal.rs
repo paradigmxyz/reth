@@ -285,8 +285,7 @@ mod tests {
 
     #[test]
     fn prune_uses_chain_tip() {
-        let store =
-            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let store = InMemoryBalStore::new(BalConfig::with_in_memory_retention_distance(2));
         let old_hash = B256::random();
         let retained_hash = B256::random();
         let old_bal = Bytes::from_static(b"old");
@@ -304,8 +303,7 @@ mod tests {
 
     #[test]
     fn insert_prunes_from_highest_inserted_block() {
-        let store =
-            InMemoryBalStore::new(BalConfig::with_in_memory_retention(PruneMode::Distance(2)));
+        let store = InMemoryBalStore::new(BalConfig::with_in_memory_retention_distance(2));
         let old_hash = B256::random();
         let high_hash = B256::random();
         let late_hash = B256::random();

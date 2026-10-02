@@ -100,10 +100,10 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Returns `None` if the block for the given hash is not found.
     pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
-        let block = self.blocks_by_hash.get(&hash).cloned()?;
+        let block = self.executed_block_by_hash(hash).cloned()?;
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
-        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
+        while let Some(executed) = self.executed_block_by_hash(parent_hash) {
             parent_hash = executed.recovered_block().parent_hash();
             blocks.push(executed.clone());
         }
@@ -117,7 +117,7 @@ impl<N: NodePrimitives> TreeState<N> {
         let parent_hash = executed.recovered_block().parent_hash();
         let block_number = executed.recovered_block().number();
 
-        if self.blocks_by_hash.contains_key(&hash) {
+        if self.contains_hash(&hash) {
             return;
         }
 
@@ -176,7 +176,7 @@ impl<N: NodePrimitives> TreeState<N> {
             return true
         }
 
-        while let Some(executed) = self.blocks_by_hash.get(&current_block) {
+        while let Some(executed) = self.executed_block_by_hash(current_block) {
             current_block = executed.recovered_block().parent_hash();
             if current_block == hash {
                 return true
@@ -205,7 +205,7 @@ impl<N: NodePrimitives> TreeState<N> {
         // First, let's walk back the canonical chain and remove canonical blocks lower than the
         // upper bound
         let mut current_block = self.current_canonical_head.hash;
-        while let Some(executed) = self.blocks_by_hash.get(&current_block) {
+        while let Some(executed) = self.executed_block_by_hash(current_block) {
             current_block = executed.recovered_block().parent_hash();
             if executed.recovered_block().number() <= upper_bound {
                 let hash = executed.recovered_block().hash();
@@ -370,14 +370,14 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent) else {
+        let Some(mut current_block) = self.executed_block_by_hash(second.parent) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
 
         while current_block.recovered_block().number() > first.number + 1 {
             let Some(block) =
-                self.blocks_by_hash.get(&current_block.recovered_block().parent_hash())
+                self.executed_block_by_hash(current_block.recovered_block().parent_hash())
             else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
@@ -466,7 +466,7 @@ mod tests {
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
-        assert_eq!(tree_state.blocks_by_hash.len(), 5);
+        assert_eq!(tree_state.block_count(), 5);
 
         let fork_block_3 = test_block_builder
             .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
@@ -479,14 +479,14 @@ mod tests {
         tree_state.insert_executed(fork_block_4.clone());
         tree_state.insert_executed(fork_block_5.clone());
 
-        assert_eq!(tree_state.blocks_by_hash.len(), 8);
+        assert_eq!(tree_state.block_count(), 8);
         assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original
                                                               // and fork)
         assert_eq!(tree_state.parent_to_child[&blocks[1].recovered_block().hash()].len(), 2); // block 2 should have two children
 
         // verify that we can insert the same block again without issues
         tree_state.insert_executed(fork_block_4.clone());
-        assert_eq!(tree_state.blocks_by_hash.len(), 8);
+        assert_eq!(tree_state.block_count(), 8);
 
         assert!(tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
             .contains(&fork_block_4.recovered_block().hash()));
@@ -520,14 +520,14 @@ mod tests {
             Some(blocks[1].recovered_block().num_hash()),
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[0].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[1].recovered_block().hash()));
         assert!(!tree_state.blocks_by_number.contains_key(&1));
         assert!(!tree_state.blocks_by_number.contains_key(&2));
 
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[2].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[3].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
         assert!(tree_state.blocks_by_number.contains_key(&3));
         assert!(tree_state.blocks_by_number.contains_key(&4));
         assert!(tree_state.blocks_by_number.contains_key(&5));
@@ -571,14 +571,14 @@ mod tests {
             None,
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[0].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[1].recovered_block().hash()));
         assert!(!tree_state.blocks_by_number.contains_key(&1));
         assert!(!tree_state.blocks_by_number.contains_key(&2));
 
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[2].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[3].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
         assert!(tree_state.blocks_by_number.contains_key(&3));
         assert!(tree_state.blocks_by_number.contains_key(&4));
         assert!(tree_state.blocks_by_number.contains_key(&5));
@@ -622,14 +622,14 @@ mod tests {
             Some(blocks[0].recovered_block().num_hash()),
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[0].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[1].recovered_block().hash()));
         assert!(!tree_state.blocks_by_number.contains_key(&1));
         assert!(!tree_state.blocks_by_number.contains_key(&2));
 
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[2].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[3].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
         assert!(tree_state.blocks_by_number.contains_key(&3));
         assert!(tree_state.blocks_by_number.contains_key(&4));
         assert!(tree_state.blocks_by_number.contains_key(&5));

@@ -105,7 +105,7 @@ where
             );
 
             let node_idx = self.node_idx.unwrap_or(env.active_node_idx);
-            if node_idx >= env.node_clients.len() {
+            if node_idx >= env.node_count() {
                 return Err(eyre::eyre!("Node index {node_idx} out of bounds"));
             }
 

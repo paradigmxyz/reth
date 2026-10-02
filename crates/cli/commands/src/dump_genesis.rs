@@ -47,7 +47,7 @@ mod tests {
             let args: DumpGenesisCommand<EthereumChainSpecParser> =
                 DumpGenesisCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(
-                Ok(args.chain.chain),
+                Ok(args.chain.chain()),
                 chain.parse::<reth_chainspec::Chain>(),
                 "failed to parse chain {chain}"
             );

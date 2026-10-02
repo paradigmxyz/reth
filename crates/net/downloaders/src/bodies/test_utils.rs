@@ -33,7 +33,7 @@ pub(crate) fn create_raw_bodies(
         .into_iter()
         .map(|header| {
             let body = bodies.remove(&header.hash()).expect("body exists");
-            body.into_block(header.unseal())
+            header.unseal().into_block(body)
         })
         .collect()
 }

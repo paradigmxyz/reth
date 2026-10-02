@@ -669,7 +669,7 @@ mod tests {
     }
 
     fn test_storage(slot: u64, value: u64) -> StorageEntry {
-        StorageEntry { key: B256::from(U256::from(slot)), value: U256::from(value) }
+        StorageEntry::new(B256::from(U256::from(slot)), U256::from(value))
     }
 
     fn seed_headers(
@@ -855,14 +855,14 @@ mod tests {
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: keccak256(slot1), value: U256::from(25) },
+                StorageEntry::new(keccak256(slot1), U256::from(25)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: keccak256(slot2), value: U256::from(20) },
+                StorageEntry::new(keccak256(slot2), U256::from(20)),
             )
             .unwrap();
 
@@ -891,14 +891,14 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                StorageEntry { key: slot1, value: U256::from(10) },
+                StorageEntry::new(slot1, U256::from(10)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address)),
-                StorageEntry { key: slot1, value: U256::from(15) },
+                StorageEntry::new(slot1, U256::from(15)),
             )
             .unwrap();
 
@@ -970,21 +970,21 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                StorageEntry { key: slot1, value: U256::from(10) },
+                StorageEntry::new(slot1, U256::from(10)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address)),
-                StorageEntry { key: slot1, value: U256::from(15) },
+                StorageEntry::new(slot1, U256::from(15)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address)),
-                StorageEntry { key: slot2, value: U256::from(20) },
+                StorageEntry::new(slot2, U256::from(20)),
             )
             .unwrap();
 

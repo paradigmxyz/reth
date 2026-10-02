@@ -312,8 +312,7 @@ impl BlobStoreSize {
 
 impl PartialEq for BlobStoreSize {
     fn eq(&self, other: &Self) -> bool {
-        self.data_size.load(Ordering::Relaxed) == other.data_size.load(Ordering::Relaxed) &&
-            self.num_blobs.load(Ordering::Relaxed) == other.num_blobs.load(Ordering::Relaxed)
+        self.data_size() == other.data_size() && self.blobs_len() == other.blobs_len()
     }
 }
 
@@ -329,7 +328,7 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
+    use alloy_eips::eip7594::BlobTransactionSidecarEip7594;
 
     #[expect(dead_code)]
     struct DynStore {
@@ -339,7 +338,7 @@ mod tests {
     #[test]
     fn pooled_blob_sidecar_defaults_to_full_availability() {
         let sidecars = [
-            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+            BlobTransactionSidecarVariant::default(),
             BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
         ];
 

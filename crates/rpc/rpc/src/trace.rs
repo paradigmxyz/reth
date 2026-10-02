@@ -291,7 +291,7 @@ where
         self.eth_api()
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
-                OpcodeGasInspector::default(),
+                OpcodeGasInspector::new(),
                 move |_tx_info, inspector, _res, _| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_hash,
@@ -902,7 +902,7 @@ mod tests {
                 .with_bytecode(alloy_primitives::bytes!("4360005260206000f3")),
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
-        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        provider.add_block(header.hash_slow(), Block::new(header, BlockBody::default()));
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -935,7 +935,7 @@ mod tests {
         let provider = MockEthProvider::default();
         for number in [1, 2] {
             let header = Header { number, gas_limit: 30_000_000, ..Default::default() };
-            provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+            provider.add_block(header.hash_slow(), Block::new(header, BlockBody::default()));
         }
         let eth_api = EthApiBuilder::new(
             provider.clone(),
@@ -981,7 +981,7 @@ mod tests {
         use reth_evm_ethereum::EthEvmConfig;
         use reth_execution_types::{Chain, ExecutionOutcome};
         use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_primitives_traits::SignerRecoverable;
         use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
         use reth_rpc_eth_types::cache::cache_new_blocks_task;
         use reth_transaction_pool::test_utils::testing_pool;
@@ -1013,10 +1013,10 @@ mod tests {
         let parent = Header { gas_limit: 30_000_000, ..Default::default() };
         let parent_hash = parent.hash_slow();
         provider.add_header(parent_hash, parent);
-        let block = Block {
-            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
-            body: BlockBody { transactions: vec![tx], ..Default::default() },
-        };
+        let block = Block::new(
+            Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            BlockBody { transactions: vec![tx], ..Default::default() },
+        );
         let block_hash = block.header.hash_slow();
         provider.add_block(block_hash, block.clone());
         let eth_api = EthApiBuilder::new(
@@ -1031,7 +1031,10 @@ mod tests {
             eth_api.cache().clone(),
             futures::stream::iter([CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    [reth_primitives_traits::Block::into_recovered_with_signers(
+                        block,
+                        vec![sender],
+                    )],
                     ExecutionOutcome {
                         receipts: vec![vec![]],
                         first_block: 1,
@@ -1111,7 +1114,7 @@ mod tests {
         use reth_evm_ethereum::EthEvmConfig;
         use reth_execution_types::{Chain, ExecutionOutcome};
         use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_primitives_traits::SignerRecoverable;
         use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
         use reth_rpc_eth_types::cache::cache_new_blocks_task;
         use reth_transaction_pool::test_utils::testing_pool;
@@ -1133,10 +1136,10 @@ mod tests {
         let parent = Header { gas_limit: 30_000_000, ..Default::default() };
         let parent_hash = parent.hash_slow();
         provider.add_header(parent_hash, parent);
-        let block = Block {
-            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
-            body: BlockBody { transactions: vec![tx], ..Default::default() },
-        };
+        let block = Block::new(
+            Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            BlockBody { transactions: vec![tx], ..Default::default() },
+        );
         let block_hash = block.header.hash_slow();
         provider.add_block(block_hash, block.clone());
         let eth_api = EthApiBuilder::new(
@@ -1151,7 +1154,10 @@ mod tests {
             eth_api.cache().clone(),
             futures::stream::iter([CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    [reth_primitives_traits::Block::into_recovered_with_signers(
+                        block,
+                        vec![sender],
+                    )],
                     ExecutionOutcome {
                         receipts: vec![vec![]],
                         first_block: 1,
@@ -1190,16 +1196,16 @@ mod tests {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let genesis_hash = init_genesis(&factory).unwrap();
-        let block = Block {
-            header: Header {
+        let block = Block::new(
+            Header {
                 parent_hash: genesis_hash,
                 number: 1,
                 beneficiary: coinbase,
                 gas_limit: 30_000_000,
                 ..Default::default()
             },
-            body: BlockBody::default(),
-        };
+            BlockBody::default(),
+        );
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
         provider_rw.update_pipeline_stages(1, false).unwrap();
@@ -1284,7 +1290,7 @@ mod tests {
         use reth_evm_ethereum::EthEvmConfig;
         use reth_execution_types::{Chain, ExecutionOutcome};
         use reth_network_api::noop::NoopNetwork;
-        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_primitives_traits::SignerRecoverable;
         use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
         use reth_rpc_eth_types::cache::cache_new_blocks_task;
         use reth_transaction_pool::test_utils::testing_pool;
@@ -1326,15 +1332,15 @@ mod tests {
         let parent = Header { gas_limit: 30_000_000, ..Default::default() };
         let parent_hash = parent.hash_slow();
         provider.add_header(parent_hash, parent);
-        let block = Block {
-            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
-            body: BlockBody { transactions, ..Default::default() },
-        };
+        let block = Block::new(
+            Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            BlockBody { transactions, ..Default::default() },
+        );
         let block_hash = block.header.hash_slow();
         let senders =
             block.body.transactions.iter().map(|tx| tx.recover_signer().unwrap()).collect();
         provider.add_block(block_hash, block.clone());
-        let recovered = RecoveredBlock::new_unhashed(block, senders);
+        let recovered = reth_primitives_traits::Block::into_recovered_with_signers(block, senders);
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),

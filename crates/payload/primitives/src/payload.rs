@@ -205,7 +205,7 @@ where
     AttributesType: PayloadAttributes,
 {
     fn from(attributes: &'a AttributesType) -> Self {
-        Self::PayloadAttributes(attributes)
+        crate::payload::PayloadOrAttributes::from_attributes(attributes)
     }
 }
 /// Extended functionality for Ethereum execution payloads

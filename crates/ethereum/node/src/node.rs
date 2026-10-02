@@ -125,7 +125,7 @@ impl EthereumNode {
     /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
     /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
-        ProviderFactoryBuilder::default()
+        reth_provider::ProviderFactory::builder()
     }
 }
 

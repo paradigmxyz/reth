@@ -704,7 +704,7 @@ where
     where
         L: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        launcher.launch_node(self.builder).await
+        self.builder.launch_with(launcher).await
     }
 
     /// Launches the node with the given closure.
@@ -1053,7 +1053,7 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
                 default_peers_path,
                 self.executor.clone(),
             )
-            .set_head(self.head);
+            .set_head(self.head());
 
         Ok(builder)
     }
@@ -1062,9 +1062,9 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
 impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BuilderContext")
-            .field("head", &self.head)
+            .field("head", &self.head())
             .field("provider", &std::any::type_name::<Node::Provider>())
-            .field("executor", &self.executor)
+            .field("executor", self.task_executor())
             .field("config", &self.config())
             .finish()
     }

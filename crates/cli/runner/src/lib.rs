@@ -81,7 +81,7 @@ impl CliRunner {
         let (context, task_manager_handle) = cli_context(&self.runtime);
 
         // Executes the command until it finished or ctrl-c was fired
-        let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
+        let command_res = self.block_on(run_to_completion_or_panic(
             task_manager_handle,
             run_until_ctrl_c(command(context)),
         ));
@@ -125,7 +125,7 @@ impl CliRunner {
         let command_handle = handle.spawn_blocking(move || handle2.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
-        let command_res = self.runtime.handle().block_on(run_to_completion_or_panic(
+        let command_res = self.block_on(run_to_completion_or_panic(
             task_manager_handle,
             run_until_ctrl_c(
                 async move { command_handle.await.expect("Failed to join blocking task") },
@@ -150,7 +150,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        self.runtime.handle().block_on(run_until_ctrl_c(fut))?;
+        self.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 

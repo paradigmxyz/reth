@@ -69,10 +69,10 @@ impl Action<EthEngineTypes> for WaitForPersistence {
             let versioned_hashes = envelope.blobs_bundle.versioned_hashes();
             let payload = ExecutionData::new(
                 envelope.execution_payload.into(),
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                ExecutionPayloadSidecar::v3(CancunPayloadFields::new(
                     parent_beacon_block_root,
                     versioned_hashes,
-                }),
+                )),
             );
 
             let (status, _) = engine.reth_new_payload(payload, true, false).await?;

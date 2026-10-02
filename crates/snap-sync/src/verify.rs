@@ -163,7 +163,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         // The stage answers to the header, while downloaded ranges answered to the attempt.
         if header.state_root() != attempt.state_root() {
             return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
-                root: GotExpected { got: attempt.state_root(), expected: header.state_root() },
+                root: GotExpected::new(attempt.state_root(), header.state_root()),
                 block_number: target.number,
                 block_hash: target.hash,
             }))
@@ -456,10 +456,7 @@ mod tests {
         assert!(matches!(run_merkle(&provider, 1), Err(StageError::Block { .. })));
         match provider.verify_state_root(write) {
             Err(SnapSyncError::Provider(ProviderError::StateRootMismatch(mismatch))) => {
-                assert_eq!(
-                    mismatch.root,
-                    GotExpected { got: state_root(&accounts()), expected: header_root }
-                );
+                assert_eq!(mismatch.root, GotExpected::new(state_root(&accounts()), header_root));
             }
             other => panic!("expected a state root mismatch, got {other:?}"),
         }

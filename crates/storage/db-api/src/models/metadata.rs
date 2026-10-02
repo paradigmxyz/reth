@@ -57,38 +57,38 @@ impl StorageSettings {
 
     /// Whether receipts are stored in static files.
     pub const fn receipts_in_static_files(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Whether transaction senders are stored in static files.
     pub const fn transaction_senders_in_static_files(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Whether storages history is stored in `RocksDB`.
     pub const fn storages_history_in_rocksdb(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Whether transaction hash numbers are stored in `RocksDB`.
     pub const fn transaction_hash_numbers_in_rocksdb(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Whether account history is stored in `RocksDB`.
     pub const fn account_history_in_rocksdb(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Whether to use hashed state tables (`HashedAccounts`/`HashedStorages`) as the canonical
     /// state representation instead of plain state tables. Implied by v2 storage layout.
     pub const fn use_hashed_state(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 
     /// Returns `true` if any tables are configured to be stored in `RocksDB`.
     pub const fn any_in_rocksdb(&self) -> bool {
-        self.storage_v2
+        self.is_v2()
     }
 }
 

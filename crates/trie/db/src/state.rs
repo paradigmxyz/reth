@@ -419,7 +419,8 @@ mod tests {
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+        let post_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
@@ -474,21 +475,21 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: slot2, value: U256::from(200) },
+                StorageEntry::new(slot2, U256::from(200)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address1)),
-                StorageEntry { key: slot1, value: U256::from(100) },
+                StorageEntry::new(slot1, U256::from(100)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address1)),
-                StorageEntry { key: slot1, value: U256::from(999) }, // should be ignored
+                StorageEntry::new(slot1, U256::from(999)), // should be ignored
             )
             .unwrap();
 
@@ -688,21 +689,21 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((1, address1)),
-                StorageEntry { key: plain_slot1, value: U256::from(100) },
+                StorageEntry::new(plain_slot1, U256::from(100)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address1)),
-                StorageEntry { key: plain_slot2, value: U256::from(200) },
+                StorageEntry::new(plain_slot2, U256::from(200)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address2)),
-                StorageEntry { key: plain_slot1, value: U256::from(300) },
+                StorageEntry::new(plain_slot1, U256::from(300)),
             )
             .unwrap();
 

@@ -468,7 +468,7 @@ impl RpcModuleConfigBuilder {
     /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
         let Self { eth } = self;
-        RpcModuleConfig { eth: eth.unwrap_or_default() }
+        RpcModuleConfig::new(eth.unwrap_or_default())
     }
 
     /// Get a reference to the eth namespace config, if any
@@ -1413,17 +1413,17 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         let mut ws_handle = None;
         let mut ipc_handle = None;
 
-        let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+        let http_socket_addr = self.http_address().unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             constants::DEFAULT_HTTP_RPC_PORT,
         )));
 
-        let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+        let ws_socket_addr = self.ws_address().unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             constants::DEFAULT_WS_RPC_PORT,
         )));
 
-        let rpc_metrics_enabled = self.rpc_metrics_enabled;
+        let rpc_metrics_enabled = self.rpc_metrics_enabled();
         let ipc_path =
             self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
@@ -2260,12 +2260,12 @@ impl RpcServerHandle {
 
     /// Returns the url to the http server
     pub fn http_url(&self) -> Option<String> {
-        self.http_local_addr.map(|addr| format!("http://{addr}"))
+        self.http_local_addr().map(|addr| format!("http://{addr}"))
     }
 
     /// Returns the url to the ws server
     pub fn ws_url(&self) -> Option<String> {
-        self.ws_local_addr.map(|addr| format!("ws://{addr}"))
+        self.ws_local_addr().map(|addr| format!("ws://{addr}"))
     }
 
     /// Returns a http client connected to the server.
@@ -2328,7 +2328,7 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.http_url()?;
-        let provider = ProviderBuilder::default()
+        let provider = alloy_provider::builder()
             .with_recommended_fillers()
             .connect_http(rpc_url.parse().expect("valid url"));
         Some(provider)
@@ -2368,7 +2368,7 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.ws_url()?;
-        let provider = ProviderBuilder::default()
+        let provider = alloy_provider::builder()
             .with_recommended_fillers()
             .connect(&rpc_url)
             .await
@@ -2394,7 +2394,7 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.ipc_endpoint()?;
-        let provider = ProviderBuilder::default()
+        let provider = alloy_provider::builder()
             .with_recommended_fillers()
             .connect(&rpc_url)
             .await
@@ -2513,8 +2513,7 @@ mod tests {
 
     #[test]
     fn test_configure_transport_config() {
-        let config = TransportRpcModuleConfig::default()
-            .with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
+        let config = TransportRpcModuleConfig::set_http([RethRpcModule::Eth, RethRpcModule::Admin]);
         assert_eq!(
             config,
             TransportRpcModuleConfig {
@@ -2530,7 +2529,7 @@ mod tests {
 
     #[test]
     fn test_configure_transport_config_none() {
-        let config = TransportRpcModuleConfig::default().with_http(Vec::<RethRpcModule>::new());
+        let config = TransportRpcModuleConfig::set_http(Vec::<RethRpcModule>::new());
         assert_eq!(
             config,
             TransportRpcModuleConfig {
@@ -2731,9 +2730,8 @@ mod tests {
     #[test]
     fn test_add_or_replace_if_module_configured() {
         // Create a config that enables RethRpcModule::Eth for HTTP and WS, but NOT IPC
-        let config = TransportRpcModuleConfig::default()
-            .with_http([RethRpcModule::Eth])
-            .with_ws([RethRpcModule::Eth]);
+        let config =
+            TransportRpcModuleConfig::set_http([RethRpcModule::Eth]).with_ws([RethRpcModule::Eth]);
 
         // Create HTTP module with an existing method (to test "replace")
         let mut http_module = RpcModule::new(());
@@ -2783,7 +2781,7 @@ mod tests {
     #[test]
     fn test_merge_if_module_configured_with_lazy_evaluation() {
         // Create a config that enables RethRpcModule::Eth for HTTP only
-        let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
+        let config = TransportRpcModuleConfig::set_http([RethRpcModule::Eth]);
 
         let mut modules =
             TransportRpcModules { config, http: Some(RpcModule::new(())), ws: None, ipc: None };

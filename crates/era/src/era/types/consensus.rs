@@ -126,10 +126,7 @@ impl CompressedSignedBeaconBlock {
 
         if let Ok(beacon) = SignedBeaconBlockElectra::<ExecutionPayloadV3>::from_ssz_bytes(&ssz) {
             let sidecar = ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root: beacon.message.parent_root,
-                    versioned_hashes: Vec::new(),
-                },
+                CancunPayloadFields::new(beacon.message.parent_root, Vec::new()),
                 PraguePayloadFields::new(beacon.message.body.execution_requests.to_requests()),
             );
             let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
@@ -137,10 +134,10 @@ impl CompressedSignedBeaconBlock {
         }
 
         if let Ok(beacon) = SignedBeaconBlockDeneb::<ExecutionPayloadV3>::from_ssz_bytes(&ssz) {
-            let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                parent_beacon_block_root: beacon.message.parent_root,
-                versioned_hashes: Vec::new(),
-            });
+            let sidecar = ExecutionPayloadSidecar::v3(CancunPayloadFields::new(
+                beacon.message.parent_root,
+                Vec::new(),
+            ));
             let payload = ExecutionPayload::V3(beacon.message.body.execution_payload);
             return Ok(Some(payload.try_into_block_with_sidecar(&sidecar)?));
         }

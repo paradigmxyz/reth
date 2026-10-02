@@ -208,12 +208,7 @@ where
 
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
         parent_header.validate_gas_limit(registered_gas_limit, block.gas_limit()).map_err(
-            |err| {
-                ValidationApiError::GasLimitMismatch(GotExpected {
-                    got: err.got,
-                    expected: err.expected,
-                })
-            },
+            |err| ValidationApiError::GasLimitMismatch(GotExpected::new(err.got, err.expected)),
         )?;
 
         // Ensure the submitted block access list does not exceed the block gas limit (EIP-7928)
@@ -275,7 +270,7 @@ where
 
         if state_root != block.header().state_root() {
             return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                GotExpected::new(state_root, block.header().state_root()).into(),
             )
             .into())
         }
@@ -290,25 +285,25 @@ where
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         if header.hash() != message.block_hash {
-            Err(ValidationApiError::BlockHashMismatch(GotExpected {
-                got: message.block_hash,
-                expected: header.hash(),
-            }))
+            Err(ValidationApiError::BlockHashMismatch(GotExpected::new(
+                message.block_hash,
+                header.hash(),
+            )))
         } else if header.parent_hash() != message.parent_hash {
-            Err(ValidationApiError::ParentHashMismatch(GotExpected {
-                got: message.parent_hash,
-                expected: header.parent_hash(),
-            }))
+            Err(ValidationApiError::ParentHashMismatch(GotExpected::new(
+                message.parent_hash,
+                header.parent_hash(),
+            )))
         } else if header.gas_limit() != message.gas_limit {
-            Err(ValidationApiError::GasLimitMismatch(GotExpected {
-                got: message.gas_limit,
-                expected: header.gas_limit(),
-            }))
+            Err(ValidationApiError::GasLimitMismatch(GotExpected::new(
+                message.gas_limit,
+                header.gas_limit(),
+            )))
         } else if header.gas_used() != message.gas_used {
-            Err(ValidationApiError::GasUsedMismatch(GotExpected {
-                got: message.gas_used,
-                expected: header.gas_used(),
-            }))
+            Err(ValidationApiError::GasUsedMismatch(GotExpected::new(
+                message.gas_used,
+                header.gas_used(),
+            )))
         } else {
             Ok(())
         }
@@ -431,7 +426,7 @@ where
 
         let block = self.payload_validator.convert_payload_to_block(payload)?;
         let recovered = match cache.recover_signers(block.body().transactions()) {
-            Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
+            Ok(senders) => Ok(block.with_senders(senders)),
             Err(_) => Err(SealedBlockRecoveryError::new(block)),
         };
         recovered.map_err(|err| NewPayloadError::Other(err.into()).into())
@@ -442,13 +437,13 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.recover_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+        let block = self.recover_payload(ExecutionData::new(
+            ExecutionPayload::V3(request.request.execution_payload),
+            ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root: request.parent_beacon_block_root,
                 versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
             }),
-        })?;
+        ))?;
 
         self.validate_message_against_block(
             block,
@@ -464,9 +459,9 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.recover_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
-            sidecar: ExecutionPayloadSidecar::v4(
+        let block = self.recover_payload(ExecutionData::new(
+            ExecutionPayload::V3(request.request.execution_payload),
+            ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
@@ -477,7 +472,7 @@ where
                     ),
                 },
             ),
-        })?;
+        ))?;
 
         self.validate_message_against_block(
             block,
@@ -496,9 +491,9 @@ where
         let payload = ExecutionPayload::V3(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
 
-        let block = self.recover_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData::new(
             payload,
-            sidecar: ExecutionPayloadSidecar::v4(
+            ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self
@@ -510,7 +505,7 @@ where
                     ),
                 },
             ),
-        })?;
+        ))?;
 
         // Check block size as per EIP-7934 (only applies when Osaka hardfork is active)
         let chain_spec = self.provider.chain_spec();
@@ -545,9 +540,9 @@ where
             DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
-        let block = self.recover_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData::new(
             payload,
-            sidecar: ExecutionPayloadSidecar::v4(
+            ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self
@@ -559,7 +554,7 @@ where
                     ),
                 },
             ),
-        })?;
+        ))?;
 
         let chain_spec = self.provider.chain_spec();
         if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
@@ -688,25 +683,25 @@ fn validate_message_against_payload(
     let payload = payload.as_v1();
 
     if payload.block_hash != message.block_hash {
-        Err(ValidationApiError::BlockHashMismatch(GotExpected {
-            got: message.block_hash,
-            expected: payload.block_hash,
-        }))
+        Err(ValidationApiError::BlockHashMismatch(GotExpected::new(
+            message.block_hash,
+            payload.block_hash,
+        )))
     } else if payload.parent_hash != message.parent_hash {
-        Err(ValidationApiError::ParentHashMismatch(GotExpected {
-            got: message.parent_hash,
-            expected: payload.parent_hash,
-        }))
+        Err(ValidationApiError::ParentHashMismatch(GotExpected::new(
+            message.parent_hash,
+            payload.parent_hash,
+        )))
     } else if payload.gas_limit != message.gas_limit {
-        Err(ValidationApiError::GasLimitMismatch(GotExpected {
-            got: message.gas_limit,
-            expected: payload.gas_limit,
-        }))
+        Err(ValidationApiError::GasLimitMismatch(GotExpected::new(
+            message.gas_limit,
+            payload.gas_limit,
+        )))
     } else if payload.gas_used != message.gas_used {
-        Err(ValidationApiError::GasUsedMismatch(GotExpected {
-            got: message.gas_used,
-            expected: payload.gas_used,
-        }))
+        Err(ValidationApiError::GasUsedMismatch(GotExpected::new(
+            message.gas_used,
+            payload.gas_used,
+        )))
     } else {
         Ok(())
     }
@@ -1047,11 +1042,8 @@ mod tests {
             None,
         );
 
-        api.recover_payload(ExecutionData {
-            payload: test_execution_payload(),
-            sidecar: Default::default(),
-        })
-        .unwrap();
+        api.recover_payload(ExecutionData::new(test_execution_payload(), Default::default()))
+            .unwrap();
     }
 
     fn test_validation_api(
@@ -1087,9 +1079,10 @@ mod tests {
             timestamp: parent.timestamp() + 12,
             ..Default::default()
         };
-        let block = SealedBlock::seal_slow(Block { header, body: Default::default() })
-            .try_recover()
-            .unwrap();
+        let block =
+            reth_primitives_traits::Block::seal_slow(Block { header, body: Default::default() })
+                .try_recover()
+                .unwrap();
         provider.state_roots.lock().push(block.state_root());
 
         let message = BidTrace {

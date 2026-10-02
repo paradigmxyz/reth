@@ -79,15 +79,15 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     pub fn next_row(&mut self) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize >= self.jar.rows {
+        if self.row as usize >= self.jar.rows() {
             // Has reached the end
             return Ok(None)
         }
 
-        let mut row = ValueRanges::with_capacity(self.jar.columns);
+        let mut row = ValueRanges::with_capacity(self.jar.columns());
 
         // Retrieve all column values from the row
-        for column in 0..self.jar.columns {
+        for column in 0..self.jar.columns() {
             self.read_value(column, &mut row)?;
         }
 
@@ -119,12 +119,12 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     pub fn next_row_with_cols(&mut self, mask: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
         self.internal_buffer.clear();
 
-        if self.row as usize >= self.jar.rows {
+        if self.row as usize >= self.jar.rows() {
             // Has reached the end
             return Ok(None)
         }
 
-        let columns = self.jar.columns;
+        let columns = self.jar.columns();
         let mut row = ValueRanges::with_capacity(columns);
 
         for column in 0..columns {
@@ -147,10 +147,10 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// Takes the column index and reads the range value for the corresponding column.
     fn read_value(&mut self, column: usize, row: &mut ValueRanges) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
-        let offset_pos = self.row as usize * self.jar.columns + column;
+        let offset_pos = self.row as usize * self.jar.columns() + column;
         let value_offset = self.reader.offset(offset_pos)? as usize;
 
-        let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
+        let column_offset_range = if self.jar.rows() * self.jar.columns() == offset_pos + 1 {
             // It's the last column of the last row
             value_offset..self.reader.size()
         } else {

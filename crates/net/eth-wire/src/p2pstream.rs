@@ -168,10 +168,10 @@ where
         if (hello.protocol_version as u8) != their_hello.protocol_version as u8 {
             // send a disconnect message notifying the peer of the protocol version mismatch
             self.send_disconnect(DisconnectReason::IncompatibleP2PProtocolVersion).await?;
-            return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
-                got: their_hello.protocol_version,
-                expected: hello.protocol_version,
-            }))
+            return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected::new(
+                their_hello.protocol_version,
+                hello.protocol_version,
+            )))
         }
 
         // determine shared capabilities (currently returns only one capability)
@@ -1012,8 +1012,7 @@ fn compress_frame(
 mod tests {
     use super::*;
     use crate::{
-        capability::SharedCapability, protocol::Protocol, test_utils::eth_hello, Capability,
-        EthVersion, ProtocolVersion,
+        protocol::Protocol, test_utils::eth_hello, Capability, EthVersion, ProtocolVersion,
     };
     use futures::task::noop_waker_ref;
     use tokio::net::{TcpListener, TcpStream};
@@ -1235,7 +1234,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_subprotocol_frame_before_decompression_when_declared_size_exceeds_limit() {
-        let cap = Capability::new_static("test", 1);
+        let cap = crate::test_utils::proto::TestProtoMessage::capability();
         let shared_capabilities =
             SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
                 .unwrap();
@@ -1443,10 +1442,10 @@ mod tests {
             // ensure that the two share a single capability, eth67
             assert_eq!(
                 *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
-                SharedCapability::Eth {
-                    version: EthVersion::Eth67,
-                    offset: MAX_RESERVED_MESSAGE_ID + 1
-                }
+                crate::capability::SharedCapability::eth(
+                    EthVersion::Eth67,
+                    MAX_RESERVED_MESSAGE_ID + 1
+                )
             );
         });
 
@@ -1461,10 +1460,10 @@ mod tests {
         // ensure that the two share a single capability, eth67
         assert_eq!(
             *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
-            SharedCapability::Eth {
-                version: EthVersion::Eth67,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
+            crate::capability::SharedCapability::eth(
+                EthVersion::Eth67,
+                MAX_RESERVED_MESSAGE_ID + 1
+            )
         );
 
         // make sure the server receives the message and asserts before ending the test

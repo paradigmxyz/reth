@@ -7,9 +7,7 @@ use alloy_consensus::{
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
-use reth_chainspec::{
-    ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, ForkCondition, MAINNET,
-};
+use reth_chainspec::{ChainSpecProvider, EthereumHardfork, ForkCondition, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
 use reth_db::tables;
@@ -103,7 +101,7 @@ async fn test_pipeline_v2_selfdestruct_changesets_use_plain_slots() -> eyre::Res
     // Phase 1 (pre-Cancun): preimage DB should be created and contain slot preimages.
     let provider = pipeline_provider_factory.provider()?;
     assert_eq!(provider.last_block_number()?, 1, "pipeline should sync block 1");
-    assert!(provider.cached_storage_settings().storage_v2, "test requires storage.v2 mode");
+    assert!(provider.cached_storage_settings().is_v2(), "test requires storage.v2 mode");
 
     let preimage_path = provider.storage_path().join("preimage");
     let expected_slots = scenario.expected_slots;
@@ -498,8 +496,8 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
     let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (
@@ -619,8 +617,8 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
     let original_value = B256::with_last_byte(0x07);
 
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (
@@ -709,8 +707,8 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (
@@ -805,8 +803,8 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (
@@ -949,8 +947,8 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
     let intra_tx_contract = Address::new([0x55; 20]);
 
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (
@@ -1154,8 +1152,8 @@ fn build_selfdestruct_chain_spec(
     let initial_balance = U256::from(ETH_TO_WEI) * U256::from(1000);
 
     Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [
                     (

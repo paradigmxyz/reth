@@ -229,8 +229,7 @@ fn storage_is_empty() {
     db.update(|tx| {
         for (slot, value) in &db_storage {
             // insert storage entries to the database
-            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
-                .unwrap();
+            tx.put::<tables::HashedStorages>(address, StorageEntry::new(*slot, *value)).unwrap();
         }
     })
     .unwrap();
@@ -275,8 +274,7 @@ fn storage_cursor_correct_order() {
     db.update(|tx| {
         for (slot, value) in &db_storage {
             // insert zero value accounts to the database
-            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
-                .unwrap();
+            tx.put::<tables::HashedStorages>(address, StorageEntry::new(*slot, *value)).unwrap();
         }
     })
     .unwrap();
@@ -315,7 +313,7 @@ fn zero_value_storage_entries_are_discarded() {
     db.update(|tx| {
         for (slot, value) in db_storage {
             // insert storage entries to the database
-            tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value }).unwrap();
+            tx.put::<tables::HashedStorages>(address, StorageEntry::new(slot, value)).unwrap();
         }
     })
     .unwrap();
@@ -348,11 +346,8 @@ fn post_state_storages_take_precedence() {
     db.update(|tx| {
         for slot in storage.keys() {
             // insert zero value accounts to the database
-            tx.put::<tables::HashedStorages>(
-                address,
-                StorageEntry { key: *slot, value: U256::ZERO },
-            )
-            .unwrap();
+            tx.put::<tables::HashedStorages>(address, StorageEntry::new(*slot, U256::ZERO))
+                .unwrap();
         }
     })
     .unwrap();
@@ -384,7 +379,7 @@ fn fuzz_hashed_storage_cursor() {
         db.update(|tx| {
             for (address, storage) in &db_storages {
                 for (slot, value) in storage {
-                    let entry = StorageEntry { key: *slot, value: *value };
+                    let entry = StorageEntry::new(*slot, *value);
                     tx.put::<tables::HashedStorages>(*address, entry).unwrap();
                 }
             }
@@ -436,11 +431,8 @@ fn all_storage_slots_deleted_exact_keys() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, value) in &db_entries {
-            tx.put::<tables::HashedStorages>(
-                address,
-                StorageEntry { key: *key, value: U256::from(*value) },
-            )
-            .unwrap();
+            tx.put::<tables::HashedStorages>(address, StorageEntry::new(*key, U256::from(*value)))
+                .unwrap();
         }
     })
     .unwrap();

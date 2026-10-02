@@ -150,9 +150,9 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
         // carries the peer's OS-assigned ephemeral source port (not dialable). If the peer
         // announced a non-zero listening port in its `Hello` message, prefer that combined with
         // the connection IP so the resulting enode is actually dialable.
-        let enode = match (self.direction, self.peer_listen_port) {
+        let enode = match (self.direction(), self.peer_listen_port) {
             (Direction::Incoming, Some(port)) => NodeRecord::new_with_ports(
-                self.remote_addr.ip(),
+                self.remote_addr().ip(),
                 port,
                 Some(record.udp_port),
                 record.id,
@@ -161,17 +161,17 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
             _ => record.to_string(),
         };
         PeerInfo {
-            remote_id: self.remote_id,
-            direction: self.direction,
+            remote_id: self.remote_id(),
+            direction: self.direction(),
             enode,
             enr: None,
-            remote_addr: self.remote_addr,
+            remote_addr: self.remote_addr(),
             local_addr: self.local_addr,
             capabilities: self.capabilities.clone(),
             client_version: self.client_version.clone(),
-            eth_version: self.version,
+            eth_version: self.version(),
             status: self.status.clone(),
-            session_established: self.established,
+            session_established: self.established(),
             kind,
         }
     }

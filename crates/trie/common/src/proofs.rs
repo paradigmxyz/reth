@@ -1093,11 +1093,11 @@ impl StorageProof {
         self,
         slot: alloy_serde::JsonStorageKey,
     ) -> alloy_rpc_types_eth::EIP1186StorageProof {
-        alloy_rpc_types_eth::EIP1186StorageProof {
-            key: slot,
-            value: self.value,
-            proof: normalize_eip1186_empty_trie_proof(self.proof),
-        }
+        alloy_rpc_types_eth::EIP1186StorageProof::new(
+            slot,
+            self.value,
+            normalize_eip1186_empty_trie_proof(self.proof),
+        )
     }
 
     /// Convert from an

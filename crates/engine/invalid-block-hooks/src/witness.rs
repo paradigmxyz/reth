@@ -491,7 +491,7 @@ mod tests {
         }
 
         // Set realistic sizes
-        bundle_state.state_size = bundle_state.state.len();
+        bundle_state.state_size = bundle_state.len();
         bundle_state.reverts_size = bundle_state.reverts.len();
 
         bundle_state

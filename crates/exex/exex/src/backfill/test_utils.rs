@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
+use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{
     execute::{BlockExecutionOutput, Executor},
@@ -25,20 +25,20 @@ pub(crate) fn to_execution_outcome(
     block_number: u64,
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
-    ExecutionOutcome {
-        bundle: block_execution_output.state.clone(),
-        receipts: vec![block_execution_output.receipts.clone()],
-        first_block: block_number,
-        requests: vec![block_execution_output.requests.clone()],
-    }
+    ExecutionOutcome::new(
+        block_execution_output.state.clone(),
+        vec![block_execution_output.receipts.clone()],
+        block_number,
+        vec![block_execution_output.requests.clone()],
+    )
 }
 
 pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     // Create a chain spec with a genesis state that contains the
     // provided sender
     Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
+        reth_chainspec::ChainSpec::builder()
+            .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [(
                     address,
@@ -69,7 +69,7 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output
-    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
+    let mut block_execution_output = EthEvmConfig::new(chain_spec)
         .batch_executor(StateProviderDatabase::new(
             LatestStateProvider::new(provider).into_evm_state_provider(),
         ))
@@ -96,8 +96,8 @@ fn blocks(
     RecoveredBlock<reth_ethereum_primitives::Block>,
 )> {
     // First block has a transaction that transfers some ETH to zero address
-    let block1 = Block {
-        header: Header {
+    let block1 = Block::new(
+        Header {
             parent_hash: chain_spec.genesis_hash(),
             receipts_root: b256!(
                 "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
@@ -108,7 +108,7 @@ fn blocks(
             gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
-        body: BlockBody {
+        BlockBody {
             transactions: vec![sign_tx_with_key_pair(
                 key_pair,
                 Transaction::Eip2930(TxEip2930 {
@@ -123,12 +123,12 @@ fn blocks(
             )],
             ..Default::default()
         },
-    }
+    )
     .try_into_recovered()?;
 
     // Second block resends the same transaction with increased nonce
-    let block2 = Block {
-        header: Header {
+    let block2 = Block::new(
+        Header {
             parent_hash: block1.hash(),
             receipts_root: b256!(
                 "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
@@ -139,7 +139,7 @@ fn blocks(
             gas_used: MIN_TRANSACTION_GAS,
             ..Default::default()
         },
-        body: BlockBody {
+        BlockBody {
             transactions: vec![sign_tx_with_key_pair(
                 key_pair,
                 Transaction::Eip2930(TxEip2930 {
@@ -154,7 +154,7 @@ fn blocks(
             )],
             ..Default::default()
         },
-    }
+    )
     .try_into_recovered()?;
 
     Ok((block1, block2))

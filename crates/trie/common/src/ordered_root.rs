@@ -263,7 +263,7 @@ mod tests {
         use super::*;
         use alloy_consensus::{
             proofs::{calculate_receipt_root, calculate_transaction_root},
-            EthereumReceipt, ReceiptWithBloom, Signed, TxLegacy,
+            EthereumReceipt, ReceiptWithBloom, TxLegacy,
         };
         use alloy_eips::eip2718::Encodable2718;
         use alloy_primitives::Signature;
@@ -290,7 +290,7 @@ mod tests {
             fn arbitrary_transactions_match_alloy_consensus_root(
                 transactions in proptest::collection::vec(
                     (arb::<TxLegacy>(), arb::<Signature>())
-                        .prop_map(|(tx, signature)| Signed::new_unhashed(tx, signature)),
+                        .prop_map(|(tx, signature)| alloy_consensus::SignableTransaction::into_signed(tx, signature)),
                     0..1024,
                 ),
             ) {

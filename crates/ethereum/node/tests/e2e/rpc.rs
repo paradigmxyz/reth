@@ -841,10 +841,10 @@ fn update_block_hash_v6(request: &mut BuilderBlockValidationRequestV6) -> eyre::
     let block_hash = ExecutionPayload::V4(request.request.execution_payload.clone())
         .try_into_block_with_sidecar::<reth_ethereum_primitives::TransactionSigned>(
             &ExecutionPayloadSidecar::v4(
-                CancunPayloadFields {
-                    parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: request.request.blobs_bundle.versioned_hashes(),
-                },
+                CancunPayloadFields::new(
+                    request.parent_beacon_block_root,
+                    request.request.blobs_bundle.versioned_hashes(),
+                ),
                 PraguePayloadFields::new(request.request.execution_requests.to_requests()),
             ),
         )?

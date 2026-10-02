@@ -892,12 +892,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");
                 self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)));
-                self.metrics.tracked_peers.set(self.swarm.peers().num_known_peers() as f64);
+                self.metrics.tracked_peers.set(self.num_known_peers() as f64);
             }
             SwarmEvent::PeerRemoved(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer dropped");
                 self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id)));
-                self.metrics.tracked_peers.set(self.swarm.peers().num_known_peers() as f64);
+                self.metrics.tracked_peers.set(self.num_known_peers() as f64);
             }
             SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                 let total_active = self.num_active_peers.fetch_sub(1, Ordering::Relaxed) - 1;
