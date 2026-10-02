@@ -21,6 +21,7 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 use std::collections::VecDeque;
+use tracing::{debug, info};
 
 /// Block-scoped inputs for the EIP-7805 appendability check, taken from the payload's own EVM
 /// environment so the check follows the fork the block was executed under.
@@ -60,15 +61,38 @@ pub(super) fn inclusion_list_satisfied<N: NodePrimitives>(
         .collect::<B256Set>();
     let withdrawn = withdrawal_credits::<N>(block);
 
-    for encoded in transactions {
+    for (il_index, encoded) in transactions.iter().enumerate() {
         let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
-        if included.contains(&transaction.recalculate_hash()) {
+        let tx_hash = transaction.recalculate_hash();
+        if included.contains(&tx_hash) {
             continue
         }
         if could_append_transaction::<N>(&transaction, state, ctx, &withdrawn)? {
+            info!(
+                target: "engine::tree",
+                block_hash = %block.hash(),
+                block_number = block.num_hash().number,
+                il_txs = transactions.len(),
+                available_gas = ctx.available_gas,
+                blob_gas_available = ctx.blob_gas_available,
+                path = "post_state",
+                %tx_hash,
+                il_index,
+                "Inclusion list unsatisfied"
+            );
             return Ok(false)
         }
     }
+    debug!(
+        target: "engine::tree",
+        block_hash = %block.hash(),
+        block_number = block.num_hash().number,
+        il_txs = transactions.len(),
+        available_gas = ctx.available_gas,
+        blob_gas_available = ctx.blob_gas_available,
+        path = "post_state",
+        "Inclusion list satisfied"
+    );
     Ok(true)
 }
 

@@ -1124,45 +1124,64 @@ where
         // budgets immediately after the block body, before withdrawals and other post-execution
         // operations. Running the normal executor without committing reuses the same transaction
         // validation and EIP-8037 gas admission rules as block execution.
-        let inclusion_list_satisfied = if let Some(transactions) =
-            input.inclusion_list_transactions()
-        {
-            // The executor enforces the two gas dimensions of the spec's
-            // `check_block_gas_capacity` but not its blob dimension.
-            let blob_gas_available = blob_gas_available(
-                self.provider.chain_spec().blob_params_at_timestamp(input.timestamp()),
-                input.blob_gas_used(),
-            );
+        let inclusion_list_satisfied =
+            if let Some(transactions) = input.inclusion_list_transactions() {
+                // The executor enforces the two gas dimensions of the spec's
+                // `check_block_gas_capacity` but not its blob dimension.
+                let blob_gas_available = blob_gas_available(
+                    self.provider.chain_spec().blob_params_at_timestamp(input.timestamp()),
+                    input.blob_gas_used(),
+                );
 
-            let mut satisfied = true;
-            for encoded in transactions {
-                let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
-                if executed_tx_hashes.as_ref().is_some_and(|hashes| {
-                    hashes.contains(&reth_primitives_traits::SignedTransaction::recalculate_hash(
-                        &transaction,
-                    ))
-                }) {
-                    continue
-                }
-                if transaction.blob_gas_used().unwrap_or_default() > blob_gas_available {
-                    continue
-                }
-                let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {
-                    continue
-                };
-                match executor.execute_transaction_without_commit(transaction) {
-                    Ok(_) => {
-                        satisfied = false;
-                        break
+                let mut satisfied = true;
+                for (il_index, encoded) in transactions.iter().enumerate() {
+                    let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
+                    let tx_hash =
+                        reth_primitives_traits::SignedTransaction::recalculate_hash(&transaction);
+                    if executed_tx_hashes.as_ref().is_some_and(|hashes| hashes.contains(&tx_hash)) {
+                        continue
                     }
-                    Err(BlockExecutionError::Validation(_)) => {}
-                    Err(err) => return Err(err.into()),
+                    if transaction.blob_gas_used().unwrap_or_default() > blob_gas_available {
+                        continue
+                    }
+                    let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {
+                        continue
+                    };
+                    match executor.execute_transaction_without_commit(transaction) {
+                        Ok(_) => {
+                            info!(
+                                target: "engine::tree",
+                                block_hash = %input.hash(),
+                                block_number = input.num_hash().number,
+                                il_txs = transactions.len(),
+                                blob_gas_available,
+                                path = "execution",
+                                %tx_hash,
+                                il_index,
+                                "Inclusion list unsatisfied"
+                            );
+                            satisfied = false;
+                            break
+                        }
+                        Err(BlockExecutionError::Validation(_)) => {}
+                        Err(err) => return Err(err.into()),
+                    }
                 }
-            }
-            Some(satisfied)
-        } else {
-            None
-        };
+                if satisfied {
+                    debug!(
+                        target: "engine::tree",
+                        block_hash = %input.hash(),
+                        block_number = input.num_hash().number,
+                        il_txs = transactions.len(),
+                        blob_gas_available,
+                        path = "execution",
+                        "Inclusion list satisfied"
+                    );
+                }
+                Some(satisfied)
+            } else {
+                None
+            };
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();

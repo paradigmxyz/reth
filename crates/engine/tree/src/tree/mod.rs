@@ -1713,6 +1713,13 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 if let Some(transactions) = inclusion_list_transactions {
+                                    debug!(
+                                        target: "engine::tree",
+                                        block_hash = %payload.block_hash(),
+                                        il_txs = transactions.len(),
+                                        il_bytes = transactions.iter().map(|tx| tx.len()).sum::<usize>(),
+                                        "Received inclusion list"
+                                    );
                                     self.state
                                         .inclusion_lists
                                         .insert(payload.block_hash(), transactions);
