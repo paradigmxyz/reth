@@ -13,7 +13,7 @@ use reth_trie::{
     HashedPostStateSorted, StateRoot,
 };
 use reth_trie_common::{updates::TrieUpdatesSorted, TrieInputSorted};
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{iter::once, ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -97,7 +97,7 @@ where
         "Computing range trie changesets from database state"
     );
 
-    let mut input = TrieInputSorted::default();
+    let mut overlay = TrieInputSorted::default();
     // Rewind later blocks to reconstruct the trie at the end of the requested range.
     if end_block < db_tip_block {
         rewind_trie_range(
@@ -105,12 +105,12 @@ where
             state_trie_provider,
             forward_updates,
             (end_block + 1)..=db_tip_block,
-            &mut input,
+            &mut overlay,
         )?;
     }
 
     let reverts =
-        rewind_trie_range(provider, state_trie_provider, forward_updates, range, &mut input)?;
+        rewind_trie_range(provider, state_trie_provider, forward_updates, range, &mut overlay)?;
 
     debug!(
         target: "trie::changesets",
@@ -130,7 +130,7 @@ fn rewind_trie_range<Provider, StateTrieProvider>(
     state_trie_provider: &StateTrieProvider,
     forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     blocks: RangeInclusive<BlockNumber>,
-    input: &mut TrieInputSorted,
+    overlay: &mut TrieInputSorted,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
@@ -140,30 +140,31 @@ where
     let mut end = *blocks.end();
     while end >= *blocks.start() {
         let mut start = end;
-        let mut forward = 0..0;
+        let mut segment_range = 0..0;
 
         // Select updates of consecutive blocks iterating backwards from `end`.
         // Without the original updates, reverting one block at a time preserves nodes that
         // appear and disappear inside the range. An endpoint-only calculation would omit them.
         if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
-            forward = index..index + 1;
-            while forward.start > 0 && start > *blocks.start() {
-                if forward_updates[forward.start - 1].0 != start - 1 {
+            segment_range = index..index + 1;
+            while segment_range.start > 0 && start > *blocks.start() {
+                if forward_updates[segment_range.start - 1].0 != start - 1 {
                     break
                 }
-                forward.start -= 1;
+                segment_range.start -= 1;
                 start -= 1;
             }
         }
 
         // Collect reverts for the segment and use them to generate the trie reverts for the
         // segment.
-        let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
-        let prefixes = segment_state.construct_prefix_sets().freeze();
-        Arc::make_mut(&mut input.state).extend_ref_and_sort(&segment_state);
-        let segment_trie = StateRoot::new(
-            InMemoryTrieCursorFactory::new(state_trie_provider, input.nodes.as_ref()),
-            HashedPostStateCursorFactory::new(state_trie_provider, input.state.as_ref()),
+        let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
+        let prefixes = segment_state_reverts.construct_prefix_sets().freeze();
+        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&segment_state_reverts);
+
+        let segment_trie_reverts = StateRoot::new(
+            InMemoryTrieCursorFactory::new(state_trie_provider, overlay.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(state_trie_provider, overlay.state.as_ref()),
         )
         .with_prefix_sets(prefixes)
         .root_with_updates()
@@ -173,10 +174,14 @@ where
 
         // The first entry wins, so calculated target values precede newest-to-oldest forward
         // values.
-        let forward = forward_updates[forward].iter().rev().map(|(_, updates)| updates.as_ref());
-        let segment = TrieUpdatesSorted::merge_iter(std::iter::once(&segment_trie).chain(forward));
-        Arc::make_mut(&mut input.nodes).extend_ref_and_sort(&segment);
-        reverts.extend_ref_and_sort(&segment);
+        let segment_trie_forward =
+            forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
+        let segment_trie_reverts =
+            TrieUpdatesSorted::merge_iter(once(&segment_trie_reverts).chain(segment_trie_forward));
+
+        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_trie_reverts);
+        reverts.extend_ref_and_sort(&segment_trie_reverts);
+
         if start == *blocks.start() {
             break
         }
