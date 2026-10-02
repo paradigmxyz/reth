@@ -42,7 +42,6 @@ where
         block_number..=block_number,
         db_tip_block,
     )
-    .map(|result| (*result.reverts).clone())
 }
 
 /// Computes aggregate trie changesets for an inclusive block range.
@@ -51,9 +50,9 @@ where
 /// `forward_updates` contains original executed-block trie updates on that same chain. Consecutive
 /// available blocks are reverted together, preserving forward paths omitted by the aggregate
 /// calculation. Missing blocks are reverted individually so transient nodes are retained.
-/// The result applies at any trie frontier between the target and the range end (or database tip
-/// for `overlay`). An empty range returns no range reverts, but still rewinds the tail.
-/// `db_tip_block` must be the current database tip for `provider`.
+/// Returns before-values for the requested range only. Later blocks are used internally to
+/// reconstruct its starting state; their changesets are not included. Empty ranges return empty
+/// changesets. `db_tip_block` must be the current database tip for `provider`.
 ///
 /// # Errors
 ///
@@ -65,11 +64,15 @@ pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     forward_updates: &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
-) -> Result<ComputedTrieChangesets, ProviderError>
+) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
+    if range.is_empty() {
+        return Ok(TrieUpdatesSorted::default())
+    }
+
     let start_block = *range.start();
     let end_block = *range.end();
 
@@ -148,16 +151,5 @@ where
         "Computed range trie changesets successfully"
     );
 
-    let reverts = Arc::new(reverts);
-    let overlay = if end_block == db_tip_block { Arc::clone(&reverts) } else { Arc::new(overlay) };
-    Ok(ComputedTrieChangesets { reverts, overlay })
-}
-
-/// Complete trie reverts for a block range and for the range plus its tail.
-#[derive(Debug, Clone, Default)]
-pub struct ComputedTrieChangesets {
-    /// Target values for paths affected by the range, including transient nodes.
-    pub reverts: Arc<TrieUpdatesSorted>,
-    /// Target values for paths affected from the range start through the database tip.
-    pub overlay: Arc<TrieUpdatesSorted>,
+    Ok(reverts)
 }

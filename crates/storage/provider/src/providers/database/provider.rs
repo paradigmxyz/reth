@@ -879,19 +879,18 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        // Calculate reverts while hashed state still represents Finish.
-        let db_tip_block = self
-            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
-            .as_ref()
-            .map(|chk| chk.block_number)
-            .ok_or_else(|| ProviderError::InsufficientChangesets {
-                requested: from,
-                available: 0..=0,
+        // Trie changesets rewind the persisted trie, while state changesets rewind from Finish.
+        // Calculate them before modifying hashed state used to reconstruct historical tries.
+        let finish =
+            self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
+                ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
             })?;
-
-        let trie_revert = self
-            .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
+        let trie_tip = finish
+            .finish_stage_checkpoint()
+            .and_then(|checkpoint| checkpoint.partial_state_trie())
+            .unwrap_or(finish.block_number);
+        let trie_revert =
+            self.overlay_manager.get_or_compute_cached_changesets_range(self, from..=trie_tip)?;
 
         let changed_accounts = self.account_changesets_range(from..)?;
 

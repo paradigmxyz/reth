@@ -6,11 +6,9 @@
 
 use crate::{
     changeset_cache::compute_block_trie_updates,
-    database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
-use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
@@ -124,7 +122,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self.changeset_cache
     }
 
-    /// Gets or computes cached changesets for an inclusive block range.
+    /// Gets complete trie before-values for an inclusive block range, oldest values taking
+    /// precedence. No updates from outside the requested range are included.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -139,59 +138,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-        self.get_or_compute_cached_changesets_range_at_frontiers(
-            provider,
-            range,
-            partial_state_trie,
-            finish,
-        )
-    }
-
-    /// Gets or computes cached changesets for an inclusive block range at known frontiers.
-    ///
-    /// The returned trie updates apply on top of the durable state trie and restore the state
-    /// before the range. Cached reverts cover the full forward range through Finish, independent
-    /// of persistence. Targets above the durable frontier also require forward completion.
-    pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
-        &self,
-        provider: &P,
-        range: RangeInclusive<BlockNumber>,
-        partial_state_trie: BlockNumHash,
-        finish: BlockNumHash,
-    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
-    where
-        P: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StageCheckpointReader
-            + PruneCheckpointReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    {
-        let target = if range.is_empty() { *range.end() } else { range.start().saturating_sub(1) };
-        let result = self.changeset_cache.get_or_compute_range(
-            self,
-            provider,
-            range,
-            partial_state_trie,
-            finish,
-        )?;
-        if target <= partial_state_trie.number {
-            return Ok(result.overlay)
-        }
-
-        // A target above the durable frontier requires advancing the trie as well as reverting.
-        // Keep that reader-specific completion outside the range cache.
-        let overlay = self
-            .overlay_builder(finish.hash)
-            .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
-        let mut nodes = Arc::clone(&overlay.input().nodes);
-        if !result.overlay.is_empty() {
-            Arc::make_mut(&mut nodes).extend_ref_and_sort(&result.overlay);
-        }
-        Ok(nodes)
+        self.changeset_cache.get_or_compute_range(self, provider, range)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.

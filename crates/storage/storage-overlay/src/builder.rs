@@ -475,11 +475,9 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         .entered();
                     let start = Instant::now();
                     let accumulated_reverts =
-                        self.overlay_manager.get_or_compute_cached_changesets_range_at_frontiers(
+                        self.overlay_manager.get_or_compute_cached_changesets_range(
                             provider,
-                            revert_blocks.clone(),
-                            state_trie_tip_block,
-                            finish_tip_block,
+                            anchor.number + 1..=state_trie_tip_block.number,
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
