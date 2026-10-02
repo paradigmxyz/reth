@@ -486,13 +486,13 @@ impl<H: BlockHeader> ChainSpec<H> {
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
     pub const fn is_ethereum(&self) -> bool {
-        self.chain.is_ethereum()
+        self.chain().is_ethereum()
     }
 
     /// Returns `true` if this chain is Optimism mainnet.
     #[inline]
     pub fn is_optimism_mainnet(&self) -> bool {
-        self.chain == Chain::optimism_mainnet()
+        self.chain() == Chain::optimism_mainnet()
     }
 
     /// Returns the known paris block, if it exists.
@@ -773,7 +773,7 @@ impl<H: BlockHeader> ChainSpec<H> {
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
 
-        match self.chain.try_into().ok()? {
+        match self.chain().try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
@@ -920,9 +920,10 @@ impl From<Genesis> for ChainSpec {
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
         // genesis json.
-        let deposit_contract = genesis.config.deposit_contract_address.map(|address| {
-            DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
-        });
+        let deposit_contract = genesis
+            .config
+            .deposit_contract_address
+            .map(|address| DepositContract::new(address, 0, MAINNET_DEPOSIT_CONTRACT.topic));
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
 
@@ -989,7 +990,7 @@ impl ChainSpecBuilder {
     /// Construct a new builder from the mainnet chain spec.
     pub fn mainnet() -> Self {
         Self {
-            chain: Some(MAINNET.chain),
+            chain: Some(MAINNET.chain()),
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
         }
@@ -1255,7 +1256,7 @@ impl ChainSpecBuilder {
 impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     fn from(value: &Arc<ChainSpec>) -> Self {
         Self {
-            chain: Some(value.chain),
+            chain: Some(value.chain()),
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
         }
@@ -2196,7 +2197,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_timestamp_fork_in_genesis() {
         let timestamp = 1690475657u64;
-        let default_spec_builder = ChainSpecBuilder::default()
+        let default_spec_builder = crate::spec::ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(Genesis::default().with_timestamp(timestamp))
             .paris_activated();
@@ -2481,8 +2482,8 @@ Post-merge hard forks (timestamp based):
         "#;
 
         let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
-        let chainspec: ChainSpec = genesis.into();
-        assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
+        let chainspec: ChainSpec = crate::spec::ChainSpec::from_genesis(genesis);
+        assert_eq!(chainspec.chain(), Chain::from_named(NamedChain::Optimism));
         let expected_state_root: B256 =
             hex!("0x9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
@@ -2696,7 +2697,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_paris_block_and_total_difficulty() {
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let paris_chainspec = ChainSpecBuilder::default()
+        let paris_chainspec = crate::spec::ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .paris_activated()
@@ -2708,7 +2709,7 @@ Post-merge hard forks (timestamp based):
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let default_chainspec = ChainSpecBuilder::default()
+        let default_chainspec = crate::spec::ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .cancun_activated()
@@ -2745,7 +2746,7 @@ Post-merge hard forks (timestamp based):
         // a genesis-provided slot number is used as-is
         let genesis =
             Genesis { gas_limit: 0x2fefd8u64, ..Default::default() }.with_slot_number(Some(999));
-        let chainspec = ChainSpecBuilder::default()
+        let chainspec = crate::spec::ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .amsterdam_activated()
@@ -2754,7 +2755,7 @@ Post-merge hard forks (timestamp based):
 
         // an omitted slot number defaults to 0
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let chainspec = ChainSpecBuilder::default()
+        let chainspec = crate::spec::ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .amsterdam_activated()
@@ -2900,7 +2901,7 @@ Post-merge hard forks (timestamp based):
             ..Default::default()
         };
 
-        let chain_spec: ChainSpec = genesis.into();
+        let chain_spec: ChainSpec = crate::spec::ChainSpec::from_genesis(genesis);
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![

@@ -267,7 +267,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
             // Note: the discv4 services uses the same `nat` so we can directly return the node
             // record here
             discv4.node_record()
-        } else if let Some(discv5) = self.inner.discv5.as_ref() {
+        } else if let Some(discv5) = self.discv5() {
             // for disv5 we must check if we have an external ip configured
             if let Some(external) =
                 self.inner.nat.clone().and_then(|nat| nat.as_external_ip(discv5.local_port()))
@@ -275,7 +275,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
                 NodeRecord::new((external, discv5.local_port()).into(), *self.peer_id())
             } else {
                 // use the node record that discv5 tracks or use localhost
-                self.inner.discv5.as_ref().and_then(|d| d.node_record()).unwrap_or_else(|| {
+                self.discv5().and_then(|d| d.node_record()).unwrap_or_else(|| {
                     NodeRecord::new(
                         (std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), discv5.local_port())
                             .into(),
@@ -316,7 +316,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
             builder.tcp4(local_node_record.tcp_port);
 
             // add IPv6 fields from discv5 for dual-stack support
-            if let Some(discv5) = self.inner.discv5.as_ref() {
+            if let Some(discv5) = self.discv5() {
                 let discv5_enr = discv5.local_enr();
                 if let Some(ip6) = discv5_enr.ip6() {
                     builder.ip6(ip6);

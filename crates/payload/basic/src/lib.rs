@@ -438,14 +438,14 @@ where
                 let _parent = span.enter();
                 let _span = debug_span!(target: "payload_builder", "build_payload").entered();
                 let _permit = permit;
-                let args = BuildArguments {
+                let args = BuildArguments::new(
                     cached_reads,
                     execution_cache,
                     state_root_handle,
-                    config: payload_config,
+                    payload_config,
                     cancel,
                     best_payload,
-                };
+                );
                 let result = builder.try_build(args);
                 if let Some(on_payload_built) = on_payload_built &&
                     let Ok(outcome) = &result &&
@@ -458,7 +458,7 @@ where
             });
         });
 
-        self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
+        self.pending_block = Some(PendingPayload::new(pending_cancel, rx));
     }
 }
 
@@ -585,14 +585,14 @@ where
 
             debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
-            let args = BuildArguments {
-                cached_reads: self.cached_reads.take().unwrap_or_default(),
-                execution_cache: self.execution_cache.clone(),
-                state_root_handle: None,
-                config: self.config.clone(),
-                cancel: CancelOnDrop::default(),
-                best_payload: None,
-            };
+            let args = BuildArguments::new(
+                self.cached_reads.take().unwrap_or_default(),
+                self.execution_cache.clone(),
+                None,
+                self.config.clone(),
+                CancelOnDrop::default(),
+                None,
+            );
 
             match self.builder.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {

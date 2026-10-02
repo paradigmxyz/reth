@@ -30,14 +30,14 @@ pub struct StoredBlockBodyIndices {
 impl StoredBlockBodyIndices {
     /// Return the range of transaction ids for this block.
     pub const fn tx_num_range(&self) -> Range<TxNumber> {
-        self.first_tx_num..self.first_tx_num + self.tx_count
+        self.first_tx_num()..self.first_tx_num + self.tx_count
     }
 
     /// Return the index of last transaction in this block unless the block
     /// is empty in which case it refers to the last transaction in a previous
     /// non-empty block
     pub const fn last_tx_num(&self) -> TxNumber {
-        self.first_tx_num.saturating_add(self.tx_count).saturating_sub(1)
+        self.first_tx_num().saturating_add(self.tx_count()).saturating_sub(1)
     }
 
     /// First transaction index.
@@ -50,12 +50,12 @@ impl StoredBlockBodyIndices {
 
     /// Return the index of the next transaction after this block.
     pub const fn next_tx_num(&self) -> TxNumber {
-        self.first_tx_num + self.tx_count
+        self.first_tx_num() + self.tx_count()
     }
 
     /// Return a flag whether the block is empty
     pub const fn is_empty(&self) -> bool {
-        self.tx_count == 0
+        self.tx_count() == 0
     }
 
     /// Return number of transaction inside block
@@ -67,7 +67,7 @@ impl StoredBlockBodyIndices {
 
     /// Returns true if the block contains a transaction with the given number.
     pub const fn contains_tx(&self, tx_num: TxNumber) -> bool {
-        tx_num >= self.first_tx_num && tx_num < self.next_tx_num()
+        tx_num >= self.first_tx_num() && tx_num < self.next_tx_num()
     }
 }
 

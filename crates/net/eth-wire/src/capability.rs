@@ -411,10 +411,10 @@ mod tests {
         assert_eq!(capability.version(), 68);
         assert_eq!(
             capability,
-            SharedCapability::Eth {
-                version: EthVersion::Eth68,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
+            crate::capability::SharedCapability::eth(
+                EthVersion::Eth68,
+                MAX_RESERVED_MESSAGE_ID + 1
+            )
         );
     }
 
@@ -426,10 +426,10 @@ mod tests {
         assert_eq!(capability.version(), 67);
         assert_eq!(
             capability,
-            SharedCapability::Eth {
-                version: EthVersion::Eth67,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
+            crate::capability::SharedCapability::eth(
+                EthVersion::Eth67,
+                MAX_RESERVED_MESSAGE_ID + 1
+            )
         );
     }
 
@@ -441,10 +441,10 @@ mod tests {
         assert_eq!(capability.version(), 66);
         assert_eq!(
             capability,
-            SharedCapability::Eth {
-                version: EthVersion::Eth66,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
+            crate::capability::SharedCapability::eth(
+                EthVersion::Eth66,
+                MAX_RESERVED_MESSAGE_ID + 1
+            )
         );
     }
 
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn lookup_rejects_message_ids_past_last_capability() {
-        let cap = Capability::new_static("test", 1);
+        let cap = crate::test_utils::proto::TestProtoMessage::capability();
         let shared =
             SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
                 .unwrap();
@@ -502,10 +502,10 @@ mod tests {
 
         assert_eq!(
             shared_capability,
-            SharedCapability::Eth {
-                version: EthVersion::Eth66,
-                offset: MAX_RESERVED_MESSAGE_ID + 1
-            }
+            crate::capability::SharedCapability::eth(
+                EthVersion::Eth66,
+                MAX_RESERVED_MESSAGE_ID + 1
+            )
         )
     }
 
@@ -614,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_raw_capability_rlp() {
-        let msg = RawCapabilityMessage { id: 1, payload: Bytes::from(vec![0x01, 0x02, 0x03]) };
+        let msg = RawCapabilityMessage::new(1, Bytes::from(vec![0x01, 0x02, 0x03]));
 
         // Encode the message into bytes
         let mut encoded = Vec::new();

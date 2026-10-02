@@ -44,8 +44,8 @@ mod tests {
         );
 
         let mut data = Vec::with_capacity(expected.length());
-        let receipt = ReceiptWithBloom {
-            receipt: Receipt {
+        let receipt = ReceiptWithBloom::new(
+            Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
@@ -58,8 +58,8 @@ mod tests {
                 )],
                 success: false,
             },
-            logs_bloom: [0; 256].into(),
-        };
+            [0; 256].into(),
+        );
 
         receipt.encode(&mut data);
 
@@ -76,8 +76,8 @@ mod tests {
         );
 
         // EIP658Receipt
-        let expected = ReceiptWithBloom {
-            receipt: Receipt {
+        let expected = ReceiptWithBloom::new(
+            Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
@@ -90,8 +90,8 @@ mod tests {
                 )],
                 success: false,
             },
-            logs_bloom: [0; 256].into(),
-        };
+            [0; 256].into(),
+        );
 
         let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
@@ -131,7 +131,7 @@ mod tests {
     fn test_encode_2718_length() {
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::Eip1559,
+                tx_type: alloy_consensus::TxEip1559::tx_type(),
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
@@ -147,15 +147,15 @@ mod tests {
         );
 
         // Test for legacy receipt as well
-        let legacy_receipt = ReceiptWithBloom {
-            receipt: Receipt {
+        let legacy_receipt = ReceiptWithBloom::new(
+            Receipt {
                 tx_type: TxType::Legacy,
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
             },
-            logs_bloom: Bloom::default(),
-        };
+            Bloom::default(),
+        );
 
         let legacy_encoded = legacy_receipt.encoded_2718();
         assert_eq!(
@@ -216,7 +216,7 @@ mod tests {
         );
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: TxType::Eip2930,
+                tx_type: alloy_consensus::TxEip2930::tx_type(),
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,

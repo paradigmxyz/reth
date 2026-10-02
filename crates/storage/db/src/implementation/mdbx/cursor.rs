@@ -369,7 +369,7 @@ mod tests {
     use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbDupCursorRW},
-        models::{BlockNumberAddress, ClientVersion},
+        models::BlockNumberAddress,
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
     };
@@ -378,12 +378,9 @@ mod tests {
 
     fn create_test_db() -> DatabaseEnv {
         let path = TempDir::new().unwrap();
-        let mut db = DatabaseEnv::open(
-            path.path(),
-            DatabaseEnvKind::RW,
-            DatabaseArguments::new(ClientVersion::default()),
-        )
-        .unwrap();
+        let mut db =
+            DatabaseEnv::open(path.path(), DatabaseEnvKind::RW, DatabaseArguments::default())
+                .unwrap();
         db.create_tables().unwrap();
         db
     }
@@ -398,31 +395,31 @@ mod tests {
         let test_data = vec![
             (
                 BlockNumberAddress((100, addr1)),
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
+                StorageEntry::new(B256::with_last_byte(1), U256::from(100)),
             ),
             (
                 BlockNumberAddress((100, addr1)),
-                StorageEntry { key: B256::with_last_byte(2), value: U256::from(200) },
+                StorageEntry::new(B256::with_last_byte(2), U256::from(200)),
             ),
             (
                 BlockNumberAddress((100, addr1)),
-                StorageEntry { key: B256::with_last_byte(3), value: U256::from(300) },
+                StorageEntry::new(B256::with_last_byte(3), U256::from(300)),
             ),
             (
                 BlockNumberAddress((101, addr1)),
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(400) },
+                StorageEntry::new(B256::with_last_byte(1), U256::from(400)),
             ),
             (
                 BlockNumberAddress((101, addr2)),
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(500) },
+                StorageEntry::new(B256::with_last_byte(1), U256::from(500)),
             ),
             (
                 BlockNumberAddress((101, addr2)),
-                StorageEntry { key: B256::with_last_byte(2), value: U256::from(600) },
+                StorageEntry::new(B256::with_last_byte(2), U256::from(600)),
             ),
             (
                 BlockNumberAddress((102, addr3)),
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(700) },
+                StorageEntry::new(B256::with_last_byte(1), U256::from(700)),
             ),
         ];
 

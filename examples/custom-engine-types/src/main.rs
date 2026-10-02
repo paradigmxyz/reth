@@ -126,7 +126,7 @@ impl PayloadTypes for CustomEngineTypes {
     ) -> ExecutionData {
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        ExecutionData::new(payload, sidecar)
     }
 }
 
@@ -347,11 +347,11 @@ where
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        self.inner.try_build(BuildArguments {
+        self.inner.try_build(BuildArguments::new(
             cached_reads,
             execution_cache,
             state_root_handle,
-            config: PayloadConfig {
+            PayloadConfig {
                 parent_header,
                 parent_block_info,
                 attributes: attributes.inner,
@@ -359,7 +359,7 @@ where
             },
             cancel,
             best_payload,
-        })
+        ))
     }
 
     fn build_empty_payload(

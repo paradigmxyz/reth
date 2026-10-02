@@ -278,6 +278,7 @@
 
 pub use imbl::OrdMap;
 
+use crate::pool::PoolInner;
 pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
@@ -302,7 +303,6 @@ pub use crate::{
         ValidPoolTransaction,
     },
 };
-use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
@@ -755,7 +755,7 @@ where
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
         let sender_id = self.pool.sender_id(&sender)?;
-        let transaction_id = TransactionId::new(sender_id, nonce);
+        let transaction_id = sender_id.into_transaction_id(nonce);
 
         self.inner().get_pool_data().all().get(&transaction_id).map(|tx| tx.transaction.clone())
     }

@@ -198,7 +198,7 @@ impl WorkerPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
             build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                crate::pool::BlockingTaskPool::builder()
                     .num_threads(self.num_threads)
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
             )
@@ -223,7 +223,7 @@ impl WorkerPool {
 
     /// Initializes per-thread [`Worker`] state on every thread in the pool.
     pub fn init<T: 'static>(&self, f: impl Fn(Option<&mut T>) -> T + Sync) {
-        self.broadcast(self.pool().current_num_threads(), |worker| {
+        self.broadcast(self.current_num_threads(), |worker| {
             worker.init::<T>(&f);
         });
     }
@@ -234,10 +234,10 @@ impl WorkerPool {
     /// Use this to initialize or re-initialize per-thread state via [`Worker::init`].
     /// Only `num_threads` threads execute the closure; the rest skip it.
     pub fn broadcast(&self, num_threads: usize, f: impl Fn(&mut Worker) + Sync) {
-        if num_threads >= self.pool().current_num_threads() {
+        if num_threads >= self.current_num_threads() {
             // Fast path: run on every thread, no atomic coordination needed.
             self.pool().broadcast(|_| {
-                WORKER.with_borrow_mut(|worker| f(worker));
+                Self::with_worker_mut(&f);
             });
         } else {
             let remaining = AtomicUsize::new(num_threads);
@@ -258,7 +258,7 @@ impl WorkerPool {
                         Err(actual) => current = actual,
                     }
                 }
-                WORKER.with_borrow_mut(|worker| f(worker));
+                Self::with_worker_mut(&f);
             });
         }
     }
@@ -284,7 +284,7 @@ impl WorkerPool {
             let started_at = Instant::now();
             metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
             let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
-            WORKER.with_borrow(|worker| f(worker))
+            Self::with_worker(f)
         })
     }
 

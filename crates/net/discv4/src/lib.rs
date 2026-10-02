@@ -666,7 +666,7 @@ impl Discv4Service {
     /// Returns the frontend handle that can communicate with the service via commands.
     pub fn handle(&self) -> Discv4 {
         Discv4 {
-            local_addr: self.local_address,
+            local_addr: self.local_addr(),
             to_service: self.to_service.clone(),
             node_record: self.shared_node_record.clone(),
         }
@@ -688,7 +688,7 @@ impl Discv4Service {
     fn resolve_external_ip(&mut self) {
         if let Some(r) = &self.resolve_external_ip_interval &&
             let Some(external_ip) =
-                r.resolver().clone().as_external_ip(self.local_node_record.udp_port)
+                r.resolver().clone().as_external_ip(self.local_enr().udp_port)
         {
             self.set_external_ip_addr(external_ip);
         }
@@ -697,12 +697,12 @@ impl Discv4Service {
     /// Sets the given ip address as the node's external IP in the node record announced in
     /// discovery
     pub fn set_external_ip_addr(&mut self, external_ip: IpAddr) {
-        if self.local_node_record.address != external_ip {
+        if self.local_enr().address != external_ip {
             debug!(target: "discv4", ?external_ip, "Updating external ip");
             self.local_node_record.address = external_ip;
             let _ = self.local_eip_868_enr.set_ip(external_ip, &self.secret_key);
             let mut lock = self.shared_node_record.lock();
-            *lock = self.local_node_record;
+            *lock = self.local_enr();
             debug!(target: "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
         }
     }
@@ -802,7 +802,7 @@ impl Discv4Service {
 
     /// Looks up the local node in the DHT.
     pub fn lookup_self(&mut self) {
-        self.lookup(self.local_node_record.id)
+        self.lookup(self.local_enr().id)
     }
 
     /// Looks up the given node in the DHT
@@ -1001,7 +1001,7 @@ impl Discv4Service {
     /// On re-ping we check for a changed `enr_seq` if eip868 is enabled and when it changed we sent
     /// a followup request to retrieve the updated ENR
     fn update_on_reping(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
-        if record.id == self.local_node_record.id {
+        if record.id == self.local_enr().id {
             return
         }
 
@@ -1316,7 +1316,7 @@ impl Discv4Service {
         let remote_addr = node.udp_addr();
         let id = node.id;
         let ping = Ping {
-            from: self.local_node_record.into(),
+            from: self.local_enr().into(),
             to: node.into(),
             expire: self.ping_expiration(),
             enr_sq: self.enr_seq(),
@@ -1859,7 +1859,7 @@ impl Discv4Service {
                     Discv4Command::SetTcpPort(port) => {
                         debug!(target: "discv4", %port, "Update tcp port");
                         self.local_node_record.tcp_port = port;
-                        if self.local_node_record.address.is_ipv4() {
+                        if self.local_enr().address.is_ipv4() {
                             let _ = self.local_eip_868_enr.set_tcp4(port, &self.secret_key);
                         } else {
                             let _ = self.local_eip_868_enr.set_tcp6(port, &self.secret_key);
@@ -1968,9 +1968,9 @@ impl Stream for Discv4Service {
 impl fmt::Debug for Discv4Service {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Discv4Service")
-            .field("local_address", &self.local_address)
+            .field("local_address", &self.local_addr())
             .field("local_peer_id", &self.local_peer_id())
-            .field("local_node_record", &self.local_node_record)
+            .field("local_node_record", &self.local_enr())
             .field("queued_pings", &self.queued_pings)
             .field("pending_lookup", &self.pending_lookup)
             .field("pending_find_nodes", &self.pending_find_nodes)
@@ -2903,7 +2903,7 @@ mod tests {
 
         let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() +
             10000000000000;
-        let msg = Neighbours { nodes: vec![service2.local_node_record], expire: expiry };
+        let msg = Neighbours { nodes: vec![service2.local_enr()], expire: expiry };
         service.on_neighbours(msg, record.tcp_addr(), id);
         // wait for the processed ping
         let event = poll_fn(|cx| service2.poll(cx)).await;
@@ -3081,7 +3081,7 @@ mod tests {
         assert_eq!(service.pending_lookup.len(), 1);
 
         let ping = Ping {
-            from: service.local_node_record.into(),
+            from: service.local_enr().into(),
             to: record.into(),
             expire: service.ping_expiration(),
             enr_sq: service.enr_seq(),
@@ -3122,8 +3122,8 @@ mod tests {
 
         // ping node 2 with wrong to field
         let mut ping = Ping {
-            from: service_1.local_node_record.into(),
-            to: service_2.local_node_record.into(),
+            from: service_1.local_enr().into(),
+            to: service_2.local_enr().into(),
             expire: service_1.ping_expiration(),
             enr_sq: service_1.enr_seq(),
         };
@@ -3132,7 +3132,7 @@ mod tests {
         let echo_hash = service_1.send_packet(Message::Ping(ping), service_2.local_addr());
         let ping_request = PingRequest {
             sent_at: Instant::now(),
-            node: service_2.local_node_record,
+            node: service_2.local_enr(),
             echo_hash,
             reason: PingReason::InitialInsert,
         };
@@ -3159,7 +3159,7 @@ mod tests {
         let (_discv4, mut service_2) = create_discv4_with_config(config).await;
 
         // send ping from 1 -> 2
-        service_1.add_node(service_2.local_node_record);
+        service_1.add_node(service_2.local_enr());
 
         // wait for the processed ping
         let event = poll_fn(|cx| service_2.poll(cx)).await;
@@ -3258,7 +3258,7 @@ mod tests {
         let (_, service_1) = create_discv4().await;
         let peerid_1 = *service_1.local_peer_id();
 
-        let config = Discv4Config::builder().add_boot_node(service_1.local_node_record).build();
+        let config = Discv4Config::builder().add_boot_node(service_1.local_enr()).build();
         service_1.spawn();
 
         let (_, mut service_2) = create_discv4_with_config(config).await;

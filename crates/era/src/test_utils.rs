@@ -71,13 +71,13 @@ pub(crate) fn create_test_receipts() -> Vec<Receipt> {
         // Legacy transaction, successful, no logs
         create_test_receipt(TxType::Legacy, true, 21000, 0),
         // EIP-2930 transaction, failed, one log
-        create_test_receipt(TxType::Eip2930, false, 42000, 1),
+        create_test_receipt(alloy_consensus::TxEip2930::tx_type(), false, 42000, 1),
         // EIP-1559 transaction, successful, multiple logs
-        create_test_receipt(TxType::Eip1559, true, 63000, 3),
+        create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 63000, 3),
         // EIP-4844 transaction, successful, two logs
-        create_test_receipt(TxType::Eip4844, true, 84000, 2),
+        create_test_receipt(alloy_consensus::TxEip4844Variant::<()>::tx_type(), true, 84000, 2),
         // EIP-7702 transaction, failed, no logs
-        create_test_receipt(TxType::Eip7702, false, 105000, 0),
+        create_test_receipt(alloy_consensus::TxEip7702::tx_type(), false, 105000, 0),
     ]
 }
 
@@ -88,7 +88,7 @@ pub(crate) fn create_test_receipt_with_bloom(
     log_count: usize,
 ) -> ReceiptWithBloom {
     let receipt = create_test_receipt(tx_type, success, cumulative_gas_used, log_count);
-    ReceiptWithBloom { receipt: receipt.into(), logs_bloom: Default::default() }
+    ReceiptWithBloom::new(receipt.into(), Default::default())
 }
 
 // Helper function to create a sample block tuple
@@ -148,7 +148,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
     let body: BlockBody<Bytes> = BlockBody {
         transactions: vec![Bytes::from(vec![(number % 256) as u8; 10])],
         ommers: vec![],
-        withdrawals: Some(Withdrawals(vec![])),
+        withdrawals: Some(Withdrawals::new(vec![])),
     };
 
     // Create test receipt list with bloom

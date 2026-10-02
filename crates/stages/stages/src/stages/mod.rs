@@ -151,9 +151,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthEvmConfig::ethereum(Arc::new(
-                    ChainSpecBuilder::mainnet().berlin_activated().build(),
-                )),
+                EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build())),
                 Arc::new(EthBeaconConsensus::new(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 ))),

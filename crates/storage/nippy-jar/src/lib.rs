@@ -121,9 +121,9 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJar")
             .field("version", &self.version)
-            .field("user_header", &self.user_header)
-            .field("rows", &self.rows)
-            .field("columns", &self.columns)
+            .field("user_header", self.user_header())
+            .field("rows", &self.rows())
+            .field("columns", &self.columns())
             .field("compressor", &self.compressor)
             .field("filter", &self.filter)
             .field("phf", &self.phf)
@@ -163,8 +163,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Adds [`compression::Zstd`] compression.
     pub fn with_zstd(mut self, use_dict: bool, max_dict_size: usize) -> Self {
-        self.compressor =
-            Some(Compressors::Zstd(compression::Zstd::new(use_dict, max_dict_size, self.columns)));
+        self.compressor = Some(Compressors::Zstd(compression::Zstd::new(
+            use_dict,
+            max_dict_size,
+            self.columns(),
+        )));
         self
     }
 
@@ -326,8 +329,8 @@ impl<H: NippyJarHeader> NippyJar<H> {
         &self,
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
-        if columns.len() != self.columns {
-            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
+        if columns.len() != self.columns() {
+            return Err(NippyJarError::ColumnLenMismatch(self.columns(), columns.len()))
         }
 
         if let Some(compression) = &self.compressor &&
@@ -385,7 +388,7 @@ impl DataReader {
     /// Returns the offset for the requested data index
     pub fn offset(&self, index: usize) -> Result<u64, NippyJarError> {
         // + 1 represents the offset_len u8 which is in the beginning of the file
-        let from = index * self.offset_size as usize + 1;
+        let from = index * self.offset_size() as usize + 1;
 
         self.offset_at(from)
     }
@@ -395,7 +398,7 @@ impl DataReader {
         let offsets_file_size = self.offset_file.metadata()?.len() as usize;
 
         if offsets_file_size > 1 {
-            let from = offsets_file_size - self.offset_size as usize * (index + 1);
+            let from = offsets_file_size - self.offset_size() as usize * (index + 1);
 
             self.offset_at(from)
         } else {
@@ -406,7 +409,7 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size() as u64)
             as usize)
     }
 
@@ -414,12 +417,12 @@ impl DataReader {
     fn offset_at(&self, index: usize) -> Result<u64, NippyJarError> {
         let mut buffer: [u8; 8] = [0; 8];
 
-        let offset_end = index.saturating_add(self.offset_size as usize);
+        let offset_end = index.saturating_add(self.offset_size() as usize);
         if offset_end > self.offset_mmap.len() {
             return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
-        buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
+        buffer[..self.offset_size() as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
         Ok(u64::from_le_bytes(buffer))
     }
 
@@ -554,7 +557,7 @@ mod tests {
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy.version, loaded_nippy.version);
-        assert_eq!(nippy.columns, loaded_nippy.columns);
+        assert_eq!(nippy.columns(), loaded_nippy.columns());
         assert_eq!(nippy.filter, loaded_nippy.filter);
         assert_eq!(nippy.phf, loaded_nippy.phf);
         assert_eq!(nippy.max_row_size, loaded_nippy.max_row_size);
@@ -837,7 +840,7 @@ mod tests {
             simulate_interrupted_prune(num_columns, file_path.path(), num_rows, missing_offsets);
 
             let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-            assert_eq!(nippy.rows, expected_rows);
+            assert_eq!(nippy.rows(), expected_rows);
         }
     }
 
@@ -849,7 +852,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
-        let initial_rows = nippy.rows;
+        let initial_rows = nippy.rows();
         let initial_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         let initial_offset_size =
@@ -873,7 +876,7 @@ mod tests {
         drop(writer);
 
         let nippy = NippyJar::load_without_header(file_path).unwrap();
-        assert_eq!(initial_rows, nippy.rows);
+        assert_eq!(initial_rows, nippy.rows());
 
         // Data was written successfully
         let new_data_size =
@@ -905,7 +908,7 @@ mod tests {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
 
         // Set the baseline that should be unwinded to
-        let initial_rows = nippy.rows;
+        let initial_rows = nippy.rows();
         let initial_data_size =
             File::open(nippy.data_path()).unwrap().metadata().unwrap().len() as usize;
         let initial_offset_size =
@@ -923,7 +926,7 @@ mod tests {
         drop(writer);
 
         let nippy = NippyJar::load_without_header(file_path).unwrap();
-        assert_eq!(initial_rows, nippy.rows);
+        assert_eq!(initial_rows, nippy.rows());
 
         // Data was written successfully
         let new_data_size =
@@ -952,7 +955,7 @@ mod tests {
             let nippy = NippyJar::new_without_header(num_columns, file_path);
             nippy.freeze_config().unwrap();
             assert_eq!(nippy.max_row_size, 0);
-            assert_eq!(nippy.rows, 0);
+            assert_eq!(nippy.rows(), 0);
 
             let mut writer = NippyJarWriter::new(nippy).unwrap();
             assert_eq!(writer.column(), 0);
@@ -990,7 +993,7 @@ mod tests {
             let nippy = NippyJar::load_without_header(file_path).unwrap();
             // Check if it was committed successfully
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
-            assert_eq!(nippy.rows, 1);
+            assert_eq!(nippy.rows(), 1);
 
             let mut writer = NippyJarWriter::new(nippy).unwrap();
             assert_eq!(writer.column(), 0);

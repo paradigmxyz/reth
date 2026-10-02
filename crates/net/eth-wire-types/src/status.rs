@@ -742,13 +742,7 @@ mod tests {
         let genesis = Genesis { nonce: rng.random(), ..Default::default() };
 
         // build head
-        let head = Head {
-            number: u64::MAX,
-            hash: head_hash,
-            difficulty: U256::from(13337),
-            total_difficulty,
-            timestamp: u64::MAX,
-        };
+        let head = Head::new(u64::MAX, head_hash, U256::from(13337), total_difficulty, u64::MAX);
 
         // add a few hardforks
         let hardforks = vec![

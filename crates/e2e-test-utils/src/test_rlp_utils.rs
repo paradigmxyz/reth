@@ -106,11 +106,11 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
         let body = BlockBody {
             transactions: vec![],
             ommers: vec![],
-            withdrawals: header.withdrawals_root.is_some().then(Withdrawals::default),
+            withdrawals: header.shanghai_active().then(Withdrawals::default),
         };
 
         // Create the block
-        let block = Block { header: header.clone(), body: body.clone() };
+        let block = Block::new(header.clone(), body.clone());
         let sealed_block = BlockTrait::seal_slow(block);
 
         debug!(target: "e2e::import",
@@ -146,7 +146,7 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock<Block>], path: &Path) -> std::i
 
     for (i, block) in blocks.iter().enumerate() {
         // Convert SealedBlock to Block before encoding
-        let block_for_encoding = block.clone().unseal();
+        let block_for_encoding = block.clone().into_block();
 
         let mut buf = Vec::new();
         block_for_encoding.encode(&mut buf);

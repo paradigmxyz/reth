@@ -271,6 +271,9 @@ mod tests {
             "stats",
         ])
         .unwrap();
-        assert_eq!(cmd.env.datadir.resolve_datadir(cmd.env.chain.chain).as_ref(), Path::new(&path));
+        assert_eq!(
+            cmd.env.datadir.resolve_datadir(cmd.env.chain.chain()).as_ref(),
+            Path::new(&path)
+        );
     }
 }

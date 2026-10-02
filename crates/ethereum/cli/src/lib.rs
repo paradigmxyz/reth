@@ -29,7 +29,7 @@ mod test {
     fn parse_dev() {
         let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.chain(), chain.chain());
         assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
         assert_eq!(
             cmd.chain.paris_block_and_final_difficulty,

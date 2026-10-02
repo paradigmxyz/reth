@@ -717,7 +717,7 @@ mod tests {
         assert_eq!(pool.size(), 0);
 
         // Attempt to remove a non-existent transaction
-        let non_existent_id = TransactionId::new(0.into(), 0);
+        let non_existent_id = crate::identifier::SenderId::into_transaction_id(0.into(), 0);
         assert!(pool.remove_transaction(&non_existent_id).is_none());
 
         // Check contains method on empty pool
@@ -786,7 +786,7 @@ mod tests {
         pool.add_transaction(tx3);
 
         // Set a size limit that requires truncation
-        let limit = SubPoolLimit { max_txs: 2, max_size: 300 };
+        let limit = SubPoolLimit::new(2, 300);
         let removed = pool.truncate_pool(limit);
 
         // Check that only one transaction was removed to satisfy the limit

@@ -96,7 +96,7 @@ fn persist_fixture_state_root(factory: &ProviderFactory<MockNodeTypesWithDB>) ->
         1,
         BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
     )
-    .unseal();
+    .into_block();
     block.header.state_root = state_root;
     let block = block.seal_slow();
 
@@ -316,7 +316,7 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
     let address = Address::random();
     let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
     let slots: Vec<StorageEntry> = (0..6u8)
-        .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
+        .map(|i| StorageEntry::new(B256::with_last_byte(i), U256::from(i as u64 + 1)))
         .collect();
 
     let provider_rw = factory.provider_rw().unwrap();
@@ -386,7 +386,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     let address = Address::random();
     let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
     let slots: Vec<StorageEntry> = (0..4u8)
-        .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
+        .map(|i| StorageEntry::new(B256::with_last_byte(i), U256::from(i as u64 + 1)))
         .collect();
 
     let provider_rw = factory.provider_rw().unwrap();
@@ -456,10 +456,10 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
         (Address::random(), Account { nonce: 2, balance: U256::from(2), ..Default::default() });
     // 2 slots for A (fits fully in the byte budget below), 5 for B (doesn't).
     let slots_a: Vec<StorageEntry> = (0..2u8)
-        .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
+        .map(|i| StorageEntry::new(B256::with_last_byte(i), U256::from(i as u64 + 1)))
         .collect();
     let slots_b: Vec<StorageEntry> = (0..5u8)
-        .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 10) })
+        .map(|i| StorageEntry::new(B256::with_last_byte(i), U256::from(i as u64 + 10)))
         .collect();
 
     let provider_rw = factory.provider_rw().unwrap();
@@ -591,7 +591,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
             number,
             BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = match number {
             0 => expired_root,
             64 => retained_root,

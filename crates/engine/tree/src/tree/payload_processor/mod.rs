@@ -988,10 +988,8 @@ mod tests {
 
         let parent_hash = B256::from([1u8; 32]);
         let block_hash = B256::from([10u8; 32]);
-        let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block_hash, number: 1 },
-            parent: parent_hash,
-        };
+        let block_with_parent =
+            BlockWithParent { block: BlockNumHash::new(1, block_hash), parent: parent_hash };
         let bundle_state = BundleState::default();
 
         // Cache should be empty initially
@@ -1024,10 +1022,8 @@ mod tests {
         // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
         let wrong_parent = B256::from([99u8; 32]);
         let block3_hash = B256::from([3u8; 32]);
-        let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block3_hash, number: 3 },
-            parent: wrong_parent,
-        };
+        let block_with_parent =
+            BlockWithParent { block: BlockNumHash::new(3, block3_hash), parent: wrong_parent };
         let bundle_state = BundleState::default();
 
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);

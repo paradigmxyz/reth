@@ -2555,7 +2555,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
             for i in offset.changeset_range() {
                 if let Some(change) = cursor.get_one::<StorageChangesetMask>(i.into())? {
                     let block_address = BlockNumberAddress((block_number, change.address));
-                    let entry = StorageEntry { key: change.key, value: change.value };
+                    let entry = StorageEntry::new(change.key, change.value);
                     changeset.push((block_address, entry));
                 }
             }
@@ -2619,7 +2619,7 @@ impl<N: NodePrimitives> StorageChangeSetReader for StaticFileProvider<N> {
                 .get_one::<StorageChangesetMask>(low.into())?
                 .filter(|change| change.address == address && change.key == storage_key)
         {
-            return Ok(Some(StorageEntry { key: change.key, value: change.value }));
+            return Ok(Some(StorageEntry::new(change.key, change.value)));
         }
 
         Ok(None)

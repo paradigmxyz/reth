@@ -365,7 +365,7 @@ fn extension_only_genesis_account_proof() {
     spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
     spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::from(1);
     let expected_root =
-        reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
+        reth_chainspec::make_genesis_header(spec.genesis(), &spec.hardforks).state_root;
     let factory = create_test_provider_factory();
     let root = insert_genesis(&factory, Arc::new(spec)).unwrap();
     assert_eq!(root, expected_root);

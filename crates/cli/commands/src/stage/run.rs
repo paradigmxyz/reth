@@ -138,7 +138,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                ChainSpecInfo {
+                    name: reth_node_core::dirs::config_path_prefix(
+                        provider_factory.chain_spec().chain(),
+                    ),
+                },
                 ctx.task_executor,
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

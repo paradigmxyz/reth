@@ -616,7 +616,7 @@ impl PruneConfig {
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
 
-        if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
+        if self.segments.receipts_log_filter.is_empty() && !receipts_log_filter.0.is_empty() {
             self.segments.receipts_log_filter = receipts_log_filter;
         }
     }

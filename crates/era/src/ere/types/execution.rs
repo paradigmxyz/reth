@@ -599,7 +599,7 @@ impl BlockTuple {
 
     /// Convert to an `alloy_consensus::Block`
     pub fn to_alloy_block<T: Decodable>(&self) -> Result<Block<T>, E2sError> {
-        let header: Header = self.header.decode()?;
+        let header: Header = self.header.decode_header()?;
         let body: BlockBody<T> = self.body.decode()?;
 
         Ok(Block::new(header, body))
@@ -717,7 +717,7 @@ mod tests {
 
         let transactions = vec![Bytes::from(vec![1, 2, 3, 4]), Bytes::from(vec![5, 6, 7, 8])];
 
-        let withdrawals = Some(Withdrawals(vec![]));
+        let withdrawals = Some(Withdrawals::new(vec![]));
 
         let block_body = BlockBody { transactions, ommers: vec![], withdrawals };
 
@@ -760,7 +760,8 @@ mod tests {
 
     #[test]
     fn test_single_receipt_compression_roundtrip() {
-        let test_receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+        let test_receipt =
+            create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
 
         // Compress the receipt
         let compressed_receipts = CompressedSlimReceipts::from_encodable(&test_receipt)
@@ -792,7 +793,7 @@ mod tests {
         // Spec: CompressedSlimReceipts.data = snappyFramed(rlp([tx-type, status, cumulative-gas,
         // logs])), with no bloom filter. Prove the inner RLP of `EthereumReceipt` is exactly that
         // 4-element list, byte for byte.
-        let receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+        let receipt = create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
 
         let compressed = CompressedSlimReceipts::from_encodable(&receipt).unwrap();
         let actual_rlp = compressed.decompress().unwrap();
@@ -819,7 +820,7 @@ mod tests {
         // post-state root, proving a single `SlimReceipt` type round-trips across forks.
         let receipts = vec![
             SlimReceipt {
-                tx_type: TxType::Eip1559,
+                tx_type: alloy_consensus::TxEip1559::tx_type(),
                 status: Eip658Value::Eip658(true),
                 cumulative_gas_used: 21000,
                 logs: vec![],

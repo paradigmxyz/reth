@@ -237,7 +237,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 
-    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
+    let executor_provider = EthEvmConfig::new(chain_spec.clone());
     let mut parent = genesis_block;
     let mut bal_buf = Vec::new();
 
@@ -258,7 +258,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
+        let state_db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
         let mut executor = executor_provider.batch_executor(state_db);
 
         let result = executor

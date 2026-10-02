@@ -377,7 +377,7 @@ mod tests {
         let tx = factory.provider_rw().unwrap().into_tx();
         tx.put::<tables::HashedStorages>(
             hashed_address,
-            StorageEntry { key: hashed_slot, value: U256::from(42) },
+            StorageEntry::new(hashed_slot, U256::from(42)),
         )
         .unwrap();
         tx.commit().unwrap();
@@ -398,7 +398,7 @@ mod tests {
             b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
         tx.put::<tables::PlainStorageState>(
             plain_address,
-            StorageEntry { key: plain_slot, value: U256::from(99) },
+            StorageEntry::new(plain_slot, U256::from(99)),
         )
         .unwrap();
         tx.commit().unwrap();
@@ -430,11 +430,8 @@ mod tests {
         let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
 
         let tx = factory.provider_rw().unwrap().into_tx();
-        tx.put::<tables::PlainStorageState>(
-            address,
-            StorageEntry { key: slot, value: U256::from(42) },
-        )
-        .unwrap();
+        tx.put::<tables::PlainStorageState>(address, StorageEntry::new(slot, U256::from(42)))
+            .unwrap();
         tx.commit().unwrap();
 
         let db = factory.provider().unwrap();
@@ -460,7 +457,7 @@ mod tests {
         let tx = factory.provider_rw().unwrap().into_tx();
         tx.put::<tables::HashedStorages>(
             hashed_address,
-            StorageEntry { key: hashed_slot, value: U256::from(42) },
+            StorageEntry::new(hashed_slot, U256::from(42)),
         )
         .unwrap();
         tx.commit().unwrap();

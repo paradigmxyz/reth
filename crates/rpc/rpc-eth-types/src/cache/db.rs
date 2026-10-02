@@ -49,7 +49,7 @@ mod tests {
         let read_slot = U256::from(2);
 
         // pre-block state
-        let mut db = CacheDB::new(EmptyDB::default());
+        let mut db = <CacheDB<EmptyDB> as Default>::default();
         db.insert_account_info(
             covered,
             AccountInfo { balance: U256::from(7), nonce: 5, ..Default::default() },

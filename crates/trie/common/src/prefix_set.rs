@@ -463,7 +463,7 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.slice().len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.as_ref().unwrap().capacity(), 3); // Capacity after shrinking
     }
 
@@ -483,7 +483,7 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.slice().len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.as_ref().unwrap().capacity(), 3); // Capacity after shrinking
     }
 

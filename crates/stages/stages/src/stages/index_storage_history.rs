@@ -112,7 +112,7 @@ where
         }
 
         let mut range = input.next_block_range();
-        let use_rocksdb = provider.cached_storage_settings().storage_v2;
+        let use_rocksdb = provider.cached_storage_settings().is_v2();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
@@ -133,7 +133,7 @@ where
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
-        let collector = if provider.cached_storage_settings().storage_v2 {
+        let collector = if provider.cached_storage_settings().is_v2() {
             collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
@@ -161,7 +161,7 @@ where
             provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
     }
 
     /// Unwind the stage.
@@ -214,7 +214,7 @@ mod tests {
 
     const fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
-        StorageEntry { key, value: U256::ZERO }
+        StorageEntry::new(key, U256::ZERO)
     }
 
     const fn block_number_address(block_number: u64) -> BlockNumberAddress {

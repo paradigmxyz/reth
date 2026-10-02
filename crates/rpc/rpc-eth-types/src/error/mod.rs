@@ -306,7 +306,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
-            EthApiError::InvalidTransaction(err) => err.into(),
+            EthApiError::InvalidTransaction(err) => err.into_rpc_err(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
             EthApiError::ExcessBlobGasNotSet |
@@ -1072,7 +1072,7 @@ pub enum RpcPoolError {
 impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: RpcPoolError) -> Self {
         match error {
-            RpcPoolError::Invalid(err) => err.into(),
+            RpcPoolError::Invalid(err) => err.into_rpc_err(),
             RpcPoolError::TxPoolOverflow => {
                 rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), error.to_string())
             }
@@ -1202,7 +1202,7 @@ mod tests {
         ];
 
         for (error, message) in cases {
-            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
+            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into_rpc_err();
             assert_eq!(error.code(), -32000);
             assert_eq!(error.message(), message);
         }
@@ -1214,7 +1214,7 @@ mod tests {
             EthApiError::HeaderNotFound(BlockId::hash(b256!(
                 "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
-            .into();
+            .into_rpc_err();
         assert_eq!(
             err.message(),
             "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
@@ -1223,22 +1223,22 @@ mod tests {
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
                 "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
-            .into();
+            .into_rpc_err();
         assert_eq!(
             err.message(),
             "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::number(100000)).into();
+            EthApiError::HeaderNotFound(BlockId::number(100000)).into_rpc_err();
         assert_eq!(err.message(), "block not found: 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::latest()).into();
+            EthApiError::HeaderNotFound(BlockId::latest()).into_rpc_err();
         assert_eq!(err.message(), "block not found: latest");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::safe()).into();
+            EthApiError::HeaderNotFound(BlockId::safe()).into_rpc_err();
         assert_eq!(err.message(), "block not found: safe");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::finalized()).into();
+            EthApiError::HeaderNotFound(BlockId::finalized()).into_rpc_err();
         assert_eq!(err.message(), "block not found: finalized");
     }
 
@@ -1252,7 +1252,7 @@ mod tests {
             EthApiError::PrunedHistoryUnavailable { requested: 5, earliest_available: 100 }
         ));
 
-        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into_rpc_err();
         assert_eq!(err.code(), 4444);
         assert_eq!(
             err.message(),
@@ -1288,7 +1288,7 @@ mod tests {
             EthApiError::ReceiptsNotFound(BlockId::hash(b256!(
                 "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
-            .into();
+            .into_rpc_err();
         assert_eq!(
             err.message(),
             "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
@@ -1297,29 +1297,29 @@ mod tests {
             EthApiError::ReceiptsNotFound(BlockId::hash_canonical(b256!(
                 "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
-            .into();
+            .into_rpc_err();
         assert_eq!(
             err.message(),
             "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::number(100000)).into();
+            EthApiError::ReceiptsNotFound(BlockId::number(100000)).into_rpc_err();
         assert_eq!(err.code(), EthRpcErrorCode::ResourceNotFound.code());
         assert_eq!(err.message(), "block not found: 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::latest()).into();
+            EthApiError::ReceiptsNotFound(BlockId::latest()).into_rpc_err();
         assert_eq!(err.message(), "block not found: latest");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::safe()).into();
+            EthApiError::ReceiptsNotFound(BlockId::safe()).into_rpc_err();
         assert_eq!(err.message(), "block not found: safe");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::finalized()).into();
+            EthApiError::ReceiptsNotFound(BlockId::finalized()).into_rpc_err();
         assert_eq!(err.message(), "block not found: finalized");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::pending()).into();
+            EthApiError::ReceiptsNotFound(BlockId::pending()).into_rpc_err();
         assert_eq!(err.message(), "block not found: pending");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::earliest()).into();
+            EthApiError::ReceiptsNotFound(BlockId::earliest()).into_rpc_err();
         assert_eq!(err.message(), "block not found: earliest");
     }
 

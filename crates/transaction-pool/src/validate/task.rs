@@ -182,7 +182,7 @@ impl<Client, Tx, Evm> TransactionValidationTaskExecutor<EthTransactionValidator<
             + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
         Evm: ConfigureEvm,
     {
-        EthTransactionValidatorBuilder::new(client, evm_config)
+        crate::validate::TransactionValidationTaskExecutor::eth_builder(client, evm_config)
             .with_additional_tasks(num_additional_tasks)
             .build_with_tasks(tasks, blob_store)
     }

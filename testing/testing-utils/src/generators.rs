@@ -110,10 +110,7 @@ pub fn random_block_with_parent<R: Rng>(
     number: u64,
     parent: Option<B256>,
 ) -> BlockWithParent {
-    BlockWithParent {
-        parent: parent.unwrap_or_default(),
-        block: NumHash::new(number, rng.random()),
-    }
+    BlockWithParent::new(parent.unwrap_or_default(), NumHash::new(number, rng.random()))
 }
 
 /// Generate a random [`SealedHeader`].
@@ -248,10 +245,10 @@ pub fn random_block<R: Rng>(
         ..Default::default()
     };
 
-    Block {
+    Block::new(
         header,
-        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
-    }
+        BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+    )
     .seal_slow()
 }
 
@@ -413,7 +410,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
     });
     let value = U256::from(rng.random::<u64>());
 
-    StorageEntry { key, value }
+    StorageEntry::new(key, value)
 }
 
 /// Generate random Externally Owned Account (EOA account without contract).

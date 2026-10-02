@@ -1124,7 +1124,7 @@ fn decode_new_payload_request(
     let versioned_hashes = calculate_versioned_hashes(&payload)?;
     let sidecar = match parent_root {
         Some(parent_beacon_block_root) => {
-            let cancun = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
+            let cancun = CancunPayloadFields::new(parent_beacon_block_root, versioned_hashes);
             match requests {
                 Some(requests) => {
                     ExecutionPayloadSidecar::v4(cancun, PraguePayloadFields::new(requests))
@@ -1503,8 +1503,8 @@ mod tests {
 
     #[test]
     fn payload_bodies_are_filtered_at_fork_boundaries() {
-        use reth_chainspec::{ChainSpecBuilder, ForkCondition};
-        let chain_spec = ChainSpecBuilder::default()
+        use reth_chainspec::ForkCondition;
+        let chain_spec = reth_chainspec::ChainSpec::builder()
             .chain(1.into())
             .genesis(Default::default())
             .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(10))

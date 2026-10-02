@@ -179,7 +179,7 @@ mod tests {
             .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
 
         let runtime = Runtime::test();
-        let mut downloader = TaskDownloader::spawn_with(downloader, &runtime);
+        let mut downloader = downloader.into_task_with(&runtime);
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 

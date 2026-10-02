@@ -403,10 +403,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the in memory pending `BlockNumHash`.
     pub fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
-        self.inner
-            .in_memory_state
-            .pending_state()
-            .map(|state| BlockNumHash { number: state.number(), hash: state.hash() })
+        self.pending_state().map(|state| BlockNumHash::new(state.number(), state.hash()))
     }
 
     /// Returns the current `ChainInfo`.
@@ -544,7 +541,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     ///
     /// This iterator contains a snapshot of the in-memory state at the time of the call.
     pub fn canonical_chain(&self) -> impl Iterator<Item = Arc<BlockState<N>>> {
-        self.inner.in_memory_state.head_state().into_iter().flat_map(|head| head.iter())
+        self.head_state().into_iter().flat_map(|head| head.iter())
     }
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
@@ -1132,7 +1129,7 @@ mod tests {
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
         let actual_pending_state = result.unwrap();
-        assert_eq!(actual_pending_state.block.recovered_block().hash(), pending_hash);
+        assert_eq!(actual_pending_state.hash(), pending_hash);
         assert_eq!(actual_pending_state.block.recovered_block().number, pending_number);
     }
 
@@ -1235,7 +1232,7 @@ mod tests {
         // Check the pending block number and hash
         assert_eq!(
             state.pending_block_num_hash().unwrap(),
-            BlockNumHash { number: 1, hash: block2.recovered_block().hash() }
+            BlockNumHash::new(1, block2.recovered_block().hash())
         );
 
         // Check the pending header

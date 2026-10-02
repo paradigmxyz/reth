@@ -65,7 +65,7 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            if self.node_idx >= env.node_clients.len() {
+            if self.node_idx >= env.node_count() {
                 return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
             }
 
@@ -176,7 +176,7 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let num_clients = env.node_clients.len();
+            let num_clients = env.node_count();
             if num_clients == 0 {
                 return Err(eyre::eyre!("No node clients available"));
             }

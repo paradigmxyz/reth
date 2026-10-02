@@ -160,7 +160,7 @@ mod tests {
                 factory,
             );
         let runtime = Runtime::test();
-        let mut downloader = TaskDownloader::spawn_with(downloader, &runtime);
+        let mut downloader = downloader.into_task_with(&runtime);
 
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -184,7 +184,7 @@ mod tests {
                 factory,
             );
         let runtime = Runtime::test();
-        let mut downloader = TaskDownloader::spawn_with(downloader, &runtime);
+        let mut downloader = downloader.into_task_with(&runtime);
 
         downloader.set_download_range(1..=0).expect("failed to set download range");
         assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));

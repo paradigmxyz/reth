@@ -271,13 +271,13 @@ where
     // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
                 .set_expected_block_start(genesis_block_number);
         }
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
@@ -316,7 +316,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.storage_v2 {
+    if genesis_storage_settings.is_v2() {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -448,7 +448,7 @@ where
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
-            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
+            (*addr, storage.iter().map(|(&key, &value)| StorageEntry::new(key, value.into())))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
@@ -569,10 +569,10 @@ where
             ?expected_state_root,
             "State root from state dump does not match state root in current header."
         );
-        return Err(InitStorageError::StateRootMismatch(GotExpected {
-            got: dump_state_root,
-            expected: expected_state_root,
-        })
+        return Err(InitStorageError::StateRootMismatch(GotExpected::new(
+            dump_state_root,
+            expected_state_root,
+        ))
         .into())
     }
 
@@ -606,10 +606,10 @@ where
             "Computed state root does not match state root in state dump"
         );
 
-        return Err(InitStorageError::StateRootMismatch(GotExpected {
-            got: computed_state_root,
-            expected: expected_state_root,
-        })
+        return Err(InitStorageError::StateRootMismatch(GotExpected::new(
+            computed_state_root,
+            expected_state_root,
+        ))
         .into())
     }
 
@@ -688,7 +688,7 @@ where
         + NodePrimitivesProvider,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
-    if storage_settings.storage_v2 {
+    if storage_settings.is_v2() {
         return dump_state_v2(collector, provider_factory, block)
     }
 
@@ -1013,17 +1013,17 @@ fn write_account_to_db<TX: DbTxMut>(
             let value_u256 = U256::from_be_bytes(value.0);
 
             // plain storage — sorted by (address, key), use append_dup
-            plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
+            plain_storage_cursor.append_dup(*address, StorageEntry::new(key, value_u256))?;
 
             // hashed storage — unsorted keccak order, use upsert
             let hashed_key = keccak256(key);
             hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+                .upsert(hashed_address, &StorageEntry::new(hashed_key, value_u256))?;
 
             // storage changeset — sorted by (block, address), then by key via append_dup
             storage_cs_cursor.append_dup(
                 BlockNumberAddress((block, *address)),
-                StorageEntry { key, value: U256::ZERO },
+                StorageEntry::new(key, U256::ZERO),
             )?;
 
             // storage history
@@ -1089,7 +1089,7 @@ where
 
             let hashed_key = keccak256(key);
             hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+                .upsert(hashed_address, &StorageEntry::new(hashed_key, value_u256))?;
 
             storage_changeset_writer.append_storage_changeset_entry(
                 reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
@@ -1370,7 +1370,7 @@ mod tests {
             reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address_with_storage)),
-                StorageEntry { key: storage_key, value: U256::ZERO }
+                StorageEntry::new(storage_key, U256::ZERO)
             )]
         );
 
@@ -1471,7 +1471,7 @@ mod tests {
             reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
             vec![(
                 BlockNumberAddress((block, address)),
-                StorageEntry { key: storage_key, value: U256::ZERO }
+                StorageEntry::new(storage_key, U256::ZERO)
             )]
         );
 
@@ -1642,7 +1642,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.storage_v2 {
+            let (accounts, storages) = if settings.is_v2() {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)

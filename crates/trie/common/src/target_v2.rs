@@ -281,7 +281,7 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             }
         }
 
-        if chunk.account_targets.is_empty() && chunk.storage_targets.is_empty() {
+        if chunk.is_empty() {
             None
         } else {
             Some(chunk)

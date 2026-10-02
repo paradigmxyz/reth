@@ -75,7 +75,7 @@ where
         let range_end = *range.end();
 
         // Check where storage history indices are stored
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return self.prune_rocksdb(provider, input, range, range_end);
         }
 
@@ -563,9 +563,8 @@ mod tests {
         let account = Account { nonce: 1, balance: U256::from(100), ..Default::default() };
 
         // Create storage entries
-        let storage_entry = |key: u8| reth_primitives_traits::StorageEntry {
-            key: B256::with_last_byte(key),
-            value: U256::from(100),
+        let storage_entry = |key: u8| {
+            reth_primitives_traits::StorageEntry::new(B256::with_last_byte(key), U256::from(100))
         };
 
         // Build changesets: blocks 0-4 have 1 storage change each, block 5 has 4 changes, block 6
@@ -825,9 +824,7 @@ mod tests {
                 vec![(
                     address,
                     account.clone(),
-                    keys.iter()
-                        .map(|key| StorageEntry { key: *key, value: U256::from(1) })
-                        .collect(),
+                    keys.iter().map(|key| StorageEntry::new(*key, U256::from(1))).collect(),
                 )]
             })
             .collect::<Vec<_>>();

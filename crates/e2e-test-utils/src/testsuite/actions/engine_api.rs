@@ -67,10 +67,10 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            if self.node_idx >= env.node_clients.len() {
+            if self.node_idx >= env.node_count() {
                 return Err(eyre::eyre!("Target node index out of bounds: {}", self.node_idx));
             }
-            if self.source_node_idx >= env.node_clients.len() {
+            if self.source_node_idx >= env.node_count() {
                 return Err(eyre::eyre!(
                     "Source node index out of bounds: {}",
                     self.source_node_idx

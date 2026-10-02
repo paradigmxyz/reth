@@ -663,10 +663,7 @@ mod tests {
         let block_hash = B256::random();
         provider.add_block(
             block_hash,
-            Block {
-                header: Header { number: 1, ..Default::default() },
-                body: BlockBody::default(),
-            },
+            Block::new(Header { number: 1, ..Default::default() }, BlockBody::default()),
         );
 
         let api = build_test_eth_api(provider);
@@ -708,10 +705,10 @@ mod tests {
         );
         let sender = tx.recover_signer().unwrap();
         provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
-        let block = Block {
-            header: Header { number: 1, ..Default::default() },
-            body: BlockBody { transactions: vec![tx], ..Default::default() },
-        };
+        let block = Block::new(
+            Header { number: 1, ..Default::default() },
+            BlockBody { transactions: vec![tx], ..Default::default() },
+        );
         let block_hash = block.header.hash_slow();
         provider.add_block(block_hash, block);
 
@@ -907,10 +904,7 @@ mod tests {
 
             mock_provider.add_block(
                 hash,
-                Block {
-                    header: header.clone(),
-                    body: BlockBody { transactions, ..Default::default() },
-                },
+                Block::new(header.clone(), BlockBody { transactions, ..Default::default() }),
             );
             mock_provider.add_header(hash, header);
 
@@ -1163,15 +1157,15 @@ mod tests {
                 .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
             provider.add_block(
                 B256::repeat_byte(0x42),
-                Block {
-                    header: Header {
+                Block::new(
+                    Header {
                         number: 1,
                         gas_limit: block_limit,
                         excess_blob_gas: Some(0),
                         ..Default::default()
                     },
-                    body: BlockBody::default(),
-                },
+                    BlockBody::default(),
+                ),
             );
             let api = build_test_eth_api_with_gas_cap(provider, gas_cap);
             let trace_api =
@@ -1247,15 +1241,15 @@ mod tests {
             provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
             provider.add_block(
                 B256::repeat_byte(0x42),
-                Block {
-                    header: Header {
+                Block::new(
+                    Header {
                         number: 1,
                         gas_limit: 30_000_000,
                         excess_blob_gas: Some(0),
                         ..Default::default()
                     },
-                    body: BlockBody::default(),
-                },
+                    BlockBody::default(),
+                ),
             );
 
             for gas in [None, Some(1_000_000)] {
@@ -1293,10 +1287,10 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.add_block(
             B256::repeat_byte(0x42),
-            Block {
-                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
-                body: BlockBody::default(),
-            },
+            Block::new(
+                Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                BlockBody::default(),
+            ),
         );
         let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
         let at = BlockId::latest();
@@ -1323,10 +1317,7 @@ mod tests {
     #[tokio::test]
     async fn header_responses_omit_size_while_blocks_keep_it() {
         let provider = MockEthProvider::default();
-        let block = Block {
-            header: Header { number: 1, ..Default::default() },
-            body: BlockBody::default(),
-        };
+        let block = Block::new(Header { number: 1, ..Default::default() }, BlockBody::default());
         let hash = block.header.hash_slow();
         let block_size = alloy_rlp::encode(&block).len();
         provider.add_block(hash, block);

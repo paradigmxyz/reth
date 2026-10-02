@@ -137,10 +137,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
             slot_number: ctx.slot_number,
         };
 
-        Ok(Block {
-            header,
-            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
-        })
+        Ok(Block::new(header, BlockBody { transactions, ommers: Default::default(), withdrawals }))
     }
 }
 

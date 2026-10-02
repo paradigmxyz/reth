@@ -1346,8 +1346,7 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let payload =
-            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
+        let payload = ExecutionData::new(payload.into(), ExecutionPayloadSidecar::none());
         Ok(self.new_payload_v1_metered(payload).await?)
     }
 
@@ -1355,10 +1354,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        let payload = ExecutionData {
-            payload: payload.into_payload(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload = ExecutionData::new(payload.into_payload(), ExecutionPayloadSidecar::none());
 
         Ok(self.new_payload_v2_metered(payload).await?)
     }
@@ -1372,13 +1368,13 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+        let payload = ExecutionData::new(
+            payload.into(),
+            ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 versioned_hashes,
                 parent_beacon_block_root,
             }),
-        };
+        );
 
         Ok(self.new_payload_v3_metered(payload).await?)
     }
@@ -1399,13 +1395,13 @@ where
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
+        let payload = ExecutionData::new(
+            payload.into(),
+            ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests },
             ),
-        };
+        );
 
         Ok(self.new_payload_v4_metered(payload).await?)
     }
@@ -1428,13 +1424,13 @@ where
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
+        let payload = ExecutionData::new(
+            payload.into(),
+            ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests },
             ),
-        };
+        );
 
         Ok(self.new_payload_v5_metered(payload).await?)
     }
@@ -1455,14 +1451,14 @@ where
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v6(
+        let payload = ExecutionData::new(
+            payload.into(),
+            ExecutionPayloadSidecar::v6(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: execution_requests },
                 BogotaPayloadFields { inclusion_list_transactions },
             ),
-        };
+        );
 
         // TODO: perform structural validation of the inclusion list transactions and populate
         // `inclusion_list_satisfied` for VALID payloads
@@ -1829,7 +1825,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip7685::Requests, Encodable2718, NumHash};
+    use alloy_eips::{Encodable2718, NumHash};
     use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
         ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
@@ -2257,10 +2253,8 @@ mod tests {
 
         tokio::spawn(async move {
             let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
-            let execution_data = ExecutionData {
-                payload: payload_v1.into(),
-                sidecar: ExecutionPayloadSidecar::none(),
-            };
+            let execution_data =
+                ExecutionData::new(payload_v1.into(), ExecutionPayloadSidecar::none());
 
             api.new_payload_v1(execution_data).await.unwrap();
         });
@@ -2314,7 +2308,7 @@ mod tests {
                         versioned_hashes: Vec::new(),
                         parent_beacon_block_root: B256::ZERO,
                     },
-                    PraguePayloadFields { requests: RequestsOrHash::Requests(Requests::default()) },
+                    PraguePayloadFields { requests: RequestsOrHash::default() },
                 ),
             };
 

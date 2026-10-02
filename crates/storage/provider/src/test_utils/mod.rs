@@ -1,7 +1,6 @@
 use crate::{
     providers::{
-        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
-        StaticFileProviderBuilder,
+        NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider, StaticFileProviderBuilder,
     },
     HashingWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     TrieWriter,
@@ -101,7 +100,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_genesis_block_number(genesis_block_number)
             .build()
             .expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_path)
+        crate::providers::RocksDBProvider::builder(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
@@ -133,7 +132,7 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_files_path).expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_path)
+        crate::providers::RocksDBProvider::builder(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
@@ -158,10 +157,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
         // Only return `Some` if there is storage.
         account.storage.map(|storage| {
-            (
-                addr,
-                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
-            )
+            (addr, storage.into_iter().map(|(key, value)| StorageEntry::new(key, value.into())))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;

@@ -153,10 +153,10 @@ where
                 .disconnect(DisconnectReason::ProtocolBreach)
                 .await
                 .map_err(EthStreamError::from)?;
-            return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
-                got: their_status_message.version(),
-                expected: status.version(),
-            })
+            return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected::new(
+                their_status_message.version(),
+                status.version(),
+            ))
             .into());
         }
 
@@ -165,10 +165,10 @@ where
                 .disconnect(DisconnectReason::ProtocolBreach)
                 .await
                 .map_err(EthStreamError::from)?;
-            return Err(EthHandshakeError::MismatchedChain(GotExpected {
-                got: *their_status_message.chain(),
-                expected: *status.chain(),
-            })
+            return Err(EthHandshakeError::MismatchedChain(GotExpected::new(
+                *their_status_message.chain(),
+                *status.chain(),
+            ))
             .into());
         }
 

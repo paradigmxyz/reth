@@ -109,7 +109,7 @@ where
 
     let provider = provider_factory.provider()?;
     let init_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-    let init_txns = if provider_factory.cached_storage_settings().storage_v2 {
+    let init_txns = if provider_factory.cached_storage_settings().is_v2() {
         provider_factory.rocksdb_provider().iter::<tables::TransactionHashNumbers>()?.count()
     } else {
         provider.tx_ref().entries::<tables::TransactionHashNumbers>()?
@@ -231,7 +231,7 @@ where
 
     let provider = provider_factory.provider()?;
     let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()? - init_blocks;
-    let current_txns = if provider_factory.cached_storage_settings().storage_v2 {
+    let current_txns = if provider_factory.cached_storage_settings().is_v2() {
         provider_factory.rocksdb_provider().iter::<tables::TransactionHashNumbers>()?.count()
     } else {
         provider.tx_ref().entries::<tables::TransactionHashNumbers>()?

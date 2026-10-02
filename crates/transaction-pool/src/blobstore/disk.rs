@@ -638,9 +638,7 @@ impl DiskFileBlobStoreInner {
                 Ok(data) => data,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
                 Err(e) => {
-                    return Err(BlobStoreError::Other(Box::new(DiskFileBlobStoreError::ReadFile(
-                        tx, path, e,
-                    ))))
+                    return Err(BlobStoreError::from(DiskFileBlobStoreError::ReadFile(tx, path, e)))
                 }
             }
         };
@@ -841,7 +839,6 @@ mod tests {
     };
 
     use super::*;
-    use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -854,11 +851,11 @@ mod tests {
         (0..num)
             .map(|_| {
                 let tx = TxHash::random_with(&mut rng);
-                let blob = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                    blobs: vec![],
-                    commitments: vec![],
-                    proofs: vec![],
-                });
+                let blob = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::new(
+                    vec![],
+                    vec![],
+                    vec![],
+                ));
                 (tx, blob)
             })
             .collect()
@@ -919,7 +916,7 @@ mod tests {
         assert!(store.get_exact(all_hashes).is_err());
 
         assert_eq!(store.data_size_hint(), Some(0));
-        assert_eq!(store.inner.size_tracker.num_blobs.load(Ordering::Relaxed), 0);
+        assert_eq!(store.inner.size_tracker.blobs_len(), 0);
     }
 
     #[test]
@@ -949,11 +946,11 @@ mod tests {
         let result = store.get(tx).unwrap();
         assert_eq!(
             result,
-            Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                blobs: vec![],
-                commitments: vec![],
-                proofs: vec![]
-            })))
+            Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::new(
+                vec![],
+                vec![],
+                vec![]
+            ))))
         );
     }
 
@@ -976,11 +973,9 @@ mod tests {
             let result = store.get(tx).unwrap();
             assert_eq!(
                 result,
-                Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                    blobs: vec![],
-                    commitments: vec![],
-                    proofs: vec![]
-                })))
+                Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(
+                    BlobTransactionSidecar::new(vec![], vec![], vec![])
+                )))
             );
         }
     }

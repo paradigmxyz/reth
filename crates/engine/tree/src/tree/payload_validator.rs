@@ -902,7 +902,7 @@ where
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
                 ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
+                    GotExpected::new(state_root, block_state_root).into(),
                 )
                 .into(),
             )
@@ -1470,7 +1470,7 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
         state: &mut EngineApiTreeState<N>,
     ) {
-        if state.invalid_headers.get(&block.hash()).is_some() {
+        if state.has_invalid_header(&block.hash()) {
             // we already marked this block as invalid
             return
         }
@@ -1600,9 +1600,7 @@ where
             .state
             .values()
             .flat_map(|account| account.storage.values())
-            .filter(|slot| {
-                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
-            })
+            .filter(|slot| slot.present_value().is_zero() && !slot.original_value().is_zero())
             .count();
 
         // Helper: check if account represents a new contract deployment
@@ -1622,7 +1620,7 @@ where
             .state
             .values()
             .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash()))
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()

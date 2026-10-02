@@ -16,7 +16,7 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
         "holesky" => HOLESKY.clone(),
         "hoodi" => HOODI.clone(),
         "dev" => DEV.clone(),
-        _ => Arc::new(parse_genesis(s)?.into()),
+        _ => Arc::new(reth_chainspec::ChainSpec::from_genesis(parse_genesis(s)?)),
     })
 }
 

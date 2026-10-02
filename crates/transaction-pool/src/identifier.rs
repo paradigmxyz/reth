@@ -63,13 +63,13 @@ pub struct SenderId(u64);
 impl SenderId {
     /// Returns a `Bound` for [`TransactionId`] starting with nonce `0`
     pub const fn start_bound(self) -> std::ops::Bound<TransactionId> {
-        std::ops::Bound::Included(TransactionId::new(self, 0))
+        std::ops::Bound::Included(self.into_transaction_id(0))
     }
 
     /// Returns a `Range` for [`TransactionId`] starting with nonce `0` and ending with nonce
     /// `u64::MAX`
     pub const fn range(self) -> std::ops::RangeInclusive<TransactionId> {
-        TransactionId::new(self, 0)..=TransactionId::new(self, u64::MAX)
+        self.into_transaction_id(0)..=self.into_transaction_id(u64::MAX)
     }
 
     /// Converts the sender to a [`TransactionId`] with the given nonce.
@@ -108,18 +108,19 @@ impl TransactionId {
     /// `on_chain_nonce`
     pub fn ancestor(transaction_nonce: u64, on_chain_nonce: u64, sender: SenderId) -> Option<Self> {
         // SAFETY: transaction_nonce > on_chain_nonce ⇒ transaction_nonce >= 1
-        (transaction_nonce > on_chain_nonce).then(|| Self::new(sender, transaction_nonce - 1))
+        (transaction_nonce > on_chain_nonce)
+            .then(|| sender.into_transaction_id(transaction_nonce - 1))
     }
 
     /// Returns the [`TransactionId`] that would come before this transaction.
     pub fn unchecked_ancestor(&self) -> Option<Self> {
         // SAFETY: self.nonce != 0 ⇒ self.nonce >= 1
-        (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
+        (self.nonce != 0).then(|| self.sender.into_transaction_id(self.nonce - 1))
     }
 
     /// Returns the [`TransactionId`] that directly follows this transaction: `self.nonce + 1`
     pub const fn descendant(&self) -> Self {
-        Self::new(self.sender, self.next_nonce())
+        self.sender.into_transaction_id(self.next_nonce())
     }
 
     /// Returns the nonce that follows immediately after this one.
@@ -137,7 +138,7 @@ mod tests {
     #[test]
     fn test_transaction_id_new() {
         let sender = SenderId(1);
-        let tx_id = TransactionId::new(sender, 5);
+        let tx_id = sender.into_transaction_id(5);
         assert_eq!(tx_id.sender, sender);
         assert_eq!(tx_id.nonce, 5);
     }
@@ -156,7 +157,7 @@ mod tests {
 
         // Ancestor is the previous nonce if the transaction nonce is higher than the on-chain nonce
         let tx_id = TransactionId::ancestor(5, 0, sender);
-        assert_eq!(tx_id, Some(TransactionId::new(sender, 4)));
+        assert_eq!(tx_id, Some(sender.into_transaction_id(4)));
 
         // No ancestor if the transaction nonce is the same as the on-chain nonce
         let tx_id = TransactionId::ancestor(5, 5, sender);
@@ -172,33 +173,33 @@ mod tests {
         let sender = SenderId(1);
 
         // Ancestor is the previous nonce if transaction nonce is higher than 0
-        let tx_id = TransactionId::new(sender, 5);
-        assert_eq!(tx_id.unchecked_ancestor(), Some(TransactionId::new(sender, 4)));
+        let tx_id = sender.into_transaction_id(5);
+        assert_eq!(tx_id.unchecked_ancestor(), Some(sender.into_transaction_id(4)));
 
         // No ancestor if transaction nonce is 0
-        let tx_id = TransactionId::new(sender, 0);
+        let tx_id = sender.into_transaction_id(0);
         assert_eq!(tx_id.unchecked_ancestor(), None);
     }
 
     #[test]
     fn test_transaction_id_descendant() {
         let sender = SenderId(1);
-        let tx_id = TransactionId::new(sender, 5);
+        let tx_id = sender.into_transaction_id(5);
         let descendant = tx_id.descendant();
-        assert_eq!(descendant, TransactionId::new(sender, 6));
+        assert_eq!(descendant, sender.into_transaction_id(6));
     }
 
     #[test]
     fn test_transaction_id_next_nonce() {
         let sender = SenderId(1);
-        let tx_id = TransactionId::new(sender, 5);
+        let tx_id = sender.into_transaction_id(5);
         assert_eq!(tx_id.next_nonce(), 6);
     }
 
     #[test]
     fn test_transaction_id_ord_eq_sender() {
-        let tx1 = TransactionId::new(100u64.into(), 0u64);
-        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        let tx1 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 0u64);
+        let tx2 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 1u64);
         assert!(tx2 > tx1);
         let set = BTreeSet::from([tx1, tx2]);
         assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
@@ -206,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_transaction_id_ord() {
-        let tx1 = TransactionId::new(99u64.into(), 0u64);
-        let tx2 = TransactionId::new(100u64.into(), 1u64);
+        let tx1 = crate::identifier::SenderId::into_transaction_id(99u64.into(), 0u64);
+        let tx2 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 1u64);
         assert!(tx2 > tx1);
         let set = BTreeSet::from([tx1, tx2]);
         assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
@@ -270,7 +271,7 @@ mod tests {
         let sender = SenderId(1);
         let start_bound = sender.start_bound();
         if let std::ops::Bound::Included(tx_id) = start_bound {
-            assert_eq!(tx_id, TransactionId::new(sender, 0));
+            assert_eq!(tx_id, sender.into_transaction_id(0));
         } else {
             panic!("Expected included bound");
         }

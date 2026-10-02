@@ -783,7 +783,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.check_next_block_number(expected_block_number)?;
 
         let start = Instant::now();
-        if let Some(last_block) = self.writer.user_header().block_end() {
+        if let Some(last_block) = self.current_block_number() {
             // We have finished the previous static file and must freeze it
             if last_block == self.writer.user_header().expected_block_end() {
                 // Commits offsets and new user_header to disk
@@ -848,9 +848,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // The next static file block number can be found by checking the one after block_end.
         // However, if it's a new file that hasn't been added any data, its block range will
         // actually be None. In that case, the next block will be found on `expected_block_start`.
-        self.writer
-            .user_header()
-            .block_end()
+        self.current_block_number()
             .map(|b| b + 1)
             .unwrap_or_else(|| self.writer.user_header().expected_block_start())
     }
@@ -880,11 +878,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         debug_assert!(segment.is_change_based());
 
         // Get the current block range
-        let current_block_end = self
-            .writer
-            .user_header()
-            .block_end()
-            .ok_or(ProviderError::MissingStaticFileBlock(segment, 0))?;
+        let current_block_end =
+            self.current_block_number().ok_or(ProviderError::MissingStaticFileBlock(segment, 0))?;
 
         // If we're already at or before the target block, nothing to do
         if current_block_end <= last_block {
@@ -937,9 +932,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if rows_to_delete > 0 {
             // Calculate the number of blocks to prune
             let current_block_end = self
-                .writer
-                .user_header()
-                .block_end()
+                .current_block_number()
                 .ok_or(ProviderError::MissingStaticFileBlock(segment, 0))?;
             let blocks_to_remove = current_block_end - last_block;
 

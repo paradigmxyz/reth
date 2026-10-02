@@ -100,6 +100,6 @@ impl PayloadTypes for EthPayloadTypes {
             &block.into_block(),
             bal,
         );
-        ExecutionData { payload, sidecar }
+        ExecutionData::new(payload, sidecar)
     }
 }

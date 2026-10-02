@@ -61,7 +61,7 @@ pub fn validate_shanghai_withdrawals<B: Block>(
         block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
     if withdrawals_root != *header_withdrawals_root {
         return Err(ConsensusError::BodyWithdrawalsRootDiff(
-            GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+            GotExpected::new(withdrawals_root, header_withdrawals_root).into(),
         ));
     }
     Ok(())
@@ -79,10 +79,10 @@ pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), Conse
     let header_blob_gas_used = block.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let total_blob_gas = block.body().blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
-        return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-            got: header_blob_gas_used,
-            expected: total_blob_gas,
-        }));
+        return Err(ConsensusError::BlobGasUsedDiff(GotExpected::new(
+            header_blob_gas_used,
+            total_blob_gas,
+        )));
     }
     Ok(())
 }
@@ -101,18 +101,15 @@ where
     let ommers_hash = body.calculate_ommers_root();
     if Some(header.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected {
-                got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
-                expected: header.ommers_hash(),
-            }
-            .into(),
+            GotExpected::new(ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH), header.ommers_hash())
+                .into(),
         ))
     }
 
     let tx_root = body.calculate_tx_root();
     if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
+            GotExpected::new(tx_root, header.transactions_root()).into(),
         ))
     }
 
@@ -120,7 +117,7 @@ where
         (Some(header_withdrawals_root), Some(withdrawals_root)) => {
             if withdrawals_root != header_withdrawals_root {
                 return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                    GotExpected::new(withdrawals_root, header_withdrawals_root).into(),
                 ))
             }
         }
@@ -175,8 +172,7 @@ where
         transaction_root.unwrap_or_else(|| block.body().calculate_tx_root());
     if calculated_transaction_root != expected_transaction_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
-            GotExpected { got: calculated_transaction_root, expected: expected_transaction_root }
-                .into(),
+            GotExpected::new(calculated_transaction_root, expected_transaction_root).into(),
         ))
     }
 
@@ -203,11 +199,8 @@ where
     let ommers_hash = block.body().calculate_ommers_root();
     if Some(block.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
-            GotExpected {
-                got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
-                expected: block.ommers_hash(),
-            }
-            .into(),
+            GotExpected::new(ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH), block.ommers_hash())
+                .into(),
         ))
     }
 
@@ -293,7 +286,7 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
 ) -> Result<(), ConsensusError> {
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
-            GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
+            GotExpected::new(header.parent_hash(), parent.hash()).into(),
         ))
     }
 
@@ -337,10 +330,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
                 .ok_or(ConsensusError::BaseFeeMissing)?
         };
         if expected_base_fee != base_fee {
-            return Err(ConsensusError::BaseFeeDiff(GotExpected {
-                expected: expected_base_fee,
-                got: base_fee,
-            }))
+            return Err(ConsensusError::BaseFeeDiff(GotExpected::new(base_fee, expected_base_fee)))
         }
     }
 
@@ -441,7 +431,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     );
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
-            diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
+            diff: GotExpected::new(excess_blob_gas, expected_excess_blob_gas),
             parent_excess_blob_gas,
             parent_blob_gas_used,
         })
@@ -506,7 +496,8 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+        let block =
+            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
 
         // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
@@ -557,7 +548,8 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+        let block =
+            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
 
         // Some(correct_root) should pass just like None
         assert!(
@@ -587,7 +579,8 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+        let block =
+            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
 
         let wrong_root = B256::repeat_byte(0xff);
         assert!(matches!(

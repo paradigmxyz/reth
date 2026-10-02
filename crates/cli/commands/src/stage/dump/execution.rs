@@ -104,7 +104,7 @@ fn import_tables_with_range<N: ProviderNodeTypes>(
             read_cursor.seek(to)?.ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
 
         Ok::<(u64, u64), eyre::ErrReport>((
-            from_block.first_tx_num,
+            from_block.first_tx_num(),
             to_block.first_tx_num + to_block.tx_count,
         ))
     })??;

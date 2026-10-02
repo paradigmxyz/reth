@@ -56,7 +56,7 @@ where
     // Check if gas used matches the value set in header.
     if block.header().gas_used() != result.gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: result.gas_used, expected: block.header().gas_used() },
+            gas: GotExpected::new(result.gas_used, block.header().gas_used()),
             gas_spent_by_tx: gas_spent_by_transactions(&result.receipts),
         })
     }
@@ -161,13 +161,13 @@ pub fn compare_receipts_root_and_logs_bloom(
 ) -> Result<(), ConsensusError> {
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
-            GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
+            GotExpected::new(calculated_receipts_root, expected_receipts_root).into(),
         ))
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
-            GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
+            GotExpected::new(calculated_logs_bloom, expected_logs_bloom).into(),
         ))
     }
 

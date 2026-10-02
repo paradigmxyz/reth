@@ -22,7 +22,7 @@ impl<T> PayloadTransactionsFixed<T> {
 
     /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
     pub fn single(transaction: T) -> Self {
-        Self { transactions: vec![transaction], index: Default::default() }
+        Self::new(vec![transaction])
     }
 }
 

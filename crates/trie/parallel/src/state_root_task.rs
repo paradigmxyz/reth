@@ -141,9 +141,7 @@ impl StateRootHandle {
     ///
     /// If called more than once.
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
-        self.state_root_rx
-            .take()
-            .expect("state_root already taken")
+        self.take_state_root_rx()
             .recv()
             .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".to_string()))?
     }
@@ -543,7 +541,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 .storage
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value()))
                 .peekable();
 
             if !destroyed && changed_storage_iter.peek().is_some() {

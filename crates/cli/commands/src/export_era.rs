@@ -108,7 +108,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
         };
 
         let export_config = era::ExportConfig {
-            network: self.env.chain.chain().to_string(),
+            network: reth_node_core::dirs::config_path_prefix(self.env.chain.chain()),
             first_block_number: self.export.first_block_number.unwrap_or(0),
             last_block_number: self
                 .export

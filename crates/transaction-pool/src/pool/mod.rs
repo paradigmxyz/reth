@@ -592,7 +592,7 @@ where
                 authorities,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
-                let transaction_id = TransactionId::new(sender_id, transaction.nonce());
+                let transaction_id = sender_id.into_transaction_id(transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, blob_sidecar) = match transaction {

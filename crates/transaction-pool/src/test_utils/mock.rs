@@ -566,12 +566,12 @@ impl MockTransaction {
 
     /// Returns a clone with a decreased nonce
     pub fn prev(&self) -> Self {
-        self.clone().with_hash(B256::random()).with_nonce(self.get_nonce() - 1)
+        self.clone().rng_hash().with_nonce(self.get_nonce() - 1)
     }
 
     /// Returns a clone with an increased nonce
     pub fn next(&self) -> Self {
-        self.clone().with_hash(B256::random()).with_nonce(self.get_nonce() + 1)
+        self.clone().rng_hash().with_nonce(self.get_nonce() + 1)
     }
 
     /// Returns a clone with an increased nonce
@@ -790,10 +790,10 @@ impl Typed2718 for MockTransaction {
     fn ty(&self) -> u8 {
         match self {
             Self::Legacy { .. } => TxType::Legacy.into(),
-            Self::Eip1559 { .. } => TxType::Eip1559.into(),
-            Self::Eip4844 { .. } => TxType::Eip4844.into(),
-            Self::Eip2930 { .. } => TxType::Eip2930.into(),
-            Self::Eip7702 { .. } => TxType::Eip7702.into(),
+            Self::Eip1559 { .. } => alloy_consensus::TxEip1559::tx_type().into(),
+            Self::Eip4844 { .. } => alloy_consensus::TxEip4844Variant::<()>::tx_type().into(),
+            Self::Eip2930 { .. } => alloy_consensus::TxEip2930::tx_type().into(),
+            Self::Eip7702 { .. } => alloy_consensus::TxEip7702::tx_type().into(),
         }
     }
 }
@@ -1070,7 +1070,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 value,
                 input,
                 access_list,
-                sidecar: BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
+                sidecar: BlobTransactionSidecarVariant::default(),
                 blob_versioned_hashes: Default::default(),
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
@@ -1231,7 +1231,7 @@ impl From<MockTransaction> for Recovered<TransactionSigned> {
         let tx = Transaction::from(tx);
         let tx: TransactionSigned =
             Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
-        Self::new_unchecked(tx, sender)
+        reth_primitives_traits::SignedTransaction::with_signer(tx, sender)
     }
 }
 
@@ -1375,7 +1375,7 @@ impl MockTransactionFactory {
     /// Generates a transaction ID for the given [`MockTransaction`].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
         let sender = self.ids.sender_id_or_create(tx.sender());
-        TransactionId::new(sender, *tx.get_nonce())
+        sender.into_transaction_id(*tx.get_nonce())
     }
 
     /// Validates a [`MockTransaction`] and returns a [`MockValidTx`].
@@ -1833,11 +1833,14 @@ mod tests {
 
         // Test EIP1559 transaction creation
         let eip1559 = factory.create_eip1559();
-        assert_eq!(eip1559.transaction.tx_type(), TxType::Eip1559);
+        assert_eq!(eip1559.transaction.tx_type(), alloy_consensus::TxEip1559::tx_type());
 
         // Test EIP4844 transaction creation
         let eip4844 = factory.create_eip4844();
-        assert_eq!(eip4844.transaction.tx_type(), TxType::Eip4844);
+        assert_eq!(
+            eip4844.transaction.tx_type(),
+            alloy_consensus::TxEip4844Variant::<()>::tx_type()
+        );
     }
 
     #[test]
@@ -1856,11 +1859,15 @@ mod tests {
         }
 
         // Test EIP1559 transaction set
-        let eip1559_set =
-            MockTransactionSet::dependent(sender, nonce_start, count, TxType::Eip1559);
+        let eip1559_set = MockTransactionSet::dependent(
+            sender,
+            nonce_start,
+            count,
+            alloy_consensus::TxEip1559::tx_type(),
+        );
         assert_eq!(eip1559_set.transactions.len(), count);
         for (idx, tx) in eip1559_set.transactions.iter().enumerate() {
-            assert_eq!(tx.tx_type(), TxType::Eip1559);
+            assert_eq!(tx.tx_type(), alloy_consensus::TxEip1559::tx_type());
             assert_eq!(tx.nonce(), nonce_start + idx as u64);
             assert_eq!(tx.sender(), sender);
         }

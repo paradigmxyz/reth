@@ -287,7 +287,7 @@ mod tests {
     }
 
     fn storage_entry(slot_byte: u8) -> StorageEntry {
-        StorageEntry { key: B256::with_last_byte(slot_byte), value: U256::from(slot_byte) }
+        StorageEntry::new(B256::with_last_byte(slot_byte), U256::from(slot_byte))
     }
 
     fn insert_hashed_storages(db: &TestStageDB, rows: impl IntoIterator<Item = (u8, u8)>) {

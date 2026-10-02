@@ -259,7 +259,7 @@ where
 
     /// Open a new cursor on the given dbi.
     pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), dbi)
+        self.cursor(dbi)
     }
 
     /// Disables a timeout for this read transaction.

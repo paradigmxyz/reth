@@ -1417,7 +1417,7 @@ mod tests {
         tx_hashes.push(&tx);
         assert_eq!(tx_hashes.types.len(), 1);
         assert_eq!(tx_hashes.sizes.len(), 1);
-        assert_eq!(tx_hashes.hashes.len(), 1);
+        assert_eq!(tx_hashes.len(), 1);
         assert_eq!(tx_hashes.types[0], tx.ty());
         assert_eq!(tx_hashes.sizes[0], tx.encode_2718_len());
         assert_eq!(tx_hashes.hashes[0], *tx.tx_hash());
@@ -1432,7 +1432,7 @@ mod tests {
         tx_hashes.extend(&txs);
         assert_eq!(tx_hashes.types.len(), 2);
         assert_eq!(tx_hashes.sizes.len(), 2);
-        assert_eq!(tx_hashes.hashes.len(), 2);
+        assert_eq!(tx_hashes.len(), 2);
         assert_eq!(tx_hashes.types[0], tx.ty());
         assert_eq!(tx_hashes.sizes[0], tx.encode_2718_len());
         assert_eq!(tx_hashes.hashes[0], *tx.tx_hash());

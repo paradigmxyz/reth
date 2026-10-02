@@ -145,7 +145,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
@@ -166,7 +166,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             Ok(EitherWriter::StaticFile(
                 provider
                     .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
@@ -189,7 +189,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn receipts_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        let receipts_in_static_files = provider.cached_storage_settings().storage_v2;
+        let receipts_in_static_files = provider.cached_storage_settings().is_v2();
         let prune_modes = provider.prune_modes_ref();
 
         if !receipts_in_static_files && prune_modes.has_receipts_pruning() ||
@@ -208,7 +208,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
         provider: &P,
     ) -> EitherWriterDestination {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database
@@ -237,7 +237,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -253,7 +253,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -271,7 +271,7 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
@@ -656,10 +656,7 @@ where
             Self::Database(cursor) => {
                 for change in changeset {
                     let storage_id = BlockNumberAddress((block_number, change.address));
-                    cursor.append_dup(
-                        storage_id,
-                        StorageEntry { key: change.key, value: change.value },
-                    )?;
+                    cursor.append_dup(storage_id, StorageEntry::new(change.key, change.value))?;
                 }
             }
             Self::StaticFile(writer) => {
@@ -711,7 +708,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherReader::RocksDB(
                 rocksdb.expect("storages_history_in_rocksdb requires rocksdb snapshot"),
             ));
@@ -732,7 +729,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherReader::RocksDB(
                 rocksdb.expect("transaction_hash_numbers_in_rocksdb requires rocksdb snapshot"),
             ));
@@ -753,7 +750,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             return Ok(EitherReader::RocksDB(
                 rocksdb.expect("account_history_in_rocksdb requires rocksdb snapshot"),
             ));
@@ -1143,8 +1140,7 @@ mod tests {
 mod rocksdb_tests {
     use super::*;
     use crate::{
-        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
-        test_utils::create_test_provider_factory,
+        providers::rocksdb::RocksDBProvider, test_utils::create_test_provider_factory,
         RocksDBProviderFactory,
     };
     use alloy_primitives::{Address, B256};
@@ -1160,7 +1156,7 @@ mod rocksdb_tests {
 
     fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::AccountsHistory>()

@@ -1344,14 +1344,14 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                reth_primitives_traits::StorageEntry { key: storage_key, value: storage },
+                reth_primitives_traits::StorageEntry::new(storage_key, storage),
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 address,
-                reth_primitives_traits::StorageEntry { key: storage_key, value: U256::from(20) },
+                reth_primitives_traits::StorageEntry::new(storage_key, U256::from(20)),
             )
             .unwrap();
         provider_rw.commit().unwrap();

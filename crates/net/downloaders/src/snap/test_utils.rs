@@ -48,14 +48,14 @@ impl TestSnapClient {
     }
 
     fn next(&self, priority: Priority) -> Ready<PeerRequestResult<SnapResponse>> {
-        self.priorities.lock().unwrap().push(priority);
+        self.priorities().push(priority);
         ready(self.responses.lock().unwrap().pop_front().expect("test response available"))
     }
 }
 
 impl DownloadClient for TestSnapClient {
     fn report_bad_message(&self, peer_id: PeerId) {
-        self.reported.lock().unwrap().push(peer_id);
+        self.reported().push(peer_id);
     }
 
     fn num_connected_peers(&self) -> usize {

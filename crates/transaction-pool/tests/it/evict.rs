@@ -20,10 +20,10 @@ async fn only_blobs_eviction() {
 
     // set the pool limits to something small
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        queued_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        basefee_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
-        blob_limit: SubPoolLimit { max_txs: 10, max_size: 1000 },
+        pending_limit: SubPoolLimit::new(10, 1000),
+        queued_limit: SubPoolLimit::new(10, 1000),
+        basefee_limit: SubPoolLimit::new(10, 1000),
+        blob_limit: SubPoolLimit::new(10, 1000),
         ..Default::default()
     };
 
@@ -141,10 +141,10 @@ async fn mixed_eviction() {
     // to be set so that the transactions will actually pass validation. Transactions here do not
     // have nonce gaps.
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        queued_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        basefee_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        blob_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
+        pending_limit: SubPoolLimit::new(20, 2000),
+        queued_limit: SubPoolLimit::new(20, 2000),
+        basefee_limit: SubPoolLimit::new(20, 2000),
+        blob_limit: SubPoolLimit::new(20, 2000),
         ..Default::default()
     };
 
@@ -248,10 +248,10 @@ async fn nonce_gaps_eviction() {
     //
     // This test also inserts nonce gaps into the non-blob transactions.
     let pool_config = PoolConfig {
-        pending_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        queued_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        basefee_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
-        blob_limit: SubPoolLimit { max_txs: 20, max_size: 2000 },
+        pending_limit: SubPoolLimit::new(20, 2000),
+        queued_limit: SubPoolLimit::new(20, 2000),
+        basefee_limit: SubPoolLimit::new(20, 2000),
+        blob_limit: SubPoolLimit::new(20, 2000),
         ..Default::default()
     };
 

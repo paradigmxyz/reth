@@ -1042,16 +1042,16 @@ mod tests {
 
     fn test_block() -> RecoveredBlock<Block> {
         RecoveredBlock::new_unhashed(
-            Block {
-                header: Header { number: 1, ..Default::default() },
-                body: BlockBody {
+            Block::new(
+                Header { number: 1, ..Default::default() },
+                BlockBody {
                     transactions: vec![TransactionSigned::new_unhashed(
                         Transaction::Legacy(Default::default()),
                         Signature::test_signature(),
                     )],
                     ..Default::default()
                 },
-            },
+            ),
             vec![Address::ZERO],
         )
     }

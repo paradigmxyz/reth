@@ -198,16 +198,15 @@ where
             }
         }
 
-        if provider.cached_storage_settings().storage_v2 {
+        if provider.cached_storage_settings().is_v2() {
             provider.commit_pending_rocksdb_batches()?;
             provider.rocksdb_provider().flush(&[Tables::TransactionHashNumbers.name()])?;
         }
 
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(input.target())
+        Ok(ExecOutput::done(
+            StageCheckpoint::new(input.target())
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: true,
-        })
+        ))
     }
 
     /// Unwind the stage.

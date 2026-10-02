@@ -135,7 +135,7 @@ where
 {
     /// Create new account cursor which combines a DB cursor and the post state.
     pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
+        let post_state_cursor = ForwardInMemoryCursor::new(post_state.accounts());
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,

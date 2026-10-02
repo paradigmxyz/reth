@@ -278,7 +278,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -315,7 +315,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -350,8 +350,8 @@ mod tests {
         let mut parent_hash = chain_spec.genesis_hash();
 
         for (i, nonce) in (1..=n).zip(0..n) {
-            let block = Block {
-                header: Header {
+            let block = Block::new(
+                Header {
                     parent_hash,
                     // Hardcoded receipts_root matching the original test (same tx in each block)
                     receipts_root: b256!(
@@ -363,7 +363,7 @@ mod tests {
                     gas_used: MIN_TRANSACTION_GAS,
                     ..Default::default()
                 },
-                body: BlockBody {
+                BlockBody {
                     transactions: vec![sign_tx_with_key_pair(
                         key_pair,
                         Transaction::Eip2930(TxEip2930 {
@@ -378,7 +378,7 @@ mod tests {
                     )],
                     ..Default::default()
                 },
-            }
+            )
             .try_into_recovered()?;
 
             parent_hash = block.hash();
@@ -418,7 +418,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;

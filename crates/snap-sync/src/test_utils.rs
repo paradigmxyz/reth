@@ -507,7 +507,7 @@ impl SnapClient for ScriptedSnapClient {
         request: GetAccountRangeMessage,
         _priority: Priority,
     ) -> Self::Output {
-        self.origins.lock().unwrap().push(request.starting_hash);
+        self.origins().push(request.starting_hash);
         self.next_response()
     }
 
@@ -521,7 +521,7 @@ impl SnapClient for ScriptedSnapClient {
         _priority: Priority,
     ) -> Self::Output {
         let from = request.starting_hash.unwrap_or(B256::ZERO);
-        self.storage_requests.lock().unwrap().push((request.account_hashes, from));
+        self.storage_requests().push((request.account_hashes, from));
         if let Some(hook) = self.on_storage_request.lock().unwrap().take() {
             hook();
         }
@@ -537,7 +537,7 @@ impl SnapClient for ScriptedSnapClient {
         request: GetByteCodesMessage,
         _priority: Priority,
     ) -> Self::Output {
-        self.code_requests.lock().unwrap().push(request.hashes);
+        self.code_requests().push(request.hashes);
         self.next_response()
     }
 
@@ -546,7 +546,7 @@ impl SnapClient for ScriptedSnapClient {
         request: GetBlockAccessListsMessage,
         _priority: Priority,
     ) -> Self::Output {
-        self.block_requests.lock().unwrap().push(request.block_hashes);
+        self.block_requests().push(request.block_hashes);
         if let Some(hook) = self.on_block_request.lock().unwrap().take() {
             hook();
         }

@@ -124,7 +124,7 @@ where
     ) -> Result<(), ConsensusError> {
         let res = validation::validate_block_post_execution_with_bal_hashes(
             block,
-            &self.chain_spec,
+            self.chain_spec(),
             result,
             receipt_root_bloom,
             block_access_list_hash,
@@ -155,7 +155,7 @@ where
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, &self.chain_spec)
+        validate_block_pre_execution(block, self.chain_spec())
     }
 
     fn validate_block_pre_execution_with_tx_root(
@@ -163,7 +163,7 @@ where
         block: &SealedBlock<B>,
         transaction_root: Option<TransactionRoot>,
     ) -> Result<(), ConsensusError> {
-        validate_block_pre_execution_with_tx_root(block, &self.chain_spec, transaction_root)
+        validate_block_pre_execution_with_tx_root(block, self.chain_spec(), transaction_root)
     }
 }
 
@@ -206,9 +206,9 @@ where
                 }
             }
         }
-        validate_header_extra_data(header, self.max_extra_data_size)?;
+        validate_header_extra_data(header, self.max_extra_data_size())?;
         validate_header_gas(header)?;
-        validate_header_base_fee(header, &self.chain_spec)?;
+        validate_header_base_fee(header, self.chain_spec())?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
@@ -276,13 +276,13 @@ where
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
         if !self.skip_gas_limit_ramp_check {
-            validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+            validate_against_parent_gas_limit(header, parent, self.chain_spec())?;
         }
 
         validate_against_parent_eip1559_base_fee(
             header.header(),
             parent.header(),
-            &self.chain_spec,
+            self.chain_spec(),
         )?;
 
         // ensure that the blob gas fields for this block
@@ -328,7 +328,10 @@ mod tests {
     fn prague_recovered_block_with_bal_hash(hash: B256) -> RecoveredBlock<EthBlock> {
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(hash);
-        RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new())
+        reth_primitives_traits::Block::into_recovered_with_signers(
+            EthBlock { header, body: Default::default() },
+            Vec::new(),
+        )
     }
 
     #[test]

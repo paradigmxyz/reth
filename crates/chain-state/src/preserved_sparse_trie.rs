@@ -136,7 +136,7 @@ mod tests {
 
         assert_eq!(preserved.block_hash(), block_hash);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
-        tx.send(SparseTrie::default()).unwrap();
+        tx.send(SparseTrie::new()).unwrap();
         assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
     }
 
@@ -149,6 +149,6 @@ mod tests {
         let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
 
         assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
-        assert!(tx.send(SparseTrie::default()).is_err());
+        assert!(tx.send(SparseTrie::new()).is_err());
     }
 }

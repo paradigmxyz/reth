@@ -565,10 +565,10 @@ mod tests {
         }
 
         let best = pool.best().without_updates();
-        let mut filter =
-            BestTransactionFilter::new(best, |_: &Arc<ValidPoolTransaction<MockTransaction>>| {
-                false
-            });
+        let mut filter = crate::BestTransactions::filter_transactions(
+            best,
+            |_: &Arc<ValidPoolTransaction<MockTransaction>>| false,
+        );
 
         assert_eq!(filter.size_hint(), (0, Some(3)));
         assert!(filter.next().is_none());
@@ -587,7 +587,7 @@ mod tests {
 
         let prioritized_tx = MockTransaction::eip1559().with_gas_price(5).with_gas_limit(200);
         let prioritized_sender = prioritized_tx.sender();
-        pool.add_transaction(Arc::new(f.validated(prioritized_tx)), 0);
+        pool.add_transaction(f.validated_arc(prioritized_tx), 0);
 
         let mut best = BestTransactionsWithPrioritizedSenders::new(
             AddressSet::from_iter([prioritized_sender]),
@@ -796,10 +796,10 @@ mod tests {
         let tx4 =
             MockTransaction::eip1559().rng_hash().with_nonce(3).with_max_fee(base_fee as u128 - 5);
 
-        pool.add_transaction(Arc::new(f.validated(tx1.clone())), 0);
-        pool.add_transaction(Arc::new(f.validated(tx2.clone())), 0);
-        pool.add_transaction(Arc::new(f.validated(tx3)), 0);
-        pool.add_transaction(Arc::new(f.validated(tx4)), 0);
+        pool.add_transaction(f.validated_arc(tx1.clone()), 0);
+        pool.add_transaction(f.validated_arc(tx2.clone()), 0);
+        pool.add_transaction(f.validated_arc(tx3), 0);
+        pool.add_transaction(f.validated_arc(tx4), 0);
 
         let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
 
@@ -948,10 +948,10 @@ mod tests {
         let best: Box<dyn crate::traits::BestTransactions<Item = _>> = Box::new(pool.best());
 
         // Create a filter that only returns transactions with even nonces
-        let filter =
-            BestTransactionFilter::new(best, |tx: &Arc<ValidPoolTransaction<MockTransaction>>| {
-                tx.nonce().is_multiple_of(2)
-            });
+        let filter = crate::BestTransactions::filter_transactions(
+            best,
+            |tx: &Arc<ValidPoolTransaction<MockTransaction>>| tx.nonce().is_multiple_of(2),
+        );
 
         // Verify that the filter only returns transactions with even nonces
         for tx in filter {
@@ -1047,7 +1047,7 @@ mod tests {
         // Add a non-blob transaction that satisfies the base fee
         let tx_non_blob =
             MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
-        pool.add_transaction(Arc::new(f.validated(tx_non_blob.clone())), 0);
+        pool.add_transaction(f.validated_arc(tx_non_blob.clone()), 0);
 
         // Add a blob transaction that satisfies both base fee and blob fee
         let tx_blob = MockTransaction::eip4844()
@@ -1055,7 +1055,7 @@ mod tests {
             .with_nonce(1)
             .with_max_fee(base_fee as u128 + 5)
             .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
-        pool.add_transaction(Arc::new(f.validated(tx_blob.clone())), 0);
+        pool.add_transaction(f.validated_arc(tx_blob.clone()), 0);
 
         let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
 

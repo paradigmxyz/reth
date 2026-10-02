@@ -89,7 +89,7 @@ fn tip_block() -> SealedBlock<reth_ethereum_primitives::Block> {
     let mut block = reth_ethereum_primitives::Block::default();
     block.header.gas_limit = 30_000_000;
     block.header.base_fee_per_gas = Some(BASE_FEE);
-    SealedBlock::seal_slow(block)
+    reth_primitives_traits::Block::seal_slow(block)
 }
 
 /// Builds a saturated pool: pending pool at its limit, basefee and queued pools populated.

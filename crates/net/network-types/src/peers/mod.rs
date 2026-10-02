@@ -109,11 +109,11 @@ impl Peer {
         reputation: i32,
         kind: ReputationChangeKind,
     ) -> ReputationChangeOutcome {
-        let previous = self.reputation;
+        let previous = self.reputation();
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), ?kind, "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation(), banned=%self.is_banned(), ?kind, "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();
@@ -134,7 +134,7 @@ impl Peer {
     /// Returns true if the peer's reputation is below the banned threshold.
     #[inline]
     pub const fn is_banned(&self) -> bool {
-        is_banned_reputation(self.reputation)
+        is_banned_reputation(self.reputation())
     }
 
     /// Returns `true` if peer is banned.

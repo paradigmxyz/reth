@@ -439,13 +439,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             .block_hash(head)?
             .expect("the hash for the latest block is missing, database is corrupt");
 
-        Ok(Head {
-            number: head,
-            hash,
-            difficulty: header.difficulty(),
-            total_difficulty: U256::ZERO,
-            timestamp: header.timestamp(),
-        })
+        Ok(Head::new(head, hash, header.difficulty(), U256::ZERO, header.timestamp()))
     }
 
     /// Attempt to look up the block number for the tip hash in the database.

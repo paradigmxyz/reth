@@ -17,7 +17,6 @@ use reth_network::{test_utils::Testnet, NetworkInfo, Peers, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::NetworkArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives_traits::SealedBlock;
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
@@ -132,7 +131,7 @@ async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
     invalid_block.header.block_access_list_hash = Some(B256::ZERO);
     assert_ne!(valid_bal_hash, B256::ZERO);
 
-    let invalid_block = SealedBlock::seal_slow(invalid_block);
+    let invalid_block = reth_primitives_traits::Block::seal_slow(invalid_block);
     let invalid_hash = invalid_block.hash();
     let genesis_hash = node.block_hash(0);
 
@@ -346,7 +345,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Setup wallet
     let chain_id = chain_spec.chain().into();
-    let wallet = Wallet::new(1).inner;
+    let wallet = Wallet::default().inner;
     let mut nonce = 0;
     let mut build_tx = || {
         let mut tx = TxEip1559 {

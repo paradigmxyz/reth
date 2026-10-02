@@ -348,7 +348,7 @@ impl<L> RpcServiceBuilder<L> {
     ///
     /// This logs each request and response for every call.
     pub fn rpc_logger(self, max_log_len: u32) -> RpcServiceBuilder<Stack<RpcLoggerLayer, L>> {
-        RpcServiceBuilder(self.0.layer(RpcLoggerLayer::new(max_log_len)))
+        self.layer(RpcLoggerLayer::new(max_log_len))
     }
 
     /// Wrap the service `S` with the middleware.

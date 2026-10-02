@@ -34,7 +34,7 @@ use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
@@ -1073,10 +1073,7 @@ fn test_disconnected_payload() {
 
     let outcome = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
     assert!(outcome.outcome.is_syncing());
 
@@ -1163,10 +1160,10 @@ async fn test_holesky_payload() {
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
                 cause: tracing::Span::none(),
-                payload: ExecutionData {
-                    payload: payload.clone().into(),
-                    sidecar: ExecutionPayloadSidecar::none(),
-                },
+                payload: ExecutionData::new(
+                    payload.clone().into(),
+                    ExecutionPayloadSidecar::none(),
+                ),
                 tx,
             }
             .into(),
@@ -1940,10 +1937,7 @@ fn test_on_new_payload_canonical_insertion() {
     // Case 1: Submit payload when NOT sync target head - should be syncing (disconnected)
     let outcome1 = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload1.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload1.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     // Since this is disconnected from genesis, it should be syncing
@@ -1995,10 +1989,7 @@ fn test_on_new_payload_invalid_ancestor() {
     // Submit payload 2 (child of invalid block 1)
     let outcome = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload2.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload2.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     // Verify response is INVALID
@@ -2016,7 +2007,7 @@ fn test_on_new_payload_invalid_ancestor() {
 
     // Verify block 2 is now also marked as invalid
     assert!(
-        test_harness.tree.state.invalid_headers.get(&hash2).is_some(),
+        test_harness.tree.state.has_invalid_header(&hash2),
         "Block should be added to invalid headers when parent is invalid"
     );
 }
@@ -2042,10 +2033,7 @@ fn test_on_new_payload_backfill_buffering() {
     // Submit payload during backfill
     let outcome = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     // Verify response is SYNCING
@@ -2088,10 +2076,7 @@ fn test_on_new_payload_malformed_payload() {
     // Submit the malformed payload
     let outcome = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     // For malformed payloads with incorrect hash, the current implementation
@@ -2133,10 +2118,7 @@ fn test_state_root_strategy_paths() {
     // Scenario 1: Test one strategy path
     let outcome1 = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload1.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload1.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     assert!(
@@ -2155,10 +2137,7 @@ fn test_state_root_strategy_paths() {
     // Scenario 2: Test different strategy path (disconnected)
     let outcome2 = test_harness
         .tree
-        .on_new_payload(ExecutionData {
-            payload: payload2.into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        })
+        .on_new_payload(ExecutionData::new(payload2.into(), ExecutionPayloadSidecar::none()))
         .unwrap();
 
     assert!(outcome2.outcome.is_syncing(), "Second strategy path should work");
@@ -2256,11 +2235,10 @@ mod check_invalid_ancestors_tests {
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
-        let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block())
-                .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block()).into(),
+            ExecutionPayloadSidecar::none(),
+        );
 
         // Check for invalid ancestors - should return None since none are marked invalid
         let result = test_harness.tree.find_invalid_ancestor(&payload);
@@ -2295,14 +2273,10 @@ mod check_invalid_ancestors_tests {
         let sealed2 = block2.seal_slow();
 
         // Create payload for block 2
-        let payload2 = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed2.hash(),
-                &sealed2.into_block(),
-            )
-            .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload2 = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(sealed2.hash(), &sealed2.into_block()).into(),
+            ExecutionPayloadSidecar::none(),
+        );
 
         // Check for invalid ancestors - should detect invalid parent
         let invalid_ancestor = test_harness.tree.find_invalid_ancestor(&payload2);
@@ -2327,14 +2301,14 @@ mod check_invalid_ancestors_tests {
         // Create a genesis-like payload with parent_hash = B256::ZERO
         let mut test_block_builder = TestBlockBuilder::eth();
         let genesis_block = test_block_builder.generate_random_block(0, B256::ZERO);
-        let genesis_payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
+        let genesis_payload = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(
                 genesis_block.hash(),
                 &genesis_block.into_block(),
             )
             .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+            ExecutionPayloadSidecar::none(),
+        );
 
         // Check for invalid ancestors - should return None for genesis block
         let result = test_harness.tree.find_invalid_ancestor(&genesis_payload);
@@ -2395,10 +2369,10 @@ mod check_invalid_ancestors_tests {
             .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
 
         // Create payload for block 1 (same block, sent again by CL)
-        let payload1 = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(hash1, &sealed1.into_block()).into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload1 = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(hash1, &sealed1.into_block()).into(),
+            ExecutionPayloadSidecar::none(),
+        );
 
         // find_invalid_ancestor should detect the block itself without re-execution
         let result = test_harness.tree.find_invalid_ancestor(&payload1);
@@ -2413,15 +2387,15 @@ mod check_invalid_ancestors_tests {
 
         // Intentionally corrupt the block to make it malformed
         // Modify the block after creation to make validation fail
-        let unsealed_block = block.unseal();
+        let unsealed_block = block.into_block();
 
         // Create payload with wrong hash (this makes it malformed)
         let wrong_hash = B256::from([0xff; 32]);
 
-        ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(wrong_hash, &unsealed_block).into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        }
+        ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(wrong_hash, &unsealed_block).into(),
+            ExecutionPayloadSidecar::none(),
+        )
     }
 }
 
@@ -2441,11 +2415,10 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
-                .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block()).into(),
+            ExecutionPayloadSidecar::none(),
+        );
 
         // Test the function directly
         let result = test_harness.tree.try_insert_payload(payload);
@@ -2483,11 +2456,10 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
-                .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload = ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block()).into(),
+            ExecutionPayloadSidecar::none(),
+        );
 
         // Test buffering during backfill sync
         let result = test_harness.tree.try_buffer_payload(payload);
@@ -2507,19 +2479,16 @@ mod payload_execution_tests {
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
 
         // Modify the block to make it malformed
-        let mut unsealed_block = block.unseal();
+        let mut unsealed_block = block.into_block();
 
         // Corrupt the block by setting an invalid gas limit
         unsealed_block.header.gas_limit = 0;
 
-        ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                unsealed_block.hash_slow(),
-                &unsealed_block,
-            )
-            .into(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        }
+        ExecutionData::new(
+            ExecutionPayloadV1::from_block_unchecked(unsealed_block.hash_slow(), &unsealed_block)
+                .into(),
+            ExecutionPayloadSidecar::none(),
+        )
     }
 }
 
@@ -3554,10 +3523,7 @@ proptest::proptest! {
             let (tx, mut rx) = unbounded_channel();
             let engine = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
             let callers = [tracing::info_span!("view_a"), tracing::info_span!("view_b")];
-            let payload = || ExecutionData {
-                payload: ExecutionPayloadV1::from_block_slow(&Block::default()).into(),
-                sidecar: ExecutionPayloadSidecar::none(),
-            };
+            let payload = || ExecutionData::new(ExecutionPayloadV1::from_block_slow(&Block::default()).into(), ExecutionPayloadSidecar::none());
             for &(caller, kind) in &requests {
                 callers[caller].in_scope(|| match kind {
                     0 => assert!(engine.new_payload(payload()).now_or_never().is_none()),

@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_provider::{
     network::{primitives::HeaderResponse, BlockResponse, Network},
-    ConnectionConfig, Provider, ProviderBuilder, WebSocketConfig,
+    ConnectionConfig, Provider, WebSocketConfig,
 };
 use alloy_rpc_types_engine::PayloadExtras;
 use alloy_transport::TransportResult;
@@ -33,7 +33,7 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider: Arc::new(
-                ProviderBuilder::default()
+                alloy_provider::builder()
                     .connect_with_config(
                         rpc_url,
                         ConnectionConfig::default().with_max_retries(u32::MAX).with_ws_config(

@@ -454,7 +454,7 @@ mod tests {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
             reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+                reth.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
@@ -465,7 +465,7 @@ mod tests {
         for chain in iter {
             let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
             let chain =
-                reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
+                reth.command.chain_spec().map(|c| c.chain().to_string()).unwrap_or(String::new());
             reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
             let log_dir = reth.logs.log_file_directory;
             let end = format!("reth/logs/{chain}");
@@ -480,7 +480,7 @@ mod tests {
         let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
             reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+                reth.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
@@ -494,7 +494,7 @@ mod tests {
         let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
             reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+                reth.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = "reth/logs".to_string();

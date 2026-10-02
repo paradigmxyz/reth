@@ -611,7 +611,7 @@ mod tests {
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
         let exex_head =
-            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+            ExExHead::new(BlockNumHash { number: genesis_block.number, hash: genesis_hash });
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -676,12 +676,12 @@ mod tests {
         let provider = BlockchainProvider::new(provider_factory.clone())?;
 
         let exex_head =
-            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+            ExExHead::new(BlockNumHash { number: genesis_block.number, hash: genesis_hash });
         let (notifications_tx, notifications_rx) = mpsc::channel(1);
 
         let evm_config = EthEvmConfig::mainnet();
         let mut notifications = ExExNotifications::new(
-            BlockNumHash { number: genesis_block.number, hash: genesis_hash },
+            BlockNumHash::new(genesis_block.number, genesis_hash),
             provider.clone(),
             evm_config.clone(),
             notifications_rx,
@@ -766,8 +766,8 @@ mod tests {
 
         let provider = BlockchainProvider::new(provider_factory)?;
 
-        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
-        let exex_head = ExExHead { block: node_head };
+        let node_head = BlockNumHash::new(genesis_block.number, genesis_hash);
+        let exex_head = ExExHead::new(node_head);
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -844,7 +844,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
-        let exex_head = ExExHead { block: exex_head_block.num_hash() };
+        let exex_head = ExExHead::new(exex_head_block.num_hash());
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
                 vec![exex_head_block.clone().try_recover()?],
@@ -925,10 +925,11 @@ mod tests {
         };
         wal.commit(&exex_head_notification)?;
 
-        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
-        let exex_head = ExExHead {
-            block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
-        };
+        let node_head = BlockNumHash::new(genesis_block.number, genesis_hash);
+        let exex_head = ExExHead::new(BlockNumHash {
+            number: exex_head_block.number,
+            hash: exex_head_block.hash(),
+        });
 
         let new_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -1010,7 +1011,7 @@ mod tests {
 
         // ExEx head is at genesis — backfill will run for block 1
         let exex_head =
-            ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
+            ExExHead::new(BlockNumHash { number: genesis_block.number, hash: genesis_hash });
 
         // Notification for a block AFTER the backfill range (block 2).
         let post_backfill_notification = ExExNotification::ChainCommitted {

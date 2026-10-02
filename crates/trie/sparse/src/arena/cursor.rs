@@ -173,7 +173,7 @@ impl ArenaCursor {
     /// Returns the absolute path of a child at `child_nibble` under the branch at the top of
     /// the stack. The result is `stack_head.path + branch.short_key + child_nibble`.
     pub(super) fn child_path(&self, arena: &NodeArena, child_nibble: u8) -> Nibbles {
-        let mut path = logical_branch_path(arena, self.stack.last().expect("cursor is non-empty"));
+        let mut path = self.head_logical_branch_path(arena);
         path.push_unchecked(child_nibble);
         path
     }

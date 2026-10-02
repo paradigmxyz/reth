@@ -175,7 +175,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             )]),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
-                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
+                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain()).unwrap(),
             withdrawals_root: Some(calculate_withdrawals_root(&[])),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
@@ -226,7 +226,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> ExecutedBlock {
         let block = self.generate_random_block(block_number, parent_hash);
         let senders = vec![self.signer; block.body().transactions.len()];
-        let recovered = RecoveredBlock::new_sealed(block, senders);
+        let recovered = block.with_senders(senders);
 
         if !self.with_state {
             let executed = ExecutedBlock::new(
@@ -474,7 +474,7 @@ mod tests {
             state.revert(1);
 
             assert_eq!(
-                state.state.get(&builder.signer).and_then(|account| account.info.clone()),
+                state.account(&builder.signer).and_then(|account| account.info.clone()),
                 expected_account,
                 "reverting must restore the signer's existence in the specified parent"
             );

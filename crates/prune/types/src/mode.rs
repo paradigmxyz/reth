@@ -147,7 +147,7 @@ mod tests {
                 Ok(Some(tip - (segment.min_blocks() + 1))),
             ),
             // Nothing to prune
-            (PruneMode::Before(tip + 1), Ok(None)),
+            (PruneMode::before_inclusive(tip), Ok(None)),
             (
                 PruneMode::Before(tip - MINIMUM_UNWIND_SAFE_DISTANCE),
                 Ok(Some(tip - MINIMUM_UNWIND_SAFE_DISTANCE - 1)),
@@ -200,8 +200,8 @@ mod tests {
                 tip - MINIMUM_UNWIND_SAFE_DISTANCE - 2,
                 should_prune,
             ),
-            (PruneMode::Before(tip + 1), 1, should_prune),
-            (PruneMode::Before(tip + 1), tip + 1, !should_prune),
+            (PruneMode::before_inclusive(tip), 1, should_prune),
+            (PruneMode::before_inclusive(tip), tip + 1, !should_prune),
         ];
 
         for (index, (mode, block, expected_result)) in tests.into_iter().enumerate() {

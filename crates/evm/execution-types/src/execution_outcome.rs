@@ -210,15 +210,15 @@ impl<T> ExecutionOutcome<T> {
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
+        HashedPostState::from_bundle_state::<KH>(self.bundle.state())
     }
 
     /// Transform block number to the index of block.
     pub const fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
-        if self.first_block > block_number {
+        if self.first_block() > block_number {
             return None
         }
-        let index = block_number - self.first_block;
+        let index = block_number - self.first_block();
         if index >= self.receipts.len() as u64 {
             return None
         }
@@ -277,7 +277,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Return last block of the execution outcome
     pub const fn last_block(&self) -> BlockNumber {
-        (self.first_block + self.len() as u64).saturating_sub(1)
+        (self.first_block() + self.len() as u64).saturating_sub(1)
     }
 
     /// Revert the state to the given block number.
@@ -316,7 +316,7 @@ impl<T> ExecutionOutcome<T> {
     where
         T: Clone,
     {
-        if at == self.first_block {
+        if at == self.first_block() {
             return (None, self)
         }
 
@@ -357,13 +357,13 @@ impl<T> ExecutionOutcome<T> {
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
-        let this_bundle = core::mem::take(&mut self.bundle);
+        let this_bundle = core::mem::take(self.state_mut());
         // extend other bundle with this
         other.extend(this_bundle);
         // discard other reverts
         other.take_n_reverts(other_len);
         // swap bundles
-        core::mem::swap(&mut self.bundle, &mut other)
+        core::mem::swap(self.state_mut(), &mut other)
     }
 
     /// Create a new instance with updated receipts.
@@ -462,7 +462,7 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
-                bundle: Cow::Borrowed(&value.bundle),
+                bundle: Cow::Borrowed(value.state()),
                 receipts: value
                     .receipts
                     .iter()
@@ -470,7 +470,7 @@ pub(super) mod serde_bincode_compat {
                         vec.iter().map(|receipt| Bytes::from(alloy_rlp::encode(receipt))).collect()
                     })
                     .collect(),
-                first_block: value.first_block,
+                first_block: value.first_block(),
                 requests: Cow::Borrowed(&value.requests),
             }
         }
@@ -547,14 +547,7 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
-            let data = Data {
-                data: ExecutionOutcome {
-                    bundle: Default::default(),
-                    receipts: vec![],
-                    first_block: 0,
-                    requests: vec![],
-                },
-            };
+            let data = Data { data: ExecutionOutcome::new(Default::default(), vec![], 0, vec![]) };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
@@ -711,12 +704,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts,                   // Include the created receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res = ExecutionOutcome::new(
+            Default::default(), // Default value for bundle
+            receipts,           // Include the created receipts
+            first_block,        // Set the first block number
+            vec![],             // Empty vector for requests
+        );
 
         // Get receipts for block number 123 and convert the result into a vector
         let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
@@ -751,12 +744,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts,                   // Include the created receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res = ExecutionOutcome::new(
+            Default::default(), // Default value for bundle
+            receipts,           // Include the created receipts
+            first_block,        // Set the first block number
+            vec![],             // Empty vector for requests
+        );
 
         // Assert that the length of receipts in exec_res is 1
         assert_eq!(exec_res.len(), 1);
@@ -765,12 +758,12 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome {
-            bundle: Default::default(), // Default value for bundle
-            receipts: receipts_empty,   // Include the empty receipts
-            requests: vec![],           // Empty vector for requests
-            first_block,                // Set the first block number
-        };
+        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome::new(
+            Default::default(), // Default value for bundle
+            receipts_empty,     // Include the empty receipts
+            first_block,        // Set the first block number
+            vec![],             // Empty vector for requests
+        );
 
         // Assert that the length of receipts in exec_res_empty_receipts is 0
         assert_eq!(exec_res_empty_receipts.len(), 0);
@@ -983,12 +976,8 @@ mod tests {
             },
         );
 
-        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
-            bundle: bundle_state,
-            receipts: Default::default(),
-            first_block: 0,
-            requests: vec![],
-        };
+        let execution_outcome: ExecutionOutcome =
+            ExecutionOutcome::new(bundle_state, Default::default(), 0, vec![]);
 
         // Get the changed accounts
         let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();

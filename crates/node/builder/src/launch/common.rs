@@ -82,7 +82,7 @@ use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
     stages::{EraImportSource, MerkleStage},
-    MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
+    MetricEvent, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
@@ -286,10 +286,7 @@ impl<T> LaunchContextWith<T> {
 
     /// Attaches another value to the launch context.
     pub fn attach<A>(self, attachment: A) -> LaunchContextWith<Attached<T, A>> {
-        LaunchContextWith {
-            inner: self.inner,
-            attachment: Attached::new(self.attachment, attachment),
-        }
+        self.inner.with(Attached::new(self.attachment, attachment))
     }
 
     /// Consumes the type and calls a function with a reference to the context.
@@ -589,7 +586,7 @@ where
                         stages.set(MerkleStage::new_unwind(true)).enable(StageId::MerkleUnwind);
                 }
 
-                PipelineBuilder::default().add_stages(stages).build(
+                reth_stages::Pipeline::builder().add_stages(stages).build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
@@ -682,10 +679,7 @@ where
         let factory = self
             .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
             .await?;
-        let ctx = LaunchContextWith {
-            inner: self.inner,
-            attachment: self.attachment.map_right(|_| factory),
-        };
+        let ctx = self.inner.with(self.attachment.map_right(|_| factory));
 
         Ok(ctx)
     }
@@ -697,7 +691,7 @@ where
 {
     /// Returns access to the underlying database.
     pub const fn database(&self) -> &T::DB {
-        self.right().db_ref()
+        self.provider_factory().db_ref()
     }
 
     /// Returns the configured `ProviderFactory`.
@@ -707,7 +701,7 @@ where
 
     /// Returns the static file provider to interact with the static files.
     pub fn static_file_provider(&self) -> StaticFileProvider<T::Primitives> {
-        self.right().static_file_provider()
+        self.provider_factory().static_file_provider()
     }
 
     /// This launches the prometheus endpoint.
@@ -753,13 +747,13 @@ where
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: self.chain_id().to_string() },
+                ChainSpecInfo { name: reth_node_core::dirs::config_path_prefix(self.chain_id()) },
                 self.task_executor().clone(),
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),
             )
             .with_storage_settings_info(StorageSettingsInfo {
-                storage_v2: storage_settings.storage_v2,
+                storage_v2: storage_settings.is_v2(),
                 pruning_mode,
                 prune_config: serde_json::to_string(&prune_config)
                     .expect("serializing PruneConfig should not fail"),
@@ -800,18 +794,17 @@ where
     ) -> LaunchContextWith<Attached<WithConfigs<T::ChainSpec>, WithMeteredProvider<T>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
-        let with_metrics =
-            WithMeteredProvider { provider_factory: self.right().clone(), metrics_sender };
+        let with_metrics = WithMeteredProvider {
+            provider_factory: self.provider_factory().clone(),
+            metrics_sender,
+        };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let sync_metrics_listener = reth_stages::MetricsListener::new(metrics_receiver);
         self.task_executor()
             .spawn_critical_task("stages metrics listener task", sync_metrics_listener);
 
-        LaunchContextWith {
-            inner: self.inner,
-            attachment: self.attachment.map_right(|_| with_metrics),
-        }
+        self.inner.with(self.attachment.map_right(|_| with_metrics))
     }
 }
 
@@ -853,10 +846,7 @@ where
             blockchain_db,
         };
 
-        let ctx = LaunchContextWith {
-            inner: self.inner,
-            attachment: self.attachment.map_right(|_| metered_providers),
-        };
+        let ctx = self.inner.with(self.attachment.map_right(|_| metered_providers));
 
         Ok(ctx)
     }
@@ -949,10 +939,7 @@ where
             sender_recovery_cache: builder_ctx.sender_recovery_cache().cloned(),
         };
 
-        let ctx = LaunchContextWith {
-            inner: self.inner,
-            attachment: self.attachment.map_right(|_| components_container),
-        };
+        let ctx = self.inner.with(self.attachment.map_right(|_| components_container));
 
         Ok(ctx)
     }

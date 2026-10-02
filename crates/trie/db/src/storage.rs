@@ -168,21 +168,21 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((1, address)),
-                StorageEntry { key: slot1, value: U256::from(10) },
+                StorageEntry::new(slot1, U256::from(10)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                StorageEntry { key: slot2, value: U256::from(20) },
+                StorageEntry::new(slot2, U256::from(20)),
             )
             .unwrap();
         provider
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((3, address)),
-                StorageEntry { key: slot1, value: U256::from(999) },
+                StorageEntry::new(slot1, U256::from(999)),
             )
             .unwrap();
 

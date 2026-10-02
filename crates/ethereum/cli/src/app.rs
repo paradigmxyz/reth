@@ -124,8 +124,11 @@ where
 
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.cli.command.chain_spec() {
-            self.cli.logs.log_file_directory =
-                self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
+            self.cli.logs.log_file_directory = self
+                .cli
+                .logs
+                .log_file_directory
+                .join(reth_node_core::dirs::config_path_prefix(chain_spec.chain()));
         }
 
         // Apply node-specific log defaults before initializing tracing

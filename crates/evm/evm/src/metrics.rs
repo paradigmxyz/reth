@@ -86,7 +86,7 @@ mod tests {
         // Use a dummy hash for testing
         let hash = B256::default();
         let sealed = block.seal_unchecked(hash);
-        RecoveredBlock::new_sealed(sealed, Default::default())
+        sealed.with_senders(Default::default())
     }
 
     #[test]

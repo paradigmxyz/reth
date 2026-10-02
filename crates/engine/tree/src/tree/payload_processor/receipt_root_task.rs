@@ -222,7 +222,7 @@ mod tests {
                 logs: vec![],
             },
             Receipt {
-                tx_type: TxType::Eip1559,
+                tx_type: alloy_consensus::TxEip1559::tx_type(),
                 cumulative_gas_used: 42000,
                 success: true,
                 logs: vec![Log {
@@ -231,7 +231,7 @@ mod tests {
                 }],
             },
             Receipt {
-                tx_type: TxType::Eip2930,
+                tx_type: alloy_consensus::TxEip2930::tx_type(),
                 cumulative_gas_used: 63000,
                 success: false,
                 logs: vec![],

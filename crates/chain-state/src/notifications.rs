@@ -354,7 +354,7 @@ mod tests {
         body.transactions.push(tx);
 
         let block = SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
-            SealedHeader::seal_slow(alloy_consensus::Header::default()),
+            <SealedHeader as Default>::default(),
             body,
         )
         .try_recover()
@@ -425,7 +425,7 @@ mod tests {
         body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut old_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
-                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                <SealedHeader as Default>::default(),
                 body,
             )
             .try_recover()
@@ -454,7 +454,7 @@ mod tests {
         body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut new_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
-                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                <SealedHeader as Default>::default(),
                 body,
             )
             .try_recover()
