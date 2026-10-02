@@ -776,7 +776,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     }
 
     /// Anchors an empty non-header segment so the next append starts at `block + 1`.
-    /// Preserves the file's expected range; refuses segments containing blocks or rows.
+    /// Preserves the file's expected range, since reopening derives the file name from it;
+    /// refuses segments containing blocks or rows.
     pub fn initialize_pruned_anchor(&mut self, block: BlockNumber) -> ProviderResult<()> {
         let header = self.user_header();
         if header.segment().is_headers() ||
@@ -923,12 +924,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
+        let block_start = self.writer.user_header().block_start().unwrap_or(expected_block_start);
+
         // Find the number of rows to keep (up to and including last_block)
-        let blocks_to_keep = if last_block >= expected_block_start {
-            last_block - expected_block_start + 1
-        } else {
-            0
-        };
+        let blocks_to_keep =
+            if last_block >= block_start { last_block - block_start + 1 } else { 0 };
 
         // Read changeset offsets from sidecar file to find where to truncate
         let csoff_path = self.data_path.with_extension("csoff");
@@ -976,7 +976,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         // Update the block range
-        self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+        self.writer.user_header_mut().set_block_range(block_start, last_block);
 
         // Sync changeset offsets to match the new block range
         self.writer.user_header_mut().sync_changeset_offsets();
@@ -1057,7 +1057,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     expected_block_start = self.writer.user_header().expected_block_start();
                 }
             }
-            self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
+            let block_start =
+                self.writer.user_header().block_start().unwrap_or(expected_block_start);
+            self.writer.user_header_mut().set_block_range(block_start, last_block);
         }
 
         // Commits new changes to disk.

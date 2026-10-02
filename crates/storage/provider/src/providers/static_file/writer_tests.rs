@@ -15,9 +15,12 @@ mod tests {
     use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader, StaticFileSegment};
     use std::{fs::OpenOptions, io::Write as _, path::PathBuf};
 
-    use crate::providers::{
-        static_file::manager::{StaticFileProviderBuilder, StaticFileWriter},
-        StaticFileProvider,
+    use crate::{
+        providers::{
+            static_file::manager::{StaticFileProviderBuilder, StaticFileWriter},
+            StaticFileProvider,
+        },
+        ChangeSetReader,
     };
     use reth_chain_state::EthPrimitives;
 
@@ -906,5 +909,37 @@ mod tests {
             provider.get_highest_static_file_block(StaticFileSegment::TransactionSenders),
             Some(250)
         );
+    }
+
+    #[test]
+    fn test_unwind_within_anchored_changesets() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for block in 11..=15 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(12).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=12).into()));
+        assert_eq!(header.changeset_offsets_len(), 3);
+        assert_eq!(get_nippy_row_count(&provider, 10), 4);
+        for block in 11..=12 {
+            assert_eq!(provider.account_block_changeset(block).unwrap().len(), 2, "{block}");
+        }
+        assert!(provider.account_block_changeset(13).unwrap().is_empty());
     }
 }
