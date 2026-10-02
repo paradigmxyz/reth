@@ -919,7 +919,7 @@ mod tests {
             );
 
             let storage = bundle_hashed_storage(&account).unwrap();
-            let hashed_slot = keccak256(B256::from(U256::from(1)));
+            let hashed_slot = keccak256(B256::with_last_byte(1));
             assert_eq!(storage.storage[&hashed_slot], U256::ZERO);
         }
     }
@@ -944,7 +944,7 @@ mod tests {
 
         let new_storage = bundle_hashed_storage(&new_account).unwrap();
         let existing_storage = bundle_hashed_storage(&existing_account).unwrap();
-        let hashed_slot = keccak256(B256::from(U256::from(1)));
+        let hashed_slot = keccak256(B256::with_last_byte(1));
         assert_eq!(new_storage.storage[&hashed_slot], value);
         assert_eq!(existing_storage.storage[&hashed_slot], value);
     }

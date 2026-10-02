@@ -1311,7 +1311,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2642,7 +2642,7 @@ Post-merge hard forks (timestamp based):
         let genesis: Genesis = serde_json::from_str(s).unwrap();
         let acc = genesis
             .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .get(&alloy_primitives::address!("0xaa00000000000000000000000000000000000000"))
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
         assert_eq!(genesis.base_fee_per_gas, Some(0x1337));
@@ -2654,7 +2654,7 @@ Post-merge hard forks (timestamp based):
         let genesis: Genesis = serde_json::from_str(s).unwrap();
         let acc = genesis
             .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .get(&alloy_primitives::address!("0xaa00000000000000000000000000000000000000"))
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
         // assert that the cancun time was picked up
@@ -2669,7 +2669,7 @@ Post-merge hard forks (timestamp based):
         // assert that the alloc was picked up
         let acc = genesis
             .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .get(&alloy_primitives::address!("0xaa00000000000000000000000000000000000000"))
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
         // assert that the cancun time was picked up
@@ -2686,7 +2686,7 @@ Post-merge hard forks (timestamp based):
         // assert that the alloc was picked up
         let acc = genesis
             .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
+            .get(&alloy_primitives::address!("0xaa00000000000000000000000000000000000000"))
             .unwrap();
         assert_eq!(acc.balance, U256::from(1));
         // assert that the cancun time was picked up
@@ -2716,9 +2716,9 @@ Post-merge hard forks (timestamp based):
         let mut header = default_chainspec.genesis_header().clone();
 
         // set the state root to the same as in the hive test the hash was pulled from
-        header.state_root =
-            B256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
-                .unwrap();
+        header.state_root = alloy_primitives::b256!(
+            "0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4"
+        );
 
         // shanghai is activated so we should have a withdrawals root
         assert_eq!(header.withdrawals_root, Some(EMPTY_WITHDRAWALS));

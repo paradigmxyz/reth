@@ -210,7 +210,7 @@ where
         Ok(EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
-            self.chain_spec().chain().id(),
+            self.chain_spec().chain_id(),
             self.chain_spec().blob_params_at_timestamp(header.timestamp),
         ))
     }
@@ -231,7 +231,7 @@ where
             },
             self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
             self.chain_spec(),
-            self.chain_spec().chain().id(),
+            self.chain_spec().chain_id(),
             self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
         ))
     }
@@ -296,7 +296,7 @@ where
 
         // configure evm env based on parent block
         let mut cfg_env = CfgEnv::new()
-            .with_chain_id(self.chain_spec().chain().id())
+            .with_chain_id(self.chain_spec().chain_id())
             .with_spec_and_mainnet_gas_params(spec);
 
         if let Some(blob_params) = &blob_params {

@@ -248,8 +248,8 @@ mod tests {
             gas_price: Some(1000u128),
             value: Some(U256::from(1000)),
             input: TransactionInput {
-                data: Some(Bytes::from(message.to_vec())),
-                input: Some(Bytes::from(message.to_vec())),
+                data: Some(Bytes::from(*message)),
+                input: Some(Bytes::from(*message)),
             },
             nonce: Some(0u64),
             ..Default::default()
@@ -258,6 +258,6 @@ mod tests {
             signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
-        assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);
+        assert_eq!(Bytes::from(*message), txn_signed.unwrap().input().0);
     }
 }

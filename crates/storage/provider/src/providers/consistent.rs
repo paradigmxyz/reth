@@ -1121,7 +1121,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .flatten()
                 .flat_map(|revert: PlainStorageRevert| {
                     revert.storage_revert.into_iter().map(move |(key, value)| {
-                        let plain_key = B256::from(key.to_be_bytes());
+                        let plain_key = B256::from(key);
                         (
                             BlockNumberAddress((block_number, revert.address)),
                             StorageEntry { key: plain_key, value: value.to_previous_value() },
@@ -1177,7 +1177,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                         return None
                     }
                     revert.storage_revert.into_iter().find_map(|(key, value)| {
-                        let plain_key = B256::from(key.to_be_bytes());
+                        let plain_key = B256::from(key);
                         (plain_key == storage_key).then(|| StorageEntry {
                             key: plain_key,
                             value: value.to_previous_value(),
@@ -1226,7 +1226,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                     .flatten()
                     .flat_map(|revert: PlainStorageRevert| {
                         revert.storage_revert.into_iter().map(move |(key, value)| {
-                            let plain_key = B256::from(key.to_be_bytes());
+                            let plain_key = B256::from(key);
                             (
                                 BlockNumberAddress((state.number(), revert.address)),
                                 StorageEntry { key: plain_key, value: value.to_previous_value() },
@@ -1916,7 +1916,7 @@ mod tests {
             balance: U256::from(1000),
             ..Default::default()
         };
-        let slot = U256::from(0x42);
+        let slot = U256::from(0x0102);
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
@@ -1978,7 +1978,9 @@ mod tests {
         let db_changeset = consistent_provider.storage_changeset(0)?;
         let mem_changeset = consistent_provider.storage_changeset(1)?;
 
-        let slot_b256 = B256::from(slot);
+        let slot_b256 = alloy_primitives::b256!(
+            "0000000000000000000000000000000000000000000000000000000000000102"
+        );
 
         assert_eq!(db_changeset.len(), 1);
         assert_eq!(mem_changeset.len(), 1);
@@ -2015,7 +2017,7 @@ mod tests {
             balance: U256::from(1000),
             ..Default::default()
         };
-        let slot = U256::from(0x42);
+        let slot = U256::from(0x0102);
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
@@ -2085,7 +2087,9 @@ mod tests {
 
         assert_eq!(all_changesets.len(), 2, "should have one changeset entry per block");
 
-        let slot_b256 = B256::from(slot);
+        let slot_b256 = alloy_primitives::b256!(
+            "0000000000000000000000000000000000000000000000000000000000000102"
+        );
         let keys: Vec<B256> = all_changesets.iter().map(|(_, entry)| entry.key).collect();
 
         assert_eq!(

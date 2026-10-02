@@ -2654,7 +2654,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                     let mut storage = storage_revert
                         .into_iter()
-                        .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
+                        .map(|(k, v)| (B256::from(k), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
@@ -3805,7 +3805,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = B256::from(storage_key.to_be_bytes());
+                        let key = B256::from(*storage_key);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
@@ -5912,7 +5912,7 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = Address::with_last_byte(1);
-        let slot_key = B256::from(U256::from(42));
+        let slot_key = B256::with_last_byte(42);
 
         {
             let rocksdb = factory.rocksdb_provider();

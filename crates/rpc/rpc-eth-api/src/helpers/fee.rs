@@ -346,7 +346,7 @@ where
                         .provider()
                         .latest_header()
                         .map_err(Self::Error::from_eth_err)?
-                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                        .ok_or(EthApiError::HeaderNotFound(alloy_eips::BlockId::latest()))?;
                     let pending_base_fee = self
                         .provider()
                         .chain_spec()
@@ -414,7 +414,7 @@ where
                 .provider()
                 .latest_header()
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                .ok_or(EthApiError::HeaderNotFound(alloy_eips::BlockId::latest()))?;
             Ok(self
                 .provider()
                 .chain_spec()

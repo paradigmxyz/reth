@@ -549,7 +549,7 @@ where
     TraceApiClient::<TransactionRequest>::trace_call_many(
         client,
         vec![],
-        Some(BlockNumberOrTag::Latest.into()),
+        Some(alloy_eips::BlockId::latest()),
     )
     .await
     .unwrap_err();

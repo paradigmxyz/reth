@@ -544,14 +544,14 @@ mod tests {
         assert_eq!(expected.as_slice(), &alloy_rlp::encode(tx));
 
         let hash = transaction.signature_hash();
-        let expected =
-            B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
-                .unwrap();
+        let expected = alloy_primitives::b256!(
+            "daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53"
+        );
         assert_eq!(expected, hash);
 
-        let secret =
-            B256::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
+        let secret = alloy_primitives::b256!(
+            "4646464646464646464646464646464646464646464646464646464646464646"
+        );
         let signature = sign_message(secret, hash).unwrap();
 
         let expected = Signature::new(
