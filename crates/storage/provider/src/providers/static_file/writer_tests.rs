@@ -942,4 +942,31 @@ mod tests {
         }
         assert!(provider.account_block_changeset(13).unwrap().is_empty());
     }
+
+    #[test]
+    fn test_unwind_below_anchor_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for block in 11..=12 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(9).unwrap();
+            assert!(writer.commit().is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=12).into()));
+        assert_eq!(get_nippy_row_count(&provider, 10), 4);
+    }
 }

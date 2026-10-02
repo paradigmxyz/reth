@@ -924,6 +924,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
+        self.ensure_above_pruned_anchor(last_block)?;
         let block_start = self.writer.user_header().block_start().unwrap_or(expected_block_start);
 
         // Find the number of rows to keep (up to and including last_block)
@@ -1003,6 +1004,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// # Note
     /// Commits to the configuration file at the end.
     fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
+        if let Some(last_block) = last_block {
+            self.ensure_above_pruned_anchor(last_block)?;
+        }
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
@@ -1105,6 +1109,21 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .map_err(ProviderError::other)?
             .delete()
             .map_err(ProviderError::other)?;
+        Ok(())
+    }
+
+    /// Errors if the current file is anchored above `last_block`, since nothing below the anchor
+    /// is stored and the unwind cannot be applied.
+    fn ensure_above_pruned_anchor(&self, last_block: BlockNumber) -> ProviderResult<()> {
+        let header = self.writer.user_header();
+        if let Some(block_start) = header.block_start() &&
+            block_start > header.expected_block_start() &&
+            last_block < block_start
+        {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "cannot unwind below the pruned anchor",
+            )))
+        }
         Ok(())
     }
 
