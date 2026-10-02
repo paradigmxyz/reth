@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Transaction, TransactionReceipt};
-use eyre::{ensure, Result};
+use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
@@ -12,24 +12,6 @@ use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
 use reth_prune_types::PruneSegment;
 use std::time::Duration;
-
-/// Polls RPC until the given `tx_hash` is visible as pending (not yet mined).
-/// Prevents race conditions where `advance_block` is called before txs are in the pool.
-/// Returns the pending transaction.
-async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Result<Transaction> {
-    poll_until(format!("transaction {tx_hash} in the pending pool"), || async move {
-        let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
-        if let Some(tx) = &tx {
-            ensure!(
-                tx.block_number.is_none(),
-                "expected pending transaction {tx_hash}, but it is mined in block {:?}",
-                tx.block_number
-            );
-        }
-        Ok(tx)
-    })
-    .await
-}
 
 /// Polls `RocksDB` until the given `tx_hash` appears in `TransactionHashNumbers` and returns its
 /// `tx_number`.
@@ -84,9 +66,6 @@ async fn test_rocksdb_block_mining() -> Result<()> {
         let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
         let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
-        // Wait for tx to enter pending pool before mining
-        wait_for_pending_tx(&client, tx_hash).await?;
-
         let payload = node.advance_block().await?;
         let block = payload.block();
         assert_eq!(block.number(), i);
@@ -126,9 +105,6 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 
     let raw_tx = wallet.account(0).transfer(Address::random(), U256::from(100)).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-
-    // Wait for tx to enter pending pool before mining
-    wait_for_pending_tx(&client, tx_hash).await?;
 
     let payload = node.advance_block().await?;
     assert_eq!(payload.block().number(), 1);
@@ -190,11 +166,6 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
         tx_hashes.push(tx_hash);
     }
 
-    // Wait for all txs to appear in pending pool before mining
-    for tx_hash in &tx_hashes {
-        wait_for_pending_tx(&client, *tx_hash).await?;
-    }
-
     // Mine one block containing all 3 txs
     let payload = node.advance_block().await?;
     assert_eq!(payload.block().number(), 1);
@@ -248,18 +219,12 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     let tx_hash_1 =
         node.rpc.inject_tx(account.transfer(Address::random(), U256::from(100)).await).await?;
 
-    // Wait for both txs to appear in pending pool
-    wait_for_pending_tx(&client, tx_hash_0).await?;
-    wait_for_pending_tx(&client, tx_hash_1).await?;
-
     let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
 
     // Block 2: 1 transaction
     let tx_hash_2 =
         node.rpc.inject_tx(account.transfer(Address::random(), U256::from(100)).await).await?;
-
-    wait_for_pending_tx(&client, tx_hash_2).await?;
 
     let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
@@ -310,10 +275,8 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     let raw_tx = wallet.account(0).transfer(Address::random(), U256::from(100)).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
-    // Verify tx is in pending pool via RPC
+    // `inject_tx` returns after the pool accepted the tx, so it is immediately visible via RPC.
     let client = node.rpc_client().expect("RPC client");
-    wait_for_pending_tx(&client, tx_hash).await?;
-
     let pending_tx: Option<Transaction> =
         client.request("eth_getTransactionByHash", [tx_hash]).await?;
     assert!(pending_tx.is_some(), "Pending tx should be visible via RPC");
@@ -369,7 +332,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Mine block 1 with a transaction from account1
     let raw_tx1 = account1.transfer(Address::random(), U256::from(100)).await;
     let tx_hash1 = node.rpc.inject_tx(raw_tx1).await?;
-    wait_for_pending_tx(&client, tx_hash1).await?;
 
     let payload1 = node.advance_block().await?;
     let block1_hash = payload1.block().hash();
@@ -382,7 +344,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Mine block 2 with transaction from account1 (nonce 1)
     let raw_tx2 = account1.transfer(Address::random(), U256::from(100)).await;
     let tx_hash2 = node.rpc.inject_tx(raw_tx2).await?;
-    wait_for_pending_tx(&client, tx_hash2).await?;
 
     let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
@@ -394,7 +355,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Mine block 3 with transaction from account1 (nonce 2)
     let raw_tx3 = account1.transfer(Address::random(), U256::from(100)).await;
     let tx_hash3 = node.rpc.inject_tx(raw_tx3).await?;
-    wait_for_pending_tx(&client, tx_hash3).await?;
 
     let payload3 = node.advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
@@ -406,8 +366,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Now create an alternate block 2 using account2 (different wallet, avoids nonce conflict)
     // Inject a tx from account2 (nonce 0) before building the alternate block
     let raw_alt_tx = account2.transfer(Address::random(), U256::from(100)).await;
-    let alt_tx_hash = node.rpc.inject_tx(raw_alt_tx).await?;
-    wait_for_pending_tx(&client, alt_tx_hash).await?;
+    node.rpc.inject_tx(raw_alt_tx).await?;
 
     // Build an alternate payload (this builds on top of the current head, i.e., block 3)
     // But we want to reorg back to block 1, so we'll use the payload and then FCU to it
@@ -438,7 +397,6 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Mine another block to verify the chain can continue
     let raw_tx_final = account2.transfer(Address::random(), U256::from(100)).await;
     let tx_hash_final = node.rpc.inject_tx(raw_tx_final).await?;
-    wait_for_pending_tx(&client, tx_hash_final).await?;
 
     let final_payload = node.advance_block().await?;
     assert!(final_payload.block().number() > 3, "Should be able to mine block after reorg");
@@ -484,7 +442,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 1 with a transfer (nonce 0)
     let raw_tx1 = account.transfer(Address::random(), U256::from(100)).await;
     let tx_hash1 = node.rpc.inject_tx(raw_tx1).await?;
-    wait_for_pending_tx(&client, tx_hash1).await?;
 
     let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
@@ -499,7 +456,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 2 with another transfer (nonce 1)
     let raw_tx2 = account.transfer(Address::random(), U256::from(100)).await;
     let tx_hash2 = node.rpc.inject_tx(raw_tx2).await?;
-    wait_for_pending_tx(&client, tx_hash2).await?;
 
     let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
@@ -513,7 +469,6 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 3 with a third transfer (nonce 2)
     let raw_tx3 = account.transfer(Address::random(), U256::from(100)).await;
     let tx_hash3 = node.rpc.inject_tx(raw_tx3).await?;
-    wait_for_pending_tx(&client, tx_hash3).await?;
 
     let payload3 = node.advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
@@ -532,8 +487,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Each block needs a transaction because the payload builder requires non-empty payloads.
     for _ in 3..8 {
         let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
-        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-        wait_for_pending_tx(&client, tx_hash).await?;
+        node.rpc.inject_tx(raw_tx).await?;
         node.advance_block().await?;
     }
     // Allow the engine loop to process the persistence completions
@@ -613,7 +567,6 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
 
     let mut account = wallet.account(0);
     let sender = account.address();
-    let client = node.rpc_client().expect("RPC client");
 
     // Mine blocks one at a time with a delay so each save_blocks + pruner cycle
     // completes independently. The race fires every cycle (the pruner reads stale
@@ -622,7 +575,6 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     for block_number in 1..=TOTAL_BLOCKS {
         let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
         let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-        wait_for_pending_tx(&client, tx_hash).await?;
 
         let payload = node.advance_block().await?;
         assert_eq!(payload.block().number(), block_number);
@@ -743,7 +695,6 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     let contract_address = account.next_contract_address();
     let deploy_hash =
         node.rpc.inject_tx(account.deploy(init_code).gas_limit(100_000).await).await?;
-    wait_for_pending_tx(&client, deploy_hash).await?;
 
     let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
@@ -770,7 +721,6 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
 
         let call_bytes = account.call(contract_address, calldata).gas_limit(50_000).await;
         let tx_hash = node.rpc.inject_tx(call_bytes).await?;
-        wait_for_pending_tx(&client, tx_hash).await?;
 
         let payload = node.advance_block().await?;
         assert_eq!(payload.block().number(), block_num);
