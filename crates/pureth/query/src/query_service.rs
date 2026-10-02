@@ -232,19 +232,8 @@ const fn block_status_name(status: CanonicalityStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{TxLegacy, TxType};
-    use alloy_primitives::{Address, Log, Signature, TxKind};
-    use reth_ethereum_primitives::{
-        Block, BlockBody, Receipt, Transaction as EthereumTransaction, TransactionSigned,
-    };
-    use reth_primitives_traits::RecoveredBlock;
-    use reth_provider::{
-        providers::BlockchainProvider,
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, DBProvider, DatabaseProviderFactory, ExecutionOutcome, OriginalValuesKnown,
-        StateWriteConfig, StateWriter,
-    };
     use reth_pureth_receipt::{
+        test_utils::{historical_provider, singleton_receipts},
         MULTIPLE_LOGS_BLOCK_HASH, PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
     };
 
@@ -256,54 +245,6 @@ mod tests {
             path: path.to_owned(),
             include_proof: true,
         }
-    }
-
-    fn historical_provider(with_receipt: bool) -> (BlockchainProvider<MockNodeTypesWithDB>, B256) {
-        let factory = create_test_provider_factory();
-        let provider = factory.database_provider_rw().unwrap();
-        let transaction = TransactionSigned::new_unhashed(
-            EthereumTransaction::Legacy(TxLegacy {
-                to: TxKind::Call(Address::ZERO),
-                ..Default::default()
-            }),
-            Signature::test_signature(),
-        );
-        let block = RecoveredBlock::try_new_unhashed(
-            Block {
-                header: Default::default(),
-                body: BlockBody { transactions: vec![transaction], ..Default::default() },
-            },
-            vec![Address::repeat_byte(0x66)],
-        )
-        .unwrap();
-        let block_hash = block.hash();
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
-            success: true,
-            cumulative_gas_used: 21_000,
-            logs: vec![Log::new_unchecked(
-                Address::repeat_byte(0x11),
-                vec![B256::repeat_byte(0x22)],
-                Bytes::from_static(&[1, 2, 3]),
-            )],
-        };
-        provider.insert_block(&block).unwrap();
-        if with_receipt {
-            provider
-                .write_state(
-                    &ExecutionOutcome {
-                        first_block: 0,
-                        receipts: vec![vec![receipt]],
-                        ..Default::default()
-                    },
-                    OriginalValuesKnown::No,
-                    StateWriteConfig::default(),
-                )
-                .unwrap();
-        }
-        provider.commit().unwrap();
-
-        (BlockchainProvider::new(factory).unwrap(), block_hash)
     }
 
     #[test]
@@ -381,7 +322,12 @@ mod tests {
 
     #[test]
     fn reth_historical_snapshot_returns_a_verified_query_response() {
-        let (provider, block_hash) = historical_provider(true);
+        let expected = crate::vector_records::load_proof_case(
+            include_bytes!("../test-data/fixtures/v0/singleton_baseline/fixture.json"),
+            include_bytes!("../test-data/fixtures/v0/singleton_baseline/proof.json"),
+        )
+        .unwrap();
+        let (provider, block_hash) = historical_provider(Some(singleton_receipts()));
         assert_eq!(
             block_hash,
             alloy_primitives::b256!(
@@ -393,39 +339,9 @@ mod tests {
         let service = QueryService::from_reth(RethRootProvider::new(provider));
         let response = service.query(request.clone()).unwrap();
 
-        assert_eq!(response.value_ssz.as_ref(), &[0x11; 20]);
-        assert_eq!(
-            response.proof,
-            [
-                alloy_primitives::b256!(
-                    "a48111926253919152be5c26543604338b03a25791b6c6f4444bfdafacc5f771"
-                ),
-                alloy_primitives::b256!(
-                    "37cb3fcfce36a2c4aed31728b918c2572b0dd37ca5f38c8dc042f717a4624fa0"
-                ),
-                B256::ZERO,
-                alloy_primitives::b256!(
-                    "0100000000000000000000000000000000000000000000000000000000000000"
-                ),
-                B256::ZERO,
-                alloy_primitives::b256!(
-                    "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"
-                ),
-                alloy_primitives::b256!(
-                    "046cc3ec2d1bdde5d07df87754e5c8eb35ec226dd3aa569fe908394bd2c88a12"
-                ),
-                B256::ZERO,
-                alloy_primitives::b256!(
-                    "0100000000000000000000000000000000000000000000000000000000000000"
-                ),
-            ]
-        );
-        assert_eq!(
-            response.root,
-            alloy_primitives::b256!(
-                "5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33"
-            )
-        );
+        assert_eq!(response.value_ssz.as_ref(), expected.selected_address);
+        assert_eq!(response.proof, expected.branch);
+        assert_eq!(response.root, expected.root);
         assert_eq!(response.root_context, "reth_experimental_unanchored");
         assert_eq!(response.producer_revision, "reth-historical-receipt-provider-v0");
         assert_eq!(response.block_status, "canonical");
@@ -447,7 +363,7 @@ mod tests {
 
     #[test]
     fn reth_query_preserves_acquisition_errors() {
-        let (provider, block_hash) = historical_provider(false);
+        let (provider, block_hash) = historical_provider(None);
         let service = QueryService::from_reth(RethRootProvider::new(provider));
 
         assert!(matches!(
@@ -457,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn supplied_snapshot_rejects_context_mismatches() {
+    fn supplied_snapshot_checks_request_validation_and_block_hash() {
         let service = QueryService::new().unwrap();
         let snapshot =
             service.provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts, SCHEMA_ID).unwrap();

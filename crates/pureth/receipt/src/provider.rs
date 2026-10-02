@@ -340,8 +340,8 @@ fn log(address: Address, topics: Vec<B256>, data: &[u8]) -> Log {
     Log::new_unchecked(address, topics, Bytes::copy_from_slice(data))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
     use super::*;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
@@ -349,7 +349,7 @@ mod tests {
         StateWriteConfig, StateWriter,
     };
 
-    fn historical_provider(
+    pub fn historical_provider(
         receipts: Option<Vec<Receipt>>,
     ) -> (BlockchainProvider<MockNodeTypesWithDB>, B256) {
         let factory = create_test_provider_factory();
@@ -382,12 +382,20 @@ mod tests {
         (BlockchainProvider::new(factory).unwrap(), block_hash)
     }
 
-    fn singleton_receipts() -> Vec<Receipt> {
+    pub fn singleton_receipts() -> Vec<Receipt> {
         vec![receipt(
             21_000,
             vec![log(Address::repeat_byte(0x11), vec![B256::repeat_byte(0x22)], &[1, 2, 3])],
         )]
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        test_utils::{historical_provider, singleton_receipts},
+        *,
+    };
 
     #[test]
     fn reth_root_provider_returns_a_coherent_snapshot() {

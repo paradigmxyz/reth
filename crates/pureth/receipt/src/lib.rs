@@ -152,6 +152,9 @@ pub use provider::{
 pub use snapshot::ReceiptSnapshot;
 pub use tree::{RetainedNode, TreeConstructionError};
 
+#[cfg(any(test, feature = "test-utils"))]
+pub use provider::test_utils;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,6 +11,13 @@ description = "Pureth receipt and log types"
 [lints]
 workspace = true
 
+[features]
+test-utils = [
+    "reth-ethereum-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+]
+
 [dependencies]
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
