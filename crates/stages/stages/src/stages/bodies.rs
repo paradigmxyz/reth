@@ -7,8 +7,8 @@ use reth_db_api::{
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
-    StaticFileProviderFactory, StatsReader,
+    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, StaticFileProviderFactory,
+    StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -113,10 +113,7 @@ where
             // If we are already in the process of unwind, this might be fine because we will
             // fix the inconsistency right away.
             if let Some(unwind_to) = unwind_block {
-                let next_tx_num_after_unwind = provider
-                    .block_body_indices(unwind_to)?
-                    .map(|b| b.next_tx_num())
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
+                let next_tx_num_after_unwind = provider.next_tx_num_after_block(unwind_to)?;
 
                 // This means we need a deeper unwind.
                 if next_tx_num_after_unwind > next_static_file_tx_num {

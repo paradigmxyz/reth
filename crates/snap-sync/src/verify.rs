@@ -286,12 +286,15 @@ mod tests {
         test_utils::{account, hashed_factory, header, key, state_root},
         SnapGeneration, SnapStorageStore, StorageChunk,
     };
-    use alloy_primitives::{map::B256Map, Bytes, U256};
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::{map::B256Map, Bytes, Signature, U256};
     use reth_db_api::transaction::DbTxMut;
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
-        DatabaseProviderFactory, ProviderFactory, PruneCheckpointReader,
+        BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory, ProviderFactory,
+        PruneCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
@@ -587,6 +590,58 @@ mod tests {
         for segment in PruneSegment::variants().filter(|segment| !segment.is_contract_logs()) {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
             assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
+        }
+    }
+
+    #[test]
+    fn published_state_can_unwind_bodies_to_the_pivot() {
+        for tx_count in [0, 2] {
+            let factory = hashed_factory();
+            insert_chain(&factory, B256::ZERO);
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(1).unwrap();
+            factory
+                .static_file_provider()
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap()
+                .ensure_at_block(1)
+                .unwrap();
+            provider.commit().unwrap();
+
+            let body = BlockBody {
+                transactions: (0..tx_count)
+                    .map(|nonce| {
+                        TransactionSigned::new_unhashed(
+                            Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                            Signature::test_signature(),
+                        )
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_rw().unwrap();
+            assert_eq!(provider.block_body_indices(1).unwrap(), None);
+            assert_eq!(provider.next_tx_num_after_block(1).unwrap(), 0);
+            assert_eq!(provider.next_tx_num_after_block(2).unwrap(), tx_count);
+            provider.remove_bodies_above(1).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_ro().unwrap();
+            assert_eq!(provider.block_body_indices(1).unwrap(), None);
+            assert_eq!(provider.block_body_indices(2).unwrap(), None);
+            let static_files = factory.static_file_provider();
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(1)
+            );
+            assert_eq!(
+                static_files.get_highest_static_file_tx(StaticFileSegment::Transactions),
+                None
+            );
         }
     }
 }

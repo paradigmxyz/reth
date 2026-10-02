@@ -2839,10 +2839,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // get transaction receipts
-        let from_transaction_num = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let from_transaction_num = self.next_tx_num_after_block(block)?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_v2 {
@@ -3700,10 +3697,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             .prune_headers(highest_static_file_block.saturating_sub(block))?;
 
         // First transaction to be removed
-        let unwind_tx_from = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let unwind_tx_from = self.next_tx_num_after_block(block)?;
 
         // Last transaction to be removed
         let unwind_tx_to = self
@@ -3742,10 +3736,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         self.storage.writer().remove_block_bodies_above(self, block)?;
 
         // First transaction to be removed
-        let unwind_tx_from = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let unwind_tx_from = self.next_tx_num_after_block(block)?;
 
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
