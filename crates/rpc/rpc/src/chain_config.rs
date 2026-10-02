@@ -13,7 +13,7 @@ where
     C: EthChainSpec + EthereumHardforks + ?Sized,
 {
     let mut config = ChainConfig {
-        chain_id: spec.chain().id(),
+        chain_id: spec.chain_id(),
         terminal_total_difficulty_passed: spec.final_paris_total_difficulty().is_some(),
         terminal_total_difficulty: spec.ethereum_fork_activation(EthereumHardfork::Paris).ttd(),
         deposit_contract_address: spec.deposit_contract().map(|dc| dc.address),
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn sepolia_config_reports_its_chain_id() {
         let config = chain_config(&*SEPOLIA);
-        assert_eq!(config.chain_id, SEPOLIA.chain().id());
+        assert_eq!(config.chain_id, SEPOLIA.chain_id());
         assert_eq!(config.shanghai_time, Some(1_677_557_088));
         assert!(config.blob_schedule.contains_key("cancun"));
     }

@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn test_from_genesis_account_with_zeroed_storage_values() {
         // Create a GenesisAccount with storage containing zero values
-        let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::from([0x00; 32]))]);
+        let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::ZERO)]);
 
         let genesis_account = GenesisAccount {
             nonce: Some(3),

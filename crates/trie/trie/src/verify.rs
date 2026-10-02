@@ -551,8 +551,8 @@ mod tests {
 
         // Add storage for the account
         let mut storage1 = BTreeMap::new();
-        storage1.insert(keccak256(B256::from(U256::from(1))), U256::from(100));
-        storage1.insert(keccak256(B256::from(U256::from(2))), U256::from(200));
+        storage1.insert(keccak256(B256::with_last_byte(1)), U256::from(100));
+        storage1.insert(keccak256(B256::with_last_byte(2)), U256::from(200));
         storage_tries.insert(addr1, storage1);
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
@@ -623,7 +623,7 @@ mod tests {
             // Add some storage for each account
             let mut storage = BTreeMap::new();
             for j in 0..i {
-                storage.insert(keccak256(B256::from(U256::from(j))), U256::from(j as u64 * 10));
+                storage.insert(keccak256(B256::with_last_byte(j)), U256::from(j as u64 * 10));
             }
             if !storage.is_empty() {
                 storage_tries.insert(addr, storage);

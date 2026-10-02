@@ -177,9 +177,9 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock<Block>], path: &Path) -> std::i
 pub fn create_fcu_json(tip: &SealedBlock<Block>) -> serde_json::Value {
     serde_json::json!({
         "params": [{
-            "headBlockHash": format!("0x{:x}", tip.hash()),
-            "safeBlockHash": format!("0x{:x}", tip.hash()),
-            "finalizedBlockHash": format!("0x{:x}", tip.hash()),
+            "headBlockHash": tip.hash().to_string(),
+            "safeBlockHash": tip.hash().to_string(),
+            "finalizedBlockHash": tip.hash().to_string(),
         }]
     })
 }

@@ -899,7 +899,7 @@ mod tests {
         provider.add_account(
             target,
             ExtendedAccount::new(0, U256::ZERO)
-                .with_bytecode("4360005260206000f3".parse().unwrap()),
+                .with_bytecode(alloy_primitives::bytes!("4360005260206000f3")),
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });

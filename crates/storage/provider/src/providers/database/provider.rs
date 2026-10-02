@@ -5912,7 +5912,7 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = Address::with_last_byte(1);
-        let slot_key = B256::from(U256::from(42));
+        let slot_key = B256::with_last_byte(42);
 
         {
             let rocksdb = factory.rocksdb_provider();
