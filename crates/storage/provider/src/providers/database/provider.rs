@@ -879,12 +879,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        // Revert through Finish: deferred blocks can mask older trie writes below the frontier.
-        // Calculate changesets before modifying hashed state used to reconstruct historical tries.
         let finish =
             self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
                 ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
             })?;
+        
+        // Calculate changesets before modifying hashed state used to reconstruct historical tries.
         let trie_revert = self
             .overlay_manager
             .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
