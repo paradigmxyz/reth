@@ -795,6 +795,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
         self.writer.user_header_mut().set_block_range(block, block);
         if self.user_header().segment().is_change_based() {
+            self.writer.user_header_mut().set_changeset_offsets_len(1);
             self.current_changeset_offset = Some(ChangesetOffset::new(0, 0));
         }
         Ok(())
