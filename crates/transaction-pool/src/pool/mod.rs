@@ -176,7 +176,7 @@ where
     /// Create a new transaction pool instance.
     pub fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
         let mut pool = TxPool::new(ordering, config.clone());
-        pool.set_check_block_gas_limit(validator.check_block_gas_limit());
+        pool.set_block_gas_limit_policy(validator.block_gas_limit_policy());
         Self {
             identifiers: Default::default(),
             validator,
@@ -213,7 +213,7 @@ where
     pub fn set_block_info(&self, info: BlockInfo) {
         let outcome = {
             let mut pool = self.pool.write();
-            pool.set_check_block_gas_limit(self.validator.check_block_gas_limit());
+            pool.set_block_gas_limit_policy(self.validator.block_gas_limit_policy());
             pool.set_block_info(info)
         };
 
@@ -549,7 +549,7 @@ where
         // update the pool
         let outcome = {
             let mut pool = self.pool.write();
-            pool.set_check_block_gas_limit(self.validator.check_block_gas_limit());
+            pool.set_block_gas_limit_policy(self.validator.block_gas_limit_policy());
             pool.on_canonical_state_change(
                 block_info,
                 mined_transactions,
