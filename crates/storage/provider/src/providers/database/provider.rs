@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    ComputedTrieData, HashedPostStateSorted,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -3607,8 +3607,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            Default::default(),
-            Default::default(),
+            ComputedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -4054,7 +4053,8 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
@@ -4767,8 +4767,10 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            Arc::new(full_persist_hashed_state),
-            Arc::new(full_persist_trie_updates),
+            ComputedTrieData::new(
+                Arc::new(full_persist_hashed_state),
+                Arc::new(full_persist_trie_updates),
+            ),
         );
 
         let deferred_trie_hashed_state = HashedPostStateSorted::new(
@@ -4790,8 +4792,10 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            Arc::new(deferred_trie_hashed_state),
-            Arc::new(deferred_trie_updates),
+            ComputedTrieData::new(
+                Arc::new(deferred_trie_hashed_state),
+                Arc::new(deferred_trie_updates),
+            ),
         );
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -5516,8 +5520,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            Default::default(),
-            Default::default(),
+            ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5586,8 +5589,9 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                Arc::new(hashed_state),
-                Default::default(),
+                ComputedTrieData {
+                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+                },
             );
             blocks.push(executed);
         }
