@@ -828,16 +828,19 @@ where
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         let dirty_range = |prefix_set: &mut PrefixSet, upper_bound: Option<Nibbles>| {
             let uncalculated_lower_bound = uncalculated_lower_bound?;
-            // Stop at the cached path so the normal traversal can reuse its descendants.
-            // Revisiting a cached ancestor leaves no gap to scan.
-            let upper_bound = upper_bound.unwrap_or(*next_path).min(*next_path);
-            if uncalculated_lower_bound >= &upper_bound {
+
+            if upper_bound.as_ref().is_some_and(|upper| uncalculated_lower_bound >= upper) {
                 return None
             }
 
-            prefix_set
-                .contains_range(uncalculated_lower_bound..&upper_bound)
-                .then_some((*uncalculated_lower_bound, Some(upper_bound)))
+            match upper_bound {
+                Some(upper_bound) => prefix_set
+                    .contains_range(uncalculated_lower_bound..&upper_bound)
+                    .then_some((*uncalculated_lower_bound, Some(upper_bound))),
+                None => prefix_set
+                    .contains_from(uncalculated_lower_bound)
+                    .then_some((*uncalculated_lower_bound, None)),
+            }
         };
 
         let mut popped_child_path_upper = None;
@@ -863,12 +866,18 @@ where
             self.pop_branch(targets)?;
         }
 
+        // Bound only this post-pop scan at the cached path so traversal can reuse its descendants.
+        // The pre-pop check must finish dirty keys inside the branch before it is encoded.
+        //
         // An empty branch_stack is skipped because a popped local root does not need this check:
         // any gap before `next_path` was already returned by `try_pop_cached_branch`, and forward
         // traversal will split its extension and process later dirty keys as needed.
         if !self.branch_stack.is_empty() &&
             let Some(upper_bound) = popped_child_path_upper &&
-            let Some(range) = dirty_range(&mut self.prefix_set, upper_bound)
+            let Some(range) = dirty_range(
+                &mut self.prefix_set,
+                Some(upper_bound.unwrap_or(*next_path).min(*next_path)),
+            )
         {
             return Ok(Some(range))
         }
@@ -2241,6 +2250,13 @@ mod tests {
             })
         }
 
+        fn dirty_key_strategy() -> impl Strategy<Value = B256> {
+            // Vary both nibbles of each byte to cover adjacent branches and extensions.
+            prop::array::uniform8(0u8..4).prop_map(|nibbles| {
+                B256::right_padding_from(&Nibbles::from_nibbles(nibbles).pack())
+            })
+        }
+
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(4000))]
             #[test]
@@ -2263,16 +2279,22 @@ mod tests {
 
             #[test]
             fn proptest_proof_with_dirty_prefixes(
-                before in prop::collection::btree_map(prop::array::uniform4(0u8..4), 1u64..100, 0..40),
-                after in prop::collection::btree_map(prop::array::uniform4(0u8..4), 1u64..100, 0..40),
+                before in prop::collection::btree_map(dirty_key_strategy(), 1u64..100, 0..80),
+                changes in prop::collection::btree_map(dirty_key_strategy(), 0u64..100, 0..8),
+                retain_unchanged in any::<bool>(),
+                target_indices in prop::collection::vec((0usize..100, 0usize..9), 0..10),
             ) {
-                // Small nibble alphabets exercise shared prefixes, extensions and branch collapse.
                 let before = before.into_iter()
-                    .map(|(key, value)| (B256::right_padding_from(&key), U256::from(value)))
+                    .map(|(key, value)| (key, U256::from(value)))
                     .collect::<BTreeMap<_, _>>();
-                let after = after.into_iter()
-                    .map(|(key, value)| (B256::right_padding_from(&key), U256::from(value)))
-                    .collect::<BTreeMap<_, _>>();
+                let mut after = if retain_unchanged { before.clone() } else { BTreeMap::new() };
+                for (key, value) in changes {
+                    if value == 0 {
+                        after.remove(&key);
+                    } else {
+                        after.insert(key, U256::from(value));
+                    }
+                }
                 let prefix_set = PrefixSetMut::from(
                     before.keys().chain(after.keys())
                         .filter(|key| before.get(*key) != after.get(*key))
@@ -2281,6 +2303,14 @@ mod tests {
                 let expected_root = crate::test_utils::storage_root_prehashed(
                     after.iter().map(|(key, value)| (*key, *value)),
                 );
+                let mut targets = vec![ProofV2Target::new(B256::ZERO)];
+                let keys = before.keys().chain(after.keys()).copied().collect::<Vec<_>>();
+                if !keys.is_empty() {
+                    for (index, len) in target_indices {
+                        targets.push(ProofV2Target::new(keys[index % keys.len()])
+                            .with_parent(ProofV2TargetParent::new(len)));
+                    }
+                }
                 let harness = TrieTestHarness::new(before);
                 let hashed_factory = MockHashedCursorFactory::new(
                     BTreeMap::new(),
@@ -2292,7 +2322,6 @@ mod tests {
                     .hashed_storage_cursor(harness.hashed_address()).unwrap();
                 let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
                     .with_prefix_set(prefix_set);
-                let mut targets = [ProofV2Target::new(B256::ZERO)];
                 let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
 
                 prop_assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
@@ -2891,6 +2920,43 @@ mod tests {
             .visited_storage_keys(harness.hashed_address())
             .iter()
             .any(|visit| visit.visited_key == Some(clean_key)));
+    }
+
+    #[test]
+    fn test_prefix_set_finishes_branch_before_returning_to_ancestor() {
+        let storage =
+            [[0x10, 0x00, 0x00], [0x12, 0x10, 0x00], [0x12, 0x10, 0x20], [0x12, 0x11, 0x00]]
+                .into_iter()
+                .map(|key| (B256::right_padding_from(&key), U256::from(1)))
+                .collect();
+        let harness = TrieTestHarness::new(storage);
+        let changes = BTreeMap::from([
+            (B256::right_padding_from(&[0x12, 0x00]), U256::from(1)),
+            (B256::right_padding_from(&[0x12, 0x20]), U256::from(1)),
+        ]);
+        let mut after = harness.storage().clone();
+        after.extend(changes.clone());
+        let expected_root = crate::test_utils::storage_root_prehashed(
+            after.iter().map(|(key, value)| (*key, *value)),
+        );
+        let hashed_factory = MockHashedCursorFactory::new(
+            BTreeMap::new(),
+            [(harness.hashed_address(), after)].into_iter().collect(),
+        );
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = hashed_factory.hashed_storage_cursor(harness.hashed_address()).unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor)
+            .with_prefix_set(PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze());
+        let mut targets = [
+            ProofV2Target::new(B256::ZERO),
+            ProofV2Target::new(B256::right_padding_from(&[0x10]))
+                .with_parent(ProofV2TargetParent::new(0)),
+        ];
+
+        // Returning to cached ancestor 0x1 must finish dirty sibling 0x122 before encoding 0x12.
+        let proof = calculator.storage_proof(harness.hashed_address(), &mut targets).unwrap();
+        assert_eq!(calculator.compute_root_hash(&proof).unwrap(), Some(expected_root));
     }
 
     /// Helper to compute the keccak256 hash of a storage leaf node. The `short_key` is the
