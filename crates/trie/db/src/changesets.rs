@@ -146,8 +146,8 @@ where
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let mut reverts = TrieUpdatesSorted::default();
-    let mut next = (!blocks.is_empty()).then_some(*blocks.end());
-    while let Some(end) = next {
+    let mut end = *blocks.end();
+    while end >= *blocks.start() {
         let mut start = end;
         let mut forward = 0..0;
 
@@ -186,7 +186,10 @@ where
         let segment = TrieUpdatesSorted::merge_iter(std::iter::once(&segment_trie).chain(forward));
         overlay.extend_ref_and_sort(&segment);
         reverts.extend_ref_and_sort(&segment);
-        next = (start > *blocks.start()).then(|| start - 1);
+        if start == *blocks.start() {
+            break
+        }
+        end = start - 1;
     }
 
     Ok(reverts)
