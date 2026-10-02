@@ -19,6 +19,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::{debug_span, field, Instrument, Span};
 
 /// Represents a future outputting unit type and is sendable.
 type ValidationFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -246,12 +247,18 @@ where
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         let hash = *transaction.hash();
+        let parent = Span::current();
         let (tx, rx) = oneshot::channel();
         {
             let res = {
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
+                    let span = validation_span(&parent, &hash, 1);
+                    let res = validator
+                        .validate_transaction(origin, transaction)
+                        .instrument(span.clone())
+                        .await;
+                    record_validation_outcome(&span, &res);
                     let _ = tx.send(res);
                 });
                 self.to_validation_task.lock().await.send(fut).await
@@ -280,12 +287,15 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         let transactions: Vec<_> = transactions.into_iter().collect();
         let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
+        let parent = Span::current();
         let (tx, rx) = oneshot::channel();
         {
             let res = {
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
+                    let spans = validation_spans(&parent, transactions.iter().map(|(_, tx)| tx));
                     let res = validator.validate_transactions(transactions).await;
+                    record_validation_outcomes(&spans, &res);
                     let _ = tx.send(res);
                 });
                 self.to_validation_task.lock().await.send(fut).await
@@ -307,10 +317,13 @@ where
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         let transactions: Vec<_> = transactions.into_iter().collect();
         let hashes: Vec<_> = transactions.iter().map(|tx| *tx.hash()).collect();
+        let parent = Span::current();
         let (tx, rx) = oneshot::channel();
         let validator = self.validator.clone();
         let fut = Box::pin(async move {
+            let spans = validation_spans(&parent, transactions.iter());
             let res = validator.validate_transactions_with_origin(origin, transactions).await;
+            record_validation_outcomes(&spans, &res);
             let _ = tx.send(res);
         });
 
@@ -326,6 +339,68 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
+    }
+}
+
+/// Creates a debug `txpool.validate` span for a transaction that is about to be validated.
+///
+/// For batch validations, `batch_size` is the number of transactions validated together, and the
+/// span covers the validation of the whole batch.
+fn validation_span(parent: &Span, hash: &alloy_primitives::TxHash, batch_size: usize) -> Span {
+    debug_span!(
+        target: "txpool",
+        parent: parent,
+        "txpool.validate",
+        tx_hash = %hash,
+        batch_size,
+        outcome = field::Empty,
+        reason = field::Empty,
+    )
+}
+
+/// Creates one `txpool.validate` span per transaction of a validation batch, or none if the spans
+/// are disabled.
+fn validation_spans<'a, T: PoolTransaction + 'a>(
+    parent: &Span,
+    transactions: impl ExactSizeIterator<Item = &'a T>,
+) -> Vec<Span> {
+    if !tracing::enabled!(target: "txpool", tracing::Level::DEBUG) {
+        return Vec::new()
+    }
+    let batch_size = transactions.len();
+    transactions.map(|tx| validation_span(parent, tx.hash(), batch_size)).collect()
+}
+
+/// Records the validation outcome and the rejection reason on a `txpool.validate` span.
+fn record_validation_outcome<T: PoolTransaction>(
+    span: &Span,
+    outcome: &TransactionValidationOutcome<T>,
+) {
+    if span.is_disabled() {
+        return
+    }
+    match outcome {
+        TransactionValidationOutcome::Valid { .. } => {
+            span.record("outcome", "valid");
+        }
+        TransactionValidationOutcome::Invalid(_, err) => {
+            span.record("outcome", "invalid");
+            span.record("reason", field::display(err));
+        }
+        TransactionValidationOutcome::Error(_, err) => {
+            span.record("outcome", "error");
+            span.record("reason", field::display(err));
+        }
+    }
+}
+
+/// Records the validation outcomes of a batch on the spans created by [`validation_spans`].
+fn record_validation_outcomes<T: PoolTransaction>(
+    spans: &[Span],
+    outcomes: &[TransactionValidationOutcome<T>],
+) {
+    for (span, outcome) in spans.iter().zip(outcomes) {
+        record_validation_outcome(span, outcome);
     }
 }
 

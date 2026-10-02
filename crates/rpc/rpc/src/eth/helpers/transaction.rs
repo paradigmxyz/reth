@@ -43,6 +43,16 @@ where
     ) -> Result<B256, Self::Error> {
         let (tx, mut pool_transaction) = tx.split();
 
+        // Short span marking when the transaction was received.
+        drop(tracing::debug_span!(
+            target: "txpool",
+            "txpool.receive",
+            tx_hash = %pool_transaction.hash(),
+            sender = %pool_transaction.sender(),
+            nonce = alloy_consensus::Transaction::nonce(&pool_transaction),
+            origin = "rpc",
+        ));
+
         // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
         // This is opt-in via --rpc.force-blob-sidecar-upcasting
         if self.inner.force_blob_sidecar_upcasting() && pool_transaction.is_eip4844() {

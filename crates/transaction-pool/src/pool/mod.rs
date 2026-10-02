@@ -81,7 +81,8 @@ use crate::{
     },
     traits::{
         AllPoolTransactions, BestTransactionsAttributes, BlockInfo, GetPooledTransactionLimit,
-        NewBlobSidecar, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
+        NewBlobSidecar, PoolSize, PoolTransaction, PropagateKind, PropagatedTransactions,
+        TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction},
     CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
@@ -108,7 +109,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, field, trace, warn, Span};
 mod events;
 pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
 pub use blob::{blob_tx_priority, fee_delta, BlobOrd, BlobTransactions};
@@ -564,6 +565,7 @@ where
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } =
             self.pool.write().update_accounts(changed_senders);
+        trace_removed(discarded.iter().map(|tx| tx.hash()), "invalidated");
 
         self.notify_on_transaction_updates(promoted, discarded);
     }
@@ -605,6 +607,20 @@ where
                     }
                 };
 
+                let span = debug_span!(
+                    target: "txpool",
+                    "txpool.insert",
+                    tx_hash = %transaction.hash(),
+                    sender = %transaction.sender(),
+                    nonce = alloy_consensus::Transaction::nonce(&transaction),
+                    ?origin,
+                    subpool = field::Empty,
+                    outcome = field::Empty,
+                    replaced = field::Empty,
+                    reason = field::Empty,
+                );
+                let _enter = span.enter();
+
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
@@ -614,7 +630,9 @@ where
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
 
-                let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
+                let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash);
+                record_insert_outcome(&span, &added);
+                let added = match added {
                     Ok(added) => added,
                     Err(err) => return (Err(err), None),
                 };
@@ -711,6 +729,8 @@ where
         }
 
         if !discarded.is_empty() {
+            trace_removed(discarded.iter().map(|tx| tx.hash()), "pool_limit");
+
             // Delete any blobs associated with discarded blob transactions
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
@@ -743,6 +763,8 @@ where
     /// Performs blob storage operations and sends all notifications. This should be called
     /// after the pool write lock has been released to avoid blocking pool operations.
     fn on_added_transaction(&self, meta: AddedTransactionMeta<T::Transaction>) {
+        trace_replaced_and_discarded(&meta.added);
+
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
@@ -895,6 +917,8 @@ where
         }
 
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
+
+        trace_removed(discarded.iter().map(|tx| tx.hash()), "invalidated");
 
         // broadcast specific transaction events
         self.with_event_listener(|listener| {
@@ -1293,6 +1317,20 @@ where
         if txs.is_empty() {
             return
         }
+        if tracing::enabled!(target: "txpool", tracing::Level::DEBUG) {
+            for (hash, kinds) in &txs.0 {
+                let full =
+                    kinds.iter().filter(|kind| matches!(kind, PropagateKind::Full(_))).count();
+                let _span = debug_span!(
+                    target: "txpool",
+                    "txpool.propagate",
+                    tx_hash = %hash,
+                    peers = kinds.len(),
+                    full_peers = full,
+                    hash_peers = kinds.len() - full,
+                );
+            }
+        }
         self.with_event_listener(|listener| {
             txs.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
         });
@@ -1454,6 +1492,74 @@ where
                 transaction: next.clone(),
             })
         }
+    }
+}
+
+/// Emits a short debug `txpool.remove` span for each removed transaction hash.
+///
+/// The spans carry `tx_hash` and `reason` (e.g. `mined`, `replaced`, `pool_limit`, `stale`,
+/// `invalidated`), so a transaction's removal can be found by hash in exported traces.
+pub fn trace_removed<'a>(hashes: impl IntoIterator<Item = &'a TxHash>, reason: &'static str) {
+    if !tracing::enabled!(target: "txpool", tracing::Level::DEBUG) {
+        return
+    }
+    for hash in hashes {
+        let _span = debug_span!(target: "txpool", "txpool.remove", tx_hash = %hash, reason);
+    }
+}
+
+/// Records the result of inserting a transaction into a pool on a `txpool.insert` span.
+///
+/// Records `outcome` (`added`, `replaced`, or the rejection kind), `subpool` and the `replaced`
+/// transaction hash on success, and the rejection `reason` on failure.
+pub fn record_insert_outcome<T: PoolTransaction>(
+    span: &Span,
+    result: &PoolResult<AddedTransaction<T>>,
+) {
+    if span.is_disabled() {
+        return
+    }
+    match result {
+        Ok(added) => {
+            let subpool = match added.subpool() {
+                SubPool::Pending => "pending",
+                SubPool::Queued => "queued",
+                SubPool::BaseFee => "basefee",
+                SubPool::Blob => "blob",
+            };
+            span.record("subpool", subpool);
+            if let Some(replaced) = added.replaced() {
+                span.record("outcome", "replaced");
+                span.record("replaced", field::display(replaced.hash()));
+            } else {
+                span.record("outcome", "added");
+            }
+        }
+        Err(err) => {
+            let outcome = match &err.kind {
+                PoolErrorKind::AlreadyImported => "already_imported",
+                PoolErrorKind::ReplacementUnderpriced => "underpriced",
+                PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => "fee_cap_below_minimum",
+                PoolErrorKind::SpammerExceededCapacity(_) => "sender_limit",
+                PoolErrorKind::DiscardedOnInsert => "discarded",
+                PoolErrorKind::InvalidTransaction(_) => "invalid",
+                PoolErrorKind::ExistingConflictingTransactionType(..) => "conflicting_tx_type",
+                PoolErrorKind::Other(_) => "error",
+            };
+            span.record("outcome", outcome);
+            span.record("reason", field::display(&err.kind));
+        }
+    }
+}
+
+/// Emits `txpool.remove` spans for transactions replaced or discarded by an insertion.
+fn trace_replaced_and_discarded<T: PoolTransaction>(added: &AddedTransaction<T>) {
+    if !tracing::enabled!(target: "txpool", tracing::Level::DEBUG) {
+        return
+    }
+    trace_removed(added.replaced().map(|tx| tx.hash()), "replaced");
+    if let Some(discarded) = added.discarded_transactions() {
+        trace_removed(discarded.iter().map(|tx| tx.hash()), "invalidated");
     }
 }
 

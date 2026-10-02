@@ -289,7 +289,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     })
                     .collect();
                 debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
-                pool.remove_transactions(stale_txs);
+                let removed = pool.remove_transactions(stale_txs);
+                crate::pool::trace_removed(removed.iter().map(|tx| tx.hash()), "stale");
                 pool.delete_blobs(stale_blobs);
             }
         }

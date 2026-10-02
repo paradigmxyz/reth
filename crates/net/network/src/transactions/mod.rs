@@ -85,7 +85,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, debug_span, trace};
 
 /// The future for importing transactions into the pool.
 ///
@@ -1539,6 +1539,16 @@ where
         // Record the transactions as seen by the peer
         for tx in &new_txs {
             self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
+            let _span = debug_span!(
+                target: "txpool",
+                "txpool.receive",
+                tx_hash = %tx.hash(),
+                sender = %tx.sender(),
+                nonce = alloy_consensus::Transaction::nonce(tx),
+                origin = "p2p",
+                %peer_id,
+                source = if source.is_broadcast() { "broadcast" } else { "response" },
+            );
         }
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying

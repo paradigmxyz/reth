@@ -678,6 +678,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 removed_txs_count += 1;
+                super::trace_removed([tx_hash], "mined");
             }
         }
 
