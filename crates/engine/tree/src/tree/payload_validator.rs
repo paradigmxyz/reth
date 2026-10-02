@@ -1270,14 +1270,17 @@ where
 
             senders.push(tx_signer);
 
-            let _enter = tracing::enabled!(target: "engine::tree", Level::TRACE).then(|| {
-                tracing::trace_span!(
-                    target: "engine::tree",
-                    "execute tx",
-                    tx_index = senders.len() - 1,
-                )
-                .entered()
-            });
+            let span = debug_span!(
+                target: "engine::tree",
+                "execute tx",
+                tx_index = senders.len() - 1,
+                tx_hash = tracing::field::Empty,
+            );
+            if !span.is_disabled() {
+                let tx_hash = <Tx as alloy_evm::RecoveredTx<InnerTx>>::tx(&tx).tx_hash();
+                span.record("tx_hash", tracing::field::display(tx_hash));
+            }
+            let _enter = span.entered();
             if tracing::enabled!(target: "engine::tree", Level::TRACE) {
                 trace!(target: "engine::tree", "Executing transaction");
             }
