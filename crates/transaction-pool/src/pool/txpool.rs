@@ -18,8 +18,8 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    BlockGasLimitPolicy, PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig,
+    TransactionOrdering, ValidPoolTransaction, U256,
 };
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, KECCAK_EMPTY,
@@ -219,6 +219,11 @@ impl<T: TransactionOrdering> TxPool<T> {
             pending_basefee: self.all_transactions.pending_fees.base_fee,
             pending_blob_fee: Some(self.all_transactions.pending_fees.blob_fee),
         }
+    }
+
+    /// Sets the transaction gas budget checked against block capacity.
+    pub(crate) fn set_block_gas_limit_policy(&mut self, policy: BlockGasLimitPolicy) {
+        self.all_transactions.block_gas_limit_policy = policy;
     }
 
     /// Updates the tracked blob fee
@@ -1448,6 +1453,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     minimal_protocol_basefee: u64,
     /// The max gas limit of the block
     block_gas_limit: u64,
+    /// Transaction gas budget checked against block capacity on insertion.
+    block_gas_limit_policy: BlockGasLimitPolicy,
     /// Max number of executable transaction slots guaranteed per account
     max_account_slots: usize,
     /// _All_ transactions identified by their hash.
@@ -2003,7 +2010,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 })
             }
         }
-        if transaction.gas_limit() > self.block_gas_limit {
+        if self
+            .block_gas_limit_policy
+            .exceeds_block_gas_limit(transaction.gas_limit(), self.block_gas_limit)
+        {
             return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
                 block_gas_limit: self.block_gas_limit,
                 tx_gas_limit: transaction.gas_limit(),
@@ -2338,6 +2348,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            block_gas_limit_policy: BlockGasLimitPolicy::TotalGas,
             by_hash: Default::default(),
             txs: Default::default(),
             sender_info: Default::default(),
@@ -3540,6 +3551,50 @@ mod tests {
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
             Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
         ));
+    }
+
+    #[test]
+    fn insertion_block_gas_policy_can_be_disabled_and_restored() {
+        let mut factory = MockTransactionFactory::default();
+        let mut pool = AllTransactions {
+            block_gas_limit_policy: BlockGasLimitPolicy::Disabled,
+            ..Default::default()
+        };
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_001);
+        pool.insert_tx(factory.validated(tx), U256::MAX, 0).unwrap();
+        assert_eq!(pool.block_gas_limit, 30_000_000);
+
+        pool.block_gas_limit_policy = BlockGasLimitPolicy::TotalGas;
+        let tx = MockTransaction::eip1559().with_gas_limit(30_000_001);
+        assert!(matches!(
+            pool.insert_tx(factory.validated(tx), U256::MAX, 0),
+            Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
+        ));
+    }
+
+    #[test]
+    fn insertion_checks_execution_budget_when_state_gas_is_exempt() {
+        let cap = 16_777_216;
+        for (block_limit, gas_limit, valid) in
+            [(cap, cap + 1, true), (cap - 1, cap + 1, false), (cap - 1, cap - 1, true)]
+        {
+            let mut factory = MockTransactionFactory::default();
+            let mut pool = AllTransactions {
+                block_gas_limit_policy: BlockGasLimitPolicy::ExecutionGas { tx_gas_limit_cap: cap },
+                block_gas_limit: block_limit,
+                ..Default::default()
+            };
+            let tx = MockTransaction::eip1559().with_gas_limit(gas_limit);
+            let result = pool.insert_tx(factory.validated(tx), U256::MAX, 0);
+            if valid {
+                assert!(result.is_ok());
+            } else {
+                assert!(matches!(result, Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
+                    block_gas_limit, tx_gas_limit, ..
+                }) if block_gas_limit == block_limit && tx_gas_limit == gas_limit));
+            }
+            assert_eq!(pool.block_gas_limit, block_limit);
+        }
     }
 
     #[test]

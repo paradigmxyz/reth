@@ -297,7 +297,7 @@ pub use crate::{
     },
     traits::*,
     validate::{
-        EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
+        BlockGasLimitPolicy, EthTransactionValidator, StatefulValidationFn, StatelessValidationFn,
         TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
         ValidPoolTransaction,
     },
