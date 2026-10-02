@@ -73,9 +73,7 @@ use reth_provider::{
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory,
-    trie_cursor::TrieCursorFactory,
-    updates::{TrieUpdates, TrieUpdatesSorted},
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
 use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
@@ -436,7 +434,7 @@ pub struct StateRootJobOutcome {
     /// Computed state root.
     pub state_root: B256,
     /// Trie updates associated with the computed state root.
-    pub trie_updates: Arc<TrieUpdatesSorted>,
+    pub trie_updates: Arc<TrieUpdates>,
     /// Hashed post state recomputed by a fallback path.
     ///
     /// When set, the root was not derived from the streamed updates, so validation replaces its
@@ -446,7 +444,7 @@ pub struct StateRootJobOutcome {
 
 impl StateRootJobOutcome {
     /// Creates a state-root job outcome.
-    pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdatesSorted>) -> Self {
+    pub const fn new(state_root: B256, trie_updates: Arc<TrieUpdates>) -> Self {
         Self { state_root, trie_updates, hashed_state: None }
     }
 
@@ -959,10 +957,7 @@ impl<N: NodePrimitives> StateRootJob<N> for SkippedStateRootJob {
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        Ok(StateRootJobOutcome::new(
-            block.header().state_root(),
-            Arc::new(TrieUpdatesSorted::default()),
-        ))
+        Ok(StateRootJobOutcome::new(block.header().state_root(), Arc::new(TrieUpdates::default())))
     }
 }
 
@@ -997,7 +992,7 @@ where
         let provider = self.state_provider_factory.database_provider_ro()?;
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
-        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates.into_sorted())))
+        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
     }
 }
 
@@ -1065,7 +1060,7 @@ where
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
-        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates.into_sorted()))
+        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
             .with_hashed_state(Some(hashed_state)))
     }
 
@@ -1110,7 +1105,7 @@ where
             compare_trie_updates_with_serial(
                 self.state_provider_factory.clone(),
                 output,
-                trie_updates.as_ref().clone().into(),
+                trie_updates.as_ref().clone(),
             );
         }
 
@@ -1201,11 +1196,8 @@ where
             match fallback_rx.try_recv() {
                 Ok(Ok((state_root, trie_updates, hashed_state))) => {
                     self.metrics.state_root_task_fallback_success_total.increment(1);
-                    return Ok(StateRootJobOutcome::new(
-                        state_root,
-                        Arc::new(trie_updates.into_sorted()),
-                    )
-                    .with_hashed_state(Some(hashed_state)))
+                    return Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates))
+                        .with_hashed_state(Some(hashed_state)))
                 }
                 Ok(Err(err)) => return Err(err),
                 Err(mpsc::TryRecvError::Empty) => {}

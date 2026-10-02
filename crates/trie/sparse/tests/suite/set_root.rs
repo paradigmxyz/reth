@@ -90,8 +90,10 @@ pub(super) fn test_set_root_retains_updates_when_requested<T: SparseTrie>(new_tr
     // take_updates should return non-empty updates.
     let updates = trie.take_updates();
     assert!(
-        !updates.is_empty(),
-        "take_updates should be non-empty when retain_updates=true: {updates:?}",
+        !updates.updated_nodes.is_empty() || !updates.removed_nodes.is_empty(),
+        "take_updates should be non-empty when retain_updates=true: updated={}, removed={}",
+        updates.updated_nodes.len(),
+        updates.removed_nodes.len(),
     );
 }
 
@@ -124,8 +126,10 @@ pub(super) fn test_set_root_does_not_retain_updates_when_not_requested<T: Sparse
 
     let updates = trie.take_updates();
     assert!(
-        updates.is_empty(),
-        "take_updates should be empty when retain_updates=false: {updates:?}",
+        updates.updated_nodes.is_empty() && updates.removed_nodes.is_empty(),
+        "take_updates should be empty when retain_updates=false: updated={}, removed={}",
+        updates.updated_nodes.len(),
+        updates.removed_nodes.len(),
     );
 }
 
