@@ -30,11 +30,21 @@ use tokio_util::sync::CancellationToken;
 /// running.
 pub const DEFAULT_SCAN_CHUNK: u64 = 100_000;
 
-// Stages a published pivot does not satisfy: headers were downloaded for real, era files are
-// imported separately, the merkle stage still has to rebuild the trie, and `Finish` only advances
-// once the state is verified. Every other stage is covered by the downloaded state.
-const UNPUBLISHED_STAGES: [StageId; 4] =
-    [StageId::Era, StageId::Headers, StageId::MerkleExecute, StageId::Finish];
+// Stages the downloaded state covers. Headers and era import run on their own, the merkle stage
+// still rebuilds the trie, and `Finish` waits for verification.
+const PUBLISHED_STAGES: [StageId; 11] = [
+    StageId::Bodies,
+    StageId::SenderRecovery,
+    StageId::Execution,
+    StageId::PruneSenderRecovery,
+    StageId::MerkleUnwind,
+    StageId::AccountHashing,
+    StageId::StorageHashing,
+    StageId::TransactionLookup,
+    StageId::IndexStorageHistory,
+    StageId::IndexAccountHistory,
+    StageId::Prune,
+];
 
 /// Decides whether downloaded state can be trusted as the node's state.
 ///
@@ -148,7 +158,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         self.tx_ref().clear::<tables::TransactionHashNumbers>()?;
 
         let checkpoint = StageCheckpoint::new(pivot);
-        for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
+        for stage in PUBLISHED_STAGES {
             self.save_stage_checkpoint(stage, checkpoint)?;
         }
         // Snap sync wrote no history below the pivot. `ContractLogs` only narrows `Receipts` by a
@@ -561,12 +571,9 @@ mod tests {
 
         provider.publish_snap_state(7).unwrap();
 
-        for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
-            let checkpoint = provider.get_stage_checkpoint(stage).unwrap();
-            assert_eq!(checkpoint.map(|it| it.block_number), Some(7), "{stage}");
-        }
-        for stage in UNPUBLISHED_STAGES {
-            assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), None, "{stage}");
+        for stage in StageId::ALL {
+            let expected = PUBLISHED_STAGES.contains(&stage).then(|| StageCheckpoint::new(7));
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), expected, "{stage}");
         }
     }
 
