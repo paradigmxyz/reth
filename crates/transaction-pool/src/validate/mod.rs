@@ -239,13 +239,11 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// This can be used to update fork specific values (timestamp).
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock<Self::Block>) {}
 
-    /// Whether total transaction gas must fit within the current block gas limit.
+    /// How transaction gas is compared against the current block gas limit.
     ///
-    /// The pool applies this policy again when inserting validated transactions. Chains with
-    /// separate execution and state gas can disable this check while enforcing their execution
-    /// limits during validation and block building. Refreshed after each head notification.
-    fn check_block_gas_limit(&self) -> bool {
-        true
+    /// The pool reapplies this policy during insertion and refreshes it after head notifications.
+    fn block_gas_limit_policy(&self) -> BlockGasLimitPolicy {
+        BlockGasLimitPolicy::TotalGas
     }
 }
 
@@ -290,10 +288,10 @@ where
         }
     }
 
-    fn check_block_gas_limit(&self) -> bool {
+    fn block_gas_limit_policy(&self) -> BlockGasLimitPolicy {
         match self {
-            Self::Left(v) => v.check_block_gas_limit(),
-            Self::Right(v) => v.check_block_gas_limit(),
+            Self::Left(v) => v.block_gas_limit_policy(),
+            Self::Right(v) => v.block_gas_limit_policy(),
         }
     }
 
@@ -301,6 +299,34 @@ where
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),
+        }
+    }
+}
+
+/// Gas budget checked against block capacity during validation and pool insertion.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BlockGasLimitPolicy {
+    /// Bound total transaction gas, including the EIP-8037 state-gas budget.
+    #[default]
+    TotalGas,
+    /// Bound only the execution budget for chains that exempt state gas from block limits.
+    ExecutionGas {
+        /// Maximum execution gas available to a transaction before intrinsic gas is deducted.
+        tx_gas_limit_cap: u64,
+    },
+    /// Do not check transaction gas against the block limit.
+    Disabled,
+}
+
+impl BlockGasLimitPolicy {
+    /// Whether a transaction's applicable gas budget exceeds block capacity.
+    pub fn exceeds_block_gas_limit(self, tx_gas_limit: u64, block_gas_limit: u64) -> bool {
+        match self {
+            Self::TotalGas => tx_gas_limit > block_gas_limit,
+            Self::ExecutionGas { tx_gas_limit_cap } => {
+                tx_gas_limit.min(tx_gas_limit_cap) > block_gas_limit
+            }
+            Self::Disabled => false,
         }
     }
 }
