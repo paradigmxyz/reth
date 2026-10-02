@@ -20,7 +20,7 @@ use alloy_rpc_types_eth::{
     AccessListResult, TransactionRequest,
 };
 use alloy_rpc_types_trace::geth::{
-    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
+    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -319,6 +319,58 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     assert_eq!(terminal.block, U256::from(3));
     assert!(terminal.traces.is_empty());
     subscription.unsubscribe().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_call_tracer_log_index() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    // init code that emits one LOG0 and deploys no code
+    let emit_log = TransactionRequest::default()
+        .with_deploy_code(Bytes::from_static(&[0x5f, 0x5f, 0xa0, 0x00]))
+        .with_gas_limit(100_000);
+    let first = provider.send_transaction(emit_log.clone()).await?;
+    let second = provider.send_transaction(emit_log).await?;
+    let second_hash = *second.tx_hash();
+    node.advance_block().await?;
+    let first = first.successful_receipt().await?;
+    let second = second.successful_receipt().await?;
+    assert_eq!(first.block_number, second.block_number);
+    let receipt_log_index = second.inner.logs()[0].log_index;
+    assert_eq!(receipt_log_index, Some(1));
+
+    let opts = GethDebugTracingOptions::call_tracer(CallConfig::default().with_log());
+    let GethTrace::CallTracer(frame) =
+        provider.debug_trace_transaction(second_hash, opts.clone()).await?
+    else {
+        panic!("expected call trace")
+    };
+    assert_eq!(frame.logs[0].index, receipt_log_index);
+
+    let erc7562_opts: GethDebugTracingOptions = serde_json::from_value(serde_json::json!({
+        "tracer": "erc7562Tracer",
+        "tracerConfig": { "withLog": true }
+    }))?;
+    let GethTrace::Erc7562Tracer(frame) =
+        provider.debug_trace_transaction(second_hash, erc7562_opts).await?
+    else {
+        panic!("expected erc7562 trace")
+    };
+    assert_eq!(frame.logs[0].index, receipt_log_index);
+
+    let traces = provider
+        .debug_trace_block_by_number(BlockNumberOrTag::Number(second.block_number.unwrap()), opts)
+        .await?;
+    let TraceResult::Success { result: GethTrace::CallTracer(frame), .. } = &traces[1] else {
+        panic!("expected call trace")
+    };
+    assert_eq!(frame.logs[0].index, receipt_log_index);
 
     Ok(())
 }
