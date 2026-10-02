@@ -6,9 +6,11 @@
 
 use crate::{
     changeset_cache::compute_block_trie_updates,
+    database_state_frontiers,
     manager_metrics::{ExecutionOverlayMetrics, OverlayCacheMetrics, StateTrieOverlayMetrics},
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
@@ -138,7 +140,32 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(self, provider, range)
+        let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+        self.get_or_compute_cached_changesets_range_at_frontiers(
+            provider,
+            range,
+            partial_state_trie,
+            finish,
+        )
+    }
+
+    pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+        partial_state_trie: BlockNumHash,
+        finish: BlockNumHash,
+    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
+    where
+        P: DBProvider
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StageCheckpointReader
+            + PruneCheckpointReader
+            + BlockNumReader
+            + StorageSettingsCache,
+    {
+        self.changeset_cache.get_or_compute_range(self, provider, range, partial_state_trie, finish)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
