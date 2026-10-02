@@ -1,8 +1,7 @@
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
-use alloy_primitives::{Address, TxKind, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
     test_chain_spec, transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
@@ -23,6 +22,7 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     const MINIMUM_PRIORITY_FEE: u128 = 1;
+    const MAX_FEE: u128 = 20_000_000_000;
 
     let (node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_node_config_modifier(|config| {
@@ -34,20 +34,9 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
         .build_single()
         .await?;
     let provider = node.rpc_provider();
+    let mut account = wallet.account(0);
 
-    let transaction = |max_priority_fee_per_gas| TransactionRequest {
-        nonce: Some(0),
-        value: Some(U256::from(100)),
-        to: Some(TxKind::Call(Address::ZERO)),
-        gas: Some(21_000),
-        max_fee_per_gas: Some(20_000_000_000),
-        max_priority_fee_per_gas: Some(max_priority_fee_per_gas),
-        chain_id: Some(1),
-        ..Default::default()
-    };
-
-    let below_minimum =
-        TransactionTestContext::sign_tx_bytes(wallet.inner.clone(), transaction(0)).await;
+    let below_minimum = account.transfer(Address::ZERO, U256::from(100)).fees(MAX_FEE, 0).await;
     let err = provider.send_raw_transaction(&below_minimum).await.unwrap_err();
     assert!(
         err.to_string().contains("transaction priority fee below minimum required priority fee 1"),
@@ -55,9 +44,12 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
     );
     assert!(node.inner.pool.is_empty());
 
-    let at_minimum =
-        TransactionTestContext::sign_tx_bytes(wallet.inner, transaction(MINIMUM_PRIORITY_FEE))
-            .await;
+    // The rejected transaction did not use up its nonce.
+    let at_minimum = account
+        .transfer(Address::ZERO, U256::from(100))
+        .fees(MAX_FEE, MINIMUM_PRIORITY_FEE)
+        .nonce(0)
+        .await;
     let pending = provider.send_raw_transaction(&at_minimum).await?;
     assert_eq!(node.inner.pool.len(), 1);
     assert!(node.inner.pool.contains(pending.tx_hash()));
@@ -298,13 +290,9 @@ async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
     let (mut node, wallet) =
         EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
 
-    for nonce in 0..3 {
-        let raw_tx = TransactionTestContext::transfer_tx_bytes_with_nonce(
-            wallet.chain_id,
-            wallet.inner.clone(),
-            nonce,
-        )
-        .await;
+    let mut account = wallet.account(0);
+    for _ in 0..3 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
         let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
         let payload = node.advance_block_synced().await?;

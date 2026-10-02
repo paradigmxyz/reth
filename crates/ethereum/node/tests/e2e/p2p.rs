@@ -1,16 +1,12 @@
 use crate::utils::advance_with_random_transactions;
-use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
-use alloy_eips::{BlockNumberOrTag, Encodable2718};
-use alloy_network::TxSignerSync;
-use alloy_primitives::B256;
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, B256};
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::StreamExt;
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt,
-};
+use reth_e2e_test_utils::{test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_network::{test_utils::Testnet, NetworkInfo, Peers, PeersInfo};
@@ -344,27 +340,10 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    // Setup wallet
-    let chain_id = chain_spec.chain().into();
-    let wallet = Wallet::new(1).inner;
-    let mut nonce = 0;
-    let mut build_tx = || {
-        let mut tx = TxEip1559 {
-            chain_id,
-            max_priority_fee_per_gas: 1_000_000_000,
-            max_fee_per_gas: 1_000_000_000,
-            gas_limit: 100_000,
-            nonce,
-            ..Default::default()
-        };
-        nonce += 1;
-        let signature = wallet.sign_transaction_sync(&mut tx).unwrap();
-        TxEnvelope::Eip1559(tx.into_signed(signature))
-    };
-
     // Setup 10 nodes
-    let (mut nodes, _) =
+    let (mut nodes, wallet) =
         EthereumNode::test_setup(10, chain_spec).with_connect_nodes(false).build().await?;
+    let mut account = wallet.account(0);
 
     // Connect all nodes to the first one
     let (first, rest) = nodes.split_at_mut(1);
@@ -373,9 +352,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     }
 
     // Build and send transaction to first node
-    let tx = build_tx();
-    let tx_hash = *tx.tx_hash();
-    let _ = nodes[0].rpc.inject_tx(tx.encoded_2718().into()).await?;
+    let tx_hash = nodes[0].rpc.inject_tx(account.tx().to(Address::ZERO).await).await?;
 
     // Wait until all nodes have the transaction
     for node in &nodes {
@@ -383,9 +360,8 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     }
 
     // Build and send one more transaction to a random node
-    let tx = build_tx();
-    let tx_hash = *tx.tx_hash();
-    let _ = nodes.choose(&mut rand::rng()).unwrap().rpc.inject_tx(tx.encoded_2718().into()).await?;
+    let raw_tx = account.tx().to(Address::ZERO).await;
+    let tx_hash = nodes.choose(&mut rand::rng()).unwrap().rpc.inject_tx(raw_tx).await?;
 
     // Wait until all nodes have the transaction
     for node in &nodes {

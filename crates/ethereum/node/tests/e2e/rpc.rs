@@ -1,7 +1,7 @@
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
     ext::DebugApi, network::TransactionBuilder, Provider, ProviderBuilder, SendableTx,
 };
@@ -17,7 +17,7 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::{
     error::EthRpcErrorCode,
     state::{AccountOverride, StateOverride},
-    TransactionRequest,
+    AccessListResult, TransactionRequest,
 };
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
@@ -1095,6 +1095,96 @@ async fn test_advance_while_send_raw_transaction_sync() -> eyre::Result<()> {
     assert_eq!(receipt.transaction_hash, keccak256(&raw_tx));
     assert!(receipt.status());
     assert_eq!(node.rpc.transaction_receipt(receipt.transaction_hash).await?, Some(receipt));
+
+    Ok(())
+}
+
+/// Before Amsterdam `eth_call` ignores the EIP-7825 transaction gas cap. With Amsterdam's EIP-8037
+/// it caps execution gas, so a call that runs out of execution gas fails like the transaction
+/// would.
+#[tokio::test]
+async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Loops `CALLDATALOAD(0)` times, about 26 gas each, then returns 1.
+    let burner = Address::with_last_byte(0x42);
+    let overrides = StateOverride::from_iter([(
+        burner,
+        AccountOverride::default()
+            .with_code(bytes!("6000355b6001900380600357600160005260206000f3")),
+    )]);
+    let call = |iterations: u64| {
+        TransactionRequest::default()
+            .to(burner)
+            .gas_limit(29_000_000)
+            .input(Bytes::from(U256::from(iterations).to_be_bytes::<32>()).into())
+    };
+
+    for fork in [EthereumHardfork::Osaka, EthereumHardfork::Amsterdam] {
+        let (node, _) = EthereumNode::test_setup_for(fork).build_single().await?;
+        let provider = node.rpc_provider();
+
+        let ok: Bytes =
+            provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
+        assert_eq!(U256::from_be_slice(&ok), U256::from(1), "{fork}");
+
+        // About 26M gas of execution, above the 16,777,216 cap.
+        let call_result = provider
+            .raw_request::<_, Bytes>("eth_call".into(), (call(1_000_000), "latest", &overrides))
+            .await;
+        let access_list: AccessListResult = provider
+            .raw_request("eth_createAccessList".into(), (call(1_000_000), "latest", &overrides))
+            .await?;
+        if fork == EthereumHardfork::Amsterdam {
+            let err = call_result.unwrap_err().to_string();
+            assert!(err.contains("out of gas"), "{err}");
+            assert_eq!(access_list.gas_used, U256::from(16_777_216));
+            assert!(access_list.error.is_some());
+        } else {
+            assert_eq!(U256::from_be_slice(&call_result?), U256::from(1));
+            assert!(access_list.gas_used > U256::from(26_000_000));
+            assert!(access_list.error.is_none());
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_test_account_tx_builder() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    let mut account = wallet.account(0).with_gas_limit(100_000);
+
+    // Init code returning the runtime `PUSH0 CALLDATALOAD PUSH0 SSTORE STOP`, which stores the
+    // first calldata word at slot 0.
+    let runtime = bytes!("5f355f5500");
+    let init_code = bytes!("645f355f55005f526005601bf3");
+
+    let contract = account.next_contract_address();
+    let deploy = node.rpc.inject_tx(account.deploy(init_code).await).await?;
+    let receipt = node.advance_until_receipt(deploy).await?;
+    assert!(receipt.status());
+    assert_eq!(receipt.contract_address, Some(contract));
+    assert_eq!(provider.get_code_at(contract).await?, runtime);
+
+    let value = U256::from(0x42);
+    let recipient = Address::with_last_byte(0x77);
+    let call = node.rpc.inject_tx(account.call(contract, B256::from(value)).await).await?;
+    let transfer = node.rpc.inject_tx(account.transfer(recipient, U256::from(7)).await).await?;
+    let receipt = node.advance_until_receipt(transfer).await?;
+    assert!(receipt.status());
+    let call_receipt = node.rpc.transaction_receipt(call).await?.expect("call is included");
+    assert!(call_receipt.status());
+    assert_eq!(call_receipt.block_number, receipt.block_number);
+
+    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, value);
+    assert_eq!(provider.get_balance(recipient).await?, U256::from(7));
+    assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
+    assert_eq!(account.nonce(), 3);
 
     Ok(())
 }
