@@ -13,9 +13,9 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    BalStoreHandle, BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
     HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateProvider, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    ProviderError, RawBal, StateProvider, StateWriteConfig, StateWriter, StaticFileProviderFactory,
     StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -97,6 +97,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Store for validated block access lists produced during execution.
+    bal_store: BalStoreHandle,
 }
 
 impl<E> ExecutionStage<E>
@@ -120,6 +122,7 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            bal_store: BalStoreHandle::noop(),
         }
     }
 
@@ -260,6 +263,14 @@ where
 
         Ok(())
     }
+
+    /// Sets the store that persists validated block access lists before checkpointing execution.
+    ///
+    /// Without a store, block access lists are validated but not retained.
+    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = bal_store;
+        self
+    }
 }
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
@@ -335,8 +346,8 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        // Reused across blocks for BAL hash encoding.
-        let mut bal_buf = Vec::new();
+        let mut bals = Vec::new();
+        let mut bal_items = 0;
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -372,7 +383,11 @@ where
                     error: BlockErrorKind::Validation(err.into()),
                 })
             }
-            let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
+            let raw_bal = built_bal.as_ref().map(|bal| {
+                bal_items += bal.total_bal_items();
+                RawBal::new(alloy_rlp::encode(bal).into())
+            });
+            let bal_hash = raw_bal.as_ref().map(RawBal::hash);
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)
@@ -381,6 +396,9 @@ where
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
                 })
+            }
+            if let Some(bal) = raw_bal {
+                bals.push((block.num_hash(), bal));
             }
             results.push(result);
 
@@ -413,7 +431,7 @@ where
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                executor.size_hint() as u64,
+                (executor.size_hint() as u64).saturating_add(bal_items),
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -509,6 +527,15 @@ where
             let hashed_state =
                 LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
+        }
+
+        // Flush before the caller can commit the execution checkpoint. Replaying a batch after
+        // a failed database commit is safe because BALs are keyed by block hash.
+        if !bals.is_empty() {
+            let blocks = bals.iter().map(|(block, _)| *block).collect::<Vec<_>>();
+            self.bal_store.insert_many(bals)?;
+            self.bal_store.flush(&blocks)?;
+            self.bal_store.prune(stage_progress)?;
         }
 
         let db_write_duration = time.elapsed();
@@ -779,7 +806,9 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
+    use alloy_consensus::Header;
+    use alloy_eips::{eip4895::Withdrawal, eip7685::EMPTY_REQUESTS_HASH, NumHash};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, Bytes, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition};
@@ -788,18 +817,24 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
+    use reth_primitives_traits::{
+        Account, Block as _, Bytecode, RecoveredBlock, SealedBlock, StorageEntry,
+    };
     use reth_provider::{
-        test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        AccountReader, BlockWriter, DatabaseProviderFactory, ReceiptProvider,
-        StaticFileProviderFactory,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
+        AccountReader, BlockWriter, DatabaseProviderFactory, ProviderFactory, ReceiptProvider,
+        RocksDBBalStore, RocksDBProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_storage_api::BalStore;
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
 
@@ -1530,5 +1565,230 @@ mod tests {
         stage
             .ensure_consistency(&provider, 1, None)
             .expect("ensure_consistency should succeed when receipts are intentionally skipped");
+    }
+
+    // Executes Amsterdam blocks independently to obtain their committed BALs, then leaves their
+    // bodies and the original state for staged execution. The first block credits a withdrawal.
+    fn bal_execution(
+        invalid_commitment: bool,
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, ExecutionStage<EthEvmConfig>, Vec<(NumHash, Bytes)>)
+    {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
+        let provider = factory.database_provider_rw().unwrap();
+        let genesis = Block::default().seal_slow().try_recover().unwrap();
+        provider.insert_block(&genesis).unwrap();
+        let db =
+            StateProviderDatabase(LatestStateProviderRef::new(&provider).into_evm_state_provider());
+        let mut executor = evm_config.batch_executor(db);
+        let mut parent_hash = genesis.hash();
+        let mut expected = Vec::new();
+        let mut blocks = Vec::new();
+        for number in 1..=2 {
+            let withdrawals = if number == 1 {
+                vec![Withdrawal {
+                    address: Address::repeat_byte(0x11),
+                    amount: 1,
+                    ..Default::default()
+                }]
+            } else {
+                Vec::new()
+            };
+            let mut block = Block {
+                header: Header {
+                    number,
+                    parent_hash,
+                    timestamp: number * 12,
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(1),
+                    excess_blob_gas: Some(0),
+                    blob_gas_used: Some(0),
+                    parent_beacon_block_root: Some(B256::ZERO),
+                    requests_hash: Some(EMPTY_REQUESTS_HASH),
+                    block_access_list_hash: Some(B256::ZERO),
+                    slot_number: Some(number),
+                    ..Default::default()
+                },
+                body: BlockBody { withdrawals: Some(withdrawals.into()), ..Default::default() },
+            };
+            executor.execute_one(&RecoveredBlock::new_unhashed(block.clone(), Vec::new())).unwrap();
+            let bal = Bal::from(executor.take_bal().unwrap());
+            block.header.block_access_list_hash = Some(bal.compute_hash());
+            if invalid_commitment && number == 2 {
+                block.header.block_access_list_hash = Some(B256::ZERO);
+            }
+            let block = block.seal_slow().try_recover().unwrap();
+            parent_hash = block.hash();
+            expected.push((block.num_hash(), alloy_rlp::encode(bal).into()));
+            blocks.push(block);
+        }
+        drop(executor);
+        for block in blocks {
+            provider.insert_block(&block).unwrap();
+        }
+        provider
+            .static_file_provider()
+            .latest_writer(StaticFileSegment::Headers)
+            .unwrap()
+            .commit()
+            .unwrap();
+        {
+            let static_files = provider.static_file_provider();
+            let mut receipts = static_files.latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts.increment_block(0).unwrap();
+            receipts.commit().unwrap();
+        }
+        provider.commit().unwrap();
+        let stage = ExecutionStage::new_with_executor(
+            evm_config,
+            Arc::new(EthBeaconConsensus::new(chain_spec)),
+        );
+        (factory, stage, expected)
+    }
+
+    #[derive(Debug)]
+    struct FailingBalFlush;
+
+    impl BalStore for FailingBalFlush {
+        fn insert(&self, _block: NumHash, _bal: RawBal) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> Result<(), ProviderError> {
+            Err(ProviderError::UnsupportedProvider)
+        }
+
+        fn prune(&self, _tip: u64) -> Result<usize, ProviderError> {
+            Ok(0)
+        }
+
+        fn get_by_hashes(&self, _hashes: &[B256]) -> Result<Vec<Option<Bytes>>, ProviderError> {
+            unreachable!("execution only writes BALs")
+        }
+    }
+
+    #[test]
+    fn backfilled_bals_are_durable_before_checkpointing() {
+        let (factory, mut stage, expected) = bal_execution(false);
+        stage = stage
+            .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider())));
+        let provider = factory.database_provider_rw().unwrap();
+
+        let output =
+            stage.execute(&provider, ExecInput { target: Some(2), checkpoint: None }).unwrap();
+
+        assert!(output.done);
+        assert_eq!(output.checkpoint.block_number, 2);
+        // A fresh store has no shared read cache and can only return flushed BALs.
+        let reopened = RocksDBBalStore::new(factory.rocksdb_provider());
+        for (block, bal) in expected {
+            assert_eq!(reopened.get_by_hash(block.hash).unwrap(), Some(bal));
+        }
+    }
+
+    #[test]
+    fn a_bal_flush_failure_prevents_execution_checkpointing() {
+        let (factory, mut stage, expected) = bal_execution(false);
+        stage = stage.with_bal_store(BalStoreHandle::new(FailingBalFlush));
+        let input = ExecInput { target: Some(2), checkpoint: None };
+        let provider = factory.database_provider_rw().unwrap();
+
+        assert!(matches!(
+            stage.execute(&provider, input),
+            Err(StageError::DatabaseIntegrity(ProviderError::UnsupportedProvider))
+        ));
+        drop(provider);
+
+        // Without a checkpoint the same range is replayed after the store recovers.
+        stage = stage
+            .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider())));
+        let provider = factory.database_provider_rw().unwrap();
+        let output = stage.execute(&provider, input).unwrap();
+        assert_eq!(output.checkpoint.block_number, 2);
+        let reopened = RocksDBBalStore::new(factory.rocksdb_provider());
+        for (block, bal) in expected {
+            assert_eq!(reopened.get_by_hash(block.hash).unwrap(), Some(bal));
+        }
+    }
+
+    #[test]
+    fn an_invalid_bal_commitment_is_not_persisted() {
+        let (factory, mut stage, expected) = bal_execution(true);
+        let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
+        stage = stage.with_bal_store(store.clone());
+        let provider = factory.database_provider_rw().unwrap();
+
+        assert!(matches!(
+            stage.execute(&provider, ExecInput { target: Some(2), checkpoint: None }),
+            Err(StageError::Block { error: BlockErrorKind::Validation(_), .. })
+        ));
+        for (block, _) in expected {
+            assert_eq!(store.get_by_hash(block.hash).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn backfilled_bals_follow_execution_batches() {
+        let (factory, mut stage, expected) = bal_execution(false);
+        let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
+        stage = stage.with_bal_store(store.clone());
+        stage.thresholds.max_blocks = Some(0);
+        let provider = factory.database_provider_rw().unwrap();
+
+        let output =
+            stage.execute(&provider, ExecInput { target: Some(2), checkpoint: None }).unwrap();
+        assert_eq!(output.checkpoint.block_number, 1);
+        assert!(!output.done);
+        assert_eq!(store.get_by_hash(expected[0].0.hash).unwrap(), Some(expected[0].1.clone()));
+        assert_eq!(store.get_by_hash(expected[1].0.hash).unwrap(), None);
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        let output = stage
+            .execute(&provider, ExecInput { target: Some(2), checkpoint: Some(output.checkpoint) })
+            .unwrap();
+        assert!(output.done);
+        assert_eq!(output.checkpoint.block_number, 2);
+        assert_eq!(store.get_by_hash(expected[1].0.hash).unwrap(), Some(expected[1].1.clone()));
+    }
+
+    #[test]
+    fn buffered_bals_count_toward_the_execution_change_limit() {
+        for (extra_changes, expected_blocks) in [(0, 1), (1, 2)] {
+            let (factory, mut stage, expected) = bal_execution(false);
+            let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
+            stage = stage.with_bal_store(store.clone());
+            let provider = factory.database_provider_rw().unwrap();
+
+            // Check the boundary in accounts and slots, not encoded bytes.
+            let db = StateProviderDatabase(
+                LatestStateProviderRef::new(&provider).into_evm_state_provider(),
+            );
+            let mut executor = stage.evm_config.batch_executor(db);
+            let block =
+                provider.recovered_block(1.into(), TransactionVariant::NoHash).unwrap().unwrap();
+            executor.execute_one(&block).unwrap();
+            let bal_items = Bal::from(executor.take_bal().unwrap()).total_bal_items();
+            let state_changes = executor.size_hint() as u64;
+            drop(executor);
+            stage.thresholds = ExecutionStageThresholds {
+                max_blocks: None,
+                max_changes: Some(state_changes + bal_items + extra_changes),
+                max_cumulative_gas: None,
+                max_duration: None,
+            };
+
+            let output =
+                stage.execute(&provider, ExecInput { target: Some(2), checkpoint: None }).unwrap();
+
+            assert_eq!(output.checkpoint.block_number, expected_blocks);
+            assert_eq!(output.done, expected_blocks == 2);
+            assert_eq!(store.get_by_hash(expected[0].0.hash).unwrap(), Some(expected[0].1.clone()));
+            assert_eq!(
+                store.get_by_hash(expected[1].0.hash).unwrap(),
+                (expected_blocks == 2).then(|| expected[1].1.clone())
+            );
+        }
     }
 }
