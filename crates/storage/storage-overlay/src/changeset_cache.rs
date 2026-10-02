@@ -38,8 +38,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, Databas
 
 /// Computes block trie updates using the changeset cache.
 ///
-/// Returns recorded updates when available; otherwise reconstructs them for a persisted block.
-///
 /// # Algorithm
 ///
 /// For block N:
@@ -105,24 +103,6 @@ where
     let tx = provider.tx_ref();
     let cache = overlay_manager.changeset_cache();
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-
-    if block_number > finish.number {
-        return Err(ProviderError::InsufficientChangesets {
-            requested: block_number,
-            available: 0..=finish.number,
-        })
-    }
-
-    if let Some(block) = overlay_manager
-        .parent_chain(finish.hash)
-        .find(|block| block.recovered_block().number() == block_number)
-    {
-        return Ok((*block.trie_data().sorted.trie_updates).clone())
-    }
-
-    if block_number > partial_state_trie.number {
-        return Err(ProviderError::StateForNumberNotFound(block_number))
-    }
 
     // Step 1: Get the trie changesets for the target block from cache
     let changesets = cache.get_or_compute(
@@ -928,7 +908,6 @@ mod tests {
         }
         let before = factory.provider().unwrap();
         let cache = manager.changeset_cache();
-        assert_eq!(manager.compute_block_trie_updates(&before, 2).unwrap(), *finish_updates);
         let (frontier, finish) = database_state_frontiers(&before).unwrap();
         let result =
             cache.get_or_compute_range(&manager, &before, 1..=2, frontier, finish).unwrap();
