@@ -214,7 +214,7 @@ where
         )
         .map_err(PayloadBuilderError::other)?;
 
-    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
+    debug!(target: "payload_builder", id=%payload_id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, il_txs = attributes.inclusion_list_transactions.as_ref().map_or(0, |txs| txs.len()), "building new payload");
     let mut cumulative_tx_gas_used = 0;
     let mut block_regular_gas_used = 0;
     let mut block_state_gas_used = 0;
@@ -269,14 +269,23 @@ where
         .filter(|_| chain_spec.is_bogota_active_at_timestamp(attributes.timestamp))
         .unwrap_or_default();
 
+    let mut il_included = 0usize;
+    let mut il_from_pool = 0usize;
+
     for raw_transaction in inclusion_list_transactions {
         let Ok(transaction) = TransactionSigned::decode_2718_exact(raw_transaction) else {
+            debug!(target: "payload_builder", id=%payload_id, "skipping undecodable inclusion-list transaction");
             continue
         };
-        let Ok(transaction) = transaction.try_into_recovered() else { continue };
+        let tx_hash = *transaction.tx_hash();
+        let Ok(transaction) = transaction.try_into_recovered() else {
+            debug!(target: "payload_builder", id=%payload_id, %tx_hash, "skipping unrecoverable inclusion-list transaction");
+            continue
+        };
         // The V1 FOCIL endpoint deliberately does not produce blob transactions, and payload
         // building cannot source a sidecar from an inclusion-list byte string.
         if transaction.is_eip4844() {
+            debug!(target: "payload_builder", id=%payload_id, %tx_hash, "skipping inclusion-list blob transaction");
             continue
         }
         inclusion_list.push(Some(transaction));
@@ -481,6 +490,7 @@ where
             let Some(tx) = transaction.as_ref() else { continue };
             let tx_hash = tx.recalculate_hash();
             if executed_tx_hashes.contains(&tx_hash) {
+                il_from_pool += 1;
                 *transaction = None;
                 continue
             }
@@ -494,6 +504,7 @@ where
                 tx.gas_limit() > block_gas_limit.saturating_sub(cumulative_tx_gas_used)
             };
             if exceeds_gas_limit {
+                debug!(target: "payload_builder", id=%payload_id, %tx_hash, gas_limit = tx.gas_limit(), block_gas_limit, cumulative_tx_gas_used, block_regular_gas_used, block_state_gas_used, "skipping inclusion-list transaction that exceeds the remaining block gas");
                 *transaction = None;
                 continue
             }
@@ -505,6 +516,7 @@ where
             let estimated_block_size_with_tx =
                 block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024;
             if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
+                debug!(target: "payload_builder", id=%payload_id, %tx_hash, estimated_block_size_with_tx, "skipping inclusion-list transaction that exceeds the block size limit");
                 *transaction = None;
                 continue
             }
@@ -527,14 +539,30 @@ where
                         )
                     ) =>
                     {
+                        // Retried on the next pass, in case an earlier inclusion-list transaction
+                        // fills the nonce gap or funds the sender.
+                        debug!(
+                            target: "payload_builder",
+                            id = %payload_id,
+                            %tx_hash,
+                            %error,
+                            "deferring inclusion-list transaction"
+                        );
                         continue
                     }
                     Err(BlockExecutionError::Validation(
-                        BlockValidationError::InvalidTx { .. } |
+                        err @ (BlockValidationError::InvalidTx { .. } |
                         BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                             ..
-                        },
+                        }),
                     )) => {
+                        debug!(
+                            target: "payload_builder",
+                            id = %payload_id,
+                            %tx_hash,
+                            %err,
+                            "skipping invalid inclusion-list transaction"
+                        );
                         *transaction = None;
                         continue
                     }
@@ -549,9 +577,22 @@ where
             block_state_gas_used += gas_output.state_gas_used();
             block_transactions_rlp_length += tx_rlp_len;
             executed_tx_hashes.insert(tx_hash);
+            il_included += 1;
             *transaction = None;
             made_progress = true;
         }
+    }
+
+    if !inclusion_list_transactions.is_empty() {
+        debug!(
+            target: "payload_builder",
+            id = %payload_id,
+            il_txs = inclusion_list_transactions.len(),
+            included = il_included,
+            from_pool = il_from_pool,
+            unresolved = inclusion_list.iter().flatten().count(),
+            "applied inclusion list"
+        );
     }
 
     // check if we have a better block

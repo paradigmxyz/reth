@@ -7,6 +7,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, Transaction};
 use alloy_eips::{
     eip2718::Decodable2718,
     eip4844::{DATA_GAS_PER_BLOB, VERSIONED_HASH_VERSION_KZG},
+    eip7840::BlobParams,
 };
 use alloy_primitives::{
     map::{AddressMap, B256Map, B256Set},
@@ -20,6 +21,7 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 use std::collections::VecDeque;
+use tracing::{debug, info};
 
 /// Block-scoped inputs for the EIP-7805 appendability check, taken from the payload's own EVM
 /// environment so the check follows the fork the block was executed under.
@@ -59,15 +61,38 @@ pub(super) fn inclusion_list_satisfied<N: NodePrimitives>(
         .collect::<B256Set>();
     let withdrawn = withdrawal_credits::<N>(block);
 
-    for encoded in transactions {
+    for (il_index, encoded) in transactions.iter().enumerate() {
         let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
-        if included.contains(&transaction.recalculate_hash()) {
+        let tx_hash = transaction.recalculate_hash();
+        if included.contains(&tx_hash) {
             continue
         }
         if could_append_transaction::<N>(&transaction, state, ctx, &withdrawn)? {
+            info!(
+                target: "engine::tree",
+                block_hash = %block.hash(),
+                block_number = block.num_hash().number,
+                il_txs = transactions.len(),
+                available_gas = ctx.available_gas,
+                blob_gas_available = ctx.blob_gas_available,
+                path = "post_state",
+                %tx_hash,
+                il_index,
+                "Inclusion list unsatisfied"
+            );
             return Ok(false)
         }
     }
+    debug!(
+        target: "engine::tree",
+        block_hash = %block.hash(),
+        block_number = block.num_hash().number,
+        il_txs = transactions.len(),
+        available_gas = ctx.available_gas,
+        blob_gas_available = ctx.blob_gas_available,
+        path = "post_state",
+        "Inclusion list satisfied"
+    );
     Ok(true)
 }
 
@@ -226,6 +251,20 @@ fn could_append_transaction<N: NodePrimitives>(
 /// Blob gas a transaction consumes, zero for every non-blob type.
 fn blob_gas(transaction: &impl Transaction) -> u64 {
     transaction.blob_versioned_hashes().map_or(0, |hashes| hashes.len() as u64) * DATA_GAS_PER_BLOB
+}
+
+/// Blob gas the block leaves unspent under the blob schedule in force at its timestamp.
+///
+/// A block with no schedule cannot carry blobs, so the resulting zero budget leaves every blob
+/// transaction unappendable.
+pub(super) fn blob_gas_available(
+    blob_params: Option<BlobParams>,
+    blob_gas_used: Option<u64>,
+) -> u64 {
+    blob_params
+        .map(|params| params.max_blob_gas_per_block())
+        .unwrap_or_default()
+        .saturating_sub(blob_gas_used.unwrap_or_default())
 }
 
 /// Upper bound on the inclusion lists retained from `engine_newPayloadV6`.

@@ -494,6 +494,14 @@ where
         } else {
             None
         };
+        // `None` for a VALID head means its list was never retained or has been evicted.
+        debug!(
+            target: "rpc::engine",
+            %head_block_hash,
+            status = ?updated.payload_status.status,
+            ?inclusion_list_satisfied,
+            "Forkchoice inclusion-list verdict"
+        );
 
         let response = ForkchoiceUpdatedResponseV2::from(updated);
         Ok(match inclusion_list_satisfied {
@@ -525,6 +533,14 @@ where
         let start = Instant::now();
         let result = Self::get_inclusion_list_v1(self);
         self.inner.metrics.latency.get_inclusion_list_v1.record(start.elapsed());
+        if let Ok(transactions) = &result {
+            debug!(
+                target: "rpc::engine",
+                txs = transactions.len(),
+                bytes = transactions.iter().map(|tx| tx.len()).sum::<usize>(),
+                "Served inclusion list"
+            );
+        }
         result
     }
 

@@ -99,6 +99,7 @@ use crate::tree::{
     error::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
+    inclusion_list::blob_gas_available,
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -107,7 +108,10 @@ use crate::tree::{
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::{
+    transaction::{Either, TxHashRef},
+    Transaction as _,
+};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
@@ -131,6 +135,7 @@ use crate::tree::{
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -153,11 +158,11 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockExecutionOutput, BlockHashReader, BlockReader, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox,
+    HashedPostStateProvider, HistoryReader, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -325,6 +330,8 @@ where
         + ChangeSetReader
         + StateProviderFactory
         + StateReader
+        // The EIP-7805 appendability check needs the block's blob schedule.
+        + ChainSpecProvider<ChainSpec: EthChainSpec>
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
@@ -1117,35 +1124,64 @@ where
         // budgets immediately after the block body, before withdrawals and other post-execution
         // operations. Running the normal executor without committing reuses the same transaction
         // validation and EIP-8037 gas admission rules as block execution.
-        let inclusion_list_satisfied = if let Some(transactions) =
-            input.inclusion_list_transactions()
-        {
-            let mut satisfied = true;
-            for encoded in transactions {
-                let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
-                if executed_tx_hashes.as_ref().is_some_and(|hashes| {
-                    hashes.contains(&reth_primitives_traits::SignedTransaction::recalculate_hash(
-                        &transaction,
-                    ))
-                }) {
-                    continue
-                }
-                let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {
-                    continue
-                };
-                match executor.execute_transaction_without_commit(transaction) {
-                    Ok(_) => {
-                        satisfied = false;
-                        break
+        let inclusion_list_satisfied =
+            if let Some(transactions) = input.inclusion_list_transactions() {
+                // The executor enforces the two gas dimensions of the spec's
+                // `check_block_gas_capacity` but not its blob dimension.
+                let blob_gas_available = blob_gas_available(
+                    self.provider.chain_spec().blob_params_at_timestamp(input.timestamp()),
+                    input.blob_gas_used(),
+                );
+
+                let mut satisfied = true;
+                for (il_index, encoded) in transactions.iter().enumerate() {
+                    let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
+                    let tx_hash =
+                        reth_primitives_traits::SignedTransaction::recalculate_hash(&transaction);
+                    if executed_tx_hashes.as_ref().is_some_and(|hashes| hashes.contains(&tx_hash)) {
+                        continue
                     }
-                    Err(BlockExecutionError::Validation(_)) => {}
-                    Err(err) => return Err(err.into()),
+                    if transaction.blob_gas_used().unwrap_or_default() > blob_gas_available {
+                        continue
+                    }
+                    let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {
+                        continue
+                    };
+                    match executor.execute_transaction_without_commit(transaction) {
+                        Ok(_) => {
+                            info!(
+                                target: "engine::tree",
+                                block_hash = %input.hash(),
+                                block_number = input.num_hash().number,
+                                il_txs = transactions.len(),
+                                blob_gas_available,
+                                path = "execution",
+                                %tx_hash,
+                                il_index,
+                                "Inclusion list unsatisfied"
+                            );
+                            satisfied = false;
+                            break
+                        }
+                        Err(BlockExecutionError::Validation(_)) => {}
+                        Err(err) => return Err(err.into()),
+                    }
                 }
-            }
-            Some(satisfied)
-        } else {
-            None
-        };
+                if satisfied {
+                    debug!(
+                        target: "engine::tree",
+                        block_hash = %input.hash(),
+                        block_number = input.num_hash().number,
+                        il_txs = transactions.len(),
+                        blob_gas_available,
+                        path = "execution",
+                        "Inclusion list satisfied"
+                    );
+                }
+                Some(satisfied)
+            } else {
+                None
+            };
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -1905,6 +1941,7 @@ where
         + StateProviderFactory
         + StateReader
         + ChangeSetReader
+        + ChainSpecProvider<ChainSpec: EthChainSpec>
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
@@ -2211,6 +2248,28 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
+        }
+    }
+
+    /// Returns the timestamp of the block.
+    pub fn timestamp(&self) -> u64
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.timestamp(),
+            Self::Block(block) => block.timestamp(),
+        }
+    }
+
+    /// Returns the blob gas used by the block, `None` before Cancun.
+    pub fn blob_gas_used(&self) -> Option<u64>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.blob_gas_used(),
+            Self::Block(block) => block.blob_gas_used(),
         }
     }
 }

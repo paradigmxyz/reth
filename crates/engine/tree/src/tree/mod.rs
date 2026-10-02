@@ -67,7 +67,9 @@ use tracing::*;
 
 mod block_buffer;
 mod inclusion_list;
-use inclusion_list::{inclusion_list_satisfied, InclusionListContext, RetainedInclusionLists};
+use inclusion_list::{
+    blob_gas_available, inclusion_list_satisfied, InclusionListContext, RetainedInclusionLists,
+};
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -1711,6 +1713,13 @@ where
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
                                 if let Some(transactions) = inclusion_list_transactions {
+                                    debug!(
+                                        target: "engine::tree",
+                                        block_hash = %payload.block_hash(),
+                                        il_txs = transactions.len(),
+                                        il_bytes = transactions.iter().map(|tx| tx.len()).sum::<usize>(),
+                                        "Received inclusion list"
+                                    );
                                     self.state
                                         .inclusion_lists
                                         .insert(payload.block_hash(), transactions);
@@ -3603,9 +3612,6 @@ where
                 return Ok(None)
             }
         };
-        // The blob dimension is bounded by the schedule in force at the block's timestamp. A
-        // block with no schedule cannot carry blobs, so the resulting zero budget correctly
-        // leaves every blob transaction unappendable.
         let blob_params = self.provider.chain_spec().blob_params_at_timestamp(block.timestamp());
         let ctx = InclusionListContext {
             chain_id: evm_env.cfg_env.chain_id,
@@ -3614,10 +3620,7 @@ where
             available_gas: block.gas_limit().saturating_sub(block.gas_used()),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
-            blob_gas_available: blob_params
-                .map(|params| params.max_blob_gas_per_block())
-                .unwrap_or_default()
-                .saturating_sub(block.blob_gas_used().unwrap_or_default()),
+            blob_gas_available: blob_gas_available(blob_params, block.blob_gas_used()),
             blob_gas_price: evm_env.block_env.blob_gasprice().unwrap_or_default(),
             max_blobs_per_tx: blob_params.map(|params| params.max_blobs_per_tx),
         };
