@@ -93,7 +93,8 @@ impl WorkerThreadMetrics {
     }
 }
 
-/// Metrics for jobs submitted through [`crate::pool::WorkerPool`] wrapper methods.
+/// Metrics for jobs submitted through [`crate::pool::WorkerPool`] wrapper methods and
+/// [`crate::parked_pool::ParkedPool::spawn`].
 #[cfg(feature = "rayon")]
 #[derive(Metrics, Clone)]
 #[metrics(scope = "executor.worker_pool")]

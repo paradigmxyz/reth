@@ -43,6 +43,11 @@ pub mod pool;
 #[cfg(feature = "rayon")]
 pub use pool::{build_pool_with_panic_handler, Worker, WorkerPool};
 
+#[cfg(feature = "rayon")]
+pub mod parked_pool;
+#[cfg(feature = "rayon")]
+pub use parked_pool::ParkedPool;
+
 /// Lock-free ordered parallel iterator extension trait.
 #[cfg(feature = "rayon")]
 pub mod for_each_ordered;
