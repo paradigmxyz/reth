@@ -64,6 +64,11 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
         for (child_pos, old_child_idx) in old_children {
             let child_node = arena.drain_node(old_child_idx);
             let new_child_idx = new_arena.insert(child_node);
+            debug_assert_eq!(
+                new_child_idx.get() + 1,
+                new_arena.len(),
+                "compaction must append, the destination doubles as the BFS queue",
+            );
             let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
             b.children[child_pos] = BranchChild::revealed(new_child_idx);
         }
@@ -753,6 +758,19 @@ impl ArenaParallelSparseTrie {
     fn recycle_subtrie_from_idx(&mut self, idx: Index) {
         let node = self.upper_arena.remove(idx).expect("subtrie exists in arena");
         self.recycle_subtrie(node);
+    }
+
+    /// Puts a subtrie that was taken for parallel processing back into its upper arena slot.
+    ///
+    /// The slot must still hold the [`ArenaSparseNode::TakenSubtrie`] placeholder: indices carry
+    /// no generation, so a slot that was removed and handed out again would silently be
+    /// overwritten.
+    fn restore_taken_subtrie(&mut self, idx: Index, subtrie: Box<ArenaSparseSubtrie>) {
+        debug_assert!(
+            matches!(self.upper_arena[idx], ArenaSparseNode::TakenSubtrie),
+            "taken subtrie slot {idx:?} was removed or reused before restoration",
+        );
+        self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
     }
 
     /// Handles cascading structural changes on the branch at the cursor head after a child
@@ -2256,7 +2274,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             if let Some(err) = results.into_iter().find(|r| r.is_err()) {
                 // Restore before returning so we don't leave TakenSubtrie holes.
                 for (idx, subtrie, _) in taken {
-                    self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
+                    self.restore_taken_subtrie(idx, subtrie);
                 }
                 return err;
             }
@@ -2264,7 +2282,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Restore taken subtries into the upper arena.
         for (idx, subtrie, _) in taken {
-            self.upper_arena[idx] = ArenaSparseNode::Subtrie(subtrie);
+            self.restore_taken_subtrie(idx, subtrie);
         }
 
         #[cfg(debug_assertions)]
@@ -2553,7 +2571,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             // Restore taken subtries into the upper arena.
             for (child_idx, subtrie) in taken {
-                self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+                self.restore_taken_subtrie(child_idx, subtrie);
             }
         }
 
@@ -2808,7 +2826,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             }
 
             // Restore the subtrie into the upper arena.
-            self.upper_arena[child_idx] = ArenaSparseNode::Subtrie(subtrie);
+            self.restore_taken_subtrie(child_idx, subtrie);
         }
 
         // Navigate to each taken subtrie via seek to propagate dirty state

@@ -165,8 +165,9 @@ pub(super) enum ArenaSparseNode {
     Subtrie(Box<ArenaSparseSubtrie>),
     /// Placeholder for a subtrie that has been temporarily taken for parallel operations.
     TakenSubtrie,
-    /// Tombstone left behind by [`NodeArena::remove`](super::NodeArena::remove); the slot is on
-    /// the arena's free list.
+    /// Tombstone for a vacated slot. [`NodeArena::remove`](super::NodeArena::remove) also puts
+    /// the slot on the arena's free list, [`NodeArena::drain_node`](super::NodeArena::drain_node)
+    /// does not.
     Free,
 }
 
