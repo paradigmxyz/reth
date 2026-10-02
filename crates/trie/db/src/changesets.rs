@@ -150,6 +150,10 @@ where
     while let Some(end) = next {
         let mut start = end;
         let mut forward = Vec::new();
+
+        // Collect into `forward` all updates of consecutive blocks iterating backwards from `end`.
+        // Without the original updates, reverting one block at a time preserves nodes that
+        // appear and disappear inside the range. An endpoint-only calculation would omit them.
         if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
             forward.push(&forward_updates[index].1);
             for (block, updates) in forward_updates[..index].iter().rev() {
@@ -161,12 +165,11 @@ where
             }
         }
 
-        // Without the original updates, reverting one block at a time preserves nodes that
-        // appear and disappear inside the range. An endpoint-only calculation would omit them.
+        // Collect reverts for the segment and use them to generate the trie reverts for the segment.
         let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
         let prefixes = segment_state.construct_prefix_sets().freeze();
         state.extend_ref_and_sort(&segment_state);
-        let updates = StateRoot::new(
+        let segment_trie = StateRoot::new(
             InMemoryTrieCursorFactory::new(state_trie_provider, &*overlay),
             HashedPostStateCursorFactory::new(state_trie_provider, &*state),
         )
@@ -178,10 +181,10 @@ where
 
         // Newest forward values win; the calculated target values override them.
         let segment = if forward.is_empty() {
-            updates
+            segment_trie
         } else {
             let mut segment = TrieUpdatesSorted::merge_slice(&forward);
-            segment.extend_ref_and_sort(&updates);
+            segment.extend_ref_and_sort(&segment_trie);
             segment
         };
         overlay.extend_ref_and_sort(&segment);
