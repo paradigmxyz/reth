@@ -29,6 +29,8 @@ mod context;
 mod handoff;
 mod run;
 
+pub(crate) use handoff::SnapActivation;
+
 use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};

@@ -16,12 +16,12 @@ use tracing::info;
 /// Activation of one attempt's downloaded state.
 ///
 /// Every step commits on its own and repeats safely, so an interrupted activation runs again.
-pub(super) struct SnapActivation<N: ProviderNodeTypes> {
+pub(crate) struct SnapActivation<N: ProviderNodeTypes> {
     factory: ProviderFactory<N>,
 }
 
 impl<N: ProviderNodeTypes> SnapActivation<N> {
-    pub(super) const fn new(factory: ProviderFactory<N>) -> Self {
+    pub(crate) const fn new(factory: ProviderFactory<N>) -> Self {
         Self { factory }
     }
 
@@ -44,13 +44,11 @@ impl<N: ProviderNodeTypes> SnapActivation<N> {
             provider.commit()?;
             return Ok(Activation::PivotReorged)
         }
-        // History below the pivot was never downloaded, so it counts as pruned and the static
-        // files start there.
-        provider.anchor_pruned_static_files(pivot.number)?;
         provider
-            .publish_snap_state(pivot.number)
+            .begin_snap_publish(pivot.number)
             .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
         provider.commit()?;
+        self.publish(pivot.number)?;
         info!(target: "sync::snap", pivot = pivot.number, "Snap state published; history below it is unavailable");
 
         self.rebuild_trie(pivot)?;
@@ -61,6 +59,34 @@ impl<N: ProviderNodeTypes> SnapActivation<N> {
             .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
         provider.commit()?;
         Ok(Activation::Published)
+    }
+
+    /// Finishes a publish interrupted between the static file and database commits, which left
+    /// anchored static files under older checkpoints. Runs before the consistency check, which
+    /// would otherwise try to unwind the files below their anchor.
+    pub(crate) fn resume_interrupted_publish(&self) -> Result<(), PipelineError> {
+        let pending = self
+            .factory
+            .database_provider_ro()?
+            .pending_snap_publish()
+            .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
+        let Some(pivot) = pending else { return Ok(()) };
+        info!(target: "sync::snap", pivot, "Resuming an interrupted snap state publish");
+        self.publish(pivot)
+    }
+
+    // Anchors the static files at `pivot` and moves the checkpoints there. Repeats safely, since
+    // nothing is appended above the pivot until its checkpoints commit.
+    fn publish(&self, pivot: u64) -> Result<(), PipelineError> {
+        let provider = self.factory.database_provider_rw()?;
+        // History below the pivot was never downloaded, so it counts as pruned and the static
+        // files start there.
+        provider.anchor_pruned_static_files(pivot)?;
+        provider
+            .publish_snap_state(pivot)
+            .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
+        provider.commit()?;
+        Ok(())
     }
 
     // Rebuilds the trie from the downloaded state up to `pivot`, committing the stage's progress
@@ -101,11 +127,12 @@ mod tests {
         StaticFileWriter, StorageSettings, StorageSettingsCache,
     };
     use reth_snap_sync::SnapGeneration;
+    use reth_stages::StageCheckpoint;
 
     const PIVOT: u64 = 1;
 
-    // Headers through the pivot, with the state published at it.
-    fn published() -> ProviderFactory<MockNodeTypesWithDB> {
+    // Headers through the pivot on storage v2.
+    fn headers() -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
@@ -123,7 +150,12 @@ mod tests {
         }
         writer.commit().unwrap();
         drop(writer);
+        factory
+    }
 
+    // Headers through the pivot, with the state published at it.
+    fn published() -> ProviderFactory<MockNodeTypesWithDB> {
+        let factory = headers();
         let provider = factory.database_provider_rw().unwrap();
         provider.anchor_pruned_static_files(PIVOT).unwrap();
         provider.publish_snap_state(PIVOT).unwrap();
@@ -156,5 +188,40 @@ mod tests {
         assert_eq!(activation, Activation::PivotReorged);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_publish_interrupted_before_its_checkpoints_resumes_at_startup() {
+        let factory = headers();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.begin_snap_publish(PIVOT).unwrap();
+        provider.commit().unwrap();
+
+        // The static files finalize, then the node stops before the database commits.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(PIVOT).unwrap();
+        provider.publish_snap_state(PIVOT).unwrap();
+        factory.static_file_provider().finalize().unwrap();
+        drop(provider);
+
+        // Startup finishes the publish before checking consistency, which would otherwise unwind
+        // the anchored files to the old checkpoints.
+        SnapActivation::new(factory.clone()).resume_interrupted_publish().unwrap();
+        assert_eq!(factory.check_consistency().unwrap(), (None, None));
+
+        let static_files = factory.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            assert_eq!(
+                static_files.get_highest_static_file_block(segment),
+                Some(PIVOT),
+                "{segment}"
+            );
+        }
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.pending_snap_publish().unwrap(), None);
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+            Some(StageCheckpoint::new(PIVOT))
+        );
     }
 }

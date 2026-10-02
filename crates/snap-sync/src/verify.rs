@@ -72,9 +72,25 @@ pub trait SnapStateVerifier {
     /// covers move to `pivot`, and the history below it counts as pruned.
     ///
     /// The trie is not rebuilt yet, so `Finish` and the merkle stage stay where they were.
+    ///
+    /// Clears the marker [`Self::begin_snap_publish`] left, in the same transaction.
     fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
     where
-        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
+        Self: MetadataWriter
+            + PruneCheckpointWriter
+            + StageCheckpointWriter
+            + DBProvider<Tx: DbTxMut>;
+
+    /// Marks `pivot` as being published, committed before the static files are anchored.
+    ///
+    /// Static files commit ahead of the database, so a crash in between leaves anchored files
+    /// under older checkpoints until [`Self::pending_snap_publish`] finishes the publish.
+    fn begin_snap_publish(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter;
+
+    /// Returns the pivot of a publish that began but whose checkpoints never committed.
+    fn pending_snap_publish(&self) -> Result<Option<u64>, SnapSyncError>;
 
     /// Returns whether `write`'s state was handed to the merkle stage, so a resumed sync does not
     /// reset its rebuild.
@@ -143,7 +159,10 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
 
     fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
     where
-        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
+        Self: MetadataWriter
+            + PruneCheckpointWriter
+            + StageCheckpointWriter
+            + DBProvider<Tx: DbTxMut>,
     {
         // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
         // transaction segments no longer hold.
@@ -166,7 +185,18 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         {
             self.save_prune_checkpoint(segment, pruned)?;
         }
-        Ok(())
+        StoredPublish::clear(self)
+    }
+
+    fn begin_snap_publish(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
+        StoredPublish::new(pivot).write(self)
+    }
+
+    fn pending_snap_publish(&self) -> Result<Option<u64>, SnapSyncError> {
+        Ok(StoredPublish::read(self)?.map(|stored| stored.pivot))
     }
 
     fn verify_completeness(
@@ -251,6 +281,27 @@ impl StoredRebuild {
     // The hand-off of `write`'s state at this build's version.
     const fn new(write: SnapWrite) -> Self {
         Self { version: Self::VERSION, write }
+    }
+}
+
+// A publish whose static files may be anchored ahead of its checkpoints.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct StoredPublish {
+    // Encoding version, checked before the rest is decoded.
+    version: u32,
+    // Block the static files are anchored at.
+    pivot: u64,
+}
+
+impl SnapRecord for StoredPublish {
+    const KEY: &'static str = "snap_publish";
+    const VERSION: u32 = 1;
+}
+
+impl StoredPublish {
+    // The publish of `pivot` at this build's version.
+    const fn new(pivot: u64) -> Self {
+        Self { version: Self::VERSION, pivot }
     }
 }
 

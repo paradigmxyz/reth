@@ -32,6 +32,7 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
+    snap::SnapActivation,
     BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
 use alloy_eips::eip2124::Head;
@@ -542,6 +543,8 @@ where
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
+
+        SnapActivation::new(factory.clone()).resume_interrupted_publish()?;
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
