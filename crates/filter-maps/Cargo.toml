@@ -1,0 +1,22 @@
+[package]
+name = "reth-filter-maps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Mapping math for the FilterMaps local search index"
+
+[lints]
+workspace = true
+
+[dependencies]
+# ethereum
+alloy-primitives.workspace = true
+
+# crypto
+sha2.workspace = true
+
+# misc
+thiserror.workspace = true
