@@ -883,7 +883,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
                 ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
             })?;
-        
+
         // Calculate changesets before modifying hashed state used to reconstruct historical tries.
         let trie_revert = self
             .overlay_manager
