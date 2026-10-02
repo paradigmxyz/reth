@@ -916,6 +916,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Ok(())
         }
 
+        self.ensure_above_pruned_anchor(last_block)?;
+
         // Navigate to the correct file if the target block is in a previous file
         let mut expected_block_start = self.writer.user_header().expected_block_start();
         while last_block < expected_block_start && expected_block_start > 0 {
@@ -923,7 +925,6 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
-        self.ensure_above_pruned_anchor(last_block)?;
         let block_start = self.writer.user_header().block_start().unwrap_or(expected_block_start);
 
         // Find the number of rows to keep (up to and including last_block)
@@ -1111,13 +1112,21 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Errors if the current file is anchored above `last_block`, since nothing below the anchor
-    /// is stored and the unwind cannot be applied.
+    /// Errors if the segment is anchored above `last_block`, since nothing below the anchor is
+    /// stored and the unwind cannot be applied. Must run before the unwind deletes any file.
     fn ensure_above_pruned_anchor(&self, last_block: BlockNumber) -> ProviderResult<()> {
         let header = self.writer.user_header();
-        if let Some(block_start) = header.block_start() &&
-            block_start > header.expected_block_start() &&
-            last_block < block_start
+        let reader = self.reader();
+        // The current file may hold an anchor not yet in the index, and the lowest file holds it
+        // when the unwind starts from a later file.
+        let current = header.block_start().map(|start| (start, header.expected_block_start()));
+        let lowest = reader.get_lowest_range(header.segment()).map(|range| {
+            (range.start(), reader.find_fixed_range(header.segment(), range.start()).start())
+        });
+        if current
+            .into_iter()
+            .chain(lowest)
+            .any(|(start, expected_start)| start > expected_start && last_block < start)
         {
             return Err(ProviderError::other(StaticFileWriterError::new(
                 "cannot unwind below the pruned anchor",

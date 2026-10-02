@@ -1038,4 +1038,58 @@ mod tests {
         assert_eq!(provider.account_block_changeset(751).unwrap().len(), 2);
         assert!(!provider.directory().join(segment.filename(&(0..=499).into())).exists());
     }
+
+    #[test]
+    fn test_unwind_below_anchor_in_earlier_file_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=753 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(499).unwrap();
+            assert!(writer.commit().is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((750..=753).into()));
+        assert!(!provider.directory().join(segment.filename(&(0..=499).into())).exists());
+    }
+
+    #[test]
+    fn test_unwind_below_anchor_from_later_file_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::Receipts;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=1001 {
+                writer.increment_block(block).unwrap();
+            }
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_receipts(1, 749).unwrap();
+            assert!(writer.commit().is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        assert_eq!(provider.get_lowest_range(segment), Some((750..=999).into()));
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(1001));
+    }
 }
