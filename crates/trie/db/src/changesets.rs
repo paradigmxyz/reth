@@ -93,54 +93,26 @@ where
 
     let mut state = HashedPostStateSorted::default();
     let mut overlay = TrieUpdatesSorted::default();
-    let mut reverts = TrieUpdatesSorted::default();
-
-    // Rewind the tail first, then the requested range, keeping the current trie and state views.
-    let tail = end_block.checked_add(1).map(|start| start..=db_tip_block);
-    for (is_range, blocks) in tail.into_iter().map(|tail| (false, tail)).chain([(true, range)]) {
-        let mut next = (!blocks.is_empty()).then_some(*blocks.end());
-        while let Some(end) = next {
-            let mut start = end;
-            let mut forward = Vec::new();
-            if let Some(updates) = forward_updates.get(&end) {
-                forward.push(updates);
-                while start > *blocks.start() {
-                    let Some(updates) = forward_updates.get(&(start - 1)) else { break };
-                    forward.push(updates);
-                    start -= 1;
-                }
-            }
-
-            // Without the original updates, reverting one block at a time preserves nodes that
-            // appear and disappear inside the range. An endpoint-only calculation would omit them.
-            let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
-            let prefixes = segment_state.construct_prefix_sets().freeze();
-            state.extend_ref_and_sort(&segment_state);
-            let updates = StateRoot::new(
-                InMemoryTrieCursorFactory::new(state_trie_provider, &overlay),
-                HashedPostStateCursorFactory::new(state_trie_provider, &state),
-            )
-            .with_prefix_sets(prefixes)
-            .root_with_updates()
-            .map_err(ProviderError::other)?
-            .1
-            .into_sorted();
-
-            // Newest forward values win; the calculated target values override them.
-            let segment = if forward.is_empty() {
-                updates
-            } else {
-                let mut segment = TrieUpdatesSorted::merge_slice(&forward);
-                segment.extend_ref_and_sort(&updates);
-                segment
-            };
-            overlay.extend_ref_and_sort(&segment);
-            if is_range {
-                reverts.extend_ref_and_sort(&segment);
-            }
-            next = (start > *blocks.start()).then(|| start - 1);
-        }
+    // Rewind later blocks to reconstruct the trie at the end of the requested range.
+    if end_block < db_tip_block {
+        rewind_trie_range(
+            provider,
+            state_trie_provider,
+            forward_updates,
+            (end_block + 1)..=db_tip_block,
+            &mut state,
+            &mut overlay,
+        )?;
     }
+
+    let reverts = rewind_trie_range(
+        provider,
+        state_trie_provider,
+        forward_updates,
+        range,
+        &mut state,
+        &mut overlay,
+    )?;
 
     debug!(
         target: "trie::changesets",
@@ -150,6 +122,64 @@ where
         num_storage_tries = reverts.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
+
+    Ok(reverts)
+}
+
+/// Rewinds the current state and trie views, returning only this range's changesets.
+fn rewind_trie_range<Provider, StateTrieProvider>(
+    provider: &Provider,
+    state_trie_provider: &StateTrieProvider,
+    forward_updates: &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+    blocks: RangeInclusive<BlockNumber>,
+    state: &mut HashedPostStateSorted,
+    overlay: &mut TrieUpdatesSorted,
+) -> Result<TrieUpdatesSorted, ProviderError>
+where
+    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
+{
+    let mut reverts = TrieUpdatesSorted::default();
+    let mut next = (!blocks.is_empty()).then_some(*blocks.end());
+    while let Some(end) = next {
+        let mut start = end;
+        let mut forward = Vec::new();
+        if let Some(updates) = forward_updates.get(&end) {
+            forward.push(updates);
+            while start > *blocks.start() {
+                let Some(updates) = forward_updates.get(&(start - 1)) else { break };
+                forward.push(updates);
+                start -= 1;
+            }
+        }
+
+        // Without the original updates, reverting one block at a time preserves nodes that
+        // appear and disappear inside the range. An endpoint-only calculation would omit them.
+        let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
+        let prefixes = segment_state.construct_prefix_sets().freeze();
+        state.extend_ref_and_sort(&segment_state);
+        let updates = StateRoot::new(
+            InMemoryTrieCursorFactory::new(state_trie_provider, &*overlay),
+            HashedPostStateCursorFactory::new(state_trie_provider, &*state),
+        )
+        .with_prefix_sets(prefixes)
+        .root_with_updates()
+        .map_err(ProviderError::other)?
+        .1
+        .into_sorted();
+
+        // Newest forward values win; the calculated target values override them.
+        let segment = if forward.is_empty() {
+            updates
+        } else {
+            let mut segment = TrieUpdatesSorted::merge_slice(&forward);
+            segment.extend_ref_and_sort(&updates);
+            segment
+        };
+        overlay.extend_ref_and_sort(&segment);
+        reverts.extend_ref_and_sort(&segment);
+        next = (start > *blocks.start()).then(|| start - 1);
+    }
 
     Ok(reverts)
 }
