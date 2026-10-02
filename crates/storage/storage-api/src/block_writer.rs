@@ -113,4 +113,7 @@ pub trait BlockWriter {
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
     ) -> ProviderResult<()>;
+
+    /// Clears the active transaction lookup index. `RocksDB` changes take effect immediately.
+    fn clear_transaction_lookup(&self) -> ProviderResult<()>;
 }

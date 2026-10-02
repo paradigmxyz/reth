@@ -3852,6 +3852,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
         Ok(())
     }
+
+    fn clear_transaction_lookup(&self) -> ProviderResult<()> {
+        if self.cached_storage_settings().storage_v2 {
+            self.rocksdb_provider.clear::<tables::TransactionHashNumbers>()
+        } else {
+            self.tx.clear::<tables::TransactionHashNumbers>().map_err(Into::into)
+        }
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvider<TX, N> {

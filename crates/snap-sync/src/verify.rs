@@ -19,7 +19,7 @@ use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    BlockHashReader, BlockWriter, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
     PruneCheckpointWriter, SnapAttemptId, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_storage_errors::provider::{ProviderError, RootMismatch};
@@ -48,7 +48,7 @@ const PUBLISHED_STAGES: [StageId; 11] = [
 
 /// Decides whether downloaded state can be trusted as the node's state.
 ///
-/// Writes join the caller's transaction, so a refused check changes nothing.
+/// Verification writes join the caller's transaction, so a refused check changes nothing.
 pub trait SnapStateVerifier {
     /// Hands complete state to the merkle stage, which rebuilds its trie from scratch.
     ///
@@ -78,9 +78,10 @@ pub trait SnapStateVerifier {
     /// covers move to `pivot`, and the history below it counts as pruned.
     ///
     /// The trie is not rebuilt yet, so `Finish` and the merkle stage stay where they were.
+    /// `RocksDB` transaction lookups are cleared immediately.
     fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
     where
-        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
+        Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
 
     /// Returns whether `write`'s state was handed to the merkle stage, so a resumed sync does not
     /// reset its rebuild.
@@ -149,13 +150,13 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
 
     fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
     where
-        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
+        Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
     {
         // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
         // transaction segments no longer hold.
         self.tx_ref().clear::<tables::BlockBodyIndices>()?;
         self.tx_ref().clear::<tables::TransactionBlocks>()?;
-        self.tx_ref().clear::<tables::TransactionHashNumbers>()?;
+        self.clear_transaction_lookup()?;
 
         let checkpoint = StageCheckpoint::new(pivot);
         for stage in PUBLISHED_STAGES {
@@ -293,8 +294,9 @@ mod tests {
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
-        BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory, ProviderFactory,
+        BlockBodyIndicesProvider, DatabaseProviderFactory, EitherWriter, ProviderFactory,
         PruneCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        StorageSettings, StorageSettingsCache, TransactionsProvider,
     };
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
@@ -642,6 +644,46 @@ mod tests {
                 static_files.get_highest_static_file_tx(StaticFileSegment::Transactions),
                 None
             );
+        }
+    }
+
+    #[test]
+    fn publishing_clears_transaction_lookups_in_the_active_backend() {
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = hashed_factory();
+            factory.set_storage_settings_cache(settings);
+            let old_hash = B256::repeat_byte(0xaa);
+            let new_hash = B256::repeat_byte(0xbb);
+            let insert_lookup = |hash| {
+                let provider = factory.database_provider_rw().unwrap();
+                provider
+                    .with_rocksdb_batch(|batch| {
+                        let mut writer =
+                            EitherWriter::new_transaction_hash_numbers(&provider, batch)?;
+                        writer.put_transaction_hash_numbers_batch(vec![(hash, 0)], false)?;
+                        Ok(((), writer.into_raw_rocksdb_batch()))
+                    })
+                    .unwrap();
+                provider.commit().unwrap();
+            };
+            insert_lookup(old_hash);
+            assert_eq!(
+                factory.database_provider_ro().unwrap().transaction_id(old_hash).unwrap(),
+                Some(0)
+            );
+
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(7).unwrap();
+            provider.commit().unwrap();
+            assert_eq!(
+                factory.database_provider_ro().unwrap().transaction_id(old_hash).unwrap(),
+                None
+            );
+
+            insert_lookup(new_hash);
+            let provider = factory.database_provider_ro().unwrap();
+            assert_eq!(provider.transaction_id(old_hash).unwrap(), None);
+            assert_eq!(provider.transaction_id(new_hash).unwrap(), Some(0));
         }
     }
 }
