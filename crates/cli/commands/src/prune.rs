@@ -6,7 +6,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_node_builder::common::metrics_hooks;
-use reth_node_core::{args::MetricArgs, version::version_metadata};
+use reth_node_core::{args::MetricArgs, dirs::config_path_prefix, version::version_metadata};
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     server::{MetricServer, MetricServerConfig},
@@ -51,11 +51,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> PruneComma
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo {
-                    name: reth_node_core::dirs::config_path_prefix(
-                        provider_factory.chain_spec().chain(),
-                    ),
-                },
+                ChainSpecInfo { name: config_path_prefix(provider_factory.chain_spec().chain()) },
                 ctx.task_executor.clone(),
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

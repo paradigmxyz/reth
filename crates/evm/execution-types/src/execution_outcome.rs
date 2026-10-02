@@ -547,7 +547,14 @@ pub(super) mod serde_bincode_compat {
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
-            let data = Data { data: ExecutionOutcome::new(Default::default(), vec![], 0, vec![]) };
+            let data = Data {
+                data: ExecutionOutcome {
+                    bundle: Default::default(),
+                    receipts: vec![],
+                    first_block: 0,
+                    requests: vec![],
+                },
+            };
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
@@ -704,12 +711,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome::new(
-            Default::default(), // Default value for bundle
-            receipts,           // Include the created receipts
-            first_block,        // Set the first block number
-            vec![],             // Empty vector for requests
-        );
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Get receipts for block number 123 and convert the result into a vector
         let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
@@ -744,12 +751,12 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = ExecutionOutcome::new(
-            Default::default(), // Default value for bundle
-            receipts,           // Include the created receipts
-            first_block,        // Set the first block number
-            vec![],             // Empty vector for requests
-        );
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Assert that the length of receipts in exec_res is 1
         assert_eq!(exec_res.len(), 1);
@@ -758,12 +765,12 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome::new(
-            Default::default(), // Default value for bundle
-            receipts_empty,     // Include the empty receipts
-            first_block,        // Set the first block number
-            vec![],             // Empty vector for requests
-        );
+        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts: receipts_empty,   // Include the empty receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Assert that the length of receipts in exec_res_empty_receipts is 0
         assert_eq!(exec_res_empty_receipts.len(), 0);
@@ -976,8 +983,12 @@ mod tests {
             },
         );
 
-        let execution_outcome: ExecutionOutcome =
-            ExecutionOutcome::new(bundle_state, Default::default(), 0, vec![]);
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
+            bundle: bundle_state,
+            receipts: Default::default(),
+            first_block: 0,
+            requests: vec![],
+        };
 
         // Get the changed accounts
         let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();

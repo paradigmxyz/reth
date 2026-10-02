@@ -1012,7 +1012,10 @@ fn compress_frame(
 mod tests {
     use super::*;
     use crate::{
-        protocol::Protocol, test_utils::eth_hello, Capability, EthVersion, ProtocolVersion,
+        capability::SharedCapability,
+        protocol::Protocol,
+        test_utils::{eth_hello, proto::TestProtoMessage},
+        Capability, EthVersion, ProtocolVersion,
     };
     use futures::task::noop_waker_ref;
     use tokio::net::{TcpListener, TcpStream};
@@ -1234,7 +1237,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_subprotocol_frame_before_decompression_when_declared_size_exceeds_limit() {
-        let cap = crate::test_utils::proto::TestProtoMessage::capability();
+        let cap = TestProtoMessage::capability();
         let shared_capabilities =
             SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
                 .unwrap();
@@ -1442,10 +1445,7 @@ mod tests {
             // ensure that the two share a single capability, eth67
             assert_eq!(
                 *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
-                crate::capability::SharedCapability::eth(
-                    EthVersion::Eth67,
-                    MAX_RESERVED_MESSAGE_ID + 1
-                )
+                SharedCapability::eth(EthVersion::Eth67, MAX_RESERVED_MESSAGE_ID + 1)
             );
         });
 
@@ -1460,10 +1460,7 @@ mod tests {
         // ensure that the two share a single capability, eth67
         assert_eq!(
             *p2p_stream.shared_capabilities.iter_caps().next().unwrap(),
-            crate::capability::SharedCapability::eth(
-                EthVersion::Eth67,
-                MAX_RESERVED_MESSAGE_ID + 1
-            )
+            SharedCapability::eth(EthVersion::Eth67, MAX_RESERVED_MESSAGE_ID + 1)
         );
 
         // make sure the server receives the message and asserts before ending the test

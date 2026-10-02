@@ -627,6 +627,7 @@ impl BlockTuple {
 mod tests {
     use super::*;
     use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
+    use alloy_consensus::TxEip1559;
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{b256, Bytes, U256};
     use reth_ethereum_primitives::Receipt;
@@ -740,8 +741,7 @@ mod tests {
 
     #[test]
     fn test_single_receipt_compression_roundtrip() {
-        let test_receipt =
-            create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
+        let test_receipt = create_test_receipt(TxEip1559::tx_type(), true, 21000, 2);
 
         // Compress the receipt
         let compressed_receipts =

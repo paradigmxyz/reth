@@ -446,7 +446,7 @@ mod tests {
 
     fn receipt(cumulative_gas_used: u64) -> Receipt {
         Receipt {
-            tx_type: alloy_consensus::TxEip1559::tx_type(),
+            tx_type: TxEip1559::tx_type(),
             success: true,
             cumulative_gas_used,
             logs: Vec::new(),

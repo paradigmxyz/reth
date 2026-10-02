@@ -717,7 +717,7 @@ mod tests {
         assert_eq!(pool.size(), 0);
 
         // Attempt to remove a non-existent transaction
-        let non_existent_id = crate::identifier::SenderId::into_transaction_id(0.into(), 0);
+        let non_existent_id = SenderId::into_transaction_id(0.into(), 0);
         assert!(pool.remove_transaction(&non_existent_id).is_none());
 
         // Check contains method on empty pool

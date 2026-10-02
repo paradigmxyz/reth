@@ -37,7 +37,7 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     // Create a chain spec with a genesis state that contains the
     // provided sender
     Arc::new(
-        reth_chainspec::ChainSpec::builder()
+        ChainSpec::builder()
             .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [(

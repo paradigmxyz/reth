@@ -41,7 +41,7 @@ use reth_node_builder::{
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage, ProviderFactory};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     TestingApi, ValidationApi,
@@ -125,7 +125,7 @@ impl EthereumNode {
     /// a [`ProviderFactory`](reth_provider::ProviderFactory) manually with all required
     /// components.
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
-        reth_provider::ProviderFactory::builder()
+        ProviderFactory::builder()
     }
 }
 

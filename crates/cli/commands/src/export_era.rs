@@ -6,6 +6,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
 use reth_era_utils as era;
+use reth_node_core::dirs::config_path_prefix;
 use reth_provider::DatabaseProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -108,7 +109,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
         };
 
         let export_config = era::ExportConfig {
-            network: reth_node_core::dirs::config_path_prefix(self.env.chain.chain()),
+            network: config_path_prefix(self.env.chain.chain()),
             first_block_number: self.export.first_block_number.unwrap_or(0),
             last_block_number: self
                 .export

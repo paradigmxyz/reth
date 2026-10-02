@@ -2509,7 +2509,7 @@ mod tests {
         traits::TransactionOrigin,
         SubPoolLimit,
     };
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Transaction, TxEip1559, TxEip4844Variant};
     use alloy_primitives::address;
 
     #[test]
@@ -4544,19 +4544,15 @@ mod tests {
         pool.set_block_info(block_info);
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs = MockTransactionSet::dependent(
-            a_sender,
-            0,
-            2,
-            alloy_consensus::TxEip4844Variant::<()>::tx_type(),
-        )
-        .into_iter()
-        .map(|mut tx| {
-            tx.set_size(default_limits.max_size / 2 + 1);
-            tx.set_max_fee((block_info.pending_basefee - 1).into());
-            tx
-        })
-        .collect::<Vec<_>>();
+        let a_txs =
+            MockTransactionSet::dependent(a_sender, 0, 2, TxEip4844Variant::<()>::tx_type())
+                .into_iter()
+                .map(|mut tx| {
+                    tx.set_size(default_limits.max_size / 2 + 1);
+                    tx.set_max_fee((block_info.pending_basefee - 1).into());
+                    tx
+                })
+                .collect::<Vec<_>>();
 
         // add all the transactions to the parked pool
         for tx in a_txs {
@@ -4587,15 +4583,14 @@ mod tests {
         pool.update_basefee(pool_base_fee, |_| {});
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs =
-            MockTransactionSet::dependent(a_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
-                .into_iter()
-                .map(|mut tx| {
-                    tx.set_size(default_limits.max_size / 2 + 1);
-                    tx.set_max_fee((pool_base_fee - 1).into());
-                    tx
-                })
-                .collect::<Vec<_>>();
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxEip1559::tx_type())
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx.set_max_fee((pool_base_fee - 1).into());
+                tx
+            })
+            .collect::<Vec<_>>();
 
         // add all the transactions to the parked pool
         for tx in a_txs {

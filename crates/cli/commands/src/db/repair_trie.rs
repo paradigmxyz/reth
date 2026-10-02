@@ -10,7 +10,7 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_node_core::{
-    dirs::{ChainPath, DataDirPath},
+    dirs::{config_path_prefix, ChainPath, DataDirPath},
     version::version_metadata,
 };
 use reth_node_metrics::{
@@ -65,9 +65,7 @@ impl Command {
     ) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
-            let chain_name = reth_node_core::dirs::config_path_prefix(
-                tool.provider_factory.chain_spec().chain(),
-            );
+            let chain_name = config_path_prefix(tool.provider_factory.chain_spec().chain());
             let executor = task_executor.clone();
             let pprof_dump_dir = data_dir.pprof_dumps();
 

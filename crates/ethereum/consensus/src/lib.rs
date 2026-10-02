@@ -328,7 +328,7 @@ mod tests {
     fn prague_recovered_block_with_bal_hash(hash: B256) -> RecoveredBlock<EthBlock> {
         let mut header = valid_prague_header();
         header.block_access_list_hash = Some(hash);
-        reth_primitives_traits::Block::into_recovered_with_signers(
+        Block::into_recovered_with_signers(
             EthBlock { header, body: Default::default() },
             Vec::new(),
         )

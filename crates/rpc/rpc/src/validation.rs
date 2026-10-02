@@ -1042,8 +1042,11 @@ mod tests {
             None,
         );
 
-        api.recover_payload(ExecutionData::new(test_execution_payload(), Default::default()))
-            .unwrap();
+        api.recover_payload(ExecutionData {
+            payload: test_execution_payload(),
+            sidecar: Default::default(),
+        })
+        .unwrap();
     }
 
     fn test_validation_api(

@@ -338,7 +338,7 @@ mod tests {
         let contract = Address::repeat_byte(0xc0);
         let beneficiary = Address::repeat_byte(0xbe);
 
-        let mut db = <revm::database::CacheDB<EmptyDB> as Default>::default();
+        let mut db = <CacheDB<EmptyDB> as Default>::default();
         insert(&mut db, BEACON_ROOTS_ADDRESS, 1, BEACON_ROOTS_CODE.clone());
         insert(&mut db, HISTORY_STORAGE_ADDRESS, 1, HISTORY_STORAGE_CODE.clone());
         insert(

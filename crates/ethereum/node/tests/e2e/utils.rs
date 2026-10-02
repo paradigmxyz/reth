@@ -1,3 +1,4 @@
+use alloy_consensus::{TxEip2930, TxEip4844Variant, TxEip7702};
 use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
 use alloy_primitives::{bytes, U256};
 use alloy_provider::{
@@ -51,8 +52,8 @@ pub(crate) async fn advance_with_random_transactions(
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create = rng.random::<bool>() &&
-                tx_type != alloy_consensus::TxEip4844Variant::<()>::tx_type() &&
-                tx_type != alloy_consensus::TxEip7702::tx_type();
+                tx_type != TxEip4844Variant::<()>::tx_type() &&
+                tx_type != TxEip7702::tx_type();
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
@@ -65,7 +66,7 @@ pub(crate) async fn advance_with_random_transactions(
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.random::<bool>() || tx_type == alloy_consensus::TxEip2930::tx_type() {
+            if rng.random::<bool>() || tx_type == TxEip2930::tx_type() {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
@@ -75,7 +76,7 @@ pub(crate) async fn advance_with_random_transactions(
                 );
             }
 
-            if tx_type == alloy_consensus::TxEip7702::tx_type() {
+            if tx_type == TxEip7702::tx_type() {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
                     chain_id: U256::from(provider.get_chain_id().await?),

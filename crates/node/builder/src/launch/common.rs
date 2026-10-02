@@ -56,7 +56,7 @@ use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::{DefaultEraHost, PruneConfigKind},
-    dirs::{ChainPath, DataDirPath},
+    dirs::{config_path_prefix, ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
     version::version_metadata,
@@ -82,7 +82,7 @@ use reth_rpc_layer::JwtSecret;
 use reth_stages::{
     sets::DefaultStages,
     stages::{EraImportSource, MerkleStage},
-    MetricEvent, PipelineTarget, StageId, StageSet,
+    MetricEvent, Pipeline, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
@@ -586,7 +586,7 @@ where
                         stages.set(MerkleStage::new_unwind(true)).enable(StageId::MerkleUnwind);
                 }
 
-                reth_stages::Pipeline::builder().add_stages(stages).build(
+                Pipeline::builder().add_stages(stages).build(
                     factory.clone(),
                     StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 )
@@ -747,7 +747,7 @@ where
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: reth_node_core::dirs::config_path_prefix(self.chain_id()) },
+                ChainSpecInfo { name: config_path_prefix(self.chain_id()) },
                 self.task_executor().clone(),
                 metrics_hooks(self.provider_factory()),
                 self.data_dir().pprof_dumps(),

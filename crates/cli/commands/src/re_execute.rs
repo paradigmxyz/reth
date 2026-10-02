@@ -254,7 +254,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                             result.receipts[i - 1].cumulative_gas_used()
                                         };
                                     if got_gas_used != expected_gas_used {
-                                        let mismatch = GotExpected::new(got_gas_used, expected_gas_used);
+                                        let mismatch =
+                                            GotExpected::new(got_gas_used, expected_gas_used);
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {

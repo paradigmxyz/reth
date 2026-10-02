@@ -1440,6 +1440,7 @@ impl<
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_consensus::{TxEip1559, TxEip2930};
     use alloy_network::Ethereum;
     use alloy_primitives::FixedBytes;
     use rand::Rng;
@@ -1581,13 +1582,13 @@ mod tests {
             success: true,
         };
         let mock_receipt_2 = reth_ethereum_primitives::Receipt {
-            tx_type: alloy_consensus::TxEip1559::tx_type(),
+            tx_type: TxEip1559::tx_type(),
             cumulative_gas_used: 200_000,
             logs: vec![],
             success: true,
         };
         let mock_receipt_3 = reth_ethereum_primitives::Receipt {
-            tx_type: alloy_consensus::TxEip2930::tx_type(),
+            tx_type: TxEip2930::tx_type(),
             cumulative_gas_used: 150_000,
             logs: vec![],
             success: false, // Different success status
@@ -1725,13 +1726,13 @@ mod tests {
             success: true,
         };
         let receipt_100_2 = reth_ethereum_primitives::Receipt {
-            tx_type: alloy_consensus::TxEip1559::tx_type(),
+            tx_type: TxEip1559::tx_type(),
             cumulative_gas_used: 42_000,
             logs: vec![mock_log.clone()],
             success: true,
         };
         let receipt_101_1 = reth_ethereum_primitives::Receipt {
-            tx_type: alloy_consensus::TxEip2930::tx_type(),
+            tx_type: TxEip2930::tx_type(),
             cumulative_gas_used: 30_000,
             logs: vec![mock_log.clone()],
             success: false,

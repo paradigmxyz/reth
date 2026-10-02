@@ -2116,8 +2116,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        let transaction =
-            reth_primitives_traits::SignedTransaction::with_signer(tx, Default::default());
+        let transaction = SignedTransaction::with_signer(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -2142,8 +2141,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        let transaction =
-            reth_primitives_traits::SignedTransaction::with_signer(tx, Default::default());
+        let transaction = SignedTransaction::with_signer(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
         let expected_cost = U256::from(100) + (U256::from(10 * 1000));
 
@@ -2167,8 +2165,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        let transaction =
-            reth_primitives_traits::SignedTransaction::with_signer(tx, Default::default());
+        let transaction = SignedTransaction::with_signer(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -2194,8 +2191,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        let transaction =
-            reth_primitives_traits::SignedTransaction::with_signer(tx, Default::default());
+        let transaction = SignedTransaction::with_signer(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
 
         // Check that the pooled transaction is created correctly
@@ -2224,8 +2220,7 @@ mod tests {
             }
             .into_signed(Signature::test_signature()),
         );
-        let transaction =
-            reth_primitives_traits::SignedTransaction::with_signer(tx, Default::default());
+        let transaction = SignedTransaction::with_signer(tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly

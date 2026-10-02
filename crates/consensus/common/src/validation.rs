@@ -496,8 +496,7 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block =
-            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
+        let block = Block::seal_slow(alloy_consensus::Block { header, body });
 
         // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
@@ -548,8 +547,7 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block =
-            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
+        let block = Block::seal_slow(alloy_consensus::Block { header, body });
 
         // Some(correct_root) should pass just like None
         assert!(
@@ -579,8 +577,7 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block =
-            reth_primitives_traits::Block::seal_slow(alloy_consensus::Block { header, body });
+        let block = Block::seal_slow(alloy_consensus::Block { header, body });
 
         let wrong_root = B256::repeat_byte(0xff);
         assert!(matches!(

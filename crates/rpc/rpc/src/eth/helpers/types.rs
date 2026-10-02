@@ -13,7 +13,7 @@ pub type EthRpcConverter<ChainSpec> =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Transaction, TxType};
+    use alloy_consensus::{Transaction, TxEip1559, TxType};
     use alloy_rpc_types_eth::TransactionRequest;
     use reth_chainspec::MAINNET;
     use reth_rpc_eth_types::simulate::resolve_transaction;
@@ -62,7 +62,7 @@ mod tests {
 
         let result = resolve_transaction(tx, 21000, 0, 1, false, &mut db, &rpc_converter).unwrap();
 
-        assert_eq!(result.tx_type(), alloy_consensus::TxEip1559::tx_type());
+        assert_eq!(result.tx_type(), TxEip1559::tx_type());
         let tx = result.into_inner();
         assert_eq!(tx.max_fee_per_gas(), 200);
         assert_eq!(tx.max_priority_fee_per_gas(), Some(10));

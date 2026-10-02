@@ -52,7 +52,7 @@ async fn test_local_rpc_tests_compat() -> Result<()> {
     // Parse the Genesis struct from JSON and convert it to ChainSpec
     // This properly handles all the hardfork configuration from the config section
     let genesis: Genesis = serde_json::from_str(&genesis_json)?;
-    let chain_spec: ChainSpec = reth_chainspec::ChainSpec::from_genesis(genesis);
+    let chain_spec: ChainSpec = ChainSpec::from_genesis(genesis);
     let chain_spec = Arc::new(chain_spec);
 
     // Create test setup with imported chain
@@ -149,7 +149,7 @@ async fn test_execution_apis_compat() -> Result<()> {
     // Load genesis from test data
     let genesis_json = std::fs::read_to_string(&genesis_path)?;
     let genesis: Genesis = serde_json::from_str(&genesis_json)?;
-    let chain_spec: ChainSpec = reth_chainspec::ChainSpec::from_genesis(genesis);
+    let chain_spec: ChainSpec = ChainSpec::from_genesis(genesis);
     let chain_spec = Arc::new(chain_spec);
 
     // Create test setup with imported chain

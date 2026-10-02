@@ -1156,7 +1156,7 @@ mod rocksdb_tests {
 
     fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
         let temp_dir = TempDir::new().unwrap();
-        let provider = crate::providers::RocksDBProvider::builder(temp_dir.path())
+        let provider = RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::AccountsHistory>()

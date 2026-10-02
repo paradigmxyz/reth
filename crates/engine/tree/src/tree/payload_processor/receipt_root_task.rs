@@ -134,7 +134,7 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
+    use alloy_consensus::{proofs::calculate_receipt_root, TxEip1559, TxEip2930, TxReceipt};
     use alloy_primitives::{b256, hex, Address, Bytes, Log};
     use crossbeam_channel::bounded;
     use reth_ethereum_primitives::{Receipt, TxType};
@@ -222,7 +222,7 @@ mod tests {
                 logs: vec![],
             },
             Receipt {
-                tx_type: alloy_consensus::TxEip1559::tx_type(),
+                tx_type: TxEip1559::tx_type(),
                 cumulative_gas_used: 42000,
                 success: true,
                 logs: vec![Log {
@@ -231,7 +231,7 @@ mod tests {
                 }],
             },
             Receipt {
-                tx_type: alloy_consensus::TxEip2930::tx_type(),
+                tx_type: TxEip2930::tx_type(),
                 cumulative_gas_used: 63000,
                 success: false,
                 logs: vec![],

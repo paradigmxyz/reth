@@ -3523,7 +3523,12 @@ proptest::proptest! {
             let (tx, mut rx) = unbounded_channel();
             let engine = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
             let callers = [tracing::info_span!("view_a"), tracing::info_span!("view_b")];
-            let payload = || ExecutionData::new(ExecutionPayloadV1::from_block_slow(&Block::default()).into(), ExecutionPayloadSidecar::none());
+            let payload = || {
+                ExecutionData::new(
+                    ExecutionPayloadV1::from_block_slow(&Block::default()).into(),
+                    ExecutionPayloadSidecar::none(),
+                )
+            };
             for &(caller, kind) in &requests {
                 callers[caller].in_scope(|| match kind {
                     0 => assert!(engine.new_payload(payload()).now_or_never().is_none()),

@@ -4,7 +4,7 @@ use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
-use reth_chainspec::{ChainSpecProvider, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{cursor::DbCursorRO, models::BlockNumberAddress, transaction::DbTx};
@@ -235,7 +235,7 @@ async fn run_pipeline_forward_and_unwind(
     // - Counter contract pre-deployed at CONTRACT_ADDRESS
     let initial_balance = U256::from(ETH_TO_WEI) * U256::from(1000);
     let chain_spec = Arc::new(
-        reth_chainspec::ChainSpec::builder()
+        ChainSpec::builder()
             .chain(MAINNET.chain())
             .genesis(Genesis {
                 alloc: [

@@ -198,7 +198,7 @@ impl WorkerPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
             build_pool_with_panic_handler(
-                crate::pool::BlockingTaskPool::builder()
+                BlockingTaskPool::builder()
                     .num_threads(self.num_threads)
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
             )

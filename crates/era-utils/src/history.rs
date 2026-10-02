@@ -871,7 +871,8 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{
-        Eip658Value, Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType,
+        Eip658Value, Header, Receipt as RlpReceipt, ReceiptWithBloom, TxEip1559, TxEip2930,
+        TxLegacy, TxType,
     };
     use alloy_primitives::{Address, Bytes, Log, Signature, B256};
     use reth_db_common::init::init_genesis;
@@ -1709,13 +1710,13 @@ mod tests {
         )];
         let slim = vec![
             SlimReceipt {
-                tx_type: alloy_consensus::TxEip2930::tx_type(),
+                tx_type: TxEip2930::tx_type(),
                 status: Eip658Value::Eip658(true),
                 cumulative_gas_used: 21_000,
                 logs: logs.clone(),
             },
             SlimReceipt {
-                tx_type: alloy_consensus::TxEip1559::tx_type(),
+                tx_type: TxEip1559::tx_type(),
                 status: Eip658Value::Eip658(false),
                 cumulative_gas_used: 42_000,
                 logs: vec![],
@@ -1731,13 +1732,13 @@ mod tests {
             receipts,
             Some(vec![
                 Receipt {
-                    tx_type: alloy_consensus::TxEip2930::tx_type(),
+                    tx_type: TxEip2930::tx_type(),
                     success: true,
                     cumulative_gas_used: 21_000,
                     logs,
                 },
                 Receipt {
-                    tx_type: alloy_consensus::TxEip1559::tx_type(),
+                    tx_type: TxEip1559::tx_type(),
                     success: false,
                     cumulative_gas_used: 42_000,
                     logs: vec![],

@@ -12,7 +12,7 @@ pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 mod tests {
     use super::*;
     use crate::TransactionSigned;
-    use alloy_consensus::{ReceiptWithBloom, TxReceipt, TxType};
+    use alloy_consensus::{ReceiptWithBloom, TxEip1559, TxEip2930, TxReceipt, TxType};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{
         address, b256, bloom, bytes, hex_literal::hex, Address, Bloom, Bytes, Log, LogData,
@@ -131,7 +131,7 @@ mod tests {
     fn test_encode_2718_length() {
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: alloy_consensus::TxEip1559::tx_type(),
+                tx_type: TxEip1559::tx_type(),
                 success: true,
                 cumulative_gas_used: 21000,
                 logs: vec![],
@@ -216,7 +216,7 @@ mod tests {
         );
         let receipt = ReceiptWithBloom {
             receipt: Receipt {
-                tx_type: alloy_consensus::TxEip2930::tx_type(),
+                tx_type: TxEip2930::tx_type(),
                 success: true,
                 cumulative_gas_used: 102068,
                 logs,

@@ -96,7 +96,7 @@ where
             }
             // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
-            Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+            Ok(ExecOutput::in_progress(input.checkpoint()))
         }
     }
 

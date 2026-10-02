@@ -1039,7 +1039,7 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory,
@@ -1344,14 +1344,14 @@ mod tests {
             .tx_ref()
             .put::<tables::StorageChangeSets>(
                 BlockNumberAddress((2, address)),
-                reth_primitives_traits::StorageEntry::new(storage_key, storage),
+                StorageEntry::new(storage_key, storage),
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 address,
-                reth_primitives_traits::StorageEntry::new(storage_key, U256::from(20)),
+                StorageEntry::new(storage_key, U256::from(20)),
             )
             .unwrap();
         provider_rw.commit().unwrap();

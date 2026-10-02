@@ -21,7 +21,7 @@ pub fn test_genesis() -> Genesis {
 /// Use this to schedule hardforks at non-genesis timestamps, otherwise prefer
 /// [`test_chain_spec`].
 pub fn test_chain_spec_builder() -> ChainSpecBuilder {
-    reth_chainspec::ChainSpec::builder().chain(MAINNET.chain()).genesis(test_genesis())
+    ChainSpec::builder().chain(MAINNET.chain()).genesis(test_genesis())
 }
 
 /// Returns the test chain spec with every hardfork up to and including `fork` active at genesis.

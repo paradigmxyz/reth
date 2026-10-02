@@ -398,7 +398,7 @@ impl UnsupportedCapabilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Capabilities, Capability, SnapVersion};
+    use crate::{test_utils::proto::TestProtoMessage, Capabilities, Capability, SnapVersion};
     use alloy_primitives::bytes::Bytes;
     use alloy_rlp::{Decodable, Encodable};
     use reth_eth_wire_types::RawCapabilityMessage;
@@ -411,10 +411,7 @@ mod tests {
         assert_eq!(capability.version(), 68);
         assert_eq!(
             capability,
-            crate::capability::SharedCapability::eth(
-                EthVersion::Eth68,
-                MAX_RESERVED_MESSAGE_ID + 1
-            )
+            SharedCapability::eth(EthVersion::Eth68, MAX_RESERVED_MESSAGE_ID + 1)
         );
     }
 
@@ -426,10 +423,7 @@ mod tests {
         assert_eq!(capability.version(), 67);
         assert_eq!(
             capability,
-            crate::capability::SharedCapability::eth(
-                EthVersion::Eth67,
-                MAX_RESERVED_MESSAGE_ID + 1
-            )
+            SharedCapability::eth(EthVersion::Eth67, MAX_RESERVED_MESSAGE_ID + 1)
         );
     }
 
@@ -441,10 +435,7 @@ mod tests {
         assert_eq!(capability.version(), 66);
         assert_eq!(
             capability,
-            crate::capability::SharedCapability::eth(
-                EthVersion::Eth66,
-                MAX_RESERVED_MESSAGE_ID + 1
-            )
+            SharedCapability::eth(EthVersion::Eth66, MAX_RESERVED_MESSAGE_ID + 1)
         );
     }
 
@@ -469,7 +460,7 @@ mod tests {
 
     #[test]
     fn lookup_rejects_message_ids_past_last_capability() {
-        let cap = crate::test_utils::proto::TestProtoMessage::capability();
+        let cap = TestProtoMessage::capability();
         let shared =
             SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
                 .unwrap();
@@ -502,10 +493,7 @@ mod tests {
 
         assert_eq!(
             shared_capability,
-            crate::capability::SharedCapability::eth(
-                EthVersion::Eth66,
-                MAX_RESERVED_MESSAGE_ID + 1
-            )
+            SharedCapability::eth(EthVersion::Eth66, MAX_RESERVED_MESSAGE_ID + 1)
         )
     }
 

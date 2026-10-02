@@ -1642,10 +1642,7 @@ mod tests {
             tx.into(),
             alloy_primitives::Signature::test_signature(),
         );
-        EthPooledTransaction::new(
-            reth_primitives_traits::SignedTransaction::with_signer(signed, sender),
-            200,
-        )
+        EthPooledTransaction::new(SignedTransaction::with_signer(signed, sender), 200)
     }
 
     fn amsterdam_fork_tracker() -> ForkTracker {
@@ -1787,11 +1784,8 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
         );
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .build(blob_store.clone());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -1814,11 +1808,8 @@ mod tests {
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
         );
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .build(InMemoryBlobStore::default());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
 
@@ -1828,11 +1819,8 @@ mod tests {
     #[test]
     fn validates_nonce_bound() {
         let provider = MockEthProvider::default().with_genesis_block();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .build(InMemoryBlobStore::default());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
         let transaction = |nonce| {
             EthPooledTransaction::try_from_consensus(
                 TransactionBuilder::default()
@@ -1859,11 +1847,8 @@ mod tests {
     #[test]
     fn validates_configured_chain_id() {
         let provider = MockEthProvider::default().with_genesis_block();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .build(InMemoryBlobStore::default());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
         let transaction = |chain_id| {
             EthPooledTransaction::try_from_consensus(
                 TransactionBuilder::default()
@@ -1901,12 +1886,9 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
-        .build(blob_store.clone());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
+            .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -1937,12 +1919,9 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .set_tx_fee_cap(100) // 100 wei cap
-        .build(blob_store.clone());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .set_tx_fee_cap(100) // 100 wei cap
+            .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction.clone());
         assert!(outcome.is_invalid());
@@ -1977,12 +1956,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .set_tx_fee_cap(0) // no cap
-        .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .set_tx_fee_cap(0) // no cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1998,12 +1975,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
-        .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -2019,12 +1994,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
-        .build(blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
+                .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         assert!(outcome.is_invalid());
@@ -2054,12 +2027,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .with_max_tx_gas_limit(None) // disabled
-        .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(None) // disabled
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -2075,12 +2046,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
-        .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -2104,11 +2073,9 @@ mod tests {
         local_config: Option<LocalTransactionConfig>,
     ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction, EthEvmConfig> {
         let blob_store = InMemoryBlobStore::default();
-        let mut builder = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .with_minimum_priority_fee(minimum_priority_fee);
+        let mut builder =
+            TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+                .with_minimum_priority_fee(minimum_priority_fee);
 
         if let Some(config) = local_config {
             builder = builder.with_local_transactions_config(config);
@@ -2271,12 +2238,9 @@ mod tests {
     fn reject_blob_tx_with_oversized_access_list() {
         let max_tx_input_bytes = 512;
         let provider = MockEthProvider::default().with_genesis_block();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            test_evm_config(),
-        )
-        .with_max_tx_input_bytes(max_tx_input_bytes)
-        .build(InMemoryBlobStore::default());
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+            .with_max_tx_input_bytes(max_tx_input_bytes)
+            .build(InMemoryBlobStore::default());
 
         let blob_tx_with_access_list = |storage_keys: usize| {
             let access_list = AccessList(vec![AccessListItem {
@@ -2319,7 +2283,7 @@ mod tests {
         );
 
         // Validate with balance check enabled
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
+        let validator = TransactionValidationTaskExecutor::eth_builder(
             provider.clone(),
             EthEvmConfig::mainnet(),
         )
@@ -2338,12 +2302,10 @@ mod tests {
         }
 
         // Validate with balance check disabled
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .disable_balance_check()
-        .build(InMemoryBlobStore::default());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .disable_balance_check()
+                .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled

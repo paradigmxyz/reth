@@ -542,7 +542,7 @@ mod tests {
     #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
         use alloy_primitives::{Address, U256};
-        use reth_primitives_traits::Account;
+        use reth_primitives_traits::{Account, StorageEntry};
         use reth_testing_utils::generators::ChangeSet;
 
         let db = TestStageDB::default();
@@ -563,9 +563,7 @@ mod tests {
         let account = Account { nonce: 1, balance: U256::from(100), ..Default::default() };
 
         // Create storage entries
-        let storage_entry = |key: u8| {
-            reth_primitives_traits::StorageEntry::new(B256::with_last_byte(key), U256::from(100))
-        };
+        let storage_entry = |key: u8| StorageEntry::new(B256::with_last_byte(key), U256::from(100));
 
         // Build changesets: blocks 0-4 have 1 storage change each, block 5 has 4 changes, block 6
         // has 1. Entries within each account must be sorted by key.

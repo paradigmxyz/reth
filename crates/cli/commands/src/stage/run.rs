@@ -21,6 +21,7 @@ use reth_network_p2p::HeadersClient;
 use reth_node_builder::common::metrics_hooks;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
+    dirs::config_path_prefix,
     version::version_metadata,
 };
 use reth_node_metrics::{
@@ -138,11 +139,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo {
-                    name: reth_node_core::dirs::config_path_prefix(
-                        provider_factory.chain_spec().chain(),
-                    ),
-                },
+                ChainSpecInfo { name: config_path_prefix(provider_factory.chain_spec().chain()) },
                 ctx.task_executor,
                 metrics_hooks(&provider_factory),
                 data_dir.pprof_dumps(),

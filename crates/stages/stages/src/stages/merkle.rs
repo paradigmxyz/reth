@@ -299,12 +299,9 @@ where
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
-                    return Ok(ExecOutput {
-                        checkpoint: input
-                            .checkpoint()
-                            .with_entities_stage_checkpoint(entities_checkpoint),
-                        done: false,
-                    })
+                    return Ok(ExecOutput::in_progress(
+                        input.checkpoint().with_entities_stage_checkpoint(entities_checkpoint),
+                    ))
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;

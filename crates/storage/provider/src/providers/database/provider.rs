@@ -2429,7 +2429,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
                             Ok(plain_storage
                                 .seek_by_key_subkey(address, key)?
                                 .filter(|v| v.key == key)
-                                .unwrap_or_else(|| StorageEntry::new(key, Default::default())))
+                                .unwrap_or_else(|| StorageEntry { key, value: Default::default() }))
                         })
                         .collect::<ProviderResult<Vec<_>>>()
                         .map(|storage| (address, storage))

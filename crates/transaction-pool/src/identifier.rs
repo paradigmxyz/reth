@@ -198,8 +198,8 @@ mod tests {
 
     #[test]
     fn test_transaction_id_ord_eq_sender() {
-        let tx1 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 0u64);
-        let tx2 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 1u64);
+        let tx1 = SenderId::into_transaction_id(100u64.into(), 0u64);
+        let tx2 = SenderId::into_transaction_id(100u64.into(), 1u64);
         assert!(tx2 > tx1);
         let set = BTreeSet::from([tx1, tx2]);
         assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);
@@ -207,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_transaction_id_ord() {
-        let tx1 = crate::identifier::SenderId::into_transaction_id(99u64.into(), 0u64);
-        let tx2 = crate::identifier::SenderId::into_transaction_id(100u64.into(), 1u64);
+        let tx1 = SenderId::into_transaction_id(99u64.into(), 0u64);
+        let tx2 = SenderId::into_transaction_id(100u64.into(), 1u64);
         assert!(tx2 > tx1);
         let set = BTreeSet::from([tx1, tx2]);
         assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![tx1, tx2]);

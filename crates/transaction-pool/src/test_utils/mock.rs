@@ -790,10 +790,10 @@ impl Typed2718 for MockTransaction {
     fn ty(&self) -> u8 {
         match self {
             Self::Legacy { .. } => TxType::Legacy.into(),
-            Self::Eip1559 { .. } => alloy_consensus::TxEip1559::tx_type().into(),
-            Self::Eip4844 { .. } => alloy_consensus::TxEip4844Variant::<()>::tx_type().into(),
-            Self::Eip2930 { .. } => alloy_consensus::TxEip2930::tx_type().into(),
-            Self::Eip7702 { .. } => alloy_consensus::TxEip7702::tx_type().into(),
+            Self::Eip1559 { .. } => TxEip1559::tx_type().into(),
+            Self::Eip4844 { .. } => TxEip4844Variant::<()>::tx_type().into(),
+            Self::Eip2930 { .. } => TxEip2930::tx_type().into(),
+            Self::Eip7702 { .. } => TxEip7702::tx_type().into(),
         }
     }
 }
@@ -1231,7 +1231,7 @@ impl From<MockTransaction> for Recovered<TransactionSigned> {
         let tx = Transaction::from(tx);
         let tx: TransactionSigned =
             Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
-        reth_primitives_traits::SignedTransaction::with_signer(tx, sender)
+        SignedTransaction::with_signer(tx, sender)
     }
 }
 
@@ -1833,14 +1833,11 @@ mod tests {
 
         // Test EIP1559 transaction creation
         let eip1559 = factory.create_eip1559();
-        assert_eq!(eip1559.transaction.tx_type(), alloy_consensus::TxEip1559::tx_type());
+        assert_eq!(eip1559.transaction.tx_type(), TxEip1559::tx_type());
 
         // Test EIP4844 transaction creation
         let eip4844 = factory.create_eip4844();
-        assert_eq!(
-            eip4844.transaction.tx_type(),
-            alloy_consensus::TxEip4844Variant::<()>::tx_type()
-        );
+        assert_eq!(eip4844.transaction.tx_type(), TxEip4844Variant::<()>::tx_type());
     }
 
     #[test]
@@ -1859,15 +1856,11 @@ mod tests {
         }
 
         // Test EIP1559 transaction set
-        let eip1559_set = MockTransactionSet::dependent(
-            sender,
-            nonce_start,
-            count,
-            alloy_consensus::TxEip1559::tx_type(),
-        );
+        let eip1559_set =
+            MockTransactionSet::dependent(sender, nonce_start, count, TxEip1559::tx_type());
         assert_eq!(eip1559_set.transactions.len(), count);
         for (idx, tx) in eip1559_set.transactions.iter().enumerate() {
-            assert_eq!(tx.tx_type(), alloy_consensus::TxEip1559::tx_type());
+            assert_eq!(tx.tx_type(), TxEip1559::tx_type());
             assert_eq!(tx.nonce(), nonce_start + idx as u64);
             assert_eq!(tx.sender(), sender);
         }

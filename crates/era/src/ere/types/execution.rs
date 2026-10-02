@@ -628,6 +628,7 @@ impl BlockTuple {
 mod tests {
     use super::*;
     use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
+    use alloy_consensus::TxEip1559;
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{b256, Bytes, U256};
     use reth_ethereum_primitives::{Receipt, TxType};
@@ -760,8 +761,7 @@ mod tests {
 
     #[test]
     fn test_single_receipt_compression_roundtrip() {
-        let test_receipt =
-            create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
+        let test_receipt = create_test_receipt(TxEip1559::tx_type(), true, 21000, 2);
 
         // Compress the receipt
         let compressed_receipts = CompressedSlimReceipts::from_encodable(&test_receipt)
@@ -793,7 +793,7 @@ mod tests {
         // Spec: CompressedSlimReceipts.data = snappyFramed(rlp([tx-type, status, cumulative-gas,
         // logs])), with no bloom filter. Prove the inner RLP of `EthereumReceipt` is exactly that
         // 4-element list, byte for byte.
-        let receipt = create_test_receipt(alloy_consensus::TxEip1559::tx_type(), true, 21000, 2);
+        let receipt = create_test_receipt(TxEip1559::tx_type(), true, 21000, 2);
 
         let compressed = CompressedSlimReceipts::from_encodable(&receipt).unwrap();
         let actual_rlp = compressed.decompress().unwrap();
@@ -820,7 +820,7 @@ mod tests {
         // post-state root, proving a single `SlimReceipt` type round-trips across forks.
         let receipts = vec![
             SlimReceipt {
-                tx_type: alloy_consensus::TxEip1559::tx_type(),
+                tx_type: TxEip1559::tx_type(),
                 status: Eip658Value::Eip658(true),
                 cumulative_gas_used: 21000,
                 logs: vec![],

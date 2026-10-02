@@ -329,6 +329,7 @@ mod tests {
     use parking_lot::{Mutex, RwLock};
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
     use std::{
@@ -487,7 +488,7 @@ mod tests {
         PoolTransaction {
             hash,
             sender,
-            transaction: reth_primitives_traits::SignedTransaction::with_signer(signed, sender),
+            transaction: SignedTransaction::with_signer(signed, sender),
         }
     }
 

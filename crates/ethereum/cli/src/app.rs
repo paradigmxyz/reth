@@ -14,6 +14,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_core::dirs::config_path_prefix;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
@@ -124,11 +125,8 @@ where
 
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.cli.command.chain_spec() {
-            self.cli.logs.log_file_directory = self
-                .cli
-                .logs
-                .log_file_directory
-                .join(reth_node_core::dirs::config_path_prefix(chain_spec.chain()));
+            self.cli.logs.log_file_directory =
+                self.cli.logs.log_file_directory.join(config_path_prefix(chain_spec.chain()));
         }
 
         // Apply node-specific log defaults before initializing tracing

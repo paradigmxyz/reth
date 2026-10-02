@@ -539,7 +539,7 @@ impl<T: PoolTransaction> Ord for QueuedOrd<T> {
 mod tests {
     use super::*;
     use crate::test_utils::{MockTransaction, MockTransactionFactory, MockTransactionSet};
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Transaction, TxEip1559};
     use alloy_primitives::address;
     use std::collections::HashSet;
 
@@ -620,24 +620,17 @@ mod tests {
         let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, alloy_consensus::TxEip1559::tx_type());
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxEip1559::tx_type());
         let a = tx_set.clone().into_vec();
 
-        let b =
-            MockTransactionSet::dependent(b_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxEip1559::tx_type()).into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c =
-            MockTransactionSet::dependent(c_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxEip1559::tx_type()).into_vec();
         tx_set.extend(c.clone());
 
-        let d =
-            MockTransactionSet::dependent(d_sender, 0, 1, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxEip1559::tx_type()).into_vec();
         tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();
@@ -701,14 +694,13 @@ mod tests {
         let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // 2 txs, that should put the pool over the size limit but not max txs
-        let a_txs =
-            MockTransactionSet::dependent(a_sender, 0, 2, alloy_consensus::TxEip1559::tx_type())
-                .into_iter()
-                .map(|mut tx| {
-                    tx.set_size(default_limits.max_size / 2 + 1);
-                    tx
-                })
-                .collect::<Vec<_>>();
+        let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxEip1559::tx_type())
+            .into_iter()
+            .map(|mut tx| {
+                tx.set_size(default_limits.max_size / 2 + 1);
+                tx
+            })
+            .collect::<Vec<_>>();
 
         // add all the transactions to the pool
         for tx in a_txs {
@@ -732,24 +724,17 @@ mod tests {
         let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
-        let mut tx_set =
-            MockTransactionSet::dependent(a_sender, 0, 4, alloy_consensus::TxEip1559::tx_type());
+        let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxEip1559::tx_type());
         let a = tx_set.clone().into_vec();
 
-        let b =
-            MockTransactionSet::dependent(b_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let b = MockTransactionSet::dependent(b_sender, 0, 3, TxEip1559::tx_type()).into_vec();
         tx_set.extend(b.clone());
 
         // C has the same number of txs as B
-        let c =
-            MockTransactionSet::dependent(c_sender, 0, 3, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let c = MockTransactionSet::dependent(c_sender, 0, 3, TxEip1559::tx_type()).into_vec();
         tx_set.extend(c.clone());
 
-        let d =
-            MockTransactionSet::dependent(d_sender, 0, 1, alloy_consensus::TxEip1559::tx_type())
-                .into_vec();
+        let d = MockTransactionSet::dependent(d_sender, 0, 1, TxEip1559::tx_type()).into_vec();
         tx_set.extend(d.clone());
 
         let all_txs = tx_set.into_vec();

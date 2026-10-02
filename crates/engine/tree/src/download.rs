@@ -420,7 +420,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use assert_matches::assert_matches;
-    use reth_chainspec::MAINNET;
+    use reth_chainspec::{ChainSpec, MAINNET};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives_traits::SealedHeader;
@@ -435,7 +435,7 @@ mod tests {
     impl TestHarness {
         fn new(total_blocks: usize) -> Self {
             let chain_spec = Arc::new(
-                reth_chainspec::ChainSpec::builder()
+                ChainSpec::builder()
                     .chain(MAINNET.chain())
                     .genesis(MAINNET.genesis.clone())
                     .paris_activated()
@@ -557,7 +557,7 @@ mod tests {
     async fn block_downloader_range_request_with_access_lists() {
         const TOTAL_BLOCKS: usize = 4;
         let chain_spec = Arc::new(
-            reth_chainspec::ChainSpec::builder()
+            ChainSpec::builder()
                 .chain(MAINNET.chain())
                 .genesis(MAINNET.genesis.clone())
                 .paris_activated()

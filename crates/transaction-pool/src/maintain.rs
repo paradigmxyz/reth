@@ -855,8 +855,8 @@ pub async fn backup_local_transactions_task<P>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, CoinbaseTipOrdering, EthPooledTransaction, Pool,
-        TransactionOrigin,
+        blobstore::InMemoryBlobStore, validate::TransactionValidationTaskExecutor,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
@@ -891,11 +891,9 @@ mod tests {
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = crate::validate::TransactionValidationTaskExecutor::eth_builder(
-            provider,
-            EthEvmConfig::mainnet(),
-        )
-        .build(blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .build(blob_store.clone());
 
         let txpool = Pool::new(
             validator,

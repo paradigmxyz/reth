@@ -565,7 +565,7 @@ mod tests {
         }
 
         let best = pool.best().without_updates();
-        let mut filter = crate::BestTransactions::filter_transactions(
+        let mut filter = BestTransactions::filter_transactions(
             best,
             |_: &Arc<ValidPoolTransaction<MockTransaction>>| false,
         );
@@ -948,7 +948,7 @@ mod tests {
         let best: Box<dyn crate::traits::BestTransactions<Item = _>> = Box::new(pool.best());
 
         // Create a filter that only returns transactions with even nonces
-        let filter = crate::BestTransactions::filter_transactions(
+        let filter = BestTransactions::filter_transactions(
             best,
             |tx: &Arc<ValidPoolTransaction<MockTransaction>>| tx.nonce().is_multiple_of(2),
         );

@@ -2197,7 +2197,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_timestamp_fork_in_genesis() {
         let timestamp = 1690475657u64;
-        let default_spec_builder = crate::spec::ChainSpec::builder()
+        let default_spec_builder = ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(Genesis::default().with_timestamp(timestamp))
             .paris_activated();
@@ -2482,7 +2482,7 @@ Post-merge hard forks (timestamp based):
         "#;
 
         let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
-        let chainspec: ChainSpec = crate::spec::ChainSpec::from_genesis(genesis);
+        let chainspec: ChainSpec = ChainSpec::from_genesis(genesis);
         assert_eq!(chainspec.chain(), Chain::from_named(NamedChain::Optimism));
         let expected_state_root: B256 =
             hex!("0x9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
@@ -2689,7 +2689,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_paris_block_and_total_difficulty() {
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let paris_chainspec = crate::spec::ChainSpec::builder()
+        let paris_chainspec = ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .paris_activated()
@@ -2701,7 +2701,7 @@ Post-merge hard forks (timestamp based):
     fn test_default_cancun_header_forkhash() {
         // set the gas limit from the hive test genesis according to the hash
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let default_chainspec = crate::spec::ChainSpec::builder()
+        let default_chainspec = ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .cancun_activated()
@@ -2737,7 +2737,7 @@ Post-merge hard forks (timestamp based):
         // a genesis-provided slot number is used as-is
         let genesis =
             Genesis { gas_limit: 0x2fefd8u64, ..Default::default() }.with_slot_number(Some(999));
-        let chainspec = crate::spec::ChainSpec::builder()
+        let chainspec = ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .amsterdam_activated()
@@ -2746,7 +2746,7 @@ Post-merge hard forks (timestamp based):
 
         // an omitted slot number defaults to 0
         let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
-        let chainspec = crate::spec::ChainSpec::builder()
+        let chainspec = ChainSpec::builder()
             .chain(Chain::from_id(1337))
             .genesis(genesis)
             .amsterdam_activated()
@@ -2892,7 +2892,7 @@ Post-merge hard forks (timestamp based):
             ..Default::default()
         };
 
-        let chain_spec: ChainSpec = crate::spec::ChainSpec::from_genesis(genesis);
+        let chain_spec: ChainSpec = ChainSpec::from_genesis(genesis);
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![

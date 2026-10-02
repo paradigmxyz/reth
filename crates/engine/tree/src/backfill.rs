@@ -241,7 +241,7 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::MAINNET;
+    use reth_chainspec::{ChainSpec, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives_traits::SealedHeader;
     use reth_provider::test_utils::MockNodeTypesWithDB;
@@ -258,7 +258,7 @@ mod tests {
     impl TestHarness {
         fn new(total_blocks: usize, pipeline_done_after: u64) -> Self {
             let chain_spec = Arc::new(
-                reth_chainspec::ChainSpec::builder()
+                ChainSpec::builder()
                     .chain(MAINNET.chain())
                     .genesis(MAINNET.genesis.clone())
                     .paris_activated()
