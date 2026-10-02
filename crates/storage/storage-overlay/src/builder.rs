@@ -857,7 +857,7 @@ mod tests {
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    use reth_trie::{BranchNodeCompact, HashedPostState, HashedStorage, Nibbles};
     use revm::{
         bytecode::Bytecode,
         database::{AccountStatus, BundleAccount, BundleState},
@@ -906,7 +906,8 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            Arc::new(hashed_state),
+            Arc::new(trie_updates),
         )
     }
 
@@ -968,7 +969,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn execution_overlay_extends_bundle_state_without_account_ids() {
         let address = Address::with_last_byte(1);
         let slot = U256::from(2);
@@ -976,12 +976,8 @@ mod tests {
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
         let code_hash = code.hash_slow();
         let account = AccountInfo {
-            nonce: 4,
-            balance: U256::from(5),
-            code_hash,
-            code: Some(code.clone()),
             account_id: AccountId::new(6),
-            ..Default::default()
+            ..AccountInfo::new(U256::from(5), 4, code_hash, code.clone())
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())

@@ -15,6 +15,8 @@ mod common;
 mod error;
 mod generation;
 mod pivot;
+mod reorg;
+mod repair;
 mod session;
 mod storage;
 mod verify;
@@ -38,9 +40,11 @@ pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
+pub use reorg::SnapReorg;
+pub use repair::StateRepairs;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
 pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
-    DEFAULT_STORAGE_ACCOUNTS,
+    DEFAULT_REPAIR_SLOTS, DEFAULT_STORAGE_ACCOUNTS,
 };
 pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

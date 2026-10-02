@@ -22,10 +22,12 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
+use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
-    EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
+    ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
+    DEFAULT_BACKFILL_RUN_THRESHOLD,
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
@@ -37,7 +39,6 @@ use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
 use reth_tasks::spawn_os_thread;
-use reth_trie_common::ComputedTrieData;
 use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
@@ -49,6 +50,8 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+use tracing::{span::Attributes, Id, Subscriber};
+use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
 
 /// Wraps blocks as if they had been downloaded without any access list data.
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
@@ -351,6 +354,7 @@ impl TestHarness {
             .tree
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
+                    cause: tracing::Span::none(),
                     state: fcu_state,
                     payload_attrs: None,
                     tx,
@@ -1037,6 +1041,7 @@ async fn test_engine_request_during_backfill() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: B256::random(),
                     safe_block_hash: B256::random(),
@@ -1157,6 +1162,7 @@ async fn test_holesky_payload() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
+                cause: tracing::Span::none(),
                 payload: ExecutionData {
                     payload: payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::none(),
@@ -1192,6 +1198,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .to_tree_tx
         .send(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: B256::random(),
                     safe_block_hash: B256::random(),
@@ -1415,13 +1422,12 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
-    let empty_trie_data = ComputedTrieData::default;
-
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
             Arc::new(BlockExecutionOutput::default()),
-            empty_trie_data(),
+            Default::default(),
+            Default::default(),
         ));
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -1430,7 +1436,8 @@ fn test_tree_state_on_new_head_deep_fork() {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
             Arc::new(block.clone()),
             Arc::new(BlockExecutionOutput::default()),
-            empty_trie_data(),
+            Default::default(),
+            Default::default(),
         ));
     }
 
@@ -1739,6 +1746,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: ancestor_block.hash(),
                     safe_block_hash: B256::ZERO,
@@ -3452,7 +3460,8 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                Arc::default(),
+                Arc::default(),
             )
         })
         .collect();
@@ -3490,7 +3499,8 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                Arc::default(),
+                Arc::default(),
             )
         })
         .collect();
@@ -3528,4 +3538,68 @@ async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
 #[tokio::test]
 async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
     assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
+}
+
+proptest::proptest! {
+    // Each case constructs a full engine harness.
+    #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+
+    #[test]
+    fn engine_messages_keep_sender_parent_on_another_thread(
+        requests in proptest::collection::vec((0..2usize, 0..3u8), 1..16),
+    ) {
+        let parents = EngineSpanParents::default();
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(parents.clone()));
+        tracing::dispatcher::with_default(&dispatch, || {
+            let (tx, mut rx) = unbounded_channel();
+            let engine = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
+            let callers = [tracing::info_span!("view_a"), tracing::info_span!("view_b")];
+            let payload = || ExecutionData {
+                payload: ExecutionPayloadV1::from_block_slow(&Block::default()).into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            };
+            for &(caller, kind) in &requests {
+                callers[caller].in_scope(|| match kind {
+                    0 => assert!(engine.new_payload(payload()).now_or_never().is_none()),
+                    1 => assert!(engine
+                        .fork_choice_updated(ForkchoiceState::default(), None)
+                        .now_or_never()
+                        .is_none()),
+                    _ => assert!(engine
+                        .reth_new_payload(payload(), false, false)
+                        .now_or_never()
+                        .is_none()),
+                });
+            }
+            let messages = (0..requests.len()).map(|_| rx.try_recv().unwrap()).collect::<Vec<_>>();
+            let expected = requests.iter().map(|&(caller, _)| callers[caller].id()).collect::<Vec<_>>();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        let mut harness = TestHarness::new(MAINNET.clone());
+                        let unrelated = tracing::info_span!("worker_background");
+                        let _entered = unrelated.enter();
+                        for message in messages {
+                            let _ = harness.tree.on_engine_message(
+                                FromEngine::Request(EngineApiRequest::Beacon(message)),
+                            ).unwrap();
+                            assert_eq!(tracing::Span::current().id(), unrelated.id());
+                        }
+                    });
+                }).join().unwrap();
+            });
+            assert_eq!(*parents.0.lock().unwrap(), expected);
+        });
+    }
+}
+
+#[derive(Clone, Default)]
+struct EngineSpanParents(Arc<std::sync::Mutex<Vec<Option<Id>>>>);
+
+impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        if matches!(attrs.metadata().name(), "on_new_payload" | "on_forkchoice_updated") {
+            self.0.lock().unwrap().push(ctx.span(id).unwrap().parent().map(|parent| parent.id()));
+        }
+    }
 }

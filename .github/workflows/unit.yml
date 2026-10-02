@@ -12,6 +12,12 @@ env:
   CARGO_TERM_COLOR: always
   SEED: rustethereumethereumrust
   RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. Test binaries report a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -67,6 +73,8 @@ jobs:
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
+      - name: Run standalone EthStats tests
+        run: cargo nextest run --no-fail-fast --locked -p reth-node-ethstats
 
   state:
     name: Ethereum state tests
@@ -127,6 +135,8 @@ jobs:
       contents: read
     env:
       RUST_BACKTRACE: 1
+      # Doctests don't need debuginfo, and dropping it keeps the cached target dir small.
+      CARGO_PROFILE_DEV_DEBUG: 0
     timeout-minutes: 30
     steps:
       - name: Secure runner
@@ -140,8 +150,14 @@ jobs:
         with:
           toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      # rust-cache restores the previous entry on a lockfile change and keeps stale artifacts,
+      # so the cache only grows. Rotating the key weekly starts from a clean target dir.
+      - name: Compute cache week
+        id: cache-week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          key: ${{ steps.cache-week.outputs.week }}
           cache-on-failure: true
       - name: Run doctests
         run: cargo test --doc --workspace --all-features

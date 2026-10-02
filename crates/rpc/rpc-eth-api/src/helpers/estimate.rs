@@ -27,6 +27,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{EvmStateProvider, StateProvider};
+use reth_tasks::cancel::is_cancelled;
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Cfg, Transaction},
@@ -265,6 +266,10 @@ pub trait EstimateCall: Call {
             if ratio < ESTIMATE_GAS_ERROR_RATIO {
                 break
             };
+
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
+            }
 
             let mut mid_tx_env = tx_env.clone();
             mid_tx_env.set_gas_limit(mid_gas_limit);

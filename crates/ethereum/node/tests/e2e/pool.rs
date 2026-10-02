@@ -289,3 +289,34 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     Ok(())
 }
+
+// Test that the pool processed the new block once `advance_block_synced` returns.
+#[tokio::test]
+async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+
+    for nonce in 0..3 {
+        let raw_tx = TransactionTestContext::transfer_tx_bytes_with_nonce(
+            wallet.chain_id,
+            wallet.inner.clone(),
+            nonce,
+        )
+        .await;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+
+        let payload = node.advance_block_synced().await?;
+        let block = payload.block();
+        assert!(block.body().transactions().any(|tx| *tx.hash() == tx_hash));
+
+        // the mined transaction is removed from the pool without waiting any further
+        let info = node.inner.pool.block_info();
+        assert_eq!(info.last_seen_block_hash, block.hash());
+        assert_eq!(info.last_seen_block_number, block.header().number);
+        assert!(node.inner.pool.is_empty());
+    }
+
+    Ok(())
+}

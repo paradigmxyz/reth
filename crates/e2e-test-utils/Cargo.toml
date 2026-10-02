@@ -71,6 +71,9 @@ serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 
+[dev-dependencies]
+reth-prune-types.workspace = true
+
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"

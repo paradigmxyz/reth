@@ -9,6 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. Test binaries report a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
 
 # Supersede PR runs without cancelling independent main or merge-queue runs.
 concurrency:
@@ -76,6 +82,10 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+        env:
+          RUSTFLAGS: -D warnings
+      # `--all-features` enables `account-ext`, so also lint the default account layout.
+      - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
           RUSTFLAGS: -D warnings
 
@@ -146,6 +156,8 @@ jobs:
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    env:
+      CARGO_INCREMENTAL: 0
     permissions:
       id-token: write
       contents: read
@@ -172,9 +184,6 @@ jobs:
           checksum: true
           fallback: none
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-on-failure: true
       - run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
 
   msrv:
