@@ -140,11 +140,10 @@ where
                     .unwrap_or_default(),
             )?
             .ensure_at_block(input.target())?;
-            return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(input.target())
+            return Ok(ExecOutput::done(
+                StageCheckpoint::new(input.target())
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: true,
-            })
+            ))
         };
         let end_block = *range_output.block_range.end();
 

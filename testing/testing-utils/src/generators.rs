@@ -413,7 +413,7 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
     });
     let value = U256::from(rng.random::<u64>());
 
-    StorageEntry { key, value }
+    StorageEntry::new(key, value)
 }
 
 /// Generate random Externally Owned Account (EOA account without contract).

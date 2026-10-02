@@ -158,10 +158,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
         // Only return `Some` if there is storage.
         account.storage.map(|storage| {
-            (
-                addr,
-                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
-            )
+            (addr, storage.into_iter().map(|(key, value)| StorageEntry::new(key, value.into())))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;

@@ -656,10 +656,7 @@ where
             Self::Database(cursor) => {
                 for change in changeset {
                     let storage_id = BlockNumberAddress((block_number, change.address));
-                    cursor.append_dup(
-                        storage_id,
-                        StorageEntry { key: change.key, value: change.value },
-                    )?;
+                    cursor.append_dup(storage_id, StorageEntry::new(change.key, change.value))?;
                 }
             }
             Self::StaticFile(writer) => {

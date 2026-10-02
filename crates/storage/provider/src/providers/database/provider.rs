@@ -2412,7 +2412,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
                                 .filter(|v| v.key == hashed_key)
                                 .map(|v| v.value)
                                 .unwrap_or_default();
-                            Ok(StorageEntry { key, value })
+                            Ok(StorageEntry::new(key, value))
                         })
                         .collect::<ProviderResult<Vec<_>>>()
                         .map(|storage| (address, storage))
@@ -2430,7 +2430,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
                             Ok(plain_storage
                                 .seek_by_key_subkey(address, key)?
                                 .filter(|v| v.key == key)
-                                .unwrap_or_else(|| StorageEntry { key, value: Default::default() }))
+                                .unwrap_or_else(|| StorageEntry::new(key, Default::default())))
                         })
                         .collect::<ProviderResult<Vec<_>>>()
                         .map(|storage| (address, storage))
@@ -2744,7 +2744,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // cast storages to B256.
                 let mut storage = storage
                     .into_iter()
-                    .map(|(k, value)| StorageEntry { key: k.into(), value })
+                    .map(|(k, value)| StorageEntry::new(k.into(), value))
                     .collect::<Vec<_>>();
                 // sort storage slots by key.
                 storage.par_sort_unstable_by_key(|a| a.key);
@@ -2792,7 +2792,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
             for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
+                let entry = StorageEntry::new(*hashed_slot, *value);
 
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
@@ -2889,8 +2889,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
                     let hashed_storage_key = keccak256(storage_key);
-                    let storage_entry =
-                        StorageEntry { key: hashed_storage_key, value: *old_storage_value };
+                    let storage_entry = StorageEntry::new(hashed_storage_key, *old_storage_value);
                     if hashed_storage_cursor
                         .seek_by_key_subkey(hashed_address, hashed_storage_key)?
                         .is_some_and(|s| s.key == hashed_storage_key)
@@ -2930,8 +2929,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                    let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+                    let storage_entry = StorageEntry::new(*storage_key, *old_storage_value);
                     if plain_storage_cursor
                         .seek_by_key_subkey(*address, *storage_key)?
                         .is_some_and(|s| s.key == *storage_key)
@@ -3052,8 +3050,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
                     let hashed_address = keccak256(address);
                     let hashed_storage_key = keccak256(storage_key);
-                    let storage_entry =
-                        StorageEntry { key: hashed_storage_key, value: *old_storage_value };
+                    let storage_entry = StorageEntry::new(hashed_storage_key, *old_storage_value);
                     if hashed_storage_cursor
                         .seek_by_key_subkey(hashed_address, hashed_storage_key)?
                         .is_some_and(|s| s.key == hashed_storage_key)
@@ -3095,8 +3092,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
 
                 for (storage_key, (old_storage_value, _new_storage_value)) in storage {
-                    let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+                    let storage_entry = StorageEntry::new(*storage_key, *old_storage_value);
                     if plain_storage_cursor
                         .seek_by_key_subkey(*address, *storage_key)?
                         .is_some_and(|s| s.key == *storage_key)
@@ -3340,7 +3336,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             }
 
             if !value.is_zero() {
-                hashed_storage.upsert(hashed_address, &StorageEntry { key, value })?;
+                hashed_storage.upsert(hashed_address, &StorageEntry::new(key, value))?;
             }
         }
         Ok(hashed_storage_keys)
@@ -3387,7 +3383,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                 }
 
                 if !value.is_zero() {
-                    hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value })?;
+                    hashed_storage_cursor.upsert(hashed_address, &StorageEntry::new(key, value))?;
                 }
                 Ok(())
             })

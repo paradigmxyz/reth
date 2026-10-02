@@ -161,7 +161,7 @@ where
             provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
     }
 
     /// Unwind the stage.

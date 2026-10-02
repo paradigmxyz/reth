@@ -162,10 +162,10 @@ where
                 let (addr_key, value) = item?;
                 cursor.append_dup(
                     B256::from_slice(&addr_key[..32]),
-                    StorageEntry {
-                        key: B256::from_slice(&addr_key[32..]),
-                        value: CompactU256::decompress_owned(value)?.into(),
-                    },
+                    StorageEntry::new(
+                        B256::from_slice(&addr_key[32..]),
+                        CompactU256::decompress_owned(value)?.into(),
+                    ),
                 )?;
             }
 
@@ -175,7 +175,7 @@ where
                     ..Default::default()
                 });
 
-            Ok(ExecOutput { checkpoint, done: true })
+            Ok(ExecOutput::done(checkpoint))
         } else {
             // Stream changesets entry-by-entry, bounded by both block count
             // (commit_threshold) and entry count (commit_entries), whichever comes first.

@@ -64,7 +64,7 @@ where
 
         let result = pruner.run_with_provider(provider, input.target())?;
         if result.progress.is_finished() {
-            Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+            Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
         } else {
             if let Some((last_segment, last_segment_output)) = result.segments.last() {
                 match last_segment_output {

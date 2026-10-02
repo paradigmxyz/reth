@@ -364,11 +364,9 @@ where
 
         validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(to_block)
-                .with_entities_stage_checkpoint(entities_checkpoint),
-            done: true,
-        })
+        Ok(ExecOutput::done(
+            StageCheckpoint::new(to_block).with_entities_stage_checkpoint(entities_checkpoint),
+        ))
     }
 
     /// Unwind the stage.

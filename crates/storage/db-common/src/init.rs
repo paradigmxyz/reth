@@ -448,7 +448,7 @@ where
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
-            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
+            (*addr, storage.iter().map(|(&key, &value)| StorageEntry::new(key, value.into())))
         })
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
@@ -1013,17 +1013,17 @@ fn write_account_to_db<TX: DbTxMut>(
             let value_u256 = U256::from_be_bytes(value.0);
 
             // plain storage — sorted by (address, key), use append_dup
-            plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
+            plain_storage_cursor.append_dup(*address, StorageEntry::new(key, value_u256))?;
 
             // hashed storage — unsorted keccak order, use upsert
             let hashed_key = keccak256(key);
             hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+                .upsert(hashed_address, &StorageEntry::new(hashed_key, value_u256))?;
 
             // storage changeset — sorted by (block, address), then by key via append_dup
             storage_cs_cursor.append_dup(
                 BlockNumberAddress((block, *address)),
-                StorageEntry { key, value: U256::ZERO },
+                StorageEntry::new(key, U256::ZERO),
             )?;
 
             // storage history
@@ -1089,7 +1089,7 @@ where
 
             let hashed_key = keccak256(key);
             hashed_storage_cursor
-                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+                .upsert(hashed_address, &StorageEntry::new(hashed_key, value_u256))?;
 
             storage_changeset_writer.append_storage_changeset_entry(
                 reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
