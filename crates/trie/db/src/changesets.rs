@@ -149,18 +149,18 @@ where
     let mut next = (!blocks.is_empty()).then_some(*blocks.end());
     while let Some(end) = next {
         let mut start = end;
-        let mut forward = Vec::new();
+        let mut forward = 0..0;
 
-        // Collect into `forward` all updates of consecutive blocks iterating backwards from `end`.
+        // Select updates of consecutive blocks iterating backwards from `end`.
         // Without the original updates, reverting one block at a time preserves nodes that
         // appear and disappear inside the range. An endpoint-only calculation would omit them.
         if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
-            forward.push(forward_updates[index].1.as_ref());
-            for (block, updates) in forward_updates[..index].iter().rev() {
-                if start == *blocks.start() || *block != start - 1 {
+            forward = index..index + 1;
+            while forward.start > 0 && start > *blocks.start() {
+                if forward_updates[forward.start - 1].0 != start - 1 {
                     break
                 }
-                forward.push(updates.as_ref());
+                forward.start -= 1;
                 start -= 1;
             }
         }
@@ -182,8 +182,8 @@ where
 
         // The first entry wins, so calculated target values precede newest-to-oldest forward
         // values.
-        forward.insert(0, &segment_trie);
-        let segment = TrieUpdatesSorted::merge_slice(&forward);
+        let forward = forward_updates[forward].iter().rev().map(|(_, updates)| updates.as_ref());
+        let segment = TrieUpdatesSorted::merge_iter(std::iter::once(&segment_trie).chain(forward));
         overlay.extend_ref_and_sort(&segment);
         reverts.extend_ref_and_sort(&segment);
         next = (start > *blocks.start()).then(|| start - 1);
