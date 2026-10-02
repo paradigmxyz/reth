@@ -26,7 +26,7 @@ pub(super) struct ArenaCursorStackEntry {
 }
 
 /// Result of [`ArenaCursor::seek`] describing the state at the deepest ancestor node.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(super) enum SeekResult {
     /// The stack head is an empty root node.
     EmptyRoot,
