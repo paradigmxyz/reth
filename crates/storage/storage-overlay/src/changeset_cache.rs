@@ -624,6 +624,7 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -631,12 +632,12 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
-        StaticFileWriter,
+        test_utils::create_test_provider_factory, BlockWriter, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_storage_api::{StageCheckpointWriter, TrieWriter};
-    use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
+    use reth_trie::{BranchNodeCompact, ComputedTrieData, Nibbles, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -834,6 +835,56 @@ mod tests {
             .get_or_compute_range(&overlay_manager, &*provider, 1..=2, partial_state_trie, finish)
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
+    }
+
+    #[test]
+    fn cached_reverts_preserve_frontier_deletions_and_override_finish_nodes() {
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..3).collect::<Vec<_>>();
+        let provider = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider.insert_block(block.recovered_block()).unwrap();
+        }
+        provider.commit().unwrap();
+        let provider = factory.provider().unwrap();
+        let frontier = blocks[1].recovered_block().num_hash();
+        let finish = blocks[2].recovered_block().num_hash();
+        let address = B256::with_last_byte(1);
+        let removed = Nibbles::from_nibbles([1]);
+        let restored = Nibbles::from_nibbles([2]);
+        let old_node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let finish_node = BranchNodeCompact::new(0b0010, 0, 0, vec![], None);
+        let storage_updates = |storage_nodes| {
+            TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(address, StorageTrieUpdatesSorted { storage_nodes })]),
+            )
+        };
+
+        // Block 2 deletes a durable node and changes another above the persisted trie frontier.
+        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        manager.insert_block(ExecutedBlock::new(
+            Arc::clone(&blocks[2].recovered_block),
+            Arc::clone(&blocks[2].execution_output),
+            ComputedTrieData::new(
+                Arc::default(),
+                Arc::new(storage_updates(vec![(removed, None), (restored, Some(finish_node))])),
+            ),
+        ));
+
+        // The deleted node is absent at both Finish and genesis, so the range revert omits it.
+        manager.changeset_cache().inner.write().insert(
+            ChangesetRangeKey::new(1, 2, finish.hash),
+            Arc::new(storage_updates(vec![(restored, Some(old_node.clone()))])),
+        );
+        let reverts = manager
+            .get_or_compute_cached_changesets_range_at_frontiers(&provider, 1..=2, frontier, finish)
+            .unwrap();
+
+        assert_eq!(
+            reverts.storage_tries_ref()[&address].storage_nodes_ref(),
+            &[(removed, None), (restored, Some(old_node))],
+        );
     }
 
     #[test]
