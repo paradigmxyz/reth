@@ -809,6 +809,67 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     }
 }
 
+/// The events the pre-warm task can handle.
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
+/// execution path without cloning the execution state.
+#[derive(Debug)]
+pub enum PrewarmTaskEvent<R> {
+    /// Signals the prewarm workers to stop executing further transactions.
+    ///
+    /// This only sets the termination flag the workers poll; the task keeps running to save the
+    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
+    /// not race ahead on transactions that will never be used.
+    TerminateTransactionExecution,
+    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
+    /// final output, and exits.
+    ///
+    /// Sent when execution completed successfully (carrying the output to save) or when the task
+    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
+    /// also stops the workers, since a teardown may arrive without a preceding
+    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
+    Terminate {
+        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
+        /// dropped handle). Using `Arc` allows sharing with the main execution path without
+        /// cloning the execution state.
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+        /// Receiver for the block validation result.
+        ///
+        /// Cache saving is racing the state root validation. We optimistically construct the
+        /// updated cache but only save it once we know the block is valid.
+        valid_block_rx: mpsc::Receiver<()>,
+    },
+    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
+    /// cancelled, reporting how many were executed.
+    FinishedTxExecution {
+        /// Number of transactions executed
+        executed_transactions: usize,
+    },
+}
+
+/// Metrics for transactions prewarming.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.prewarm")]
+pub struct PrewarmMetrics {
+    /// The number of transactions to prewarm
+    pub(crate) transactions: Gauge,
+    /// A histogram of the number of transactions to prewarm
+    pub(crate) transactions_histogram: Histogram,
+    /// A histogram of duration per transaction prewarming
+    pub(crate) total_runtime: Histogram,
+    /// A histogram of EVM execution duration per transaction prewarming
+    pub(crate) execution_duration: Histogram,
+    /// A histogram for prefetch targets per transaction prewarming
+    pub(crate) prefetch_storage_targets: Histogram,
+    /// Time spent in `save_cache`, including dropping its removed `SavedCache` values.
+    /// Excludes any later freeing of cache contents by other `ExecutionCache` clones.
+    pub(crate) cache_saving_duration: Gauge,
+    /// Counter for transaction execution errors during prewarming
+    pub(crate) transaction_errors: Counter,
+    /// A histogram of BAL slot iteration duration during prefetching
+    pub(crate) bal_slot_iteration_duration: Histogram,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1290,65 +1351,4 @@ mod tests {
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
     }
-}
-
-/// The events the pre-warm task can handle.
-///
-/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
-/// execution path without cloning the execution state.
-#[derive(Debug)]
-pub enum PrewarmTaskEvent<R> {
-    /// Signals the prewarm workers to stop executing further transactions.
-    ///
-    /// This only sets the termination flag the workers poll; the task keeps running to save the
-    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
-    /// not race ahead on transactions that will never be used.
-    TerminateTransactionExecution,
-    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
-    /// final output, and exits.
-    ///
-    /// Sent when execution completed successfully (carrying the output to save) or when the task
-    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
-    /// also stops the workers, since a teardown may arrive without a preceding
-    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
-    Terminate {
-        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
-        /// dropped handle). Using `Arc` allows sharing with the main execution path without
-        /// cloning the execution state.
-        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-        /// Receiver for the block validation result.
-        ///
-        /// Cache saving is racing the state root validation. We optimistically construct the
-        /// updated cache but only save it once we know the block is valid.
-        valid_block_rx: mpsc::Receiver<()>,
-    },
-    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
-    /// cancelled, reporting how many were executed.
-    FinishedTxExecution {
-        /// Number of transactions executed
-        executed_transactions: usize,
-    },
-}
-
-/// Metrics for transactions prewarming.
-#[derive(Metrics, Clone)]
-#[metrics(scope = "sync.prewarm")]
-pub struct PrewarmMetrics {
-    /// The number of transactions to prewarm
-    pub(crate) transactions: Gauge,
-    /// A histogram of the number of transactions to prewarm
-    pub(crate) transactions_histogram: Histogram,
-    /// A histogram of duration per transaction prewarming
-    pub(crate) total_runtime: Histogram,
-    /// A histogram of EVM execution duration per transaction prewarming
-    pub(crate) execution_duration: Histogram,
-    /// A histogram for prefetch targets per transaction prewarming
-    pub(crate) prefetch_storage_targets: Histogram,
-    /// Time spent in `save_cache`, including dropping its removed `SavedCache` values.
-    /// Excludes any later freeing of cache contents by other `ExecutionCache` clones.
-    pub(crate) cache_saving_duration: Gauge,
-    /// Counter for transaction execution errors during prewarming
-    pub(crate) transaction_errors: Counter,
-    /// A histogram of BAL slot iteration duration during prefetching
-    pub(crate) bal_slot_iteration_duration: Histogram,
 }
