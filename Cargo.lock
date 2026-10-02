@@ -970,9 +970,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.9.7"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7895d0d2c946c0ae9253c227db77b9fc707383831058e6a5232fdfc774b28259"
+checksum = "b94e3e0a88f8db47250ac8a95fb825d020719f833eb1dc661bd3609c3bbece7d"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -986,6 +986,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "tracing",
+ "triomphe",
 ]
 
 [[package]]
@@ -3365,6 +3366,7 @@ name = "ef-tests"
 version = "2.7.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -5698,10 +5700,11 @@ dependencies = [
 
 [[package]]
 name = "keccak-asm"
-version = "0.1.6"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa468878266ad91431012b3e5ef1bf9b170eab22883503a318d46857afa4579a"
+checksum = "f32890f646914a263e39064295005972f0e95b928254061b2aca98445f304ee9"
 dependencies = [
+ "cfg-if",
  "digest 0.10.7",
  "sha3-asm",
 ]
@@ -6119,7 +6122,7 @@ dependencies = [
  "indexmap 2.14.2",
  "metrics",
  "metrics-util",
- "quanta",
+ "quanta 0.12.6",
  "thiserror 2.0.20",
 ]
 
@@ -6151,7 +6154,7 @@ dependencies = [
  "indexmap 2.14.2",
  "metrics",
  "ordered-float",
- "quanta",
+ "quanta 0.12.6",
  "rand 0.9.4",
  "rand_xoshiro",
  "rapidhash",
@@ -7357,6 +7360,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "quanta"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73be39b77b45d82a4d1a5793fe9a89a5c143ceaa6ad0d8417982566bb0f34e11"
+dependencies = [
+ "libc",
+ "portable-atomic",
+ "raw-cpuid",
+ "wasip1",
+ "wasip2",
+ "web-sys",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8098,7 +8116,6 @@ version = "2.7.0"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
- "cfg-if",
  "eyre",
  "libc",
  "rand 0.8.6",
@@ -8116,9 +8133,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef769807575055ccafe9db3a9d7eca3b97ca8213122942e71c47915776ec52b2"
+checksum = "59a24479f12308e4ff8db606bc445fed267899a56661877231667f94eb0fd699"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8137,9 +8154,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs-derive"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0652b5da6dcce54dc8bcfb69c5241b0ef09211963f76929d4d63e23767b43bf6"
+checksum = "ecf4de10362fdf18e80e9f3d096f617ce0725c85dc24e9deabb414c52089040c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8485,6 +8502,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-api",
@@ -8578,6 +8596,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8599,7 +8618,6 @@ dependencies = [
  "indexmap 2.14.2",
  "metrics",
  "metrics-util",
- "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.6",
@@ -8647,6 +8665,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9053,8 +9072,11 @@ dependencies = [
  "alloy-primitives",
  "fixed-cache",
  "metrics",
+ "metrics-util",
+ "moka",
  "parking_lot",
  "reth-errors",
+ "reth-evm",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
@@ -9867,9 +9889,9 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives-traits"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6835d57ed17047c8ba42992550b3cd1232cb92deb119715d32f63079fb5844d"
+checksum = "f6ba9e5768d35c074e997bd8c92938c8a52f3207c5ff97258eb2eca5d7a79dd5"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -9888,7 +9910,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
- "quanta",
+ "quanta 0.13.0",
  "rayon",
  "reth-codecs",
  "revm-bytecode",
@@ -10368,8 +10390,10 @@ version = "2.7.0"
 dependencies = [
  "alloy-rpc-types-engine",
  "brotli",
+ "bytes",
  "flate2",
  "http",
+ "http-body",
  "http-body-util",
  "jsonrpsee",
  "jsonrpsee-http-client",
@@ -10398,9 +10422,9 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-traits"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d6c3c55bf695994b2ce87e05eaf49c1135c84d3d1f5e774df6077a8173ebdb0"
+checksum = "8a4658e897dcc67b1710af3ec82e7bb4bcd766c171523b8ecf79baef43851d1a"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10557,6 +10581,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.4",
  "reth-codecs",
+ "reth-primitives-traits",
  "reth-trie-common",
  "serde",
 ]
@@ -10685,6 +10710,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "dashmap",
  "reth-chain-state",
  "reth-chainspec",
@@ -10987,9 +11013,9 @@ dependencies = [
 
 [[package]]
 name = "reth-zstd-compressors"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "253f7d5772f3c8d0dcc3fdac398db6bca4f6f6e602d240c3bc47338dde0910dd"
+checksum = "65d41037bdcd4d60ca6bbe4e65cc61bbaf29ef7235c2c614e59c25d5a94ac813"
 dependencies = [
  "zstd 0.13.3",
 ]
@@ -11337,7 +11363,7 @@ dependencies = [
  "eyre",
  "libc",
  "libloading 0.9.0",
- "quanta",
+ "quanta 0.12.6",
  "rayon",
  "revm-bytecode",
  "revm-context",
@@ -12086,9 +12112,9 @@ dependencies = [
 
 [[package]]
 name = "sha3-asm"
-version = "0.1.6"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59cbb88c189d6352cc8ae96a39d19c7ecad8f7330b29461187f2587fdc2988d5"
+checksum = "471668161349031e3d415412f996b030c477488eec267cc3cadae3d06c0a367f"
 dependencies = [
  "cc",
  "cfg-if",
@@ -13595,6 +13621,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
+name = "wasip1"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5e26842486624357dbeb8f0381cf1fb42f022291fd787d4a816768fec8cc760"
+
+[[package]]
 name = "wasip2"
 version = "1.0.3+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14237,6 +14269,9 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+dependencies = [
+ "bitflags 2.13.2",
+]
 
 [[package]]
 name = "wit-bindgen-core"

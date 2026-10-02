@@ -24,6 +24,7 @@ reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] 
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+alloy-eip7928.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-consensus.workspace = true

@@ -7,7 +7,10 @@ use std::{fmt::Display, future::Future, time::Duration};
 /// block.
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Interval at which [`poll_until`] polls.
+/// Interval at which [`poll_until`] polls and [`NodeTestContext::advance_while`] advances the
+/// chain.
+///
+/// [`NodeTestContext::advance_while`]: crate::node::NodeTestContext::advance_while
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Calls `poll` every [`POLL_INTERVAL`] until it returns a value.

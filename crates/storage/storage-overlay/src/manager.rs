@@ -869,8 +869,6 @@ fn compute_overlay<N: NodePrimitives>(
 
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let trie_data = block.trie_data();
-
             trace!(
                 target: "storage::overlay::manager",
                 %anchor_hash,
@@ -881,8 +879,8 @@ fn compute_overlay<N: NodePrimitives>(
             let mut parent_input = parent_input;
             extend_overlay(
                 Arc::make_mut(&mut parent_input),
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
+                block.hashed_state_ref(),
+                block.trie_updates_ref(),
             );
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
@@ -905,30 +903,18 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let hashed_states = blocks.iter().map(ExecutedBlock::hashed_state).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
-        || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-            )
-        },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-            )
-        },
+        || TrieUpdatesSorted::merge_batch(blocks.iter().map(ExecutedBlock::trie_updates)),
+        || HashedPostStateSorted::merge_batch(hashed_states.iter().cloned()),
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-        ),
+        TrieUpdatesSorted::merge_batch(blocks.iter().map(ExecutedBlock::trie_updates)),
+        HashedPostStateSorted::merge_batch(hashed_states.iter().cloned()),
     );
 
     TrieInputSorted::new(nodes, state, Default::default())
@@ -1019,7 +1005,7 @@ mod tests {
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
-    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
     use revm::{
         bytecode::Bytecode,
         database::BundleState,
@@ -1066,7 +1052,8 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
+            Arc::new(hashed_state),
+            Arc::new(TrieUpdatesSorted::default()),
         )
     }
 
@@ -1525,20 +1512,20 @@ mod tests {
     #[test]
     fn taking_sparse_trie_removes_it() {
         let manager = OverlayManager::<EthPrimitives>::default();
-        let state_root = B256::with_last_byte(1);
-        let other_state_root = B256::with_last_byte(2);
+        let block_hash = B256::with_last_byte(1);
+        let other_block_hash = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
 
         manager.store_sparse_trie(PreservedSparseTrie::anchored(
             SparseTrie::default(),
-            state_root,
+            block_hash,
             anchor_hash,
         ));
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
-        assert_eq!(preserved.state_root(), state_root);
+        assert_eq!(preserved.block_hash(), block_hash);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
-        assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
+        assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
     }
 

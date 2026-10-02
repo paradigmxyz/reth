@@ -50,7 +50,7 @@ use reth_evm::{revm::context::Block as _, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{BlockExecutionOutput, ProviderResult};
 use reth_storage_overlay::OverlayManager;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::updates::TrieUpdatesSorted;
 
 /// Strategy that returns `B256::ZERO` as the state root from an activation timestamp on, and
 /// delegates to the default machinery before that.
@@ -109,7 +109,7 @@ where
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        Ok(StateRootJobOutcome::new(B256::ZERO, Arc::new(TrieUpdates::default())))
+        Ok(StateRootJobOutcome::new(B256::ZERO, Arc::new(TrieUpdatesSorted::default())))
     }
 }
 

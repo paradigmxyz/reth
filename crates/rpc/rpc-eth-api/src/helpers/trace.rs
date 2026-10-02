@@ -13,8 +13,12 @@ use reth_evm::{
     EvmFor, HaltReasonFor, InspectorFor, IntoTxEnv, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
-use reth_rpc_eth_types::cache::db::{attach_bal_before_tx, StateCacheDb};
+use reth_rpc_eth_types::{
+    cache::db::{attach_bal_before_tx, StateCacheDb},
+    EthApiError,
+};
 use reth_storage_api::{ProviderBlock, ProviderTx};
+use reth_tasks::cancel::is_cancelled;
 use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
@@ -318,6 +322,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .evm_factory()
                     .create_tracer(&mut db, evm_env, inspector_setup())
                     .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
                         let tx_info = TransactionInfo {
                             hash: Some(*ctx.tx.tx_hash()),
                             index: Some(idx),
