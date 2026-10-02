@@ -12,7 +12,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     HashedPostStateSorted, StateRoot,
 };
-use reth_trie_common::updates::TrieUpdatesSorted;
+use reth_trie_common::{updates::TrieUpdatesSorted, TrieInputSorted};
 use std::{ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
@@ -97,8 +97,7 @@ where
         "Computing range trie changesets from database state"
     );
 
-    let mut state = HashedPostStateSorted::default();
-    let mut overlay = TrieUpdatesSorted::default();
+    let mut input = TrieInputSorted::default();
     // Rewind later blocks to reconstruct the trie at the end of the requested range.
     if end_block < db_tip_block {
         rewind_trie_range(
@@ -106,19 +105,12 @@ where
             state_trie_provider,
             forward_updates,
             (end_block + 1)..=db_tip_block,
-            &mut state,
-            &mut overlay,
+            &mut input,
         )?;
     }
 
-    let reverts = rewind_trie_range(
-        provider,
-        state_trie_provider,
-        forward_updates,
-        range,
-        &mut state,
-        &mut overlay,
-    )?;
+    let reverts =
+        rewind_trie_range(provider, state_trie_provider, forward_updates, range, &mut input)?;
 
     debug!(
         target: "trie::changesets",
@@ -138,8 +130,7 @@ fn rewind_trie_range<Provider, StateTrieProvider>(
     state_trie_provider: &StateTrieProvider,
     forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     blocks: RangeInclusive<BlockNumber>,
-    state: &mut HashedPostStateSorted,
-    overlay: &mut TrieUpdatesSorted,
+    input: &mut TrieInputSorted,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
@@ -169,10 +160,10 @@ where
         // segment.
         let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
         let prefixes = segment_state.construct_prefix_sets().freeze();
-        state.extend_ref_and_sort(&segment_state);
+        Arc::make_mut(&mut input.state).extend_ref_and_sort(&segment_state);
         let segment_trie = StateRoot::new(
-            InMemoryTrieCursorFactory::new(state_trie_provider, &*overlay),
-            HashedPostStateCursorFactory::new(state_trie_provider, &*state),
+            InMemoryTrieCursorFactory::new(state_trie_provider, input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(state_trie_provider, input.state.as_ref()),
         )
         .with_prefix_sets(prefixes)
         .root_with_updates()
@@ -184,7 +175,7 @@ where
         // values.
         let forward = forward_updates[forward].iter().rev().map(|(_, updates)| updates.as_ref());
         let segment = TrieUpdatesSorted::merge_iter(std::iter::once(&segment_trie).chain(forward));
-        overlay.extend_ref_and_sort(&segment);
+        Arc::make_mut(&mut input.nodes).extend_ref_and_sort(&segment);
         reverts.extend_ref_and_sort(&segment);
         if start == *blocks.start() {
             break
