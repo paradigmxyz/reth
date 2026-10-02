@@ -1287,10 +1287,9 @@ mod tests {
         drop(proof_handle);
     }
 
-    /// Ensures the overflow pool is only used, and only created, for counts the base pool cannot
-    /// hold.
+    /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
     #[test]
-    fn overflow_pool_serves_counts_beyond_the_base_pool() {
+    fn single_pool_serves_fractional_worker_counts() {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
@@ -1308,28 +1307,21 @@ mod tests {
         .build()
         .unwrap();
         let base = runtime.proof_storage_worker_pool().num_threads();
-        assert_eq!(runtime.proof_storage_overflow_worker_pool().unwrap().num_threads(), base);
-        assert_eq!(runtime.proof_account_overflow_worker_pool().unwrap().num_threads(), base);
+        assert_eq!(base, 8);
+        assert!(runtime.proof_storage_overflow_worker_pool().is_none());
+        assert!(runtime.proof_account_overflow_worker_pool().is_none());
 
         for counts in [
             ProofWorkerCounts::new(0, 0),
-            ProofWorkerCounts::new(base, base),
-            ProofWorkerCounts::new(base + 1, base + 2),
+            ProofWorkerCounts::new(base / 4, base / 4),
+            ProofWorkerCounts::new(base / 2, base / 2),
             ProofWorkerCounts::full(&runtime),
         ] {
-            // Occupy every base thread so the partial-overflow case must complete its proofs
-            // using overflow workers. Dropping the sender releases the threads even on panic.
-            let release_base =
-                (counts.storage == base + 1).then(|| block_base_proof_workers(&runtime));
             let (proof_result_tx, proof_result_rx) = unbounded();
             let handle =
                 ProofWorkerHandle::new(&runtime, ctx.clone(), counts, proof_result_tx.clone());
             assert_eq!(handle.total_storage_workers(), counts.storage.max(1));
             assert_eq!(handle.total_account_workers(), counts.account.max(1));
-            if counts.storage <= base {
-                assert!(!runtime.proof_storage_overflow_worker_pool().unwrap().is_initialized());
-                assert!(!runtime.proof_account_overflow_worker_pool().unwrap().is_initialized());
-            }
 
             let address = B256::ZERO;
             let slot = ProofV2Target::new(B256::ZERO);
@@ -1360,7 +1352,6 @@ mod tests {
                 proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
             assert!(proof.storage_proofs.contains_key(&address));
 
-            drop(release_base);
             drop(handle);
             drop(proof_result_tx);
             // Every broadcast holds a result sender until all its workers have exited. An
@@ -1370,33 +1361,5 @@ mod tests {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }
-    }
-
-    fn block_base_proof_workers(runtime: &Runtime) -> CrossbeamSender<()> {
-        let (release_tx, release_rx) = unbounded();
-        let (started_tx, started_rx) = unbounded();
-        let count = runtime.proof_storage_worker_pool().num_threads() +
-            runtime.proof_account_worker_pool().num_threads();
-        for storage in [true, false] {
-            let rt = runtime.clone();
-            let release_rx = release_rx.clone();
-            let started_tx = started_tx.clone();
-            let name = if storage { "block-storage-workers" } else { "block-account-workers" };
-            runtime.spawn_blocking_named(name, move || {
-                let pool = if storage {
-                    rt.proof_storage_worker_pool()
-                } else {
-                    rt.proof_account_worker_pool()
-                };
-                pool.broadcast(pool.num_threads(), |_| {
-                    started_tx.send(()).unwrap();
-                    let _ = release_rx.recv();
-                });
-            });
-        }
-        for _ in 0..count {
-            started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-        }
-        release_tx
     }
 }

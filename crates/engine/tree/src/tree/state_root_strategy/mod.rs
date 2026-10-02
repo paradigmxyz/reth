@@ -482,21 +482,20 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
-    /// Transaction count at or below which a block gets half the base proof worker pool, since
+    /// Transaction count at or below which a block gets a quarter of the proof worker pool, since
     /// fewer transactions produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
-    /// Gas used at or above which a block also gets the overflow proof worker pool.
+    /// Gas used at or above which a block gets the full proof worker pool.
     ///
     /// More workers help drain the proof queue on large blocks while storage reads are blocked.
-    /// Keeping that capacity in a separate pool avoids waking unused threads on regular blocks.
     const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
 
     /// Returns how many workers to spawn for the block being validated from one kind of proof
     /// worker pool, given the base pool size and the size of the overflow pool extending it.
     ///
-    /// Explicit counts take precedence. Otherwise, small transaction counts use half the base
-    /// pool, large gas usage uses both pools, and unknown or regular block sizes use the base pool.
+    /// Explicit counts take precedence. Otherwise, small transaction counts use a quarter of
+    /// the capacity, large gas usage uses all of it, and unknown or regular blocks use half.
     /// The transaction threshold is checked first, regardless of gas usage.
     const fn proof_worker_count(
         base_pool_threads: usize,
@@ -508,14 +507,15 @@ impl DefaultStateRootStrategy {
         let count = if let Some(configured_threads) = configured_threads {
             configured_threads
         } else {
+            let pool_threads = base_pool_threads + overflow_pool_threads;
             match (transaction_count, gas_used) {
                 (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
-                    base_pool_threads / 2
+                    pool_threads / 4
                 }
                 (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => {
-                    base_pool_threads + overflow_pool_threads
+                    pool_threads
                 }
-                _ => base_pool_threads,
+                _ => pool_threads / 2,
             }
         };
 
@@ -1379,8 +1379,8 @@ mod tests {
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
-        let base_pool_threads = 32;
-        let overflow_pool_threads = 32;
+        let base_pool_threads = 64;
+        let overflow_pool_threads = 0;
         let count = |transaction_count, gas_used| {
             DefaultStateRootStrategy::proof_worker_count(
                 base_pool_threads,
@@ -1391,16 +1391,15 @@ mod tests {
             )
         };
 
-        // Small blocks keep half the base pool, whatever their gas.
+        // Small blocks use a quarter of the pool, whatever their gas.
         assert_eq!(count(Some(30), Some(1_000_000)), 16);
         assert_eq!(count(Some(30), Some(300_000_000)), 16);
 
-        // Gas heavy blocks spill into the overflow pool.
+        // Gas heavy blocks use the full pool.
         assert_eq!(count(Some(1_000), Some(100_000_000)), 64);
         assert_eq!(count(Some(1_000), Some(300_000_000)), 64);
 
-        // Everything else, including a block whose size is not known yet, stays in the base pool
-        // and never names the overflow pool.
+        // Everything else, including a block whose size is not known yet, uses half the pool.
         assert_eq!(count(Some(31), Some(99_999_999)), 32);
         assert_eq!(count(Some(1_000), Some(15_000_000)), 32);
         assert_eq!(count(None, None), 32);

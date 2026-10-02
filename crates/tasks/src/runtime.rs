@@ -1113,21 +1113,12 @@ impl RuntimeBuilder {
     }
 }
 
-/// Splits the proof worker budget into the base pool size and the size of the overflow pool that
-/// only blocks needing more than the base pool dispatch into.
-///
-/// Every thread of a pool runs the per-block worker broadcast even when it does not take a worker
-/// slot, so capacity that most blocks do not use is kept out of the base pool. A pinned thread
-/// count is the whole budget and spills into the overflow pool only when it exceeds `default`.
+/// Keeps the full proof worker budget in a single pool, without an overflow pool.
 #[cfg(feature = "rayon")]
 const fn split_proof_worker_threads(configured: Option<usize>, default: usize) -> (usize, usize) {
     match configured {
-        Some(configured) => {
-            let base = if configured < default { configured } else { default };
-            let base = if base == 0 { 1 } else { base };
-            (base, configured.saturating_sub(base))
-        }
-        None => (default, default),
+        Some(configured) => (if configured == 0 { 1 } else { configured }, 0),
+        None => (default * 2, 0),
     }
 }
 
@@ -1170,25 +1161,22 @@ mod tests {
 
         let resolved = runtime.cpu_pool().current_num_threads();
         assert!(resolved >= 1);
-        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 2);
-        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 2);
-        assert_eq!(
-            runtime.proof_storage_overflow_worker_pool().map(WorkerPool::num_threads),
-            Some(resolved * 2)
-        );
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 4);
+        assert!(runtime.proof_storage_overflow_worker_pool().is_none());
+        assert!(runtime.proof_account_overflow_worker_pool().is_none());
     }
 
     #[cfg(feature = "rayon")]
     #[test]
     fn proof_worker_threads_split_keeps_pinned_counts() {
-        assert_eq!(split_proof_worker_threads(None, 16), (16, 16));
+        assert_eq!(split_proof_worker_threads(None, 16), (32, 0));
 
-        // A pinned count is the whole budget: it shrinks the base pool or spills into the
-        // overflow pool, but base and overflow always add up to it.
+        // A pinned count is the whole single-pool budget.
         for configured in [1, 8, 16, 17, 64] {
             let (base, overflow) = split_proof_worker_threads(Some(configured), 16);
             assert_eq!(base + overflow, configured, "configured {configured}");
-            assert!(base <= 16, "configured {configured}");
+            assert_eq!(overflow, 0, "configured {configured}");
         }
 
         assert_eq!(split_proof_worker_threads(Some(0), 16), (1, 0));
