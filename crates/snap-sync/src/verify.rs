@@ -36,10 +36,6 @@ pub const DEFAULT_SCAN_CHUNK: u64 = 100_000;
 const UNPUBLISHED_STAGES: [StageId; 4] =
     [StageId::Era, StageId::Headers, StageId::MerkleExecute, StageId::Finish];
 
-// A snap sync produced no rows below its pivot, so every segment but `ContractLogs` counts as
-// pruned there; that one only narrows `Receipts` by a log filter it is not configured with here.
-const UNPRUNED_SEGMENTS: [PruneSegment; 1] = [PruneSegment::ContractLogs];
-
 /// Decides whether downloaded state can be trusted as the node's state.
 ///
 /// Writes join the caller's transaction, so a refused check changes nothing.
@@ -155,10 +151,10 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
             self.save_stage_checkpoint(stage, checkpoint)?;
         }
+        // Snap sync wrote no history below the pivot. `ContractLogs` only narrows `Receipts` by a
+        // log filter, so it has no checkpoint of its own.
         let pruned = PruneCheckpoint::pruned_through(pivot);
-        for segment in
-            PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
-        {
+        for segment in PruneSegment::variants().filter(|segment| !segment.is_contract_logs()) {
             self.save_prune_checkpoint(segment, pruned)?;
         }
         Ok(())
@@ -581,9 +577,7 @@ mod tests {
 
         provider.publish_snap_state(7).unwrap();
 
-        for segment in
-            PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
-        {
+        for segment in PruneSegment::variants().filter(|segment| !segment.is_contract_logs()) {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
             assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
         }

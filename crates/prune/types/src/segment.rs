@@ -85,6 +85,11 @@ impl PruneSegment {
     pub const fn is_storage_history(&self) -> bool {
         matches!(self, Self::StorageHistory)
     }
+
+    /// Returns true if this is [`Self::ContractLogs`].
+    pub const fn is_contract_logs(&self) -> bool {
+        matches!(self, Self::ContractLogs)
+    }
 }
 
 /// Prune purpose.
