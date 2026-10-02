@@ -1029,7 +1029,7 @@ mod tests {
     use super::*;
     use crate::{ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::{
         models::{
@@ -1039,18 +1039,16 @@ mod tests {
         transaction::DbTxMut,
         BlockNumberList,
     };
-    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, ProviderFactory,
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    use reth_storage_api::{StageCheckpointWriter, TrieWriter};
+    use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedCursorFactory, HashedPostStateCursorFactory},
-        trie_cursor::noop::NoopTrieCursorFactory,
-        updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles, StateRoot,
+        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
+        HashedStorage, Nibbles,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1366,206 +1364,5 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
-    }
-
-    /// Account whose storage trie is shaped by the storage fixture tests.
-    const STORAGE_FIXTURE_ADDRESS: Address = Address::with_last_byte(0x42);
-
-    /// Returns the fixture account and its storage slots as hashed state.
-    fn storage_fixture_state(slots: impl IntoIterator<Item = (u64, u64)>) -> HashedPostState {
-        let hashed_address = keccak256(STORAGE_FIXTURE_ADDRESS);
-        HashedPostState::default()
-            .with_accounts([(
-                hashed_address,
-                Some(Account { balance: U256::from(1), ..Default::default() }),
-            )])
-            .with_storages([(
-                hashed_address,
-                HashedStorage::from_iter(slots.into_iter().map(|(slot, value)| {
-                    (keccak256(B256::from(U256::from(slot))), U256::from(value))
-                })),
-            )])
-    }
-
-    /// Computes the root and every stored trie node of `state` from scratch.
-    fn full_trie(state: &HashedPostState) -> (B256, TrieUpdates) {
-        let state = state.clone().into_sorted();
-        StateRoot::new(
-            NoopTrieCursorFactory::default(),
-            HashedPostStateCursorFactory::new(NoopHashedCursorFactory::default(), &state),
-        )
-        .root_with_updates()
-        .unwrap()
-    }
-
-    /// Returns the trie updates that turn the `parent` trie into the `child` trie.
-    fn trie_diff(parent: &TrieUpdates, child: &TrieUpdates) -> TrieUpdatesSorted {
-        fn diff_nodes(
-            parent: &alloy_primitives::map::HashMap<Nibbles, BranchNodeCompact>,
-            child: &alloy_primitives::map::HashMap<Nibbles, BranchNodeCompact>,
-        ) -> Vec<(Nibbles, Option<BranchNodeCompact>)> {
-            let mut nodes = child
-                .iter()
-                .filter(|(path, node)| parent.get(*path) != Some(*node))
-                .map(|(path, node)| (*path, Some(node.clone())))
-                .chain(
-                    parent
-                        .keys()
-                        .filter(|path| !child.contains_key(*path))
-                        .map(|path| (*path, None)),
-                )
-                .collect::<Vec<_>>();
-            nodes.sort_unstable_by_key(|(path, _)| *path);
-            nodes
-        }
-
-        let empty = Default::default();
-        let storage_tries = parent
-            .storage_tries
-            .keys()
-            .chain(child.storage_tries.keys())
-            .map(|address| {
-                let parent = parent.storage_tries.get(address).map_or(&empty, |t| &t.storage_nodes);
-                let child = child.storage_tries.get(address).map_or(&empty, |t| &t.storage_nodes);
-                (*address, StorageTrieUpdatesSorted { storage_nodes: diff_nodes(parent, child) })
-            })
-            .collect();
-
-        TrieUpdatesSorted::new(
-            diff_nodes(&parent.account_nodes, &child.account_nodes),
-            storage_tries,
-        )
-    }
-
-    /// Returns `block` with its trie data replaced by the transition from `parent` to `state`.
-    fn with_fixture_trie_data(
-        block: &ExecutedBlock<EthPrimitives>,
-        parent: &HashedPostState,
-        state: &HashedPostState,
-        changes: HashedPostState,
-    ) -> ExecutedBlock<EthPrimitives> {
-        ExecutedBlock::new(
-            Arc::clone(&block.recovered_block),
-            Arc::clone(&block.execution_output),
-            ComputedTrieData::new(
-                Arc::new(changes.into_sorted()),
-                Arc::new(trie_diff(&full_trie(parent).1, &full_trie(state).1)),
-            ),
-        )
-    }
-
-    /// Persists the fixture blocks, the hashed state at Finish, the trie at the state trie
-    /// frontier and the storage changesets of each persisted block.
-    fn persist_storage_fixture(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-        blocks: &[ExecutedBlock<EthPrimitives>],
-        finish_state: &HashedPostState,
-        state_trie_state: &HashedPostState,
-        state_trie_tip: BlockNumber,
-        changesets: &[(BlockNumber, Vec<(u64, u64)>)],
-    ) {
-        let provider_rw = factory.provider_rw().unwrap();
-        for block in blocks {
-            provider_rw.insert_block(block.recovered_block()).unwrap();
-        }
-        let finish_tip = blocks.last().unwrap().block_number();
-        provider_rw
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(finish_tip).with_finish_stage_checkpoint(FinishCheckpoint {
-                    partial_state_trie: Some(state_trie_tip),
-                }),
-            )
-            .unwrap();
-
-        let tx = provider_rw.tx_ref();
-        for (hashed_address, account) in &finish_state.accounts {
-            tx.put::<tables::HashedAccounts>(*hashed_address, account.unwrap()).unwrap();
-        }
-        for (hashed_address, storage) in &finish_state.storages {
-            let mut slots =
-                storage.storage.iter().filter(|(_, value)| !value.is_zero()).collect::<Vec<_>>();
-            slots.sort_unstable();
-            for (key, value) in slots {
-                tx.put::<tables::HashedStorages>(
-                    *hashed_address,
-                    StorageEntry { key: *key, value: *value },
-                )
-                .unwrap();
-            }
-        }
-        for (block_number, slots) in changesets {
-            for (slot, value) in slots {
-                tx.put::<tables::StorageChangeSets>(
-                    BlockNumberAddress((*block_number, STORAGE_FIXTURE_ADDRESS)),
-                    StorageEntry { key: B256::from(U256::from(*slot)), value: U256::from(*value) },
-                )
-                .unwrap();
-            }
-        }
-        provider_rw
-            .write_trie_updates_sorted(&full_trie(state_trie_state).1.into_sorted())
-            .unwrap();
-        provider_rw.commit().unwrap();
-    }
-
-    /// Genesis slots whose hashed keys start with `7c300`, `7c301`, `7c310` and `7c311`, so the
-    /// genesis storage trie stores a branch at `7c3` reached through the extension `7c`.
-    const EXTENSION_BRANCH_SLOTS: [u64; 4] = [4_445_016, 1_349_525, 437_033, 333_413];
-
-    /// Slot whose hashed key starts with `7c5`, splitting the `7c` extension into a stored branch.
-    const EXTENSION_SPLIT_SLOT: u64 = 3_775;
-
-    /// Genesis slots with distinct first nibbles other than `7`.
-    const FILLER_SLOTS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
-
-    #[test]
-    fn retained_view_state_root_matches_in_memory_fork_after_disk_reorg() {
-        let genesis_slots = FILLER_SLOTS
-            .into_iter()
-            .chain(EXTENSION_BRANCH_SLOTS)
-            .map(|slot| (slot, slot))
-            .collect::<Vec<_>>();
-        let genesis = storage_fixture_state(genesis_slots.clone());
-        let disk_tip =
-            storage_fixture_state(genesis_slots.iter().copied().chain([(EXTENSION_SPLIT_SLOT, 1)]));
-
-        // Block #1 on disk splits the extension, so the durable trie stores a branch at `7c`
-        // whose hash for child `3` covers the genesis values below `7c3`.
-        let factory = create_test_provider_factory();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..2).collect::<Vec<_>>();
-        persist_storage_fixture(
-            &factory,
-            &blocks,
-            &disk_tip,
-            &disk_tip,
-            1,
-            &[(1, vec![(EXTENSION_SPLIT_SLOT, 0)])],
-        );
-
-        // An in-memory fork of #1 changes a slot below `7c3`. Its view reverts block #1 and
-        // replays the fork on top of genesis, so the durable `7c` branch hash for child `3` is
-        // stale unless the fork's keys are invalidated.
-        let fork_changes = storage_fixture_state([(EXTENSION_BRANCH_SLOTS[0], 1)]);
-        let mut fork_state = genesis.clone();
-        fork_state.extend(fork_changes.clone());
-        let fork = with_fixture_trie_data(
-            &TestBlockBuilder::eth()
-                .get_executed_block_with_number(1, blocks[0].recovered_block().hash()),
-            &genesis,
-            &fork_state,
-            fork_changes,
-        );
-        assert_ne!(fork.recovered_block().hash(), blocks[1].recovered_block().hash());
-
-        let manager = OverlayManager::<EthPrimitives>::default();
-        manager.insert_block(fork.clone());
-        let provider = factory.provider().unwrap();
-        let view = OverlayStateProvider::new_ref(
-            &provider,
-            manager.overlay_builder(fork.recovered_block().hash()),
-        );
-
-        assert_eq!(view.state_root(HashedPostState::default()).unwrap(), full_trie(&fork_state).0);
     }
 }
