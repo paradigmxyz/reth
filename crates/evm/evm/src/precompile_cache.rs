@@ -211,7 +211,7 @@ where
     }
 
     fn execute(
-        &mut self,
+        &self,
         evm: &mut Evm<'_, T>,
         message: &Message<T>,
         gas: &mut GasTracker,
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn caches_successful_precompile_output() {
         let cache_map = PrecompileCacheMap::default();
-        let mut provider = CachedPrecompileProvider::new(
+        let provider = CachedPrecompileProvider::new(
             evm2::Precompiles::base(SpecId::OSAKA),
             cache_map.clone(),
             SpecId::OSAKA,
@@ -558,7 +558,7 @@ mod tests {
     #[test]
     fn identity_cache_obeys_input_size_boundary() {
         let cache = PrecompileCacheMap::default();
-        let mut provider = CachedPrecompileProvider::new(
+        let provider = CachedPrecompileProvider::new(
             evm2::Precompiles::base(SpecId::OSAKA),
             cache.clone(),
             SpecId::OSAKA,
