@@ -64,8 +64,6 @@ use tracing::{debug, debug_span, error, instrument, trace};
 use crate::proof_task_metrics::{
     ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
 };
-#[cfg(feature = "metrics")]
-use reth_trie::{hashed_cursor::InstrumentedHashedCursor, trie_cursor::InstrumentedTrieCursor};
 
 /// Type alias for the V2 account proof calculator with worker cursors.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
@@ -85,7 +83,7 @@ type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
 
 /// Trie cursor used by proof workers, instrumented to record cursor metrics.
 #[cfg(feature = "metrics")]
-type WorkerTrieCursor<'a, C> = InstrumentedTrieCursor<'a, C>;
+type WorkerTrieCursor<'a, C> = reth_trie::trie_cursor::InstrumentedTrieCursor<'a, C>;
 
 /// Trie cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
 /// cursor operations are not timed or counted.
@@ -94,7 +92,7 @@ type WorkerTrieCursor<'a, C> = C;
 
 /// Hashed cursor used by proof workers, instrumented to record cursor metrics.
 #[cfg(feature = "metrics")]
-type WorkerHashedCursor<'a, C> = InstrumentedHashedCursor<'a, C>;
+type WorkerHashedCursor<'a, C> = reth_trie::hashed_cursor::InstrumentedHashedCursor<'a, C>;
 
 /// Hashed cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
 /// cursor operations are not timed or counted.
@@ -704,10 +702,12 @@ where
         let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
         let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
         #[cfg(feature = "metrics")]
-        let trie_cursor =
-            InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
+        let trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
+            trie_cursor,
+            &mut cursor_metrics_cache.storage_trie_cursor,
+        );
         #[cfg(feature = "metrics")]
-        let hashed_cursor = InstrumentedHashedCursor::new(
+        let hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
@@ -920,22 +920,22 @@ where
         let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
         #[cfg(feature = "metrics")]
-        let account_trie_cursor = InstrumentedTrieCursor::new(
+        let account_trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
             account_trie_cursor,
             &mut cursor_metrics_cache.account_trie_cursor,
         );
         #[cfg(feature = "metrics")]
-        let account_hashed_cursor = InstrumentedHashedCursor::new(
+        let account_hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             account_hashed_cursor,
             &mut cursor_metrics_cache.account_hashed_cursor,
         );
         #[cfg(feature = "metrics")]
-        let storage_trie_cursor = InstrumentedTrieCursor::new(
+        let storage_trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
             storage_trie_cursor,
             &mut cursor_metrics_cache.storage_trie_cursor,
         );
         #[cfg(feature = "metrics")]
-        let storage_hashed_cursor = InstrumentedHashedCursor::new(
+        let storage_hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             storage_hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
