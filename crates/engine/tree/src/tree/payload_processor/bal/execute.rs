@@ -42,7 +42,7 @@ use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
 use reth_tasks::Runtime;
 use revm::{
-    context::{result::ResultAndState, Block},
+    context::{result::ResultAndState, Block, Cfg},
     database::{states::bundle_state::BundleRetention, State},
     state::bal::Bal as RevmBal,
 };
@@ -128,7 +128,7 @@ where
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
-    let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap;
+    let tx_gas_limit_cap = evm_env.cfg_env.tx_gas_limit_cap();
     let mut canonical_state = State::builder()
         .with_database(make_db(false)?)
         .with_bundle_update()
@@ -289,7 +289,7 @@ impl AbortGuard {
 struct BlockGasTracker {
     block_gas_limit: u64,
     enable_amsterdam_eip8037: bool,
-    tx_gas_limit_cap: Option<u64>,
+    tx_gas_limit_cap: u64,
     cumulative_tx_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
@@ -299,7 +299,7 @@ impl BlockGasTracker {
     const fn new(
         block_gas_limit: u64,
         enable_amsterdam_eip8037: bool,
-        tx_gas_limit_cap: Option<u64>,
+        tx_gas_limit_cap: u64,
     ) -> Self {
         Self {
             block_gas_limit,
@@ -334,8 +334,7 @@ impl BlockGasTracker {
             self.cumulative_tx_gas_used
         };
         let block_available_gas = self.block_gas_limit.saturating_sub(block_gas_used);
-        let tx_min_gas_limit =
-            self.tx_gas_limit_cap.map_or(tx_gas_limit, |cap| tx_gas_limit.min(cap));
+        let tx_min_gas_limit = tx_gas_limit.min(self.tx_gas_limit_cap);
 
         if tx_min_gas_limit > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
@@ -374,7 +373,7 @@ impl BlockGasTracker {
 mod tests {
     use super::*;
     use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
-    use alloy_consensus::{BlockHeader, Header};
+    use alloy_consensus::{BlockHeader, Header, TxLegacy};
     use alloy_eip7928::{
         bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
     };
@@ -383,12 +382,16 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{B256, U256};
-    use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
+    use alloy_primitives::{TxKind, B256, U256};
+    use reth_chainspec::MAINNET;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
+    use reth_primitives_traits::{
+        crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
+    };
     use reth_revm::db::BundleState;
     use reth_tasks::Runtime;
+    use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
     use revm::{
         database::{CacheDB, EmptyDB},
         state::{AccountInfo, Bytecode},
@@ -1262,6 +1265,80 @@ mod tests {
     }
 
     #[test]
+    fn unset_tx_gas_limit_cap_matches_serial_execution() {
+        let evm_config = EthEvmConfig::new(Arc::new(
+            reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+        ));
+        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+        let mut pre_block_db = system_contracts_db();
+        for addr in [alice, bob, recipient] {
+            insert_funded(
+                &mut pre_block_db,
+                addr,
+                U256::from(alloy_consensus::constants::ETH_TO_WEI),
+            );
+        }
+        // The second gas limit exceeds the regular gas left after the first transfer, but its
+        // regular part, capped at the EIP-7825 default, fits.
+        let make_tx = |kp, gas_limit| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(MAINNET.chain.id()),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit,
+                    to: TxKind::Call(recipient),
+                    value: U256::from(1),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100_000), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 19_990_000), bob);
+        let reference_bal = reference_bal_for_block(
+            &evm_config,
+            pre_block_db.clone(),
+            &empty_amsterdam_block(B256::ZERO),
+            vec![tx1.clone(), tx2.clone()],
+        );
+        let block = empty_amsterdam_block_with_gas_limit(
+            compute_block_access_list_hash(&reference_bal),
+            20_000_000,
+        );
+        let mut evm_env = evm_config.evm_env(block.header()).unwrap();
+        // An unset cap means the spec default.
+        evm_env.cfg_env.tx_gas_limit_cap = None;
+        let ctx = evm_config.context_for_block(&block).unwrap();
+
+        let mut state = State::builder().with_database(pre_block_db.clone()).build();
+        let evm = evm_config.evm_with_env(&mut state, evm_env.clone());
+        let mut serial = evm_config.create_executor_with_state(evm, ctx.clone());
+        serial.apply_pre_execution_changes().unwrap();
+        serial.execute_transaction(tx1.clone()).unwrap();
+        serial.execute_transaction(tx2.clone()).unwrap();
+
+        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (output, ..) = execute_block(
+            &Runtime::test(),
+            &evm_config,
+            &|_: bool| Ok(pre_block_db.clone()),
+            to_arc_decoded(reference_bal),
+            evm_env,
+            ctx,
+            2,
+            tx_stream(vec![tx1, tx2]),
+            receipt_tx,
+        )
+        .unwrap();
+        assert_eq!(output.receipts, serial.receipts());
+    }
+
+    #[test]
     fn shadow_tx_with_revert() {
         // A tx that reverts in a deployed contract. Both paths must produce identical receipts
         // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
@@ -1505,7 +1582,7 @@ mod tests {
             );
 
         // Non-Amsterdam: block_available_gas = 1_000_000 - 600_000 = 400_000 → reject 500_000.
-        let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false, None);
+        let mut non_amsterdam = BlockGasTracker::new(block_gas_limit, false, u64::MAX);
         non_amsterdam.record_result(&fake_result);
         assert!(
             non_amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
@@ -1513,7 +1590,7 @@ mod tests {
         );
 
         // Amsterdam: both regular and state budgets have 700_000 left → accept 500_000.
-        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, None);
+        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, u64::MAX);
         amsterdam.record_result(&fake_result);
         assert!(
             amsterdam.validate_tx_limit(second_tx_gas_limit).is_ok(),
@@ -1551,7 +1628,7 @@ mod tests {
 
         // Regular budget is full (block_regular_gas_used = 0) but the state budget has
         // only 400_000 left → reject 500_000.
-        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, None);
+        let mut amsterdam = BlockGasTracker::new(block_gas_limit, true, u64::MAX);
         amsterdam.record_result(&fake_result);
         assert!(
             amsterdam.validate_tx_limit(second_tx_gas_limit).is_err(),
@@ -1564,7 +1641,7 @@ mod tests {
 
         // With a cap of 400_000 the capped regular check passes, but the full 500_000
         // limit still counts against the state budget → reject.
-        let mut capped = BlockGasTracker::new(block_gas_limit, true, Some(400_000));
+        let mut capped = BlockGasTracker::new(block_gas_limit, true, 400_000);
         capped.record_result(&fake_result);
         assert!(
             capped.validate_tx_limit(second_tx_gas_limit).is_err(),
@@ -1589,7 +1666,7 @@ mod tests {
 
         // Case 1: fresh block, no prior gas consumed.
         // tx_min_gas_limit = TX_GAS_LIMIT_CAP (16_777_216) ≤ block_available_gas (30M) → Ok.
-        let tracker = BlockGasTracker::new(block_gas_limit, false, Some(TX_GAS_LIMIT_CAP));
+        let tracker = BlockGasTracker::new(block_gas_limit, false, TX_GAS_LIMIT_CAP);
         assert!(
             tracker.validate_tx_limit(oversized).is_ok(),
             "oversized tx must pass when capped limit fits in block gas",
@@ -1610,7 +1687,7 @@ mod tests {
                 EvmState::default(),
             );
 
-        let mut tracker = BlockGasTracker::new(block_gas_limit, false, Some(TX_GAS_LIMIT_CAP));
+        let mut tracker = BlockGasTracker::new(block_gas_limit, false, TX_GAS_LIMIT_CAP);
         tracker.record_result(&fake_result);
         assert!(
             tracker.validate_tx_limit(oversized).is_err(),
