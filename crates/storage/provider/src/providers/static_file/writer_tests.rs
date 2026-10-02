@@ -20,7 +20,7 @@ mod tests {
             static_file::manager::{StaticFileProviderBuilder, StaticFileWriter},
             StaticFileProvider,
         },
-        ChangeSetReader,
+        ChangeSetReader, ReceiptProvider,
     };
     use reth_chain_state::EthPrimitives;
     use reth_ethereum_primitives::Receipt;
@@ -1095,39 +1095,41 @@ mod tests {
 
     #[test]
     fn test_unwind_below_boundary_anchor_errors() {
-        let (static_dir, _) = create_test_static_files_dir();
-        let provider = setup_test_provider(&static_dir, 500);
+        for committed in [false, true] {
+            let (static_dir, _) = create_test_static_files_dir();
+            let provider = setup_test_provider(&static_dir, 500);
 
-        {
-            let mut writer =
-                provider.get_writer(500, StaticFileSegment::AccountChangeSets).unwrap();
-            writer.initialize_pruned_anchor(500).unwrap();
-            writer.append_account_changeset(generate_test_changeset(501, 2), 501).unwrap();
-            writer.commit().unwrap();
-        }
-        {
-            let mut writer = provider.get_writer(500, StaticFileSegment::Receipts).unwrap();
-            writer.initialize_pruned_anchor(500).unwrap();
-            writer.increment_block(501).unwrap();
-            writer.append_receipt(100, &Receipt::default()).unwrap();
-            writer.commit().unwrap();
-        }
-        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
-            let mut writer = provider.latest_writer(segment).unwrap();
-            if segment.is_change_based() {
-                writer.prune_account_changesets(499).unwrap();
-            } else {
-                writer.prune_receipts(1, 499).unwrap();
+            for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
+                let mut writer = provider.get_writer(500, segment).unwrap();
+                writer.initialize_pruned_anchor(500).unwrap();
+                if segment.is_change_based() {
+                    writer.append_account_changeset(generate_test_changeset(501, 2), 501).unwrap();
+                } else {
+                    writer.increment_block(501).unwrap();
+                    writer.append_receipt(100, &Receipt::default()).unwrap();
+                }
+                if committed {
+                    writer.commit().unwrap();
+                }
+
+                if segment.is_change_based() {
+                    writer.prune_account_changesets(499).unwrap();
+                } else {
+                    writer.prune_receipts(1, 499).unwrap();
+                }
+                assert!(writer.commit().is_err(), "{segment}, committed={committed}");
+                // A rejected unwind must leave pending data available to commit.
+                writer.commit().unwrap();
             }
-            assert!(writer.commit().is_err(), "{segment}");
-        }
-        drop(provider);
+            drop(provider);
 
-        let provider = setup_test_provider(&static_dir, 500);
-        assert_eq!(provider.account_block_changeset(501).unwrap().len(), 2);
-        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
-            let header = provider.latest_writer(segment).unwrap().user_header().clone();
-            assert_eq!(header.block_range(), Some((500..=501).into()), "{segment}");
+            let provider = setup_test_provider(&static_dir, 500);
+            assert_eq!(provider.account_block_changeset(501).unwrap().len(), 2);
+            assert_eq!(provider.receipt(100).unwrap(), Some(Receipt::default()));
+            for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
+                let header = provider.latest_writer(segment).unwrap().user_header().clone();
+                assert_eq!(header.block_range(), Some((500..=501).into()), "{segment}");
+            }
         }
     }
 }
