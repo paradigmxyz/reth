@@ -32,15 +32,13 @@ use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    receipt::await_successful_receipts,
-    trie::{assert_trie_consistency, wait_for_persisted_block},
-    wallet::TestAccount,
+    receipt::await_successful_receipts, trie::assert_trie_consistency, wallet::TestAccount,
     E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
 use reth_revm::db::BundleAccount;
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 const ETH: u128 = 1_000_000_000_000_000_000;
 
@@ -103,8 +101,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
     for _ in 0..4 {
         ctx.mine_block(vec![]).await?;
     }
-    wait_for_persisted_block(&ctx.node.inner.provider, scenario_tip, Duration::from_secs(30))
-        .await?;
+    ctx.node.wait_for_persisted_block(scenario_tip).await?;
     assert_trie_consistency(&ctx.node.inner.provider)?;
 
     Ok(())
