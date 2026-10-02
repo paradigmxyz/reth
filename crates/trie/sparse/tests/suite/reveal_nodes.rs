@@ -120,10 +120,8 @@ pub(super) fn test_reveal_nodes_with_branch_masks<T: SparseTrie>(new_trie: fn() 
     // guided by the masks stored during reveal_nodes.
     let updates = trie.take_updates();
     assert!(
-        !updates.updated_nodes.is_empty() || !updates.removed_nodes.is_empty(),
-        "take_updates should be non-empty when masks guide update tracking: updated={}, removed={}",
-        updates.updated_nodes.len(),
-        updates.removed_nodes.len(),
+        !updates.is_empty(),
+        "take_updates should be non-empty when masks guide update tracking: {updates:?}",
     );
 }
 
