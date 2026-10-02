@@ -155,17 +155,18 @@ where
         // Without the original updates, reverting one block at a time preserves nodes that
         // appear and disappear inside the range. An endpoint-only calculation would omit them.
         if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
-            forward.push(&forward_updates[index].1);
+            forward.push(forward_updates[index].1.as_ref());
             for (block, updates) in forward_updates[..index].iter().rev() {
                 if start == *blocks.start() || *block != start - 1 {
                     break
                 }
-                forward.push(updates);
+                forward.push(updates.as_ref());
                 start -= 1;
             }
         }
 
-        // Collect reverts for the segment and use them to generate the trie reverts for the segment.
+        // Collect reverts for the segment and use them to generate the trie reverts for the
+        // segment.
         let segment_state = HashedPostStateSorted::from_reverts(provider, start..=end)?;
         let prefixes = segment_state.construct_prefix_sets().freeze();
         state.extend_ref_and_sort(&segment_state);
@@ -179,14 +180,10 @@ where
         .1
         .into_sorted();
 
-        // Newest forward values win; the calculated target values override them.
-        let segment = if forward.is_empty() {
-            segment_trie
-        } else {
-            let mut segment = TrieUpdatesSorted::merge_slice(&forward);
-            segment.extend_ref_and_sort(&segment_trie);
-            segment
-        };
+        // The first entry wins, so calculated target values precede newest-to-oldest forward
+        // values.
+        forward.insert(0, &segment_trie);
+        let segment = TrieUpdatesSorted::merge_slice(&forward);
         overlay.extend_ref_and_sort(&segment);
         reverts.extend_ref_and_sort(&segment);
         next = (start > *blocks.start()).then(|| start - 1);
