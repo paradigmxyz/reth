@@ -16,7 +16,7 @@ use reth_db_api::{
     RawKey, RawTable,
 };
 use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
-use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
@@ -155,12 +155,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
             self.save_stage_checkpoint(stage, checkpoint)?;
         }
-        // `before_inclusive` keeps the pivot itself, whose state the node has.
-        let pruned = PruneCheckpoint {
-            block_number: Some(pivot),
-            tx_number: None,
-            prune_mode: PruneMode::before_inclusive(pivot),
-        };
+        let pruned = PruneCheckpoint::pruned_through(pivot);
         for segment in
             PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
         {
@@ -589,9 +584,8 @@ mod tests {
         for segment in
             PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
         {
-            let checkpoint = provider.get_prune_checkpoint(segment).unwrap().unwrap();
-            assert_eq!(checkpoint.block_number, Some(7));
-            assert_eq!(checkpoint.prune_mode, PruneMode::before_inclusive(7));
+            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
+            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
         }
     }
 }
