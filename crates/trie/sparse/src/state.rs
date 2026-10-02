@@ -7,16 +7,12 @@ use alloy_primitives::{map::B256Map, B256};
 use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
-    updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
+    updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
 };
-use tracing::instrument;
-
-#[cfg(feature = "metrics")]
-use reth_primitives_traits::FastInstant as Instant;
-
 #[cfg(feature = "std")]
 use tracing::debug;
+use tracing::instrument;
 
 /// Holds data that should be dropped after any locks are released.
 ///
@@ -394,51 +390,55 @@ where
     pub fn root_with_updates(
         &mut self,
         new_epoch: TrieNodeEpoch,
-    ) -> SparseStateTrieResult<(B256, TrieUpdatesSorted)> {
+    ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         // record revealed node metrics
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        let root = self.revealed_trie_mut()?.root(new_epoch);
-
-        #[cfg(feature = "metrics")]
-        let start = Instant::now();
-
         let storage_tries = self.storage_trie_updates();
-        let updates = self.revealed_trie_mut()?.take_updates();
-        let updates = TrieUpdatesSorted::new(updates, storage_tries);
+        let revealed = self.revealed_trie_mut()?;
 
-        #[cfg(feature = "metrics")]
-        self.metrics.histograms.take_updates_duration_seconds.record(start.elapsed().as_secs_f64());
-
+        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        let updates = TrieUpdates {
+            account_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+            storage_tries,
+        };
         Ok((root, updates))
     }
 
     /// Returns storage trie updates for tries that have been revealed.
     ///
     /// Panics if any of the storage tries are not revealed.
-    pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdatesSorted> {
+    pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
         self.storage
             .tries
             .iter_mut()
             .map(|(address, trie)| {
                 let trie = trie.as_revealed_mut().unwrap();
                 let updates = trie.take_updates();
-                let updates = StorageTrieUpdatesSorted { storage_nodes: updates };
+                let updates = StorageTrieUpdates {
+                    storage_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                };
                 (*address, updates)
             })
             .filter(|(_, updates)| !updates.is_empty())
             .collect()
     }
 
-    /// Returns [`TrieUpdatesSorted`] by taking the updates from the revealed sparse tries.
+    /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
     ///
     /// Returns `None` if the accounts trie is not revealed.
-    pub fn take_trie_updates(&mut self) -> Option<TrieUpdatesSorted> {
+    pub fn take_trie_updates(&mut self) -> Option<TrieUpdates> {
         let storage_tries = self.storage_trie_updates();
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
-            TrieUpdatesSorted::new(updates, storage_tries)
+            TrieUpdates {
+                account_nodes: updates.updated_nodes,
+                removed_nodes: updates.removed_nodes,
+                storage_tries,
+            }
         })
     }
 }
@@ -596,12 +596,16 @@ impl<S: SparseTrieTrait + Clone> StorageTries<S> {
 mod tests {
     use super::*;
     use crate::{ArenaParallelSparseTrie, LeafLookup, LeafUpdate};
-    use alloy_primitives::{b256, map::HashMap, U256};
+    use alloy_primitives::{
+        b256,
+        map::{HashMap, HashSet},
+        U256,
+    };
     use arbitrary::Arbitrary;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
-    use reth_trie::{HashBuilder, MultiProof, EMPTY_ROOT_HASH};
+    use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
         BranchNodeMasks, BranchNodeMasksMap, BranchNodeV2, LeafNode, RlpNode, StorageMultiProof,
@@ -1132,15 +1136,17 @@ mod tests {
         // TODO(alexey): assert against real state root calculation updates
         pretty_assertions::assert_eq!(
             sparse_updates,
-            TrieUpdatesSorted::new(
-                Vec::new(),
-                B256Map::from_iter([(
+            TrieUpdates {
+                account_nodes: HashMap::default(),
+                storage_tries: HashMap::from_iter([(
                     b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
-                    StorageTrieUpdatesSorted {
-                        storage_nodes: vec![(Nibbles::from_nibbles([0x1]), None)],
+                    StorageTrieUpdates {
+                        storage_nodes: HashMap::default(),
+                        removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
                     }
                 )]),
-            )
+                removed_nodes: HashSet::default()
+            }
         );
     }
 }
