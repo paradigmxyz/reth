@@ -20,7 +20,8 @@ pub(super) struct ArenaCursorStackEntry {
     /// A [`Nibbles`] holds at most 64 nibbles, so this always fits in a `u8`.
     path_len: u8,
     /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
-    /// Only meaningful when this entry's node is a branch.
+    /// Only meaningful when this entry's node is a branch. Ranges over `0..=16`, where 16 means
+    /// the last child of a full branch has been visited.
     next_dense_idx: u8,
 }
 
@@ -163,7 +164,12 @@ impl ArenaCursor {
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn pop(&mut self, arena: &mut NodeArena) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
-        trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
+        trace!(
+            target: TRACE_TARGET,
+            idx = ?entry.index,
+            path = ?self.entry_path(&entry),
+            "Popped stack entry",
+        );
 
         #[cfg(debug_assertions)]
         if let Some(ArenaSparseNode::Subtrie(s)) = arena.get(entry.index) {
@@ -352,6 +358,11 @@ impl ArenaCursor {
             // The target is not below the walk's root. Callers only seek within the root's
             // prefix, so this cannot happen for a revealed root; leaving `self.path` alone
             // keeps the entry paths derivable.
+            debug_assert!(
+                false,
+                "seek target {full_path:?} is not below the walk's root {:?}",
+                self.head_path(),
+            );
             return SeekResult::Diverged;
         }
         self.path = *full_path;
