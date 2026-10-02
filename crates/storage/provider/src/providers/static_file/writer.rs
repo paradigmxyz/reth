@@ -1116,18 +1116,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// stored and the unwind cannot be applied. Must run before the unwind deletes any file.
     fn ensure_above_pruned_anchor(&self, last_block: BlockNumber) -> ProviderResult<()> {
         let header = self.writer.user_header();
-        let reader = self.reader();
-        // The current file may hold an anchor not yet in the index, and the lowest file holds it
-        // when the unwind starts from a later file.
-        let current = header.block_start().map(|start| (start, header.expected_block_start()));
-        let lowest = reader.get_lowest_range(header.segment()).map(|range| {
-            (range.start(), reader.find_fixed_range(header.segment(), range.start()).start())
-        });
-        if current
-            .into_iter()
-            .chain(lowest)
-            .any(|(start, expected_start)| start > expected_start && last_block < start)
-        {
+        // The current file may hold an anchor not yet in the index, and the index's lowest block
+        // bounds the segment, including anchors on a file boundary.
+        let current = header.block_start().filter(|start| *start > header.expected_block_start());
+        let lowest = self.reader().get_lowest_range_start(header.segment());
+        if current.into_iter().chain(lowest).any(|start| last_block < start) {
             return Err(ProviderError::other(StaticFileWriterError::new(
                 "cannot unwind below the pruned anchor",
             )))
