@@ -23,6 +23,7 @@ mod tests {
         ChangeSetReader,
     };
     use reth_chain_state::EthPrimitives;
+    use reth_ethereum_primitives::Receipt;
 
     // ==================== HELPER FUNCTIONS ====================
 
@@ -978,5 +979,35 @@ mod tests {
         let mut writer = provider.get_writer(10, StaticFileSegment::AccountChangeSets).unwrap();
         assert!(writer.initialize_pruned_anchor(150).is_err());
         assert_eq!(writer.user_header().block_range(), None);
+    }
+
+    #[test]
+    fn test_unwind_within_anchored_receipts() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::Receipts;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for (block, txs) in [(11, 100..102), (12, 102..103)] {
+                writer.increment_block(block).unwrap();
+                for tx in txs {
+                    writer.append_receipt(tx, &Receipt::default()).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_receipts(1, 11).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=11).into()));
+        assert_eq!(header.tx_range(), Some((100..=101).into()));
     }
 }
