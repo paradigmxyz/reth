@@ -382,7 +382,7 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{TxKind, B256, U256};
+    use alloy_primitives::{Bytes, TxKind, B256, U256};
     use reth_chainspec::MAINNET;
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
@@ -654,13 +654,6 @@ mod tests {
         // 3. Build the reference BAL by running the block through a canonical executor with
         //    `with_bal_builder`.
         // 4. Feed that BAL into `execute_block` and assert 2 receipts + no rejections.
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::TxKind;
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
         let evm_config = EthEvmConfig::mainnet();
         let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -883,13 +876,6 @@ mod tests {
     fn shadow_multi_value_transfer() {
         // Two senders → same recipient. Byte-equal across paths means: worker-produced
         // diffs commit identically to a directly-executed serial path.
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::TxKind;
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
         let evm_config = EthEvmConfig::mainnet();
         let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -929,14 +915,6 @@ mod tests {
         // Each worker sees an empty block, so both transactions fit individually. The ordered
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
         // block gas for tx2's gas limit.
-        use alloy_consensus::TxLegacy;
-        use alloy_evm::block::BlockValidationError;
-        use alloy_primitives::TxKind;
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
         let evm_config = EthEvmConfig::mainnet();
         let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
@@ -1002,8 +980,50 @@ mod tests {
         }
     }
 
-    /// Two funded senders each transferring to a fresh recipient, plus the reference BAL of a
-    /// block containing only the covered subset of those transfers.
+    /// Two funded senders each transferring to the same recipient, which is funded only if
+    /// `fund_recipient` is set.
+    fn two_transfers(
+        tx1_gas_limit: u64,
+        tx2_gas_limit: u64,
+        fund_recipient: bool,
+    ) -> (CacheDB<EmptyDB>, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
+        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+        let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, balance);
+        insert_funded(&mut pre_block_db, bob, balance);
+        if fund_recipient {
+            insert_funded(&mut pre_block_db, recipient, balance);
+        }
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, gas_limit, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit,
+                    to: TxKind::Call(recipient),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, tx1_gas_limit, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, tx2_gas_limit, 200u64), bob);
+        (pre_block_db, tx1, tx2)
+    }
+
+    /// [`two_transfers`] to a fresh recipient, plus the reference BAL of a block containing only
+    /// the covered subset of those transfers.
     fn two_transfers_with_reference_bal(
         evm_config: &EthEvmConfig,
         tx_gas_limit: u64,
@@ -1014,43 +1034,7 @@ mod tests {
         Recovered<reth_ethereum_primitives::TransactionSigned>,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
     ) {
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::TxKind;
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
-        let recipient = alloy_primitives::Address::from([0xCA; 20]);
-        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-
-        let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
-        let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
-
-        let mut pre_block_db = system_contracts_db();
-        insert_funded(&mut pre_block_db, alice, sender_balance);
-        insert_funded(&mut pre_block_db, bob, sender_balance);
-
-        let chain_id = MAINNET.chain.id();
-        let make_tx = |kp, value| {
-            sign_tx_with_key_pair(
-                kp,
-                Transaction::Legacy(TxLegacy {
-                    chain_id: Some(chain_id),
-                    nonce: 0,
-                    gas_price: 1,
-                    gas_limit: tx_gas_limit,
-                    to: TxKind::Call(recipient),
-                    value: U256::from(value),
-                    input: Default::default(),
-                }),
-            )
-        };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
-
+        let (pre_block_db, tx1, tx2) = two_transfers(tx_gas_limit, tx_gas_limit, false);
         let reference_block = empty_amsterdam_block(B256::ZERO);
         let covered = if bal_covers_first { vec![tx1.clone()] } else { vec![] };
         let reference_bal =
@@ -1269,46 +1253,20 @@ mod tests {
         let evm_config = EthEvmConfig::new(Arc::new(
             reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
         ));
-        let recipient = alloy_primitives::Address::from([0xCA; 20]);
-        let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
-        let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
-        let mut pre_block_db = system_contracts_db();
-        for addr in [alice, bob, recipient] {
-            insert_funded(
-                &mut pre_block_db,
-                addr,
-                U256::from(alloy_consensus::constants::ETH_TO_WEI),
-            );
-        }
+        let block_gas_limit = 20_000_000;
         // The second gas limit exceeds the regular gas left after the first transfer, but its
-        // regular part, capped at the EIP-7825 default, fits.
-        let make_tx = |kp, gas_limit| {
-            sign_tx_with_key_pair(
-                kp,
-                Transaction::Legacy(TxLegacy {
-                    chain_id: Some(MAINNET.chain.id()),
-                    nonce: 0,
-                    gas_price: 1,
-                    gas_limit,
-                    to: TxKind::Call(recipient),
-                    value: U256::from(1),
-                    input: Default::default(),
-                }),
-            )
-        };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100_000), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 19_990_000), bob);
+        // regular part, capped at the EIP-7825 default, fits. The funded recipient keeps both
+        // transfers off the state-gas budget.
+        let (pre_block_db, tx1, tx2) = two_transfers(100_000, 19_990_000, true);
         let reference_bal = reference_bal_for_block(
             &evm_config,
             pre_block_db.clone(),
-            &empty_amsterdam_block(B256::ZERO),
+            &empty_amsterdam_block_with_gas_limit(B256::ZERO, block_gas_limit),
             vec![tx1.clone(), tx2.clone()],
         );
         let block = empty_amsterdam_block_with_gas_limit(
             compute_block_access_list_hash(&reference_bal),
-            20_000_000,
+            block_gas_limit,
         );
         let mut evm_env = evm_config.evm_env(block.header()).unwrap();
         // An unset cap means the spec default.
@@ -1345,13 +1303,6 @@ mod tests {
         //
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
         let evm_config = EthEvmConfig::mainnet();
         let revert_contract: alloy_primitives::Address =
             alloy_primitives::Address::from([0xDE; 20]);
@@ -1395,13 +1346,6 @@ mod tests {
         // a diff produced by a worker EVM.
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::{Bytes, TxKind};
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
         let evm_config = EthEvmConfig::mainnet();
         let sstore_contract: alloy_primitives::Address =
             alloy_primitives::Address::from([0x55; 20]);
