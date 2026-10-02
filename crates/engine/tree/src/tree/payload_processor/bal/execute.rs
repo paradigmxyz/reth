@@ -141,6 +141,12 @@ where
         .expect("with_bal_builder set")
         .accounts
         .reserve(bal.len());
+    // The BAL lists every account the block touches, so the commit maps are sized once instead of
+    // being rehashed while transactions commit.
+    canonical_state.cache.accounts.reserve(bal.len());
+    if let Some(transition_state) = canonical_state.transition_state.as_mut() {
+        transition_state.transitions.reserve(bal.len());
+    }
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
