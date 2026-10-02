@@ -1468,6 +1468,11 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// CAUTION: destructive. Deletes the existing files immediately, not on commit.
     pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        if !self.cached_storage_settings().storage_v2 {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor requires storage v2",
+            )))
+        }
         let static_files = self.static_file_provider();
         for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
             static_files.delete_segment(segment)?;
