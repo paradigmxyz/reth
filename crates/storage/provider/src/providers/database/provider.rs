@@ -1478,6 +1478,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             static_files.delete_segment(segment)?;
             static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
         }
+        static_files.set_earliest_history_height(pivot);
         Ok(())
     }
 }

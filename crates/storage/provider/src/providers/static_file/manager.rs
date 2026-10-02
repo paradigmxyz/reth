@@ -1992,6 +1992,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Sets the earliest available block number, matching what [`Self::initialize_index`] derives.
+    pub(crate) fn set_earliest_history_height(&self, block: BlockNumber) {
+        self.earliest_history_height.store(block, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Gets the lowest static file's block range if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].

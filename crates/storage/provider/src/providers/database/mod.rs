@@ -1249,6 +1249,25 @@ mod tests {
     }
 
     #[test]
+    fn anchored_static_files_expire_history_below_the_pivot() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(10).unwrap();
+        provider.commit().unwrap();
+
+        let static_files = factory.static_file_provider();
+        assert_eq!(static_files.earliest_history_height(), 10);
+        assert_matches!(
+            factory.provider().unwrap().block(5.into()),
+            Err(ProviderError::BlockExpired { requested: 5, earliest_available: 10 })
+        );
+
+        static_files.initialize_index().unwrap();
+        assert_eq!(static_files.earliest_history_height(), 10);
+    }
+
+    #[test]
     fn anchoring_static_files_requires_storage_v2() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
