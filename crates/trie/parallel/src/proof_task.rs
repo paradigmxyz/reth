@@ -44,9 +44,9 @@ use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     proof_v2,
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
+    trie_cursor::{TrieCursorFactory, TrieStorageCursor},
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
@@ -64,22 +64,42 @@ use tracing::{debug, debug_span, error, instrument, trace};
 use crate::proof_task_metrics::{
     ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
 };
+#[cfg(feature = "metrics")]
+use reth_trie::{hashed_cursor::InstrumentedHashedCursor, trie_cursor::InstrumentedTrieCursor};
 
-/// Type alias for the V2 account proof calculator with instrumented cursors.
+/// Type alias for the V2 account proof calculator with worker cursors.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
-    InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
-    InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
+    WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
+    WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
     AsyncAccountValueEncoder<
-        InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-        InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+        WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
+        WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
     >,
 >;
 
-/// Type alias for the V2 storage proof calculator with instrumented cursors.
+/// Type alias for the V2 storage proof calculator with worker cursors.
 type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
-    InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-    InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+    WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
+    WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
 >;
+
+/// Trie cursor used by proof workers, instrumented to record cursor metrics.
+#[cfg(feature = "metrics")]
+type WorkerTrieCursor<'a, C> = InstrumentedTrieCursor<'a, C>;
+
+/// Trie cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
+/// cursor operations are not timed or counted.
+#[cfg(not(feature = "metrics"))]
+type WorkerTrieCursor<'a, C> = C;
+
+/// Hashed cursor used by proof workers, instrumented to record cursor metrics.
+#[cfg(feature = "metrics")]
+type WorkerHashedCursor<'a, C> = InstrumentedHashedCursor<'a, C>;
+
+/// Hashed cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
+/// cursor operations are not timed or counted.
+#[cfg(not(feature = "metrics"))]
+type WorkerHashedCursor<'a, C> = C;
 
 /// Tracks worker availability counts.
 ///
@@ -666,6 +686,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
+    #[cfg_attr(not(feature = "metrics"), expect(unused_mut))]
     fn run(mut self) -> ProviderResult<()> {
         // Create provider from factory
         let provider = self.task_ctx.factory.database_provider_ro()?;
@@ -678,19 +699,20 @@ where
         );
 
         let mut storage_proofs_processed = 0u64;
+        #[cfg(feature = "metrics")]
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
         let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
         let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let instrumented_trie_cursor =
+        #[cfg(feature = "metrics")]
+        let trie_cursor =
             InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
-        let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let hashed_cursor = InstrumentedHashedCursor::new(
             hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
-        let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
-            instrumented_trie_cursor,
-            instrumented_hashed_cursor,
-        );
+        let mut v2_calculator =
+            proof_v2::StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
@@ -875,6 +897,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
+    #[cfg_attr(not(feature = "metrics"), expect(unused_mut))]
     fn run(mut self) -> ProviderResult<()> {
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
@@ -885,6 +908,7 @@ where
         );
 
         let mut account_proofs_processed = 0u64;
+        #[cfg(feature = "metrics")]
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Create both account and storage calculators for V2 proofs.
@@ -895,42 +919,35 @@ where
         let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
         let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
-        let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
+        #[cfg(feature = "metrics")]
+        let account_trie_cursor = InstrumentedTrieCursor::new(
             account_trie_cursor,
             &mut cursor_metrics_cache.account_trie_cursor,
         );
-        let instrumented_account_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let account_hashed_cursor = InstrumentedHashedCursor::new(
             account_hashed_cursor,
             &mut cursor_metrics_cache.account_hashed_cursor,
         );
-        let instrumented_storage_trie_cursor = InstrumentedTrieCursor::new(
+        #[cfg(feature = "metrics")]
+        let storage_trie_cursor = InstrumentedTrieCursor::new(
             storage_trie_cursor,
             &mut cursor_metrics_cache.storage_trie_cursor,
         );
-        let instrumented_storage_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let storage_hashed_cursor = InstrumentedHashedCursor::new(
             storage_hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
 
-        let mut v2_account_calculator =
-            proof_v2::ProofCalculator::<
-                _,
-                _,
-                AsyncAccountValueEncoder<
-                    InstrumentedTrieCursor<
-                        '_,
-                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-                    >,
-                    InstrumentedHashedCursor<
-                        '_,
-                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
-                    >,
-                >,
-            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
+        let mut v2_account_calculator = V2AccountProofCalculator::<'_, Factory::Provider>::new(
+            account_trie_cursor,
+            account_hashed_cursor,
+        );
         let v2_storage_calculator =
             Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
-                instrumented_storage_trie_cursor,
-                instrumented_storage_hashed_cursor,
+                storage_trie_cursor,
+                storage_hashed_cursor,
             )));
 
         // Count this worker as available only after successful initialization.
