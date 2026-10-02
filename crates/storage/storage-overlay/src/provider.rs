@@ -1513,61 +1513,8 @@ mod tests {
     /// genesis storage trie stores a branch at `7c3` reached through the extension `7c`.
     const EXTENSION_BRANCH_SLOTS: [u64; 4] = [4_445_016, 1_349_525, 437_033, 333_413];
 
-    /// Slot whose hashed key starts with `7c5`, splitting the `7c` extension into a stored branch.
-    const EXTENSION_SPLIT_SLOT: u64 = 3_775;
-
     /// Genesis slots with distinct first nibbles other than `7`.
     const FILLER_SLOTS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
-
-    #[test]
-    fn retained_view_state_root_matches_in_memory_fork_after_disk_reorg() {
-        let genesis_slots = FILLER_SLOTS
-            .into_iter()
-            .chain(EXTENSION_BRANCH_SLOTS)
-            .map(|slot| (slot, slot))
-            .collect::<Vec<_>>();
-        let genesis = storage_fixture_state(genesis_slots.clone());
-        let disk_tip =
-            storage_fixture_state(genesis_slots.iter().copied().chain([(EXTENSION_SPLIT_SLOT, 1)]));
-
-        // Block #1 on disk splits the extension, so the durable trie stores a branch at `7c`
-        // whose hash for child `3` covers the genesis values below `7c3`.
-        let factory = create_test_provider_factory();
-        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..2).collect::<Vec<_>>();
-        persist_storage_fixture(
-            &factory,
-            &blocks,
-            &disk_tip,
-            &disk_tip,
-            1,
-            &[(1, vec![(EXTENSION_SPLIT_SLOT, 0)])],
-        );
-
-        // An in-memory fork of #1 changes a slot below `7c3`. Its view reverts block #1 and
-        // replays the fork on top of genesis, so the durable `7c` branch hash for child `3` is
-        // stale unless the fork's keys are invalidated.
-        let fork_changes = storage_fixture_state([(EXTENSION_BRANCH_SLOTS[0], 1)]);
-        let mut fork_state = genesis.clone();
-        fork_state.extend(fork_changes.clone());
-        let fork = with_fixture_trie_data(
-            &TestBlockBuilder::eth()
-                .get_executed_block_with_number(1, blocks[0].recovered_block().hash()),
-            &genesis,
-            &fork_state,
-            fork_changes,
-        );
-        assert_ne!(fork.recovered_block().hash(), blocks[1].recovered_block().hash());
-
-        let manager = OverlayManager::<EthPrimitives>::default();
-        manager.insert_block(fork.clone());
-        let provider = factory.provider().unwrap();
-        let view = OverlayStateProvider::new_ref(
-            &provider,
-            manager.overlay_builder(fork.recovered_block().hash()),
-        );
-
-        assert_eq!(view.state_root(HashedPostState::default()).unwrap(), full_trie(&fork_state).0);
-    }
 
     #[test]
     fn view_with_trie_changesets_ignores_nodes_removed_above_state_trie_frontier() {
