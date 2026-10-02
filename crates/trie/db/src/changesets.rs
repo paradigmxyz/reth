@@ -47,13 +47,11 @@ where
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
 /// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
+///
 /// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
 /// strictly increasing block number. Consecutive available blocks are reverted together, preserving
 /// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
 /// transient nodes are retained.
-/// Returns before-values for the requested range only. Later blocks are used internally to
-/// reconstruct its starting state; their changesets are not included. Empty ranges return empty
-/// changesets. `db_tip_block` must be the current database tip for `provider`.
 ///
 /// # Errors
 ///
