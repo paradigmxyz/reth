@@ -13,7 +13,7 @@ use reth_trie::{
     HashedPostStateSorted, StateRoot,
 };
 use reth_trie_common::updates::TrieUpdatesSorted;
-use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
+use std::{ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -38,7 +38,7 @@ where
     compute_range_trie_changesets(
         provider,
         state_trie_provider,
-        &BTreeMap::new(),
+        &[],
         block_number..=block_number,
         db_tip_block,
     )
@@ -47,9 +47,10 @@ where
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
 /// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
-/// `forward_updates` contains original executed-block trie updates on that same chain. Consecutive
-/// available blocks are reverted together, preserving forward paths omitted by the aggregate
-/// calculation. Missing blocks are reverted individually so transient nodes are retained.
+/// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
+/// strictly increasing block number. Consecutive available blocks are reverted together, preserving
+/// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
+/// transient nodes are retained.
 /// Returns before-values for the requested range only. Later blocks are used internally to
 /// reconstruct its starting state; their changesets are not included. Empty ranges return empty
 /// changesets. `db_tip_block` must be the current database tip for `provider`.
@@ -61,7 +62,7 @@ where
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
-    forward_updates: &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
@@ -69,6 +70,11 @@ where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
+    debug_assert!(
+        forward_updates.is_sorted_by(|(a, _), (b, _)| a < b),
+        "forward updates must have strictly increasing block numbers"
+    );
+
     if range.is_empty() {
         return Ok(TrieUpdatesSorted::default())
     }
@@ -130,7 +136,7 @@ where
 fn rewind_trie_range<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
-    forward_updates: &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     blocks: RangeInclusive<BlockNumber>,
     state: &mut HashedPostStateSorted,
     overlay: &mut TrieUpdatesSorted,
@@ -144,10 +150,12 @@ where
     while let Some(end) = next {
         let mut start = end;
         let mut forward = Vec::new();
-        if let Some(updates) = forward_updates.get(&end) {
-            forward.push(updates);
-            while start > *blocks.start() {
-                let Some(updates) = forward_updates.get(&(start - 1)) else { break };
+        if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
+            forward.push(&forward_updates[index].1);
+            for (block, updates) in forward_updates[..index].iter().rev() {
+                if start == *blocks.start() || *block != start - 1 {
+                    break
+                }
                 forward.push(updates);
                 start -= 1;
             }

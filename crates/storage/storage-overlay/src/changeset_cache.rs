@@ -255,7 +255,7 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
-        let forward_updates = overlay_manager
+        let mut forward_updates = overlay_manager
             .parent_chain(finish.hash)
             .take_while(|block| block.recovered_block().number() >= start_block)
             .map(|block| {
@@ -264,7 +264,8 @@ impl ChangesetCache {
                     Arc::clone(&block.trie_data().sorted.trie_updates),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
+        forward_updates.reverse();
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -828,7 +829,7 @@ mod tests {
             let result = reth_trie_db::compute_range_trie_changesets(
                 &*provider,
                 &state_trie_provider,
-                &BTreeMap::from([(3, Arc::clone(&base_nodes))]),
+                &[(3, Arc::clone(&base_nodes))],
                 range,
                 3,
             )
@@ -883,7 +884,7 @@ mod tests {
         let result = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
-            &BTreeMap::new(),
+            &[],
             1..=2,
             2,
         )
@@ -895,7 +896,7 @@ mod tests {
         let first = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
-            &BTreeMap::new(),
+            &[],
             1..=1,
             2,
         )
@@ -903,7 +904,7 @@ mod tests {
         let second = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
-            &BTreeMap::new(),
+            &[],
             2..=2,
             2,
         )
@@ -911,7 +912,7 @@ mod tests {
         let mut merged = second.clone();
         merged.extend_ref_and_sort(&first);
         assert_eq!(result, merged);
-        let forward = BTreeMap::from([(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))]);
+        let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
         assert_eq!(
             reth_trie_db::compute_range_trie_changesets(
                 &*provider,
@@ -937,14 +938,9 @@ mod tests {
             )),
             provider.cached_storage_settings().is_v2(),
         );
-        let at_first = reth_trie_db::compute_range_trie_changesets(
-            &*provider,
-            &at_first,
-            &BTreeMap::new(),
-            1..=1,
-            1,
-        )
-        .unwrap();
+        let at_first =
+            reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
+                .unwrap();
         assert_eq!(first, at_first);
     }
 
@@ -1027,7 +1023,7 @@ mod tests {
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
-            &BTreeMap::new(),
+            &[],
             1..=3,
             3,
         )
@@ -1116,7 +1112,7 @@ mod tests {
         let actual = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
-            &BTreeMap::new(),
+            &[],
             2..=3,
             3,
         )
