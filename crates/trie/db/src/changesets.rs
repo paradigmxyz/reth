@@ -13,7 +13,7 @@ use reth_trie::{
     StateRoot,
 };
 use reth_trie_common::updates::TrieUpdatesSorted;
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -38,15 +38,20 @@ where
     compute_range_trie_changesets(
         provider,
         state_trie_provider,
+        Arc::default(),
         block_number..=block_number,
         db_tip_block,
     )
+    .map(|result| (*result.reverts).clone())
 }
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
-/// The returned changesets restore the trie from the state after `range.end()` to the state before
-/// `range.start()`. `db_tip_block` must be the current database tip for `provider`.
+/// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
+/// `base_nodes` are the trie updates layered over the underlying database to construct that view.
+/// The result contains both range-relative reverts and an overlay applicable to that database.
+/// An empty range returns no range-relative reverts, but still completes and rewinds the database
+/// trie to `range.end()`. `db_tip_block` must be the current database tip for `provider`.
 ///
 /// # Errors
 ///
@@ -55,19 +60,16 @@ where
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
+    base_nodes: Arc<TrieUpdatesSorted>,
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
-) -> Result<TrieUpdatesSorted, ProviderError>
+) -> Result<ComputedTrieChangesets, ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
     let start_block = *range.start();
     let end_block = *range.end();
-
-    if start_block > end_block {
-        return Ok(TrieUpdatesSorted::default())
-    }
 
     if end_block > db_tip_block {
         return Err(ProviderError::InsufficientChangesets {
@@ -85,7 +87,11 @@ where
     );
 
     // Collect the state revert for the requested range.
-    let range_state_revert = reth_trie::HashedPostStateSorted::from_reverts(provider, range)?;
+    let range_state_revert = if start_block > end_block {
+        Default::default()
+    } else {
+        reth_trie::HashedPostStateSorted::from_reverts(provider, range)?
+    };
     let range_prefix_sets = range_state_revert.construct_prefix_sets();
 
     let (range_nodes, range_state) = if end_block == db_tip_block {
@@ -127,15 +133,19 @@ where
         (tail_trie_revert, pre_range_state_revert)
     };
 
-    let range_trie_revert = StateRoot::new(
-        InMemoryTrieCursorFactory::new(state_trie_provider, &range_nodes),
-        HashedPostStateCursorFactory::new(state_trie_provider, &range_state),
-    )
-    .with_prefix_sets(range_prefix_sets.freeze())
-    .root_with_updates()
-    .map_err(ProviderError::other)?
-    .1
-    .into_sorted();
+    let range_trie_revert = if start_block > end_block {
+        TrieUpdatesSorted::default()
+    } else {
+        StateRoot::new(
+            InMemoryTrieCursorFactory::new(state_trie_provider, &range_nodes),
+            HashedPostStateCursorFactory::new(state_trie_provider, &range_state),
+        )
+        .with_prefix_sets(range_prefix_sets.freeze())
+        .root_with_updates()
+        .map_err(ProviderError::other)?
+        .1
+        .into_sorted()
+    };
 
     debug!(
         target: "trie::changesets",
@@ -146,5 +156,27 @@ where
         "Computed range trie changesets successfully"
     );
 
-    Ok(range_trie_revert)
+    let reverts = Arc::new(range_trie_revert);
+    let mut overlay = base_nodes;
+    if !range_nodes.is_empty() {
+        Arc::make_mut(&mut overlay).extend_ref_and_sort(&range_nodes);
+    }
+    if overlay.is_empty() {
+        overlay = Arc::clone(&reverts);
+    } else if !reverts.is_empty() {
+        Arc::make_mut(&mut overlay).extend_ref_and_sort(&reverts);
+    }
+
+    Ok(ComputedTrieChangesets { reverts, overlay })
+}
+
+/// Trie reverts for a block range and the corresponding overlay for the underlying database.
+#[derive(Debug, Clone, Default)]
+pub struct ComputedTrieChangesets {
+    /// Updates from the trie after the range to the trie before it. Their keys identify nodes
+    /// affected by the range, without the updates used to reconstruct its starting trie.
+    pub reverts: Arc<TrieUpdatesSorted>,
+    /// Updates from the underlying database trie to the trie before the range, including the
+    /// input overlay and any rewind from the database tip to the range end.
+    pub overlay: Arc<TrieUpdatesSorted>,
 }

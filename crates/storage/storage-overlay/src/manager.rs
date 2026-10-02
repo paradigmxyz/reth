@@ -14,7 +14,7 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
-use reth_errors::{ProviderError, ProviderResult};
+use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
     dashmap::{mapref::entry::Entry, DashMap},
@@ -150,10 +150,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Gets or computes cached changesets for an inclusive block range at known frontiers.
     ///
-    /// The range must end at Finish. The returned trie updates apply on top of the durable state
-    /// trie: when the state trie frontier lags Finish, the cached reverts only describe the trie at
-    /// Finish, so they are layered over the in-memory trie updates between the two frontiers.
-    /// Otherwise nodes that exist durably but were removed by those in-memory blocks survive.
+    /// The returned trie updates apply on top of the durable state trie and restore the state
+    /// before the range. The calculation includes the in-memory updates that complete the trie
+    /// at Finish and any rewind to the range end.
     pub(crate) fn get_or_compute_cached_changesets_range_at_frontiers<P>(
         &self,
         provider: &P,
@@ -170,50 +169,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        debug_assert_eq!(*range.end(), finish.number);
-
-        let reverts = self.changeset_cache.get_or_compute_range(
-            self,
-            provider,
-            range,
-            partial_state_trie,
-            finish,
-        )?;
-
-        let finish_nodes = self.finish_trie_nodes(partial_state_trie, finish)?;
-        if finish_nodes.is_empty() {
-            return Ok(reverts)
-        }
-
-        let mut nodes = (*finish_nodes).clone();
-        nodes.extend_ref_and_sort(&reverts);
-        Ok(Arc::new(nodes))
-    }
-
-    /// Returns the in-memory trie updates that complete the durable state trie at Finish.
-    pub(crate) fn finish_trie_nodes(
-        &self,
-        partial_state_trie: BlockNumHash,
-        finish: BlockNumHash,
-    ) -> ProviderResult<Arc<TrieUpdatesSorted>> {
-        if partial_state_trie == finish {
-            return Ok(Arc::default())
-        }
-
-        let overlay_error = || StateTrieOverlayError {
-            tip_hash: finish.hash,
-            anchor_hash: partial_state_trie.hash,
-        };
-        let finish_state =
-            self.block_state(finish.hash).ok_or_else(|| ProviderError::other(overlay_error()))?;
-        let (nodes, _) = self
-            .overlay_for_parent(
-                &finish_state,
-                partial_state_trie.hash,
-                OverlayCacheConfig::default(),
-            )
-            .map_err(ProviderError::other)?;
-        Ok(nodes)
+        self.changeset_cache
+            .get_or_compute_range(self, provider, range, partial_state_trie, finish)
+            .map(|result| result.overlay)
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
