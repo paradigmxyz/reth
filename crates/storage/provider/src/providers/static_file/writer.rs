@@ -926,6 +926,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             expected_block_start = self.writer.user_header().expected_block_start();
         }
 
+        // An anchor can start inside the file's fixed range, shifting the sidecar indices.
         let block_start = self.writer.user_header().block_start().unwrap_or(expected_block_start);
 
         // Find the number of rows to keep (up to and including last_block)
@@ -1062,6 +1063,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                     expected_block_start = self.writer.user_header().expected_block_start();
                 }
             }
+            // Preserve the anchor; the fixed file range may start before any retained history.
             let block_start =
                 self.writer.user_header().block_start().unwrap_or(expected_block_start);
             self.writer.user_header_mut().set_block_range(block_start, last_block);
