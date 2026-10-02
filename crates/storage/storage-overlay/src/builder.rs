@@ -474,11 +474,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let _guard = debug_span!(target: "storage::overlay", "retrieving_trie_reverts")
                         .entered();
                     let start = Instant::now();
-                    let accumulated_reverts =
-                        self.overlay_manager.get_or_compute_cached_changesets_range(
-                            provider,
-                            anchor.number + 1..=state_trie_tip_block.number,
-                        )?;
+                    // Deferred blocks can mask writes below the trie frontier; include Finish.
+                    let accumulated_reverts = self
+                        .overlay_manager
+                        .get_or_compute_cached_changesets_range(provider, revert_blocks.clone())?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
                 } else if state_trie_tip_block == finish_tip_block {

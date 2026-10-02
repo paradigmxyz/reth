@@ -33,7 +33,7 @@ use tracing::{debug, warn};
 /// Returns recorded block trie updates, or reconstructs them for a persisted block.
 ///
 /// Reconstruction uses the block's changeset paths and looks up their after-values in the
-/// persisted trie, rewound to that block with changesets for subsequent persisted blocks.
+/// masked disk trie, completed with changesets for subsequent blocks through Finish.
 ///
 /// # Errors
 ///
@@ -96,13 +96,10 @@ where
 
     let changesets =
         cache.get_or_compute_range(overlay_manager, provider, block_number..=block_number)?;
-    let reverts = cache.get_or_compute_range(
-        overlay_manager,
-        provider,
-        block_number + 1..=partial_state_trie.number,
-    )?;
+    let reverts =
+        cache.get_or_compute_range(overlay_manager, provider, block_number + 1..=finish.number)?;
 
-    // Rewind the persisted trie to the state after the target block.
+    // Include deferred blocks: they may have masked older writes in the disk trie.
     let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
     let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
@@ -655,6 +652,56 @@ mod tests {
         let (_, trie_updates) =
             DbStateRoot::<_, A>::from_tx(provider.tx_ref()).root_with_updates().unwrap();
         provider.write_trie_updates(trie_updates).unwrap();
+    }
+
+    #[test]
+    fn consumers_restore_trie_values_masked_by_deferred_blocks() {
+        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
+        let provider = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider.insert_block(block.recovered_block()).unwrap();
+        }
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(10)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(5) }),
+            )
+            .unwrap();
+        let path = Nibbles::from_nibbles([1]);
+        let updates = |mask| {
+            Arc::new(TrieUpdatesSorted::new(
+                vec![(path, Some(BranchNodeCompact::new(mask, 0, 0, vec![], None)))],
+                B256Map::default(),
+            ))
+        };
+        let block4 = updates(1);
+        let block9 = updates(2);
+        // Block 9 masks block 4's write, so the persisted trie does not contain the block-5 value.
+        let masked = TrieUpdatesSorted::disjointed_merge_batch(&[&block4], &[&block9]);
+        assert!(masked.is_empty());
+        provider.write_trie_updates_sorted(&masked).unwrap();
+        provider.commit().unwrap();
+        let provider = factory.provider_rw().unwrap();
+        for (start, end, before) in [
+            (4, 4, Arc::new(TrieUpdatesSorted::new(vec![(path, None)], B256Map::default()))),
+            (5, 10, Arc::clone(&block4)),
+            (5, 5, Arc::default()),
+        ] {
+            manager.changeset_cache().inner.write().insert(
+                ChangesetRangeKey::new(start, end, blocks[end as usize].recovered_block().hash()),
+                before,
+            );
+        }
+        let (frontier, finish) = database_state_frontiers(&*provider).unwrap();
+        let overlay = manager
+            .overlay_builder(blocks[4].recovered_block().hash())
+            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+            .unwrap();
+        assert_eq!(overlay.input().nodes, block4);
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 4).unwrap(), *block4);
     }
 
     #[test]
