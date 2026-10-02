@@ -404,6 +404,9 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+
+        // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
+        // missing blocks do not affect correctness.
         let mut forward_updates = overlay_manager
             .parent_chain(finish.hash)
             .take_while(|block| block.recovered_block().number() >= start_block)
@@ -415,6 +418,7 @@ impl ChangesetCache {
             })
             .collect::<Vec<_>>();
         forward_updates.reverse();
+
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
