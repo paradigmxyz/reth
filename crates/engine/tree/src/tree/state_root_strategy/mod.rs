@@ -71,7 +71,7 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::{utils::increase_thread_priority, WorkerPool};
+use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     trie_cursor::TrieCursorFactory,
@@ -492,14 +492,13 @@ impl DefaultStateRootStrategy {
     const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
 
     /// Returns how many workers to spawn for the block being validated from one kind of proof
-    /// worker pool, given the base pool size and the size of the overflow pool extending it.
+    /// worker pool, given its capacity.
     ///
     /// Explicit counts take precedence. Otherwise, small transaction counts use a quarter of
     /// the capacity, large gas usage uses all of it, and unknown or regular blocks use half.
     /// The transaction threshold is checked first, regardless of gas usage.
     const fn proof_worker_count(
-        base_pool_threads: usize,
-        overflow_pool_threads: usize,
+        pool_threads: usize,
         configured_threads: Option<usize>,
         transaction_count: Option<usize>,
         gas_used: Option<u64>,
@@ -507,7 +506,6 @@ impl DefaultStateRootStrategy {
         let count = if let Some(configured_threads) = configured_threads {
             configured_threads
         } else {
-            let pool_threads = base_pool_threads + overflow_pool_threads;
             match (transaction_count, gas_used) {
                 (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
                     pool_threads / 4
@@ -566,14 +564,12 @@ impl DefaultStateRootStrategy {
         let worker_counts = ProofWorkerCounts::new(
             Self::proof_worker_count(
                 executor.proof_storage_worker_pool().num_threads(),
-                executor.proof_storage_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
                 executor.proof_storage_worker_threads_override(),
                 transaction_count,
                 gas_used,
             ),
             Self::proof_worker_count(
                 executor.proof_account_worker_pool().num_threads(),
-                executor.proof_account_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
                 executor.proof_account_worker_threads_override(),
                 transaction_count,
                 gas_used,
@@ -992,7 +988,7 @@ where
                 parent_header,
                 preserved_sparse_trie,
                 // Block built incrementally, so neither the tx count nor the gas is known at FCU
-                // time: the payload builder gets the base pool.
+                // time: the payload builder uses half of each proof pool.
                 transaction_count: None,
                 gas_used: None,
                 config: ctx.config,
@@ -1379,12 +1375,10 @@ mod tests {
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
-        let base_pool_threads = 64;
-        let overflow_pool_threads = 0;
+        let pool_threads = 64;
         let count = |transaction_count, gas_used| {
             DefaultStateRootStrategy::proof_worker_count(
-                base_pool_threads,
-                overflow_pool_threads,
+                pool_threads,
                 None,
                 transaction_count,
                 gas_used,
@@ -1410,8 +1404,7 @@ mod tests {
         {
             assert_eq!(
                 DefaultStateRootStrategy::proof_worker_count(
-                    32,
-                    16,
+                    48,
                     Some(48),
                     transaction_count,
                     gas_used
@@ -1422,10 +1415,11 @@ mod tests {
 
         // Pools smaller than two threads, and a pinned count of zero, still get a worker.
         assert_eq!(
-            DefaultStateRootStrategy::proof_worker_count(1, 0, None, Some(1), Some(1_000_000)),
+            DefaultStateRootStrategy::proof_worker_count(1, None, Some(1), Some(1_000_000)),
             1
         );
-        assert_eq!(DefaultStateRootStrategy::proof_worker_count(32, 32, Some(0), None, None), 1);
+        assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, None, None, None), 1);
+        assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, Some(0), None, None), 1);
     }
 
     #[test]
