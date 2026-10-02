@@ -635,9 +635,16 @@ impl TrieUpdatesSorted {
             return acc;
         }
 
-        // Large k: k-way merge.
+        Self::merge_iter(items.iter().map(AsRef::as_ref))
+    }
+
+    /// Batch-merge sorted trie updates yielded **newest to oldest**, using a k-way merge.
+    ///
+    /// Traverses the iterator separately for account and storage nodes without collecting its
+    /// inputs. The iterator is cloned for the account-node traversal.
+    pub fn merge_iter<'a>(items: impl Iterator<Item = &'a Self> + Clone) -> Self {
         let account_nodes =
-            kway_merge_sorted(items.iter().map(|i| i.as_ref().account_nodes.as_slice()));
+            kway_merge_sorted(items.clone().map(|item| item.account_nodes.as_slice()));
 
         struct StorageAcc<'a> {
             slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
@@ -646,7 +653,7 @@ impl TrieUpdatesSorted {
         let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
 
         for item in items {
-            for (addr, storage) in &item.as_ref().storage_tries {
+            for (addr, storage) in &item.storage_tries {
                 let entry = acc.entry(*addr).or_insert_with(|| StorageAcc { slices: Vec::new() });
                 entry.slices.push(storage.storage_nodes.as_slice());
             }
@@ -1260,6 +1267,38 @@ mod tests {
         assert_eq!(updates.account_nodes.len(), 1);
         assert!(updates.account_nodes.contains_key(&Nibbles::from_nibbles_unchecked([0x01])));
         assert!(!updates.account_nodes.contains_key(&Nibbles::default()));
+    }
+
+    #[test]
+    fn test_trie_updates_sorted_merge_iter() {
+        let path = Nibbles::from_nibbles_unchecked([1]);
+        let updates = (0..31)
+            .map(|index| {
+                let nodes = vec![(path, (index % 2 != 0).then(BranchNodeCompact::default))];
+                TrieUpdatesSorted::new(
+                    nodes.clone(),
+                    B256Map::from_iter([
+                        (B256::ZERO, StorageTrieUpdatesSorted { storage_nodes: nodes.clone() }),
+                        (
+                            B256::with_last_byte(index + 1),
+                            StorageTrieUpdatesSorted { storage_nodes: nodes },
+                        ),
+                    ]),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for count in [0, 1, 2, 29, 30, 31] {
+            let mut expected = TrieUpdatesSorted::default();
+            for update in updates[..count].iter().rev() {
+                expected.extend_ref_and_sort(update);
+            }
+
+            // A forward-only iterator ensures merging does not require DoubleEndedIterator.
+            let iter = (0..).take(count).map(|index| &updates[index]);
+            assert_eq!(TrieUpdatesSorted::merge_iter(iter), expected);
+            assert_eq!(TrieUpdatesSorted::merge_slice(&updates[..count]), expected);
+        }
     }
 }
 
