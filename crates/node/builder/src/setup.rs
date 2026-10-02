@@ -16,7 +16,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{providers::ProviderNodeTypes, BalProvider, ProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
     stages::{EraImportSource, ExecutionStage},
@@ -124,16 +124,13 @@ where
                 prune_config.segments,
                 era_import_source,
             )
-            .set(
-                ExecutionStage::new(
-                    evm_config,
-                    consensus,
-                    stage_config.execution.into(),
-                    stage_config.execution_external_clean_threshold(),
-                    exex_manager_handle,
-                )
-                .with_bal_store(provider_factory.bal_store().clone()),
-            )
+            .set(ExecutionStage::new(
+                evm_config,
+                consensus,
+                stage_config.execution.into(),
+                stage_config.execution_external_clean_threshold(),
+                exex_manager_handle,
+            ))
             .disable_all(disabled_stages),
         )
         .build(provider_factory, static_file_producer);

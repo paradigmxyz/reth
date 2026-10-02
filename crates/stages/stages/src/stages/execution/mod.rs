@@ -13,7 +13,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BalStoreHandle, BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
+    BalProvider, BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
     HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, RawBal, StateProvider, StateWriteConfig, StateWriter, StaticFileProviderFactory,
     StatsReader, StoragePath, StorageSettingsCache, TransactionVariant,
@@ -97,8 +97,6 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
-    /// Store for validated block access lists produced during execution.
-    bal_store: BalStoreHandle,
 }
 
 impl<E> ExecutionStage<E>
@@ -122,7 +120,6 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
-            bal_store: BalStoreHandle::noop(),
         }
     }
 
@@ -263,20 +260,13 @@ where
 
         Ok(())
     }
-
-    /// Sets the store that persists validated block access lists before checkpointing execution.
-    ///
-    /// Without a store, block access lists are validated but not retained.
-    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
-        self.bal_store = bal_store;
-        self
-    }
 }
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: ConfigureEvm,
     Provider: DBProvider
+        + BalProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
             Header = <E::Primitives as NodePrimitives>::BlockHeader,
@@ -533,9 +523,10 @@ where
         // a failed database commit is safe because BALs are keyed by block hash.
         if !bals.is_empty() {
             let blocks = bals.iter().map(|(block, _)| *block).collect::<Vec<_>>();
-            self.bal_store.insert_many(bals)?;
-            self.bal_store.flush(&blocks)?;
-            self.bal_store.prune(stage_progress)?;
+            let bal_store = provider.bal_store();
+            bal_store.insert_many(bals)?;
+            bal_store.flush(&blocks)?;
+            bal_store.prune(stage_progress)?;
         }
 
         let db_write_duration = time.elapsed();
@@ -827,8 +818,8 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        AccountReader, BlockWriter, DatabaseProviderFactory, ProviderFactory, ReceiptProvider,
-        RocksDBBalStore, RocksDBProviderFactory, StaticFileProviderFactory,
+        AccountReader, BalStoreHandle, BlockWriter, DatabaseProviderFactory, ProviderFactory,
+        ReceiptProvider, RocksDBBalStore, RocksDBProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
@@ -1575,6 +1566,8 @@ mod tests {
     {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
+        let factory = factory.with_bal_store(store);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
         let provider = factory.database_provider_rw().unwrap();
         let genesis = Block::default().seal_slow().try_recover().unwrap();
@@ -1671,8 +1664,6 @@ mod tests {
     #[test]
     fn backfilled_bals_are_durable_before_checkpointing() {
         let (factory, mut stage, expected) = bal_execution(false);
-        stage = stage
-            .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider())));
         let provider = factory.database_provider_rw().unwrap();
 
         let output =
@@ -1690,7 +1681,8 @@ mod tests {
     #[test]
     fn a_bal_flush_failure_prevents_execution_checkpointing() {
         let (factory, mut stage, expected) = bal_execution(false);
-        stage = stage.with_bal_store(BalStoreHandle::new(FailingBalFlush));
+        let store = factory.bal_store().clone();
+        let factory = factory.with_bal_store(BalStoreHandle::new(FailingBalFlush));
         let input = ExecInput { target: Some(2), checkpoint: None };
         let provider = factory.database_provider_rw().unwrap();
 
@@ -1701,8 +1693,7 @@ mod tests {
         drop(provider);
 
         // Without a checkpoint the same range is replayed after the store recovers.
-        stage = stage
-            .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider())));
+        let factory = factory.with_bal_store(store);
         let provider = factory.database_provider_rw().unwrap();
         let output = stage.execute(&provider, input).unwrap();
         assert_eq!(output.checkpoint.block_number, 2);
@@ -1715,8 +1706,7 @@ mod tests {
     #[test]
     fn an_invalid_bal_commitment_is_not_persisted() {
         let (factory, mut stage, expected) = bal_execution(true);
-        let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
-        stage = stage.with_bal_store(store.clone());
+        let store = factory.bal_store().clone();
         let provider = factory.database_provider_rw().unwrap();
 
         assert!(matches!(
@@ -1731,8 +1721,7 @@ mod tests {
     #[test]
     fn backfilled_bals_follow_execution_batches() {
         let (factory, mut stage, expected) = bal_execution(false);
-        let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
-        stage = stage.with_bal_store(store.clone());
+        let store = factory.bal_store().clone();
         stage.thresholds.max_blocks = Some(0);
         let provider = factory.database_provider_rw().unwrap();
 
@@ -1757,8 +1746,7 @@ mod tests {
     fn buffered_bals_count_toward_the_execution_change_limit() {
         for (extra_changes, expected_blocks) in [(0, 1), (1, 2)] {
             let (factory, mut stage, expected) = bal_execution(false);
-            let store = BalStoreHandle::new(RocksDBBalStore::new(factory.rocksdb_provider()));
-            stage = stage.with_bal_store(store.clone());
+            let store = factory.bal_store().clone();
             let provider = factory.database_provider_rw().unwrap();
 
             // Check the boundary in accounts and slots, not encoded bytes.
