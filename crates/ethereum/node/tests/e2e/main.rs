@@ -13,6 +13,7 @@ mod p2p;
 mod pool;
 mod prestate;
 mod reorg;
+mod restart;
 mod rpc;
 mod selfdestruct;
 mod simulate;
