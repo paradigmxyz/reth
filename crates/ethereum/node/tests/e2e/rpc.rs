@@ -1149,3 +1149,42 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_test_account_tx_builder() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    let mut account = wallet.account(0).with_gas_limit(100_000);
+
+    // Init code returning the runtime `PUSH0 CALLDATALOAD PUSH0 SSTORE STOP`, which stores the
+    // first calldata word at slot 0.
+    let runtime = bytes!("5f355f5500");
+    let init_code = bytes!("645f355f55005f526005601bf3");
+
+    let contract = account.next_contract_address();
+    let deploy = node.rpc.inject_tx(account.deploy(init_code).await).await?;
+    let receipt = node.advance_until_receipt(deploy).await?;
+    assert!(receipt.status());
+    assert_eq!(receipt.contract_address, Some(contract));
+    assert_eq!(provider.get_code_at(contract).await?, runtime);
+
+    let value = U256::from(0x42);
+    let recipient = Address::with_last_byte(0x77);
+    let call = node.rpc.inject_tx(account.call(contract, B256::from(value)).await).await?;
+    let transfer = node.rpc.inject_tx(account.transfer(recipient, U256::from(7)).await).await?;
+    let receipt = node.advance_until_receipt(transfer).await?;
+    assert!(receipt.status());
+    let call_receipt = node.rpc.transaction_receipt(call).await?.expect("call is included");
+    assert!(call_receipt.status());
+    assert_eq!(call_receipt.block_number, receipt.block_number);
+
+    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, value);
+    assert_eq!(provider.get_balance(recipient).await?, U256::from(7));
+    assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
+    assert_eq!(account.nonce(), 3);
+
+    Ok(())
+}

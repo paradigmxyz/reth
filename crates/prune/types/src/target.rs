@@ -31,15 +31,15 @@ pub enum UnwindTargetPrunedError {
         /// The limit of the history
         limit: u64,
     },
-    /// The target block is below the lowest block whose history is still available.
-    #[error("Cannot unwind to block {target_block} as {history_type} is pruned through block {pruned_through}")]
-    TargetBelowHistoryFloor {
+    /// The target block is below history that was already pruned
+    #[error("Cannot unwind to block {target_block} as {history_type} is pruned through block {pruned_block}")]
+    TargetBelowPrunedHistory {
         /// The target block number
         target_block: BlockNumber,
-        /// The type of history that no longer reaches the target
+        /// The type of history that was pruned
         history_type: HistoryType,
-        /// The highest block whose history was pruned
-        pruned_through: BlockNumber,
+        /// The highest pruned block
+        pruned_block: BlockNumber,
     },
 }
 
@@ -156,21 +156,6 @@ impl PruneModes {
                 checkpoints.iter().find(|(segment, _)| segment.is_storage_history()),
             ),
         ] {
-            // A recorded `Before` checkpoint means the history below it is simply absent, whether
-            // the pruner removed it or an externally supplied state (a snapshot bootstrap, say)
-            // never produced it. Either way an unwind past it has no change sets to replay.
-            if let Some((_, checkpoint)) = checkpoint &&
-                matches!(checkpoint.prune_mode, PruneMode::Before(_)) &&
-                let Some(pruned_through) = checkpoint.block_number &&
-                target_block < pruned_through
-            {
-                return Err(UnwindTargetPrunedError::TargetBelowHistoryFloor {
-                    target_block,
-                    history_type: history_type.clone(),
-                    pruned_through,
-                })
-            }
-
             if let Some(PruneMode::Distance(limit)) = prune_mode {
                 // check if distance exceeds the configured limit
                 if distance > *limit {
@@ -189,6 +174,20 @@ impl PruneModes {
                         })
                     }
                 }
+            }
+
+            // History pruned through a block can't be reverted below it, whatever the mode.
+            // Unwinding to the checkpoint itself only needs the changesets above it. The database
+            // pruner can stop inside a block and then records the block before it, so the block
+            // right above the checkpoint may be partly pruned.
+            if let Some(pruned_block) = checkpoint.and_then(|checkpoint| checkpoint.1.block_number) &&
+                target_block < pruned_block
+            {
+                return Err(UnwindTargetPrunedError::TargetBelowPrunedHistory {
+                    target_block,
+                    history_type: history_type.clone(),
+                    pruned_block,
+                })
             }
         }
         Ok(())
@@ -272,30 +271,21 @@ mod tests {
     }
 
     #[test]
-    fn unwind_below_a_before_checkpoint_is_rejected() {
-        // An externally supplied state (or a `Before` pruner run) leaves no change sets below the
-        // recorded block, so an unwind past it cannot be replayed even with no prune mode set.
-        let prune_modes = PruneModes::default();
+    fn unwind_below_recorded_history_checkpoint() {
         let checkpoints = [(
             PruneSegment::AccountHistory,
             PruneCheckpoint {
-                block_number: Some(900),
+                block_number: Some(499),
                 tx_number: None,
-                prune_mode: PruneMode::before_inclusive(900),
+                prune_mode: PruneMode::Before(500),
             },
         )];
-
-        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 900, &checkpoints).is_ok());
-        let result = prune_modes.ensure_unwind_target_unpruned(1000, 899, &checkpoints);
-
-        assert_matches!(
-            result,
-            Err(UnwindTargetPrunedError::TargetBelowHistoryFloor {
-                target_block: 899,
-                history_type: HistoryType::AccountHistory,
-                pruned_through: 900,
-            })
-        );
+        let before =
+            PruneModes { account_history: Some(PruneMode::Before(500)), ..Default::default() };
+        for prune_modes in [before, PruneModes::default()] {
+            assert!(prune_modes.ensure_unwind_target_unpruned(1000, 100, &checkpoints).is_err());
+            assert!(prune_modes.ensure_unwind_target_unpruned(1000, 499, &checkpoints).is_ok());
+        }
     }
 
     #[test]
