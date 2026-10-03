@@ -268,6 +268,19 @@ impl SnapshotManifest {
         self.base_url.as_deref().unwrap_or("")
     }
 
+    /// Validates the internal consistency and required fields of the snapshot manifest.
+    pub fn validate(&self) -> Result<()> {
+        for (key, component) in &self.components {
+            if let ComponentManifest::Chunked(chunked) = component {
+                eyre::ensure!(
+                    chunked.blocks_per_file > 0,
+                    "Invalid modular manifest: component '{key}' has blocks_per_file = 0; must be greater than zero"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Look up a component by type.
     pub fn component(&self, ty: SnapshotComponentType) -> Option<&ComponentManifest> {
         self.components.get(ty.key())
@@ -473,6 +486,9 @@ impl ComponentManifest {
 impl ChunkedArchive {
     /// Returns the number of chunks.
     pub fn num_chunks(&self) -> u64 {
+        if self.blocks_per_file == 0 {
+            return 0;
+        }
         self.total_blocks.div_ceil(self.blocks_per_file)
     }
 
@@ -480,7 +496,7 @@ impl ChunkedArchive {
     /// tip.
     pub fn tail_chunks_for_distance(&self, distance: u64) -> u64 {
         let needed = distance.min(self.total_blocks);
-        if needed == 0 {
+        if needed == 0 || self.blocks_per_file == 0 {
             return 0;
         }
 
@@ -505,7 +521,7 @@ impl ChunkedArchive {
             return path.clone();
         }
         let start = index * self.blocks_per_file;
-        let end = (index + 1) * self.blocks_per_file - 1;
+        let end = (index + 1).saturating_mul(self.blocks_per_file).saturating_sub(1);
         format!("{key}-{start}-{end}.tar.zst")
     }
 
@@ -1589,5 +1605,47 @@ mod tests {
             "mismatched chunk_files must not partially apply"
         );
         assert_eq!(urls[1], "https://example.com/mainnet/headers-500000-999999.tar.zst");
+    }
+
+    #[test]
+    fn manifest_rejects_zero_blocks_per_file() {
+        let manifest: SnapshotManifest = serde_json::from_value(serde_json::json!({
+            "block": 9,
+            "chain_id": 1,
+            "storage_version": 2,
+            "timestamp": 0,
+            "base_url": "http://127.0.0.1:9/",
+            "components": {
+                "headers": {
+                    "blocks_per_file": 0,
+                    "total_blocks": 10,
+                    "chunk_sizes": [10],
+                    "chunk_output_files": [[{
+                        "path": "static_files/static_file_headers_0_9",
+                        "size": 1,
+                        "blake3": "0".repeat(64)
+                    }]]
+                }
+            }
+        }))
+        .unwrap();
+
+        let err = manifest.validate().unwrap_err();
+        assert!(err.to_string().contains("blocks_per_file = 0"));
+    }
+
+    #[test]
+    fn chunked_archive_zero_blocks_per_file_does_not_panic() {
+        let chunked = ChunkedArchive {
+            blocks_per_file: 0,
+            total_blocks: 10,
+            chunk_sizes: vec![],
+            chunk_decompressed_sizes: vec![],
+            chunk_files: vec![],
+            chunk_output_files: vec![],
+        };
+        assert_eq!(chunked.num_chunks(), 0);
+        assert_eq!(chunked.tail_chunks_for_distance(5), 0);
+        assert_eq!(chunked.chunk_relative_path("headers", 0), "headers-0-0.tar.zst");
     }
 }
