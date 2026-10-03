@@ -101,15 +101,28 @@ where
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
                 }
                 SnapBootstrapOutcome::TrieRebuild { write, pivot } => {
-                    // Forkchoice may have moved during the download, so headers catch up before
-                    // the handoff checks the pivot is still canonical.
+                    // The rebuild reads every account and can take hours, so it runs on the
+                    // blocking pool and stops with the backfill.
+                    let rebuild = SnapHandoff::new(self.factory.clone());
+                    let stop = self.stop.clone();
+                    self.runtime
+                        .spawn_blocking(move || rebuild.rebuild(pivot, &stop))
+                        .await
+                        .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
+                    if self.stop.is_cancelled() {
+                        return stopped
+                    }
+                    // Forkchoice may have moved meanwhile, so headers catch up before the
+                    // handoff checks the pivot is still canonical. An unwind or a moved target
+                    // syncs headers again, and the next pass resumes at the handoff.
                     let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
                         return stopped
                     };
-                    headers?;
+                    if headers?.is_unwind() || targets.has_changed().unwrap_or(false) {
+                        continue
+                    }
                     let handoff = SnapHandoff::new(self.factory.clone());
-                    // Publishing and the trie rebuild read every account, so they run on the
-                    // blocking pool.
+                    // Publishing reads every account, so it runs on the blocking pool.
                     let handoff = self
                         .runtime
                         .spawn_blocking(move || handoff.hand_off(write, pivot))
