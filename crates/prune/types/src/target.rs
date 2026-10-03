@@ -177,6 +177,9 @@ impl PruneModes {
             }
 
             // History pruned through a block can't be reverted below it, whatever the mode.
+            // Unwinding to the checkpoint itself only needs the changesets above it. The database
+            // pruner can stop inside a block and then records the block before it, so the block
+            // right above the checkpoint may be partly pruned.
             if let Some(pruned_block) = checkpoint.and_then(|checkpoint| checkpoint.1.block_number) &&
                 target_block < pruned_block
             {
