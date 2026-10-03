@@ -4,6 +4,7 @@ use alloy_consensus::Transaction;
 use alloy_primitives::{Address, Bytes, B256};
 use reth_ethereum_primitives::{Block, Receipt};
 use reth_primitives_traits::RecoveredBlock;
+use std::fmt;
 
 pub const RECEIPT_SCHEMA_ID: &str = "pureth-receipt-v0";
 
@@ -59,6 +60,31 @@ pub enum ReceiptConversionError {
     DecreasingCumulativeGas { index: usize, previous: u64, current: u64 },
     TooManyTopics { receipt_index: usize, log_index: usize, actual: usize },
 }
+
+impl fmt::Display for ReceiptConversionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReceiptCountMismatch { transactions, receipts } => write!(
+                formatter,
+                "receipt count mismatch: {transactions} transactions, {receipts} receipts"
+            ),
+            Self::TransactionTypeMismatch { index, transaction, receipt } => write!(
+                formatter,
+                "transaction type mismatch at index {index}: transaction {transaction}, receipt {receipt}"
+            ),
+            Self::DecreasingCumulativeGas { index, previous, current } => write!(
+                formatter,
+                "cumulative gas decreased at index {index}: previous {previous}, current {current}"
+            ),
+            Self::TooManyTopics { receipt_index, log_index, actual } => write!(
+                formatter,
+                "receipt {receipt_index} log {log_index} has {actual} topics, maximum is {MAX_TOPICS}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReceiptConversionError {}
 
 const MAX_TOPICS: usize = 4;
 
@@ -136,6 +162,7 @@ pub fn convert_receipts(
     Ok(ReceiptsSsz(converted))
 }
 
+pub mod eip6466;
 mod provider;
 mod snapshot;
 mod tree;
