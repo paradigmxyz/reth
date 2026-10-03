@@ -51,7 +51,10 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
 
     // Take updates — should be non-empty with hashed branch children.
     let updates = trie.take_updates();
-    assert!(!updates.is_empty(), "updates should be non-empty after mutations");
+    assert!(
+        !updates.updated_nodes.is_empty() || !updates.removed_nodes.is_empty(),
+        "updates should be non-empty after mutations"
+    );
 
     // Taking updates should not affect the cached root.
     let hash2 = trie.root(epoch(0));
@@ -616,4 +619,73 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
         harness.original_root(),
         "cold path root should match reference (K1 and K5 updated)"
     );
+
+    // --- Block 3: prune a trie that already holds blinded children, then re-reveal one ---
+    let _ = trie.take_updates();
+    trie.prune(epoch(2));
+
+    let mut changeset3: BTreeMap<B256, U256> = BTreeMap::new();
+    changeset3.insert(keys[7], U256::from(777));
+    let mut leaf_updates3 = SuiteTestHarness::leaf_updates(&changeset3);
+    harness.reveal_and_update(&mut trie, &mut leaf_updates3);
+    let root3 = trie.root(epoch(3));
+
+    harness.apply_changeset(changeset3);
+    assert_eq!(root3, harness.original_root(), "block 3 root should match reference");
+}
+
+/// Many blocks of reveal, update, root and prune over subtries that are several levels deep.
+///
+/// Keys share four first-byte prefixes, two per first nibble so that the nodes below them are
+/// subtrie roots rather than children of an extension. Each subtrie holds hundreds of leaves and
+/// keeps blinded children at every level, so consecutive prunes drop, carry over and create
+/// blinded children in the same subtrie while the updates in between re-reveal them.
+pub(super) fn test_repeated_prune_and_reveal_with_deep_subtries<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    const INITIAL_KEYS: u64 = 1024;
+    const PREFIXES: [u8; 4] = [0x1a, 0x1c, 0xc4, 0xc7];
+
+    let key = |i: u64| {
+        let mut hashed = keccak256(i.to_be_bytes());
+        hashed.0[0] = PREFIXES[(i % 4) as usize];
+        hashed
+    };
+
+    let storage: BTreeMap<B256, U256> =
+        (0..INITIAL_KEYS).map(|i| (key(i), U256::from(i + 1))).collect();
+    let mut harness = SuiteTestHarness::new(storage);
+    let mut trie: T = harness.init_trie_with_targets(&[], true, new_trie);
+
+    let mut next_new_key = INITIAL_KEYS;
+    for block in 1..=24u64 {
+        // Busy blocks keep the previous block's nodes as well. Every fourth block touches one
+        // key per subtrie and keeps only its own nodes, which discards most of what the busy
+        // blocks revealed.
+        let quiet = block % 4 == 0;
+        let (touched, inserted, retained_blocks) = if quiet { (4, 0, 1) } else { (64, 4, 2) };
+
+        let mut changeset = BTreeMap::new();
+        // Modify and delete existing keys; some of them were already deleted by earlier blocks.
+        for j in 0..touched {
+            let value =
+                if (block + j) % 5 == 0 { U256::ZERO } else { U256::from(block * 1000 + j) };
+            changeset.insert(key((block * 37 + j * 53) % INITIAL_KEYS), value);
+        }
+        for _ in 0..inserted {
+            changeset.insert(key(next_new_key), U256::from(next_new_key));
+            next_new_key += 1;
+        }
+
+        let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
+        harness.reveal_and_update(&mut trie, &mut leaf_updates);
+        let root = trie.root(epoch(block));
+
+        harness.apply_changeset(changeset);
+        assert_eq!(root, harness.original_root(), "block {block} root should match reference");
+
+        let _ = trie.take_updates();
+        trie.prune(epoch(block + 1 - retained_blocks));
+        assert_eq!(trie.root(epoch(block)), root, "block {block} root should survive the prune");
+    }
 }

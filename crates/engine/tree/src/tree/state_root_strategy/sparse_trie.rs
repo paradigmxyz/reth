@@ -18,7 +18,7 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdatesSorted, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
+    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
@@ -495,7 +495,7 @@ where
                 // A still-blind account trie means this block never changed state, so preserve
                 // the cached parent root instead of fetching and revealing
                 // the unchanged root node.
-                (self.parent_state_root, TrieUpdatesSorted::default())
+                (self.parent_state_root, TrieUpdates::default())
             }
             Err(err) => {
                 return Err(StateRootTaskError::Other(format!(
@@ -1678,7 +1678,7 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
-    use reth_trie_parallel::proof_task::ProofTaskCtx;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
@@ -1702,7 +1702,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(runtime),
             proof_result_tx.clone(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
@@ -2080,9 +2080,10 @@ mod tests {
             .unwrap();
         let (serial_root, serial_updates) = serial.root_with_updates(task.new_epoch).unwrap();
         assert_eq!(serial_root, expected_root);
-        assert!(serial_updates.iter().any(|(_, node)| node.is_some()));
-        let updates = &outcome.trie_updates.storage_tries_ref()[&address];
-        assert_eq!(updates.storage_nodes, serial_updates);
+        assert!(!serial_updates.updated_nodes.is_empty());
+        let updates = &outcome.trie_updates.storage_tries[&address];
+        assert_eq!(updates.storage_nodes, serial_updates.updated_nodes);
+        assert_eq!(updates.removed_nodes, serial_updates.removed_nodes);
 
         let (mut reused, _) = task.into_trie_for_reuse();
         assert_eq!(reused.storage_root(&address, TrieNodeEpoch::new(2)), Some(expected_root));
@@ -2309,7 +2310,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2393,7 +2394,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2448,7 +2449,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2539,7 +2540,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2592,7 +2593,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
