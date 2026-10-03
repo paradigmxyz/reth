@@ -97,7 +97,12 @@ where
         // the database commit in a previous stage run. So, our only solution is to unwind the
         // static files and proceed from the database expected height.
         Ordering::Greater => {
-            let highest_db_block = provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64;
+            let highest_db_block = provider
+                .tx_ref()
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .last()?
+                .map(|(block, _)| block)
+                .unwrap_or_default();
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             static_file_producer
@@ -254,10 +259,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestStageDB,
+        UnwindStageTestRunner,
     };
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::Signature;
     use assert_matches::assert_matches;
-    use reth_provider::StaticFileProviderFactory;
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
 
@@ -465,6 +474,41 @@ mod tests {
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
+    }
+
+    #[test]
+    fn ensure_consistency_heals_to_the_highest_db_block() {
+        let db = TestStageDB::default();
+        let factory = &db.factory;
+        let static_files = factory.static_file_provider();
+        let body = |nonce| BlockBody {
+            transactions: vec![TransactionSigned::new_unhashed(
+                Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                Signature::test_signature(),
+            )],
+            ..Default::default()
+        };
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(0, None), (1, Some(&body(0)))]).unwrap();
+        provider.commit().unwrap();
+
+        // The static files commit block 2, the database does not.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
+        static_files.commit().unwrap();
+        drop(provider);
+
+        // Bodies stage healing alone, without startup recovery.
+        let provider = factory.database_provider_rw().unwrap();
+        ensure_consistency(&provider, None).unwrap();
+        provider.commit().unwrap();
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(1)
+        );
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
     }
 
     mod test_utils {
