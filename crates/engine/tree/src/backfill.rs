@@ -7,6 +7,7 @@
 //!
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
+use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
@@ -66,9 +67,9 @@ pub trait BackfillSync: Send {
 pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
-    /// Moves the target of a running backfill, as forkchoice advances, without starting another
-    /// run.
-    UpdateTarget(PipelineTarget),
+    /// Moves the target of a running backfill to the new forkchoice head, without starting another
+    /// run. It may arrive when no run is active, in which case it should be ignored.
+    UpdateTarget(B256),
 }
 
 /// The events that can be emitted on backfill sync.
@@ -240,20 +241,36 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
+    use crate::{
+        chain::{ChainHandler, HandlerEvent},
+        download::{BlockDownloader, DownloadAction, DownloadOutcome},
+        engine::{EngineHandler, EngineRequestHandler, FromEngine, RequestHandlerEvent},
+        test_utils::{insert_headers_into_client, TestPipelineBuilder},
+    };
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives_traits::SealedHeader;
+    use reth_primitives_traits::{NodePrimitives, SealedHeader};
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
     use reth_tasks::Runtime;
-    use std::{collections::VecDeque, future::poll_fn, sync::Arc};
+    use std::{
+        collections::VecDeque,
+        future::poll_fn,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        task::Waker,
+    };
+
+    type TestBlock = <EthPrimitives as NodePrimitives>::Block;
 
     struct TestHarness {
         pipeline_sync: PipelineSync<MockNodeTypesWithDB>,
@@ -294,6 +311,41 @@ mod tests {
         }
     }
 
+    // Emits one queued backfill action per poll.
+    struct QueuedActions(VecDeque<BackfillAction>);
+
+    impl EngineRequestHandler for QueuedActions {
+        type Event = ();
+        type Request = ();
+        type Block = TestBlock;
+
+        fn on_event(&mut self, _event: FromEngine<Self::Request, Self::Block>) {}
+
+        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
+            self.0.pop_front().map_or(Poll::Pending, |action| {
+                Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action)))
+            })
+        }
+    }
+
+    // Counts how often in-flight downloads are cleared.
+    #[derive(Default)]
+    struct CountedClears(Arc<AtomicUsize>);
+
+    impl BlockDownloader for CountedClears {
+        type Block = TestBlock;
+
+        fn on_action(&mut self, action: DownloadAction) {
+            if matches!(action, DownloadAction::Clear) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<DownloadOutcome<Self::Block>> {
+            Poll::Pending
+        }
+    }
+
     #[tokio::test]
     async fn pipeline_started_and_finished() {
         const TOTAL_BLOCKS: usize = 10;
@@ -329,9 +381,35 @@ mod tests {
     async fn target_updates_do_not_start_the_pipeline() {
         let TestHarness { mut pipeline_sync, tip } = TestHarness::new(10, 5);
 
-        pipeline_sync.on_action(BackfillAction::UpdateTarget(PipelineTarget::Sync(tip)));
+        pipeline_sync.on_action(BackfillAction::UpdateTarget(tip));
 
         assert_matches!(poll!(poll_fn(|cx| pipeline_sync.poll(cx))), Poll::Pending);
         assert!(pipeline_sync.is_pipeline_idle());
+    }
+
+    #[test]
+    fn only_a_new_backfill_run_clears_downloads() {
+        let head = B256::repeat_byte(1);
+        let actions = VecDeque::from([
+            BackfillAction::UpdateTarget(head),
+            BackfillAction::Start(PipelineTarget::Sync(head)),
+        ]);
+        let downloader = CountedClears::default();
+        let clears = Arc::clone(&downloader.0);
+        let mut handler =
+            EngineHandler::new(QueuedActions(actions), downloader, futures::stream::empty::<()>());
+        let mut cx = Context::from_waker(Waker::noop());
+
+        assert!(matches!(
+            ChainHandler::poll(&mut handler, &mut cx),
+            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::UpdateTarget(_)))
+        ));
+        assert_eq!(clears.load(Ordering::Relaxed), 0);
+
+        assert!(matches!(
+            ChainHandler::poll(&mut handler, &mut cx),
+            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::Start(_)))
+        ));
+        assert_eq!(clears.load(Ordering::Relaxed), 1);
     }
 }
