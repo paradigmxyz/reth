@@ -521,12 +521,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     res
                 };
 
-                let prefix_sets = if trie_changesets {
-                    Default::default()
-                } else {
-                    hashed_state_reverts.construct_prefix_sets()
-                };
-
                 // Resolve overlays and extend reverts with them. If reverts are empty, use overlays
                 // directly to avoid cloning.
                 let (overlay_trie, overlay_state) =
@@ -549,6 +543,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     Arc::new(hashed_state_reverts)
                 } else {
                     Arc::new(hashed_state_reverts)
+                };
+
+                // Without trie changesets the trie nodes still describe Finish, so every key whose
+                // value differs from Finish must be invalidated: both the reverted keys and the
+                // keys changed by the in-memory blocks replayed on top of the anchor. The overlay
+                // trie nodes are only valid relative to the anchor's trie, not Finish's.
+                let prefix_sets = if trie_changesets {
+                    Default::default()
+                } else {
+                    hashed_state_updates.construct_prefix_sets()
                 };
 
                 trie_updates_total_len = trie_updates.total_len();
@@ -841,7 +845,7 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
@@ -1208,7 +1212,7 @@ mod tests {
     }
 
     #[test]
-    fn state_trie_overlay_uses_revert_prefix_sets_without_trie_changesets() {
+    fn state_trie_overlay_invalidates_reverts_and_fork_without_trie_changesets() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
@@ -1223,14 +1227,27 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
+        // The fork changes keys distinct from those reverted on disk.
+        let fork = TestBlockBuilder::eth()
+            .get_executed_block_with_number(2, blocks[1].recovered_block().hash());
+        let fork = with_unique_trie_data(&fork, 2);
         let provider = factory.provider().unwrap();
         let overlay = OverlayManager::<EthPrimitives>::default()
             .overlay_builder(blocks[1].recovered_block().hash())
+            .with_appended_block(fork)
             .build_state_trie_overlay(&provider, false)
             .unwrap();
 
-        assert!(overlay.input().nodes.is_empty());
-        assert!(!overlay.input().prefix_sets.is_empty());
+        let mut prefixes = overlay.input().prefix_sets.clone().freeze();
+        assert!(prefixes
+            .account_prefix_set
+            .contains(&Nibbles::unpack(keccak256(Address::with_last_byte(1)))));
+        assert!(prefixes.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
+        assert!(prefixes
+            .storage_prefix_sets
+            .get_mut(&B256::with_last_byte(2))
+            .unwrap()
+            .contains(&Nibbles::unpack(B256::with_last_byte(34))));
     }
 
     #[test]
