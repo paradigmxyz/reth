@@ -1499,6 +1499,20 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             Err(ProviderError::SnapStorageLayoutUnsupported)
         }
     }
+
+    /// Refuses a database the selected sync can't continue: snap needs the hashed state layout,
+    /// and only snap can finish an unverified snap attempt.
+    pub fn ensure_sync_mode(&self, snap: bool) -> ProviderResult<()> {
+        if snap {
+            self.ensure_snap_sync_layout()?;
+        }
+        match self.snap_attempt()? {
+            Some(attempt) if !snap && !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
