@@ -1439,11 +1439,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Deletes the transaction, receipt, sender and changeset static files and restarts each
     /// segment after `pivot`, so the next block appended is `pivot + 1`. Headers are kept.
     ///
-    /// Each segment gets an empty file anchored at `pivot`: nothing is stored for `pivot` itself,
-    /// and blocks at or below it read as pruned history although the pruner never ran.
+    /// Each segment gets an empty file anchored at `pivot`. Blocks below it read as expired history
+    /// although the pruner never ran, and `pivot` itself reads as missing since nothing is stored
+    /// for it.
     ///
     /// CAUTION: destructive. The files are deleted immediately, while the anchor is written on
-    /// commit. Errors unless storage v2 is enabled.
+    /// commit. The caller moves the stage and prune checkpoints to `pivot` in the same commit and
+    /// must be able to resume if the process stops between the static file and database commits.
+    /// Errors unless storage v2 is enabled.
     pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
         if !self.cached_storage_settings().storage_v2 {
             return Err(ProviderError::other(StaticFileWriterError::new(
