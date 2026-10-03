@@ -4,18 +4,19 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
+    test_chain_spec, test_chain_spec_builder, test_genesis, transaction::TransactionTestContext,
+    wait::poll_until, E2ETestSetupExt,
 };
 use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{BlockNumReader, CanonStateSubscriptions};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionPoolExt,
 };
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
@@ -305,6 +306,52 @@ async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
         assert_eq!(info.last_seen_block_number, block.header().number);
         assert!(node.inner.pool.is_empty());
     }
+
+    Ok(())
+}
+
+// Test that `advance_until_pool_drained` mines the pending transactions over as many blocks as
+// they need, without a trailing empty block, and does not wait for a transaction behind a nonce
+// gap.
+#[tokio::test]
+async fn advance_until_pool_drained_mines_pending_transactions() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // A block of 100k gas fits four transfers.
+    let mut genesis = test_genesis();
+    genesis.gas_limit = 100_000;
+    let chain_spec = test_chain_spec_builder().genesis(genesis).cancun_activated().build();
+    let (mut node, wallet) =
+        EthereumNode::test_setup(1, Arc::new(chain_spec)).build_single().await?;
+
+    let mut account = wallet.account(0).with_gas_limit(21_000);
+    let mut pending = Vec::new();
+    for _ in 0..10 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
+        pending.push(node.rpc.inject_tx(raw_tx).await?);
+    }
+    let gap_nonce = account.nonce() + 1;
+    let queued = account.transfer(Address::random(), U256::from(100)).nonce(gap_nonce).await;
+    let queued = node.rpc.inject_tx(queued).await?;
+
+    let payloads = node.advance_until_pool_drained().await?;
+    assert_eq!(payloads.len(), 3);
+    assert!(payloads.iter().all(|payload| !payload.block().body().transactions.is_empty()));
+    let mined = payloads
+        .iter()
+        .flat_map(|payload| payload.block().body().transactions().map(|tx| *tx.hash()))
+        .collect::<Vec<_>>();
+    assert_eq!(mined, pending);
+    let head = payloads.last().unwrap().block().number;
+    assert_eq!(node.inner.provider.best_block_number()?, head);
+
+    let size = node.inner.pool.pool_size();
+    assert_eq!((size.pending, size.queued), (0, 1));
+    assert!(node.inner.pool.contains(&queued));
+
+    // Nothing is pending, so the chain does not advance.
+    assert!(node.advance_until_pool_drained().await?.is_empty());
+    assert_eq!(node.inner.provider.best_block_number()?, head);
 
     Ok(())
 }
