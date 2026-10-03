@@ -1,48 +1,36 @@
 name: Cyclops audit
 
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
+  pull_request:
     types: [labeled]
-  issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
+  issue_comment:
     types: [created]
 
 permissions: {}
 
 jobs:
-  publish-label:
-    if: github.event_name == 'pull_request_target' && (github.event.label.name == 'cyclops' || github.event.label.name == 'agentic-audit')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish event
-        env:
-          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
-          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
-          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
-        run: |
-          set -euo pipefail
+  audit:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (
+        github.event.label.name == 'cyclops' ||
+        github.event.label.name == 'agentic-audit'
+      )
+    permissions:
+      contents: read
+      id-token: write
+    uses: tempoxyz/gh-actions/.github/workflows/pr-audit.yml@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+    with:
+      required-labels: |
+        cyclops
+        agentic-audit
+    secrets:
+      EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+      EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+      EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
 
-          [[ "$HAS_EVENTS_ARGS" == "true" ]] || { echo "::error::Missing EVENTS_ARGS secret"; exit 1; }
-          [[ "$HAS_EVENTS_KEY" == "true" ]] || { echo "::error::Missing EVENTS_KEY secret"; exit 1; }
-          [[ "$HAS_EVENTS_CERT" == "true" ]] || { echo "::error::Missing EVENTS_CERT secret"; exit 1; }
-
-          printf '%s' '${{ secrets.EVENTS_KEY }}' > "${RUNNER_TEMP}/key"
-          printf '%s' '${{ secrets.EVENTS_CERT }}' > "${RUNNER_TEMP}/cert"
-
-          # EVENTS_ARGS may contain additional curl arguments, not just a URL.
-          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
-            -H "Content-Type: application/json" \
-            --key "${RUNNER_TEMP}/key" \
-            --cert "${RUNNER_TEMP}/cert" \
-            -d '{
-              "repository": "${{ github.repository }}",
-              "event": "pr_audit",
-              "data": {
-                "pr_number": ${{ github.event.pull_request.number }},
-                "sha": "${{ github.event.pull_request.head.sha }}"
-              }
-            }'
-
-  publish-comment:
+  audit-comment:
     if: >-
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
