@@ -176,10 +176,9 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         for stage in PUBLISHED_STAGES {
             self.save_stage_checkpoint(stage, checkpoint)?;
         }
-        // Snap sync wrote no history below the pivot. `ContractLogs` only narrows `Receipts` by a
-        // log filter, so it has no checkpoint of its own.
+        // Snap sync wrote no history below the pivot.
         let pruned = PruneCheckpoint::pruned_through(pivot);
-        for segment in PruneSegment::variants().filter(|segment| !segment.is_contract_logs()) {
+        for segment in PruneSegment::variants() {
             self.save_prune_checkpoint(segment, pruned)?;
         }
         Ok(())
@@ -616,7 +615,7 @@ mod tests {
 
         provider.publish_snap_state(7).unwrap();
 
-        for segment in PruneSegment::variants().filter(|segment| !segment.is_contract_logs()) {
+        for segment in PruneSegment::variants() {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
             assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
         }
