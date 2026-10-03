@@ -33,6 +33,11 @@ alloy-consensus.workspace = true
 
 [features]
 default = ["std"]
+account-ext = [
+    "revm/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-trie?/account-ext",
+]
 std = [
     "reth-primitives-traits/std",
     "alloy-primitives/std",
