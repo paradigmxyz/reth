@@ -126,10 +126,11 @@ where
     fn on_action(&mut self, action: BackfillAction) {
         match action {
             // The zero hash is never a usable target.
-            BackfillAction::Start(target) | BackfillAction::UpdateTarget(target)
-                if target.sync_target().is_some_and(|hash| hash.is_zero()) => {}
+            BackfillAction::Start(PipelineTarget::Sync(hash)) |
+            BackfillAction::UpdateTarget(hash)
+                if hash.is_zero() => {}
             BackfillAction::Start(target) => self.pending_target = Some(target),
-            BackfillAction::UpdateTarget(PipelineTarget::Sync(hash)) => {
+            BackfillAction::UpdateTarget(hash) => {
                 if let SnapBackfillState::Running { targets, .. } = &self.state {
                     targets.send_if_modified(|current| {
                         let changed = *current != hash;
@@ -138,7 +139,6 @@ where
                     });
                 }
             }
-            BackfillAction::UpdateTarget(PipelineTarget::Unwind(_)) => {}
         }
     }
 
@@ -316,8 +316,10 @@ mod tests {
             panic!("the run owns the pipeline")
         };
         let mut observer = targets.subscribe();
-        backfill.on_action(BackfillAction::UpdateTarget(PipelineTarget::Sync(NEXT_TARGET)));
-        backfill.on_action(BackfillAction::UpdateTarget(PipelineTarget::Sync(NEXT_TARGET)));
+        backfill.on_action(BackfillAction::UpdateTarget(B256::ZERO));
+        assert!(!observer.has_changed().unwrap());
+        backfill.on_action(BackfillAction::UpdateTarget(NEXT_TARGET));
+        backfill.on_action(BackfillAction::UpdateTarget(NEXT_TARGET));
 
         assert!(observer.has_changed().unwrap());
         assert_eq!(*observer.borrow_and_update(), NEXT_TARGET);
