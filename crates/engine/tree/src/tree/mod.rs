@@ -15,7 +15,8 @@ use error::{
     InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
+    BlockState, CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, InMemoryStateWriter,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -297,9 +298,13 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the state of the canonical chain that isn't persisted yet.
-    /// This is intended to be accessed from external sources, such as rpc.
+    /// Keeps track of the executed blocks that aren't persisted yet, canonical and non-canonical.
+    ///
+    /// This is taken from the tree state, so the engine and its tree state always share the
+    /// node's single store, which is also accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
+    /// The engine's write access to `canonical_in_memory_state`, taken from the tree state.
+    in_memory_state_writer: InMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -374,6 +379,8 @@ where
     V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
+    ///
+    /// The engine uses the in-memory state of the tree state's overlay manager.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -381,7 +388,6 @@ where
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
         persistence: PersistenceHandle<N>,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
@@ -390,6 +396,8 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        let canonical_in_memory_state = state.tree_state.in_memory_state().clone();
+        let in_memory_state_writer = state.tree_state.in_memory_state_writer().clone();
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -405,6 +413,7 @@ where
             backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
+            in_memory_state_writer,
             payload_builder,
             config,
             metrics: Default::default(),
@@ -423,6 +432,8 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
+    ///
+    /// The engine tracks the executed blocks in the in-memory state of `overlay_manager`.
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
@@ -430,7 +441,6 @@ where
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
         overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
@@ -463,7 +473,6 @@ where
             payload_validator,
             tx,
             state,
-            canonical_in_memory_state,
             persistence,
             persistence_state,
             payload_builder,
@@ -496,7 +505,7 @@ where
     /// How many canonical blocks are retained in memory. A large count means persistence is
     /// falling behind execution.
     fn persistence_gap(&self) -> u64 {
-        self.canonical_in_memory_state.canonical_chain().count() as u64
+        self.canonical_in_memory_state.canonical_block_count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
@@ -894,29 +903,31 @@ where
     /// given head.
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+        let Some(new_head_state) = self.state.tree_state.executed_state_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
         };
 
-        let new_head_number = new_head_block.recovered_block().number();
+        let new_head_number = new_head_state.number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut new_chain = vec![new_head_block.clone()];
-        let mut current_hash = new_head_block.recovered_block().parent_hash();
+        // The in-memory chain ending at the new head, from newest to oldest. Its parent links are
+        // walked instead of looking up every block by hash.
+        let mut new_blocks = new_head_state.chain().skip(1);
+        let mut current_hash = new_head_state.parent_hash();
         let mut current_number = new_head_number - 1;
+        let mut new_chain = vec![new_head_state.block()];
 
         // Walk back the new chain until we reach a block we know about
         //
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
-                current_hash = block.recovered_block().parent_hash();
+            if let Some(block) = new_blocks.next() {
+                current_hash = block.parent_hash();
                 current_number -= 1;
-                new_chain.push(block);
+                new_chain.push(block.block());
             } else {
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
@@ -957,10 +968,9 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
-                current_hash = block.recovered_block().parent_hash();
-                new_chain.push(block);
+            if let Some(block) = new_blocks.next() {
+                current_hash = block.parent_hash();
+                new_chain.push(block.block());
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
@@ -1085,7 +1095,7 @@ where
         // Load the canonical ancestor's block
         let executed_block = self.canonical_block_by_hash(new_head_hash)?;
         // Perform the reorg to properly handle the unwind
-        self.canonical_in_memory_state
+        self.in_memory_state_writer
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
 
         // CRITICAL: Update the canonical head after the reorg
@@ -1125,7 +1135,7 @@ where
 
         // Load the block from storage
         let executed_block = self.canonical_block_by_hash(block_hash)?;
-        self.canonical_in_memory_state
+        self.in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
         debug!(
@@ -1631,18 +1641,18 @@ where
                             }
                         };
 
-                        let is_pending = self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash();
-                        self.state.tree_state.insert_executed(block.clone());
+                        if self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash()
+                        {
+                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                            self.state.tree_state.insert_pending_block(block.clone());
+                        } else {
+                            self.state.tree_state.insert_executed(block.clone());
+                        }
                         self.metrics
                             .engine
                             .executed_blocks
                             .set(self.state.tree_state.block_count() as f64);
-
-                        if is_pending {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
-                        }
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
@@ -1843,7 +1853,7 @@ where
     ///
     /// This will also do the necessary housekeeping of the tree state, this includes:
     ///  - removing all blocks below the backfill height
-    ///  - resetting the canonical in-memory state
+    ///  - moving the remaining canonical in-memory blocks to the non-canonical section
     ///
     /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
     /// target block.
@@ -1903,9 +1913,9 @@ where
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         self.purge_timing_stats(backfill_height, None);
-        // we remove all entries because now we're synced to the backfill target and consider this
-        // the canonical chain
-        self.canonical_in_memory_state.clear_state();
+        // no in-memory block is canonical anymore, because we're now synced to the backfill target
+        // and consider it the canonical head
+        self.in_memory_state_writer.demote_canonical_chain();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
             // update the tracked chain height, after backfill sync both the canonical height and
@@ -2250,8 +2260,7 @@ where
 
                 let persistence_threshold =
                     usize::try_from(self.config.persistence_threshold()).unwrap_or(usize::MAX);
-                if self.canonical_in_memory_state.canonical_chain().count() <= persistence_threshold
-                {
+                if self.canonical_in_memory_state.canonical_block_count() <= persistence_threshold {
                     return None
                 }
 
@@ -2281,8 +2290,7 @@ where
             return None
         }
 
-        let mut blocks = Vec::new();
-        let mut current_hash = self.state.tree_state.canonical_block_hash();
+        let current_hash = self.state.tree_state.canonical_block_hash();
 
         debug!(
             target: "engine::tree",
@@ -2295,17 +2303,19 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= prev_partial_state_trie {
-                break;
-            }
-
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block.clone());
-            }
-
-            current_hash = block.recovered_block().parent_hash();
-        }
+        // Walk the parent links of the canonical head's in-memory chain, under a single lookup.
+        let mut blocks = self
+            .state
+            .tree_state
+            .executed_state_by_hash(current_hash)
+            .map(|head| {
+                head.chain()
+                    .take_while(|block| block.number() > prev_partial_state_trie)
+                    .filter(|block| block.number() <= new_db_tip)
+                    .map(BlockState::block)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
@@ -2337,14 +2347,10 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical in-memory state first: state providers build their overlays from the
-        // canonical chain, so it must never reference blocks whose overlays the manager has
-        // already pruned. `remove_before` does not read the canonical in-memory state, so the
-        // order between the two trims is free to choose.
-        self.canonical_in_memory_state.remove_persisted_blocks_until(
-            self.persistence_state.last_persisted_block,
-            in_memory_persisted_block.number,
-        );
+        self.canonical_in_memory_state.set_persisted(self.persistence_state.last_persisted_block);
+        // Trims the canonical chain to the state/trie frontier and prunes non-canonical blocks
+        // below the finalized block, then lets the overlay manager drop the overlays that can no
+        // longer be built.
         self.remove_before(in_memory_persisted_block, finalized)?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
@@ -2371,8 +2377,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block.clone())
+        if let Some(state) = self.state.tree_state.executed_state_by_hash(hash) {
+            return Ok(state.block())
         }
 
         let (block, senders) = self
@@ -2916,7 +2922,7 @@ where
         }
 
         // update the tracked in-memory state with the new chain
-        self.canonical_in_memory_state.update_chain(chain_update);
+        self.in_memory_state_writer.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
@@ -2956,12 +2962,7 @@ where
     /// This reinserts any blocks in the new chain that do not already exist in the tree
     fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
         for block in new_chain {
-            if self
-                .state
-                .tree_state
-                .executed_block_by_hash(block.recovered_block().hash())
-                .is_none()
-            {
+            if !self.state.tree_state.contains_hash(&block.recovered_block().hash()) {
                 trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
                 self.state.tree_state.insert_executed(block);
             }
@@ -3269,13 +3270,12 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        let is_pending = self.state.tree_state.canonical_block_hash() ==
-            executed.recovered_block().parent_hash();
-        self.state.tree_state.insert_executed(executed.clone());
-
-        if is_pending {
+        if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
+        {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            self.canonical_in_memory_state.set_pending_block(executed.clone());
+            self.state.tree_state.insert_pending_block(executed.clone());
+        } else {
+            self.state.tree_state.insert_executed(executed.clone());
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
@@ -3627,7 +3627,10 @@ where
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
     /// those which have a fork point at or below the finalized hash.
     ///
-    /// Canonical blocks below the upper bound will still be removed.
+    /// Canonical blocks up to the upper bound are removed as well, but only if the last persisted
+    /// block is part of the in-memory canonical chain or the block it builds on. If a reorg
+    /// happened while persisting, they stay in memory until a later removal passes that check,
+    /// see [`TreeState::remove_until`].
     pub(crate) fn remove_before(
         &mut self,
         upper_bound: BlockNumHash,
