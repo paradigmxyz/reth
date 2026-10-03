@@ -24,7 +24,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork};
+use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt, NodeHelperType,
@@ -66,7 +66,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     use reth_primitives_traits::SignedTransaction;
     use reth_transaction_pool::test_utils::TransactionGenerator;
 
-    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
     let client = node.rpc_client().unwrap();
