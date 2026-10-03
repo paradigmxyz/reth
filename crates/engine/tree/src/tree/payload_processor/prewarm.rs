@@ -11,7 +11,10 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
-use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
+use super::{
+    bal_prewarm_pool::BalPrewarmPool, prewarm_dispatch::BoundedPrewarmReceiver,
+    StateRootHintStream, StateRootUpdateStream,
+};
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
@@ -43,6 +46,8 @@ use std::sync::{
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
+
+pub use super::prewarm_dispatch::TransactionPrewarmPolicy;
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -162,32 +167,58 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
-                while let Ok((index, tx)) = pending.recv() {
-                    if ctx.should_stop() {
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            "Termination requested, stopping transaction distribution"
-                        );
-                        break;
+                if let Some(policy) = ctx.transaction_prewarm_policy {
+                    let pending = BoundedPrewarmReceiver::new(
+                        pending,
+                        policy,
+                        Arc::clone(&ctx.executed_tx_index),
+                        Arc::clone(&ctx.terminate_execution),
+                    );
+                    while let Some((index, tx, permit)) = pending.next() {
+                        tx_count += 1;
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            // The permit covers the entire queued/running job, including stale
+                            // skip, provider init failure, execution error and unwinding.
+                            let _permit = permit;
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        });
                     }
+                } else {
+                    while let Ok((index, tx)) = pending.recv() {
+                        if ctx.should_stop() {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                "Termination requested, stopping transaction distribution"
+                            );
+                            break;
+                        }
 
-                    // skip transactions already executed by the main loop
-                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                        continue;
+                        // skip transactions already executed by the main loop
+                        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                            continue;
+                        }
+
+                        tx_count += 1;
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        });
                     }
-
-                    tx_count += 1;
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
-                    });
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
@@ -568,6 +599,8 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
+    /// Optional admission bounds, used only for transaction prewarming.
+    pub(crate) transaction_prewarm_policy: Option<TransactionPrewarmPolicy>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
@@ -845,6 +878,7 @@ pub struct PrewarmMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::payload_processor::CacheTaskHandle;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
@@ -856,6 +890,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
+    use std::time::Duration;
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -874,6 +909,7 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            transaction_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
@@ -894,6 +930,73 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn bounded_transaction_handle_drop_retires_scope_and_clears_worker_state() {
+        let runtime = Runtime::test();
+        let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
+        let mut ctx = test_prewarm_context(saved, Gauge::noop());
+        ctx.saved_cache = None;
+        ctx.env.transaction_count = 2;
+        ctx.transaction_prewarm_policy =
+            TransactionPrewarmPolicy::new(1, 1, Duration::from_millis(1));
+        let stopped = ctx.terminate_execution.clone();
+        let committed = ctx.executed_tx_index.clone();
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(runtime.clone(), PayloadExecutionCache::default(), ctx);
+        // A real CacheTaskHandle drop supplies the same Terminate event as an early canonical
+        // execution/conversion error. Keep input connected throughout to rule out EOF cleanup.
+        let handle = CacheTaskHandle {
+            saved_cache: None,
+            to_prewarm_task: Some(actions_tx.clone()),
+            executed_tx_index: committed,
+            cache_metrics: None,
+        };
+        let (input, pending) = mpsc::sync_channel(0);
+        let (retired, retirement) = mpsc::channel();
+        let _task = runtime.spawn_blocking_named("prewarm", move || {
+            task.run(PrewarmMode::Transactions { pending, hints: None }, actions_tx);
+            retired.send(()).unwrap();
+        });
+        let tx = WithTxEnv::<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>> {
+            tx_env: Default::default(),
+            tx: Arc::new(Recovered::new_unchecked(
+                TransactionSigned::Legacy(alloy_consensus::Signed::new_unchecked(
+                    alloy_consensus::TxLegacy::default(),
+                    alloy_primitives::Signature::test_signature(),
+                    B256::ZERO,
+                )),
+                alloy_primitives::Address::ZERO,
+            )),
+        };
+        let (accepted, acceptance) = mpsc::channel();
+        let producer = {
+            let input = input.clone();
+            std::thread::spawn(move || accepted.send(input.send((1, tx)).is_ok()).unwrap())
+        };
+        // Rendezvous proves the actual distributor owns a future transaction while its
+        // committed cursor is zero. No transaction worker can run that index yet.
+        assert!(acceptance.recv_timeout(Duration::from_secs(5)).unwrap());
+        producer.join().unwrap();
+
+        let (next_done, next_completion) = mpsc::channel();
+        let next_runtime = runtime.clone();
+        let _next = runtime.spawn_blocking_named("prewarm-txs", move || {
+            let pool = next_runtime.prewarming_pool();
+            // get_or_init of a different type panics if a previous EVM/provider still occupies
+            // worker state. This job runs on the SAME named coordinator after scope retirement.
+            pool.broadcast(pool.current_num_threads(), |worker| {
+                worker.get_or_init::<()>(|| ());
+            });
+            pool.clear();
+            next_done.send(()).unwrap();
+        });
+        drop(handle);
+        retirement.recv_timeout(Duration::from_secs(5)).unwrap();
+        next_completion.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(stopped.load(Ordering::Relaxed));
+        drop(input);
     }
 
     fn test_prewarm_context(
@@ -917,6 +1020,7 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            transaction_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,

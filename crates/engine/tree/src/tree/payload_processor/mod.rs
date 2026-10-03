@@ -9,7 +9,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use prewarm::PrewarmMetrics;
+use prewarm::{PrewarmMetrics, TransactionPrewarmPolicy};
 use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
@@ -44,6 +44,7 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 pub mod bal;
 pub mod bal_prewarm_pool;
 pub mod prewarm;
+mod prewarm_dispatch;
 pub mod receipt_root_task;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
@@ -95,6 +96,8 @@ where
     cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Optional bounds for transaction-prewarm job admission.
+    transaction_prewarm_policy: Option<TransactionPrewarmPolicy>,
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
@@ -129,6 +132,7 @@ where
             execution_cache: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
+            transaction_prewarm_policy: None,
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
@@ -141,6 +145,14 @@ where
             disable_bal_batch_io: config.disable_bal_batch_io(),
             bal_prewarm_pool: OnceLock::new(),
         }
+    }
+
+    /// Configures transaction job admission; BAL and skipped modes are unaffected.
+    pub(super) const fn set_transaction_prewarm_policy(
+        &mut self,
+        policy: Option<TransactionPrewarmPolicy>,
+    ) {
+        self.transaction_prewarm_policy = policy;
     }
 
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
@@ -451,6 +463,7 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            transaction_prewarm_policy: self.transaction_prewarm_policy,
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
@@ -760,6 +773,18 @@ mod tests {
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
         )
+    }
+
+    #[test]
+    fn transaction_prewarm_policy_is_disabled_by_default_and_can_be_cleared() {
+        let mut processor = test_processor();
+        assert!(processor.transaction_prewarm_policy.is_none());
+        let policy =
+            TransactionPrewarmPolicy::new(128, 16, std::time::Duration::from_micros(100)).unwrap();
+        processor.set_transaction_prewarm_policy(Some(policy));
+        assert_eq!(processor.transaction_prewarm_policy, Some(policy));
+        processor.set_transaction_prewarm_policy(None);
+        assert!(processor.transaction_prewarm_policy.is_none());
     }
 
     #[test]
