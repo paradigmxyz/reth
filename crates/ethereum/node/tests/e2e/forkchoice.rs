@@ -6,9 +6,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{
-    eth_payload_attributes, test_chain_spec, trie::wait_for_persisted_block, E2ETestSetupExt,
-};
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
@@ -231,7 +229,7 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
         }
         if branch == 0 {
             node.update_forkchoice(genesis, chains[0][3]).await?;
-            wait_for_persisted_block(&node.inner.provider, 3, Duration::from_secs(30)).await?;
+            node.wait_for_persisted_block(3).await?;
         }
     }
     let [a, b] = chains;
@@ -278,6 +276,73 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
         );
     }
     drop(disk_reorg_guard);
+
+    Ok(())
+}
+
+/// A forkchoice update to genesis must unwind the canonical chain when unwinding to a canonical
+/// ancestor is enabled. Genesis is always loaded from the database and has no parent state.
+#[tokio::test]
+async fn fcu_unwinds_canonical_chain_to_genesis() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+        .with_tree_config_modifier(|config| {
+            config
+                .with_always_process_payload_attributes_on_canonical_head(true)
+                .with_unwind_canonical_header(true)
+        })
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build()
+        .await?;
+    let node = nodes.pop().unwrap();
+    let genesis = node.block_hash(0);
+    let engine = node.auth_server_handle().http_client();
+    let rpc = node.rpc_provider();
+
+    let mut head = genesis;
+    for number in 1..=3 {
+        let envelope = node
+            .testing_build_block_v1(TestingBuildBlockRequestV1 {
+                parent_block_hash: head,
+                payload_attributes: eth_payload_attributes(&chain_spec, number),
+                transactions: vec![],
+                extra_data: None,
+            })
+            .await?;
+        let payload = envelope.execution_payload;
+        let hash = payload.payload_inner.payload_inner.block_hash;
+        let status =
+            EngineApiClient::<EthEngineTypes>::new_payload_v3(&engine, payload, vec![], B256::ZERO)
+                .await?;
+        assert_eq!(status.status, PayloadStatusEnum::Valid);
+        node.update_forkchoice(genesis, hash).await?;
+        head = hash;
+    }
+    assert_eq!(rpc.get_block_number().await?, 3);
+
+    let status = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+        &engine,
+        ForkchoiceState {
+            head_block_hash: genesis,
+            safe_block_hash: genesis,
+            finalized_block_hash: genesis,
+        },
+        None,
+    )
+    .await?;
+    assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
+    assert_eq!(
+        rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+        genesis,
+        "unwinding to genesis must make it the canonical head"
+    );
 
     Ok(())
 }
