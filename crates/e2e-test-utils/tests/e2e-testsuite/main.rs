@@ -5,7 +5,7 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::Result;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec,
+    eth_payload_attributes, test_chain_spec,
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
@@ -16,7 +16,7 @@ use reth_e2e_test_utils::{
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
     },
-    E2ETestSetupExt,
+    E2ETestSetupBuilder, E2ETestSetupExt,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -315,6 +315,30 @@ async fn test_setup_builder_with_storage_v2() -> Result<()> {
         let provider = node.inner.provider.database_provider_ro()?;
         assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_attributes_generator() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let fee_recipient = Address::with_last_byte(0x42);
+    let attributes_chain_spec = chain_spec.clone();
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new_with_attributes_generator(
+        1,
+        chain_spec,
+        move |timestamp| PayloadAttributes {
+            suggested_fee_recipient: fee_recipient,
+            ..eth_payload_attributes(&attributes_chain_spec, timestamp)
+        },
+    )
+    .build_single()
+    .await?;
+
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().header().beneficiary, fee_recipient);
 
     Ok(())
 }

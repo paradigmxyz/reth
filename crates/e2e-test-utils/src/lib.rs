@@ -1,13 +1,12 @@
 //! Utilities for end-to-end tests.
 
-use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter, PayloadTypes,
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use std::sync::Arc;
@@ -76,7 +75,7 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + NodeTypesForProvider
         + Node<
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
@@ -90,7 +89,7 @@ where
 
 impl<T> NodeBuilderHelper for T where
     Self: Default
-        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + NodeTypesForProvider
         + Node<
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<

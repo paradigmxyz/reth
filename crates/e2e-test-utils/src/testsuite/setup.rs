@@ -2,11 +2,11 @@
 
 use crate::{testsuite::Environment, E2ETestSetupExt, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{EngineTypes, PayloadTypes, TreeConfig};
+use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes, TreeConfig};
 use reth_node_core::{args::StorageArgs, primitives::RecoveredBlock};
 use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
@@ -181,6 +181,7 @@ where
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         // Note: this future is quite large so we box it
         Box::pin(self.apply_::<N>(env)).await
@@ -190,6 +191,7 @@ where
     async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
