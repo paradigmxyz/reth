@@ -40,6 +40,14 @@ pub trait BalStore: Send + Sync + 'static {
     /// Returns the number of BALs pruned.
     fn prune(&self, tip: BlockNumber) -> ProviderResult<usize>;
 
+    /// Whether the store's retention policy excludes this block at the given chain tip.
+    ///
+    /// Backfill uses this to avoid downloading BALs that would immediately be pruned. Stores with
+    /// a retention policy should override this; the default assumes no pruning.
+    fn should_prune(&self, _block: BlockNumber, _tip: BlockNumber) -> bool {
+        false
+    }
+
     /// Fetch BALs for the given block hashes.
     ///
     /// The returned vector must align with `block_hashes`.
@@ -155,6 +163,12 @@ impl BalStoreHandle {
     #[inline]
     pub fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
         self.inner.prune(tip)
+    }
+
+    /// Whether the store's retention policy excludes this block at the given chain tip.
+    #[inline]
+    pub fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+        self.inner.should_prune(block, tip)
     }
 
     /// Fetch BALs for the given block hashes.

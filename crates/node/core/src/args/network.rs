@@ -321,6 +321,14 @@ pub struct NetworkArgs {
     )]
     pub max_peers: Option<usize>,
 
+    /// Download missing BALs in the store's retention window on startup and new chain heads.
+    #[arg(long = "bal.backfill")]
+    pub bal_backfill: bool,
+
+    /// Maximum number of concurrent BAL requests.
+    #[arg(long = "bal.max-concurrent-requests", value_name = "COUNT", default_value = "4")]
+    pub max_concurrent_bal_requests: NonZeroUsize,
+
     /// Max concurrent `GetPooledTransactions` requests.
     #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_concurrent_tx_requests, verbatim_doc_comment)]
     pub max_concurrent_tx_requests: u32,
@@ -741,6 +749,8 @@ impl Default for NetworkArgs {
             max_outbound_peers: None,
             max_inbound_peers: None,
             max_peers: None,
+            bal_backfill: false,
+            max_concurrent_bal_requests: NonZeroUsize::new(4).unwrap(),
             max_concurrent_tx_requests,
             max_concurrent_tx_requests_per_peer,
             soft_limit_byte_size_pooled_transactions_response,
@@ -1181,6 +1191,30 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn parse_bal_args() {
+        let defaults = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert_eq!(defaults, NetworkArgs::default());
+        assert!(!defaults.bal_backfill);
+        assert_eq!(defaults.max_concurrent_bal_requests.get(), 4);
+
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--bal.backfill",
+            "--bal.max-concurrent-requests",
+            "2",
+        ])
+        .args;
+        assert!(args.bal_backfill);
+        assert_eq!(args.max_concurrent_bal_requests.get(), 2);
+        assert!(CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--bal.max-concurrent-requests",
+            "0",
+        ])
+        .is_err());
     }
 
     #[test]
