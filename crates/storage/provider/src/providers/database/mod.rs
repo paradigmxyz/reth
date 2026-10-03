@@ -1138,6 +1138,50 @@ mod tests {
     }
 
     #[test]
+    fn receipts_by_block_range_keeps_blocks_aligned_when_receipts_are_missing() {
+        use crate::ReceiptProvider;
+        use reth_db_api::transaction::DbTxMut;
+        use reth_ethereum_primitives::Receipt;
+
+        let factory = create_test_provider_factory();
+        let mut rng = generators::rng();
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut parent = None;
+        // 4 blocks with 2 transactions each: block n owns tx numbers 2n and 2n+1
+        for number in 0..4 {
+            let block = random_block(
+                &mut rng,
+                number,
+                BlockParams { parent, tx_count: Some(2), ..Default::default() },
+            );
+            parent = Some(block.hash());
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+        }
+        // receipts of block 1 (tx 2 and 3) were pruned
+        for tx_num in [0u64, 1, 4, 5, 6, 7] {
+            let receipt = Receipt { cumulative_gas_used: tx_num, ..Default::default() };
+            provider_rw.tx_ref().put::<tables::Receipts<Receipt>>(tx_num, receipt).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let receipts = provider.receipts_by_block_range(0..=3).unwrap();
+        assert_eq!(receipts.len(), 4);
+        let gas =
+            |block: &Vec<Receipt>| block.iter().map(|r| r.cumulative_gas_used).collect::<Vec<_>>();
+        assert_eq!(gas(&receipts[0]), [0, 1]);
+        assert_eq!(
+            receipts[1],
+            Vec::new(),
+            "pruned block must not receive the next block's receipts"
+        );
+        assert_eq!(gas(&receipts[2]), [4, 5]);
+        assert_eq!(gas(&receipts[3]), [6, 7]);
+        // consistent with the single block lookup
+        assert_eq!(provider.receipts_by_block(1.into()).unwrap(), None);
+    }
+
+    #[test]
     fn insert_block_with_prune_modes() {
         let block = TEST_BLOCK.clone();
 
