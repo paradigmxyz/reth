@@ -163,8 +163,11 @@ where
 
     /// Returns the current forkchoice state of the node.
     pub fn current_forkchoice_state(&self) -> eyre::Result<ForkchoiceState> {
-        let latest_header =
-            self.inner.provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?.unwrap();
+        let latest_header = self
+            .inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or_else(|| eyre!("latest block not found"))?;
 
         if latest_header.number() == 0 {
             return Ok(ForkchoiceState::same_hash(latest_header.hash()));
@@ -176,13 +179,13 @@ where
                 .inner
                 .provider
                 .sealed_header_by_number_or_tag(BlockNumberOrTag::Safe)?
-                .unwrap()
+                .ok_or_else(|| eyre!("safe block not found"))?
                 .hash(),
             finalized_block_hash: self
                 .inner
                 .provider
                 .sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized)?
-                .unwrap()
+                .ok_or_else(|| eyre!("finalized block not found"))?
                 .hash(),
         })
     }
@@ -211,26 +214,37 @@ where
         Ok(())
     }
 
-    /// Creates a new payload from given attributes generator
-    /// expects a payload attribute event and waits until the payload is built.
+    /// Builds a payload on top of the latest block and returns it without submitting it to the
+    /// engine.
     ///
-    /// It triggers the resolve payload via engine api and expects the built payload event.
+    /// Sends a forkchoice update with the next payload attributes, see
+    /// [`Self::set_next_payload_timestamp`], and resolves the payload job it starts with
+    /// [`PayloadKind::WaitForPending`], which waits for the build in progress instead of returning
+    /// an empty payload. The payload can still contain no transactions, e.g. if the pool had none
+    /// when the build started. Payload jobs started by others, e.g. by forkchoice updates with
+    /// payload attributes sent by the test, do not affect this.
+    ///
+    /// Returns an error if the forkchoice update fails or starts no payload job, e.g. because the
+    /// engine is syncing, or if the payload job fails to build a payload.
+    ///
+    /// [`PayloadKind::WaitForPending`]: reth_payload_primitives::PayloadKind::WaitForPending
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let eth_attr = self.payload.next_attributes();
-        let payload_id = self
+        let attributes = self.payload.next_attributes();
+        let state = self.current_forkchoice_state()?;
+        let updated = self
             .inner
             .add_ons_handle
             .beacon_engine_handle
-            .fork_choice_updated(self.current_forkchoice_state()?, Some(eth_attr.clone()))
-            .await?
-            .payload_id
-            .unwrap();
-        // first event is the payload attributes
-        self.payload.expect_attr_event(eth_attr).await?;
-        // wait for the payload builder to have finished building
-        self.payload.wait_for_built_payload(payload_id).await;
-        // ensure we're also receiving the built payload as event
-        Ok(self.payload.expect_built_payload().await?)
+            .fork_choice_updated(state, Some(attributes))
+            .await?;
+        let payload_id = updated.payload_id.ok_or_else(|| {
+            eyre!(
+                "forkchoice update to block {} with payload attributes started no payload job: {}",
+                state.head_block_hash,
+                updated.payload_status.status
+            )
+        })?;
+        self.payload.resolve_payload(payload_id).await
     }
 
     /// Triggers payload building job and submits it to the engine.
@@ -328,8 +342,8 @@ where
                 {
                     return Ok(output)
                 }
-                // Cancelling the block would leave its payload events in the stream and break the
-                // next block, so finish it even if `fut` completes first.
+                // The engine can still import a cancelled block and make it canonical after this
+                // returns, so finish it even if `fut` completes first.
                 let mut advance = pin!(self.advance_block());
                 match select(advance.as_mut(), fut.as_mut()).await {
                     Either::Left((payload, _)) => {
@@ -924,6 +938,7 @@ mod tests {
         node: &mut NodeHelperType<EthereumNode>,
         payload: <EthEngineTypes as PayloadTypes>::BuiltPayload,
     ) {
+        assert_send(node.new_payload());
         assert_send(node.advance_block());
         assert_send(node.advance_block_synced());
         assert_send(node.inject_and_advance(Bytes::new()));
