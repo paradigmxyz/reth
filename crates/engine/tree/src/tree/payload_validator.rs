@@ -100,7 +100,7 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::PayloadProcessor,
+    payload_processor::{prewarm::TransactionPrewarmPolicy, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
@@ -373,6 +373,18 @@ where
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
         }
+    }
+
+    /// Configures optional admission bounds for transaction-prewarm jobs.
+    ///
+    /// The default is unbounded dispatch. This policy does not affect canonical execution or
+    /// BAL prewarming, but it can reduce how far ahead transaction proof/cache hints are produced.
+    pub const fn with_transaction_prewarm_policy(
+        mut self,
+        policy: Option<TransactionPrewarmPolicy>,
+    ) -> Self {
+        self.payload_processor.set_transaction_prewarm_policy(policy);
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
