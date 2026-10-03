@@ -80,8 +80,8 @@ pub trait SnapStateVerifier {
     ///
     /// - Moves the stages the downloaded state covers to `pivot`.
     /// - Records history below `pivot` as pruned.
-    /// - Clears body indices and transaction lookups, so transaction numbers restart at 0 above
-    ///   `pivot`. `RocksDB` lookups are cleared immediately, not on commit.
+    /// - Clears body indices, database receipts and transaction lookups, so transaction numbers
+    ///   restart at 0 above `pivot`. `RocksDB` lookups are cleared immediately, not on commit.
     ///
     /// Publishing is not verification: the merkle stage and `Finish` wait for the trie rebuild.
     /// It cannot be undone, the node must not unwind below `pivot`, and the caller resets the
@@ -192,6 +192,9 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         // with body tables of its own has to clear them as well.
         self.tx_ref().clear::<tables::BlockWithdrawals>()?;
         self.tx_ref().clear::<tables::BlockOmmers>()?;
+        // Receipt log filtering keeps receipts in MDBX even with storage v2. Their transaction
+        // numbers must be reusable after publication.
+        self.tx_ref().clear::<tables::Receipts>()?;
         self.clear_transaction_lookup()?;
 
         let checkpoint = StageCheckpoint::new(pivot);
@@ -356,9 +359,9 @@ mod tests {
     };
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-    use alloy_primitives::{map::B256Map, Bytes, Signature, U256};
+    use alloy_primitives::{map::B256Map, Address, Bytes, Signature, U256};
     use reth_db_api::transaction::DbTxMut;
-    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
@@ -366,10 +369,12 @@ mod tests {
         PruneCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
         StorageSettings, StorageSettingsCache, TransactionsProvider,
     };
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
     use revm::bytecode::Bytecode;
+    use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Provider = <Factory as DatabaseProviderFactory>::ProviderRW;
@@ -850,5 +855,49 @@ mod tests {
             assert_eq!(provider.transaction_id(old_hash).unwrap(), None);
             assert_eq!(provider.transaction_id(new_hash).unwrap(), Some(0));
         }
+    }
+
+    #[test]
+    fn publishing_resets_database_receipts_before_reusing_transaction_numbers() {
+        let factory = hashed_factory().with_prune_modes(PruneModes {
+            receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                Address::ZERO,
+                PruneMode::Before(0),
+            )])),
+            ..Default::default()
+        });
+        insert_chain(&factory, B256::ZERO);
+        let body = BlockBody {
+            transactions: (0..2)
+                .map(|nonce| {
+                    TransactionSigned::new_unhashed(
+                        Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                        Signature::test_signature(),
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(0, None), (1, Some(&body))]).unwrap();
+        {
+            let mut writer = EitherWriter::new_receipts(&provider, 1).unwrap();
+            assert!(matches!(&writer, EitherWriter::Database(_)));
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+        }
+        provider.commit().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(1).unwrap();
+        provider.publish_snap_state(1).unwrap();
+        provider.commit().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+        {
+            let mut writer = EitherWriter::new_receipts(&provider, 2).unwrap();
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+        }
+        provider.commit().unwrap();
     }
 }
