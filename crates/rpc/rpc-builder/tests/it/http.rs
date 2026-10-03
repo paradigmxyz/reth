@@ -496,6 +496,16 @@ where
     )
     .await
     .unwrap_err();
+    DebugApiClient::<TransactionRequest>::debug_storage_range_at(
+        client,
+        block_id,
+        0,
+        Address::default(),
+        Bytes::default(),
+        0,
+    )
+    .await
+    .unwrap_err();
 
     for block_id in [
         BlockId::number(0),

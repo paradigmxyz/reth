@@ -363,15 +363,19 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Returns the storage at the given block height and transaction index. The result can be
     /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
     /// specifying the offset via `keyStart` (hash of storage key).
+    ///
+    /// The state is the one after executing the first `txIdx` transactions of the block, i.e. the
+    /// state the transaction at `txIdx` runs on, matching geth. Passing the block's transaction
+    /// count addresses the state after its last transaction.
     #[method(name = "storageRangeAt")]
     async fn debug_storage_range_at(
         &self,
-        block_hash: B256,
+        block_id: BlockId,
         tx_idx: usize,
         contract_address: Address,
-        key_start: B256,
+        key_start: Bytes,
         max_result: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<HashedStorageRangeResult>;
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
