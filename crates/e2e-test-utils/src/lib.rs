@@ -1,4 +1,4 @@
-//! Utilities for end-to-end tests.
+#![doc = include_str!("../README.md")]
 
 use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
