@@ -15,7 +15,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, thread::JoinHandle};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
 pub(crate) struct Handle<N, P, Evm>
@@ -24,6 +24,8 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     control: Arc<Control<Job<N, P, Evm>>>,
+    /// Declared after control so the command channel disconnects before joining the worker.
+    _worker: WorkerGuard,
 }
 
 impl<N, P, Evm> Debug for Handle<N, P, Evm>
@@ -59,10 +61,12 @@ where
     ) -> Self {
         let (control, commands) = Control::new();
         let publication = control.publication();
-        runtime.spawn_critical_os_thread("txpool-prewarm", "txpool prewarm worker", async move {
-            worker::Worker::new(commands, publication, source, evm_config).run()
-        });
-        Self { control }
+        let worker = runtime.spawn_critical_os_thread(
+            "txpool-prewarm",
+            "txpool prewarm worker",
+            async move { worker::Worker::new(commands, publication, source, evm_config).run() },
+        );
+        Self { control, _worker: WorkerGuard(Some(worker)) }
     }
 
     /// Pauses speculative work.
@@ -121,8 +125,77 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
     fn best_transactions(&self, parent_hash: B256) -> Option<Transactions<N>>;
 }
 
+/// Joins the worker after its control channel disconnects, keeping database cleanup inside
+/// engine shutdown rather than racing process-wide native destructors.
+struct WorkerGuard(Option<JoinHandle<()>>);
+
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        if let Some(worker) = self.0.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 /// A request to warm txpool transactions against one fully validated parent state.
 struct Job<N: NodePrimitives, P, Evm: ConfigureEvm<Primitives = N>> {
     evm_env: EvmEnvFor<Evm>,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::{bounded, Receiver, Sender};
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use std::{thread, time::Duration};
+
+    #[derive(Debug)]
+    struct BlockingDropSource {
+        dropping: Sender<()>,
+        release: Receiver<()>,
+    }
+
+    impl Source<EthPrimitives> for BlockingDropSource {
+        fn best_transactions(&self, _: B256) -> Option<Transactions<EthPrimitives>> {
+            None
+        }
+    }
+
+    impl Drop for BlockingDropSource {
+        fn drop(&mut self) {
+            self.dropping.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+    }
+
+    #[test]
+    fn dropping_handle_waits_for_worker_resources() {
+        let runtime = reth_tasks::Runtime::test();
+        let (dropping_tx, dropping_rx) = bounded(1);
+        let (release_tx, release_rx) = bounded(1);
+        let source = Arc::new(BlockingDropSource { dropping: dropping_tx, release: release_rx });
+        let handle = Handle::<EthPrimitives, MockEthProvider, _>::spawn(
+            &runtime,
+            source,
+            EthEvmConfig::mainnet(),
+        );
+        // A retained pause guard must not keep the control channel connected during shutdown.
+        let pause = handle.pause();
+        let (stopped_tx, stopped_rx) = bounded(1);
+        let shutdown = thread::spawn(move || {
+            drop(handle);
+            stopped_tx.send(()).unwrap();
+        });
+
+        dropping_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let stopped_early = stopped_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+        release_tx.send(()).unwrap();
+        shutdown.join().unwrap();
+        drop(pause);
+
+        assert!(!stopped_early, "handle dropped while the worker was still releasing resources");
+    }
 }
