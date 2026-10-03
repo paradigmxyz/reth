@@ -352,7 +352,7 @@ where
             for receipt in block_receipts {
                 let receipt_size = receipt.length();
                 if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
                 total_bytes += receipt_size;
                 partial_block.push(receipt);

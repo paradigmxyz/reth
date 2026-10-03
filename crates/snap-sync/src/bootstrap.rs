@@ -45,6 +45,8 @@ pub struct SnapBootstrap<C, F, X> {
     ranges_per_check: usize,
     // Stops the run at the next step boundary, leaving committed progress in place.
     cancel: CancellationToken,
+    // Stops the all-or-nothing hand-off scan, which `cancel` otherwise stops.
+    shutdown: Option<CancellationToken>,
     accounts: AccountRangeDownload<C, F>,
     storage: StorageRangeDownload<C, F>,
     bytecode: BytecodeDownload<C, F>,
@@ -67,6 +69,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
             session: SnapSyncSession::new(policy),
             ranges_per_check: DEFAULT_RANGES_PER_CHECK,
             cancel: CancellationToken::new(),
+            shutdown: None,
         }
     }
 }
@@ -89,6 +92,15 @@ impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run stopping once `cancel` fires.
     pub fn with_cancellation(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    /// Returns this run finishing the hand-off scan unless `shutdown` fires.
+    ///
+    /// The scan reads every account and restarts from scratch once stopped, so a caller that
+    /// cancels runs often, such as to refresh headers, keeps it running until shutdown.
+    pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = Some(shutdown);
         self
     }
 }
@@ -438,7 +450,7 @@ where
     // Checks the downloaded state is complete and hands it to the merkle stage. The scan reads
     // every account, so it runs on the blocking pool.
     async fn hand_off(&self, write: SnapWrite) -> Result<Step, SnapSyncError> {
-        let cancel = self.cancel.clone();
+        let cancel = self.shutdown.as_ref().unwrap_or(&self.cancel).clone();
         self.commit_blocking(move |provider| {
             provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &cancel)
         })

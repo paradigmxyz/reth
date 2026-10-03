@@ -41,7 +41,7 @@ use reth_eth_wire_types::{
     capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
     UnifiedStatus,
 };
-use reth_network_p2p::sync::NetworkSyncUpdater;
+use reth_network_p2p::{snap::client::SnapClient, sync::NetworkSyncUpdater};
 use reth_network_peers::NodeRecord;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
@@ -51,7 +51,7 @@ pub type PeerId = alloy_primitives::B512;
 /// Helper trait that unifies network API needed to launch node.
 pub trait FullNetwork:
     BlockDownloaderProvider<
-        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block> + SnapClient,
     > + NetworkSyncUpdater
     + NetworkInfo
     + NetworkEventListenerProvider
@@ -65,7 +65,8 @@ pub trait FullNetwork:
 
 impl<T> FullNetwork for T where
     T: BlockDownloaderProvider<
-            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>
+                        + SnapClient,
         > + NetworkSyncUpdater
         + NetworkInfo
         + NetworkEventListenerProvider

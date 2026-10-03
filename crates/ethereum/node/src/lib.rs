@@ -33,3 +33,5 @@ pub use engine::EthereumEngineValidator;
 
 pub mod engine_ssz_proxy;
 pub mod engine_ssz_witness;
+
+pub mod snap;

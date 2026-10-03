@@ -41,6 +41,11 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
+reth-errors.workspace = true
+reth-snap-sync.workspace = true
+reth-stages.workspace = true
+reth-engine-tree.workspace = true
+reth-network-p2p.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -63,6 +68,7 @@ eyre.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 futures.workspace = true
+tokio-util.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -95,6 +101,11 @@ alloy-rpc-types-trace.workspace = true
 similar-asserts.workspace = true
 reqwest.workspace = true
 reth-rpc-layer.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-static-file.workspace = true
+reth-consensus.workspace = true
+reth-network-peers.workspace = true
 
 [features]
 default = []
@@ -141,4 +152,9 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
+    "reth-stages/test-utils",
+    "reth-consensus/test-utils",
+    "reth-engine-tree/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-stages-api/test-utils",
 ]
