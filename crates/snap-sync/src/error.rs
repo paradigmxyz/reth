@@ -1,7 +1,9 @@
 //! Failures raised while assembling a snap state generation.
 
 use alloy_primitives::B256;
-use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
+use reth_downloaders::snap::{
+    InvalidAccountRange, InvalidBlockAccessListRequest, InvalidStorageRangeRequest,
+};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -15,6 +17,9 @@ pub enum SnapSyncError {
     /// A request for state failed.
     #[error(transparent)]
     Request(#[from] RequestError),
+    /// An account range was requested with its origin past its limit.
+    #[error(transparent)]
+    AccountRangeRequest(#[from] InvalidAccountRange),
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
@@ -68,12 +73,21 @@ pub enum SnapSyncError {
         /// Block the list was applied for.
         block: u64,
     },
-    /// The pivot was moved below the last block whose list is applied.
-    #[error("pivot {pivot} is below applied block {applied}")]
-    PivotBelowApplied {
+    /// The pivot was moved to a block not past the current one.
+    #[error("pivot {pivot} cannot move to block {target}, which is not past it")]
+    PivotNotAdvanced {
+        /// Block the attempt is anchored to.
+        pivot: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
+    /// Catch-up has not carried the downloaded state to the pivot, which committing storage
+    /// persisted ahead of its range or completing the attempt requires.
+    #[error("catch-up applied block {applied}, the pivot is {pivot}")]
+    CatchUpBehindPivot {
         /// Last block whose list is applied.
         applied: u64,
-        /// Block the pivot was moved to.
+        /// Block the attempt is anchored to.
         pivot: u64,
     },
     /// A list was applied for a block the canonical chain no longer holds.
@@ -161,6 +175,52 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Scheduled accounts remain to be fetched again at the pivot.
+    #[error("{accounts} accounts remain to be fetched again at the pivot")]
+    PendingRepairs {
+        /// Number of accounts still scheduled.
+        accounts: usize,
+    },
+    /// Account ranges remain to be downloaded.
+    #[error("accounts from {next} are not downloaded yet")]
+    IncompleteAccounts {
+        /// Key the next range is requested from.
+        next: B256,
+    },
+    /// The pivot is the genesis block, whose trie the merkle stage never rebuilds.
+    #[error("snap synchronization cannot anchor to the genesis block")]
+    GenesisPivot,
+    /// Work stopped because its session was cancelled.
+    #[error("snap synchronization was cancelled")]
+    Cancelled,
+    /// A reorg was recovered to a pivot below the last block both branches share.
+    #[error("pivot {target} is below reorg ancestor {ancestor}")]
+    PivotBelowAncestor {
+        /// Last block both branches share.
+        ancestor: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
+}
+
+impl SnapSyncError {
+    /// Whether the node's progress resolves this error, as new peers serve the state or missing
+    /// headers are downloaded.
+    ///
+    /// A closed channel means the network is gone, not that peers lack the state.
+    pub const fn is_transient(&self) -> bool {
+        match self {
+            Self::Request(error) => !error.is_channel_closed(),
+            Self::MissingHeader { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether a block the attempt builds on left the canonical chain, so its downloaded state
+    /// belongs to another fork.
+    pub const fn is_reorg(&self) -> bool {
+        matches!(self, Self::NonCanonicalBlock { .. } | Self::ForkedBlock { .. })
+    }
 }
 
 impl From<DatabaseError> for SnapSyncError {

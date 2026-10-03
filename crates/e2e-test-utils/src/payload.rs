@@ -10,6 +10,13 @@ use tokio_stream::wrappers::BroadcastStream;
 pub struct PayloadTestContext<T: PayloadTypes> {
     pub payload_event_stream: BroadcastStream<Events<T>>,
     payload_builder: PayloadBuilderHandle<T>,
+    /// Timestamp of the last generated payload attributes, or the starting point if none were
+    /// generated yet.
+    ///
+    /// [`Self::next_attributes`] increments it before generating the next attributes. Prefer
+    /// [`NodeTestContext::set_next_payload_timestamp`] over setting it directly.
+    ///
+    /// [`NodeTestContext::set_next_payload_timestamp`]: crate::node::NodeTestContext::set_next_payload_timestamp
     pub timestamp: u64,
     #[debug(skip)]
     attributes_generator: Box<dyn Fn(u64) -> T::PayloadAttributes + Send + Sync>,

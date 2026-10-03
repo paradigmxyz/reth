@@ -1,10 +1,11 @@
 //! Downloads the storage of an account range's contracts, committing every verified response.
 
 use crate::{
-    common::DownloadContext, SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress,
-    VerifiedRange, MAX_HASH,
+    common::DownloadContext, SnapAccountStore, SnapStorageStore, SnapSyncError, StorageChunk,
+    StorageProgress, VerifiedRange, MAX_HASH,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
+use futures::future::join_all;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{
     StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedStorageRanges,
@@ -21,14 +22,19 @@ use std::fmt;
 /// Default number of contracts asked for per storage request.
 pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 
-/// Downloads the storage an account range's contracts still need, one request at a time.
+/// Default number of scheduled slots fetched again per repair batch.
+pub const DEFAULT_REPAIR_SLOTS: usize = 128;
+
+/// Downloads the storage an account range's contracts still need, and repaired slots again.
 ///
-/// Every verified response is committed before the next request, so at most one response is held
-/// however large a contract is, and a download resumes from the persisted progress.
+/// Each range response is committed before the next request, so at most one is held however large
+/// a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
     // Contracts asked for per request.
     max_accounts: usize,
+    // Scheduled slots fetched again per repair batch.
+    max_repair_slots: usize,
 }
 
 impl<C, F> StorageRangeDownload<C, F> {
@@ -37,6 +43,7 @@ impl<C, F> StorageRangeDownload<C, F> {
         Self {
             context: DownloadContext::new(client, factory, runtime),
             max_accounts: DEFAULT_STORAGE_ACCOUNTS,
+            max_repair_slots: DEFAULT_REPAIR_SLOTS,
         }
     }
 
@@ -49,6 +56,13 @@ impl<C, F> StorageRangeDownload<C, F> {
     /// Returns this download asking for at most `max_accounts` contracts per request, at least one.
     pub const fn with_max_accounts(mut self, max_accounts: usize) -> Self {
         self.max_accounts = if max_accounts == 0 { 1 } else { max_accounts };
+        self
+    }
+
+    /// Returns this download fetching at most `max_repair_slots` scheduled slots again per repair
+    /// batch, at least one.
+    pub const fn with_max_repair_slots(mut self, max_repair_slots: usize) -> Self {
+        self.max_repair_slots = if max_repair_slots == 0 { 1 } else { max_repair_slots };
         self
     }
 }
@@ -74,7 +88,7 @@ where
         else {
             return Ok(StorageRangeStep::Complete)
         };
-        let end = contracts.accounts().len().min(first.saturating_add(self.max_accounts));
+        let end = progress.request_end(contracts.accounts(), first, self.max_accounts);
         let batch = contracts.range(first..end).expect("positions are inside the batch");
         let from = progress.resume_at(batch.accounts()[0].0).expect("first contract is incomplete");
 
@@ -112,6 +126,59 @@ where
             .await?;
         Ok(StorageRangeStep::Committed(committed))
     }
+
+    /// Fetches the pivot's values of the next batch of slots scheduled for repair at `range`'s
+    /// origin concurrently, zero where its storage holds none. Unserved slots stay scheduled, and
+    /// `Ok(None)` when none was served.
+    pub async fn repair_slots(
+        &mut self,
+        range: &VerifiedRange,
+    ) -> Result<Option<Vec<(B256, U256)>>, SnapSyncError> {
+        let (write, account) = (range.write(), range.origin());
+        let repairs = self.context.factory().database_provider_ro()?.snap_repairs(write)?;
+        // Only a contract the pivot holds has slots to fetch; for any other account they are zero.
+        let contracts = range.range().storage_batch();
+        let Some(batch) = contracts.range(0..1).filter(|batch| batch.accounts()[0].0 == account)
+        else {
+            return Ok(Some(Vec::new()))
+        };
+
+        let mut requests = Vec::new();
+        for slot in repairs.slots(account).take(self.max_repair_slots) {
+            let request = GetStorageRangesMessage {
+                request_id: self.context.next_request_id(),
+                root_hash: batch.state_root(),
+                account_hashes: vec![account],
+                starting_hash: slot.into(),
+                limit_hash: slot.into(),
+                response_bytes: self.context.response_bytes(),
+            };
+            let downloader = StorageRangeDownloader::new(
+                self.context.client().clone(),
+                request,
+                &batch,
+                self.context.runtime().clone(),
+            )?;
+            requests.push(async move { downloader.await.map(|outcome| (slot, outcome)) });
+        }
+
+        let requested = requests.len();
+        let mut values = Vec::new();
+        for response in join_all(requests).await {
+            let (slot, StorageRangeOutcome::Verified(ranges)) = response? else { continue };
+            // Proved from the slot, so one keyed past it means the storage holds none there.
+            let value = ranges
+                .into_ranges()
+                .into_iter()
+                .next()
+                .and_then(|range| range.slots.first().copied())
+                .filter(|(key, _)| *key == slot)
+                .map_or(U256::ZERO, |(_, value)| value);
+            values.push((slot, value));
+        }
+        // An account scheduled without slots has nothing to wait for.
+        Ok((!values.is_empty() || requested == 0).then_some(values))
+    }
 }
 
 impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
@@ -119,6 +186,7 @@ impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
         f.debug_struct("StorageRangeDownload")
             .field("context", &self.context)
             .field("max_accounts", &self.max_accounts)
+            .field("max_repair_slots", &self.max_repair_slots)
             .finish()
     }
 }
@@ -170,10 +238,12 @@ mod tests {
     use crate::{
         test_utils::{
             account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
+            storage_ranges, storage_root_of, stored_slots, verified_range, verified_repair,
+            ScriptedSnapClient,
         },
-        SnapAccountStore, SnapAttemptStore,
+        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, StateRepairs,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::U256;
     use reth_eth_wire_types::snap::StorageRangesMessage;
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
@@ -382,5 +452,176 @@ mod tests {
 
         assert!(matches!(download.next(&range).await, Err(SnapSyncError::StaleWrite { .. })));
         assert_eq!(client.storage_requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn storage_part_way_through_resumes_at_the_new_root() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        // The new pivot turned the first account into a contract, ahead of the carried one.
+        let mut moved = accounts.clone();
+        moved[0].1 = contract(1, &small);
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]),
+            storage_ranges(2, &[&small[..]], &small, &[]),
+            storage_ranges(3, &[&large[1..]], &large, &[key(2), key(3)]),
+            storage_ranges(4, &[&small[..]], &small, &[]),
+        ];
+        let (client, mut download) = download(responses, factory.clone());
+        committed(&mut download, &range).await;
+
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.advance_snap_pivot(range.write(), generation(2, state_root(&moved))).unwrap();
+        provider.commit().unwrap();
+        let range =
+            VerifiedRange::new(write, verified_range(&moved, 0..moved.len(), B256::ZERO, &[]));
+        for _ in 0..3 {
+            committed(&mut download, &range).await;
+        }
+        assert!(matches!(download.next(&range).await.unwrap(), StorageRangeStep::Complete));
+        assert_eq!(
+            *client.storage_requests(),
+            [
+                (vec![key(2), key(3)], B256::ZERO),
+                (vec![key(1)], B256::ZERO),
+                (vec![key(2), key(3)], key(2)),
+                (vec![key(3)], B256::ZERO),
+            ]
+        );
+
+        // The carried slot holds pivot 1's value until the lists reach the new pivot.
+        let provider = factory.database_provider_rw().unwrap();
+        assert!(matches!(
+            provider.commit_account_range(write, range.range(), Default::default(), Vec::new()),
+            Err(SnapSyncError::CatchUpBehindPivot { applied: 1, pivot: 2 })
+        ));
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+        let coverage = provider
+            .commit_account_range(write, range.range(), Default::default(), Vec::new())
+            .unwrap();
+        provider.commit().unwrap();
+        assert!(coverage.is_complete());
+        assert_eq!(slots_of(&factory, key(1)), small);
+        assert_eq!(slots_of(&factory, key(2)), large);
+    }
+
+    #[tokio::test]
+    async fn a_page_ending_before_a_carried_contract_hands_it_to_the_next_range() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let large = large();
+        let first = storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]);
+        let (_, mut download) = download([first], factory.clone());
+        committed(&mut download, &range).await;
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider
+            .advance_snap_pivot(range.write(), generation(2, state_root(&accounts)))
+            .unwrap();
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+
+        // The new root's page stops before the contract part way through.
+        let page = verified_range(&accounts, 0..1, B256::ZERO, &[B256::ZERO, key(1)]);
+        let next = provider
+            .commit_account_range(write, &page, Default::default(), Vec::new())
+            .unwrap()
+            .next()
+            .unwrap();
+
+        assert!(next <= key(2));
+        assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
+    }
+
+    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
+    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
+        let (factory, _) = started(accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let mut repairs = StateRepairs::default();
+        for slot in slots {
+            repairs.insert_slot(key(2), *slot);
+        }
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let range = verified_repair(accounts, 1..2, key(2), &[key(2)]);
+        (factory, VerifiedRange::new(write, range))
+    }
+
+    #[tokio::test]
+    async fn repair_slots_read_zero_where_the_pivot_holds_none() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[key(1)]),
+            // Nothing is stored at key 5, which the proof shows.
+            storage_ranges(2, &[&[]], &large, &[key(5)]),
+        ];
+        let (client, mut download) = download(responses, factory);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        assert_eq!(values, Some(vec![(key(1), U256::from(11)), (key(5), U256::ZERO)]));
+        assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1)), (vec![key(2)], key(5))]);
+    }
+
+    #[tokio::test]
+    async fn a_contract_scheduled_without_slots_fetches_none() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[]);
+        let provider = factory.database_provider_rw().unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(range.write(), repairs).unwrap();
+        provider.commit().unwrap();
+        let (client, mut download) = download([], factory);
+
+        assert_eq!(download.repair_slots(&range).await.unwrap(), Some(Vec::new()));
+        assert!(client.storage_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unserved_repair_slot_fetches_nothing() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1)]);
+        let (_, mut download) = download([storage_ranges(1, &[], &[], &[])], factory);
+
+        assert_eq!(download.repair_slots(&range).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn served_repair_slots_survive_an_unserved_one() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[key(1)]),
+            storage_ranges(2, &[], &[], &[]),
+        ];
+        let (_, mut download) = download(responses, factory);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        // Key 5 stays scheduled for the next batch.
+        assert_eq!(values, Some(vec![(key(1), U256::from(11))]));
+    }
+
+    #[tokio::test]
+    async fn repair_slots_are_fetched_in_bounded_batches() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [storage_ranges(1, &[&large[..1]], &large, &[key(1)])];
+        let (client, download) = download(responses, factory);
+        let mut download = download.with_max_repair_slots(1);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        // Key 5 waits for the next batch, after the account commits this one.
+        assert_eq!(values, Some(vec![(key(1), U256::from(11))]));
+        assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1))]);
     }
 }
