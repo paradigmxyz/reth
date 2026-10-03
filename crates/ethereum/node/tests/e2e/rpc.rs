@@ -1183,3 +1183,58 @@ async fn test_test_account_tx_builder() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_mine() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let mut account = wallet.account(0);
+    let recipient = Address::with_last_byte(0x77);
+
+    // Leaves canonical notifications in the stream that `mine` has to skip.
+    node.advance_blocks(2).await?;
+
+    // The receipts are in the order of the given transactions, not in block order.
+    let first = account.transfer(recipient, U256::from(1)).await;
+    let second = account.transfer(recipient, U256::from(2)).await;
+    let mined = node.mine([second.clone(), first.clone()]).await?.ensure_success()?;
+    assert_eq!(mined.block().number, 3);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [keccak256(&second), keccak256(&first)]
+    );
+    assert_eq!(mined.chain.range(), 3..=3);
+    assert_eq!(
+        mined.chain.execution_outcome().account(&recipient).flatten().map(|acc| acc.balance),
+        Some(U256::from(3))
+    );
+
+    // Other pool transactions must not ride along, and the block is not imported if they do.
+    let stray = node.rpc.inject_tx(account.transfer(recipient, U256::from(3)).await).await?;
+    assert_eq!(
+        node.mine([]).await.unwrap_err().to_string(),
+        format!(
+            "block 4 does not include the expected transactions: missing [], unexpected pool \
+             transactions [{stray:?}]"
+        )
+    );
+    let mined = node.mine_including([]).await?;
+    assert_eq!(mined.block().number, 4);
+    assert_eq!(mined.chain.transaction_hashes().copied().collect::<Vec<_>>(), [stray]);
+
+    // A transaction the block can not include, here because of a nonce gap, is missing.
+    let nonce = account.nonce() + 1;
+    let gapped = account.transfer(recipient, U256::from(4)).nonce(nonce).await;
+    assert_eq!(
+        node.mine([gapped.clone()]).await.unwrap_err().to_string(),
+        format!(
+            "block 5 does not include the expected transactions: missing [{:?}], unexpected pool \
+             transactions []",
+            keccak256(&gapped)
+        )
+    );
+
+    Ok(())
+}
