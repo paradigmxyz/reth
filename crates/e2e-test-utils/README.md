@@ -79,6 +79,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Put a raw transaction into the pool | `node.rpc.inject_tx(raw)` |
 | **Producing blocks** | |
 | Mine given transactions and get their receipts | `node.mine(txs)`, which fails if the block misses one of them or includes another pool transaction; `mine_including(txs)` allows other pool transactions |
+| Mine transactions that are already in the pool, e.g. sent through a provider | `node.mine_pooled(hashes)`, with the checks of `mine` and an error for a hash that is not in the pool |
 | Produce blocks from the pool | `advance_block()`, `advance_blocks(n)`; `advance_block_synced()` also waits for the pool to process the block |
 | Produce blocks until a transaction is included | `advance_until_receipt(hash)` |
 | Produce blocks while a future runs, e.g. `eth_sendRawTransactionSync` | `advance_while(fut)` |
@@ -107,6 +108,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Wait for any condition | `wait::poll_until(what, poll)`; `poll_until_with(PollOpts { .. }, ..)` for another timeout or interval |
 | Assert that something does not happen | `wait::assert_holds_for(duration, what, check)` |
 | Wait for a block, or a pool state | `wait_block(n, hash, wait_finish_checkpoint)`, `wait_for_pool(condition)`, `wait_for_pool_head(hash)` |
+| Wait for transactions to enter or leave the pool | `wait_for_pooled(hashes)`, `wait_for_pool_removal(hashes)`, which returns right away for transactions that never entered |
 | Wait for persistence or pruning | `wait_for_persisted_block(n)`, `wait_for_prune_checkpoint(segment, n)` |
 | **Assertions and inspection** | |
 | Inspect a mined block | `MinedBlock`: `block()`, `receipts`, `chain` (the committed `Chain` with its execution outcome), `ensure_success()` |
@@ -182,7 +184,6 @@ use alloy_primitives::{Address, U256};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{node::Finality, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
-use reth_transaction_pool::TransactionPool;
 
 async fn reorg_returns_transaction_to_pool() -> eyre::Result<()> {
     let (mut node, wallet) =
@@ -199,7 +200,7 @@ async fn reorg_returns_transaction_to_pool() -> eyre::Result<()> {
 
     let b1 = node.advance_block_on(genesis).await?.block().hash();
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, b1);
-    node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
+    node.wait_for_pooled([tx_hash]).await?;
 
     node.reorg_to(a1).await?;
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, a1);
@@ -471,8 +472,12 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
 - **The pool lags behind the chain.** `advance_block`, `mine` and `import_payload` return once the
   block is canonical, but the pool processes it in the background, so right afterwards it can still
   hold the mined transactions and old nonces, and a block built next, e.g. on a fork, can include
-  them. Use `advance_block_synced` or `wait_for_pool_head(hash)`. After a reorg, the transactions of
-  the reorged blocks return to the pool later still; wait for them with `wait_for_pool`.
+  them. Use `advance_block_synced` or `wait_for_pool_head(hash)`. These only cover the pool's own
+  update; a node that runs additional pool maintenance tasks on new blocks, e.g. for a separate
+  sub-pool or its own eviction rules, can report the new head before they ran, so wait for the
+  expected contents with `wait_for_pool_removal` or `wait_for_pooled` instead. After a reorg, the
+  transactions of the reorged blocks return to the pool later still; wait for them with
+  `wait_for_pooled`.
 - **`canonical_stream` is a backlog.** It holds every canonical notification since the context was
   created, up to 256 unread ones (older ones are dropped without an error). `mine`,
   `mine_including`, `inject_and_advance` and `advance` skip ahead to the notification of their
