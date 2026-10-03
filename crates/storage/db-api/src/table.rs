@@ -83,6 +83,16 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// Whether the table is also a `DUPSORT` table.
     const DUPSORT: bool;
 
+    /// Experimental storage layout: shift the first encoded duplicate-key byte to select
+    /// one of four ordered prefix shards. Packed trie views override the legacy encoding.
+    fn storage_shard_shift() -> Option<u8> {
+        match Self::NAME {
+            "HashedStorages" => Some(6),
+            "StoragesTrie" => Some(2),
+            _ => None,
+        }
+    }
+
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
