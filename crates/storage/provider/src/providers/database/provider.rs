@@ -1499,6 +1499,31 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             Err(ProviderError::SnapStorageLayoutUnsupported)
         }
     }
+
+    /// Refuses a database the selected sync can't continue: snap needs the hashed state layout
+    /// when it runs, and only snap can finish an unverified snap attempt.
+    pub fn ensure_sync_mode(&self, snap: bool) -> ProviderResult<()> {
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                if snap {
+                    self.ensure_snap_sync_layout()
+                } else {
+                    Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+                }
+            }
+            // Snap only bootstraps a database with nothing executed. A database without stored
+            // settings gets its layout at genesis, so it is only checked once genesis has run.
+            None if snap &&
+                self.storage_settings()?.is_some() &&
+                self.get_stage_checkpoint(StageId::Execution)?
+                    .is_none_or(|checkpoint| checkpoint.block_number == 0) =>
+            {
+                self.ensure_snap_sync_layout()
+            }
+            // Verified snap state and executed state continue with the staged pipeline.
+            _ => Ok(()),
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
