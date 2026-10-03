@@ -29,20 +29,21 @@ reth-trie-common.workspace = true
 alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # revm
 revm.workspace = true
 
 # misc
+futures.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-alloy-rlp.workspace = true
-futures.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true

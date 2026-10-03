@@ -22,7 +22,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, BlockId,
+    eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -607,8 +607,12 @@ where
             }
         }
 
-        ensure_intrinsic_gas(transaction, &self.fork_tracker).inspect_err(|_| {
-            self.validation_metrics.rejected_intrinsic_gas_too_low.increment(1);
+        ensure_intrinsic_gas(transaction, &self.fork_tracker).inspect_err(|err| {
+            if matches!(err, InvalidPoolTransactionError::IntrinsicGasTooLow) {
+                self.validation_metrics.rejected_intrinsic_gas_too_low.increment(1);
+            } else {
+                self.validation_metrics.rejected_intrinsic_gas_too_high.increment(1);
+            }
         })?;
 
         // light blob tx pre-checks
@@ -744,7 +748,7 @@ where
         {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
-                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
+                    Ok(bytecode) => bytecode.is_some_and(|b| b.is_eip7702()),
                     Err(err) => {
                         return Err(TransactionValidationOutcome::Error(
                             *transaction.hash(),
@@ -956,17 +960,13 @@ where
         self.fork_tracker
             .max_initcode_size
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
-        // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
-        // because the cap only applies to regular gas (state gas uses a reservoir).
-        // Store 0 to disable the txpool-level check.
-        let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            0
-        } else {
-            evm_env.cfg_env.tx_gas_limit_cap()
-        };
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
         self.fork_tracker
             .tx_gas_limit_cap
             .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+        self.fork_tracker
+            .tx_regular_gas_cap
+            .store(tx_regular_gas_cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -978,9 +978,15 @@ where
         let tip_timestamp = self.fork_tracker.tip_timestamp();
 
         // If next block is Osaka, allow 7594 sidecars
-        if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(12)) {
+        if self
+            .chain_spec()
+            .is_osaka_active_at_timestamp(tip_timestamp.saturating_add(SLOT_DURATION_SECS))
+        {
             true
-        } else if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(24)) {
+        } else if self
+            .chain_spec()
+            .is_osaka_active_at_timestamp(tip_timestamp.saturating_add(2 * SLOT_DURATION_SECS))
+        {
             let current_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
@@ -1087,6 +1093,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     max_initcode_size: usize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     tx_gas_limit_cap: u64,
+    /// Cached EIP-8037 intrinsic regular gas cap from EVM config (0 = no cap).
+    tx_regular_gas_cap: u64,
     /// Whether EIP-7594 blob sidecars are accepted.
     /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
     /// are always accepted, regardless of Osaka fork activation.
@@ -1116,6 +1124,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .expect("latest header is not found");
         let evm_env =
             evm_config.evm_env(&tip).expect("evm_env should not fail for existing blocks");
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
 
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -1154,12 +1163,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
-            tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-                0
-            } else {
-                evm_env.cfg_env.tx_gas_limit_cap()
-            },
+            tx_gas_limit_cap,
+            tx_regular_gas_cap,
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
@@ -1384,6 +1389,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             other_tx_types,
             max_initcode_size,
             tx_gas_limit_cap,
+            tx_regular_gas_cap,
             eip7594,
         } = self;
 
@@ -1397,6 +1403,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(max_initcode_size),
             tx_gas_limit_cap: AtomicU64::new(tx_gas_limit_cap),
+            tx_regular_gas_cap: AtomicU64::new(tx_regular_gas_cap),
         };
 
         EthTransactionValidator {
@@ -1467,6 +1474,8 @@ pub struct ForkTracker {
     pub max_initcode_size: AtomicUsize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
+    /// Cached EIP-8037 intrinsic regular gas cap from EVM config (0 = no cap).
+    pub tx_regular_gas_cap: AtomicU64,
 }
 
 impl ForkTracker {
@@ -1506,7 +1515,8 @@ impl ForkTracker {
     }
 }
 
-/// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
+/// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction, and
+/// that its intrinsic regular gas fits the EIP-8037 regular gas cap.
 ///
 /// Caution: This only checks past the Merge hardfork.
 pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
@@ -1539,19 +1549,40 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.input(),
         transaction.is_create(),
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
-        transaction
-            .access_list()
-            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
-            .unwrap_or_default() as u64,
-        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        transaction.access_list().map(|l| l.storage_keys_count()).unwrap_or_default() as u64,
+        transaction.authorization_count().unwrap_or_default(),
         eip2780,
     );
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas {
+    // EIP-8037: `tx.gas` may exceed the cap, but intrinsic regular gas and the calldata floor may
+    // not, otherwise the transaction can never be included.
+    let regular_gas_cap =
+        fork_tracker.tx_regular_gas_cap.load(std::sync::atomic::Ordering::Relaxed);
+    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas() {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
+    } else if regular_gas_cap > 0 &&
+        gas.initial_regular_gas().max(gas.floor_gas()) > regular_gas_cap
+    {
+        // `GasTooHigh` is not a bad transaction, so peers that still relay these, such as nodes
+        // without this check, are not penalized.
+        Err(InvalidTransactionError::GasTooHigh.into())
     } else {
         Ok(())
+    }
+}
+
+/// Returns the pool's `(tx_gas_limit_cap, tx_regular_gas_cap)` for the given EVM config, where 0
+/// disables the respective check.
+///
+/// EIP-8037 lets `tx.gas` exceed the EIP-7825 cap because state gas is drawn from a reservoir
+/// above it, but the cap still bounds intrinsic regular gas and the calldata floor.
+fn tx_gas_caps(cfg: &impl Cfg) -> (u64, u64) {
+    let cap = cfg.tx_gas_limit_cap();
+    if cfg.is_amsterdam_eip8037_enabled() {
+        (0, cap)
+    } else {
+        (cap, 0)
     }
 }
 
@@ -1603,6 +1634,10 @@ mod tests {
             value: U256::from(value),
             ..Default::default()
         };
+        pooled_eip1559_tx(tx, sender)
+    }
+
+    fn pooled_eip1559_tx(tx: alloy_consensus::TxEip1559, sender: Address) -> EthPooledTransaction {
         let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
             tx.into(),
             alloy_primitives::Signature::test_signature(),
@@ -1613,15 +1648,8 @@ mod tests {
         )
     }
 
-    /// EIP-2780 replaces the flat 21k intrinsic base with a decomposed one: 12k base, plus a cold
-    /// account access for `tx.to` and a transfer charge when `tx.value` is non-zero, with a
-    /// carve-out for self-transfers.
-    #[test]
-    fn intrinsic_gas_eip2780() {
-        let sender = Address::repeat_byte(1);
-        let recipient = Address::repeat_byte(2);
-
-        let amsterdam = || ForkTracker {
+    fn amsterdam_fork_tracker() -> ForkTracker {
+        ForkTracker {
             shanghai: true.into(),
             cancun: true.into(),
             prague: true.into(),
@@ -1631,7 +1659,19 @@ mod tests {
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
             tx_gas_limit_cap: AtomicU64::new(0),
-        };
+            tx_regular_gas_cap: AtomicU64::new(0),
+        }
+    }
+
+    /// EIP-2780 replaces the flat 21k intrinsic base with a decomposed one: 12k base, plus a cold
+    /// account access for `tx.to` and a transfer charge when `tx.value` is non-zero, with a
+    /// carve-out for self-transfers.
+    #[test]
+    fn intrinsic_gas_eip2780() {
+        let sender = Address::repeat_byte(1);
+        let recipient = Address::repeat_byte(2);
+
+        let amsterdam = amsterdam_fork_tracker;
         let pre_amsterdam = || ForkTracker { amsterdam: false.into(), ..amsterdam() };
 
         // Self-transfer: base cost only (12k), where pre-Amsterdam it pays the flat 21k.
@@ -1655,6 +1695,68 @@ mod tests {
         );
     }
 
+    /// EIP-8037: `tx.gas` may exceed the cap, but intrinsic regular gas and the calldata floor may
+    /// not.
+    #[test]
+    fn intrinsic_regular_gas_cap_eip8037() {
+        let cap = revm::primitives::eip7825::TX_GAS_LIMIT_CAP;
+        let fork_tracker =
+            ForkTracker { tx_regular_gas_cap: AtomicU64::new(cap), ..amsterdam_fork_tracker() };
+        let is_too_high = |res| {
+            matches!(
+                res,
+                Err(InvalidPoolTransactionError::Consensus(InvalidTransactionError::GasTooHigh))
+            )
+        };
+        let tx = |tx| {
+            pooled_eip1559_tx(
+                alloy_consensus::TxEip1559 {
+                    chain_id: 1,
+                    gas_limit: 2 * cap,
+                    max_fee_per_gas: 1,
+                    to: Address::repeat_byte(2).into(),
+                    ..tx
+                },
+                Address::repeat_byte(1),
+            )
+        };
+
+        // Zero-value call with `addresses` access list entries: 15,000 + 4,180 intrinsic regular
+        // gas per address.
+        let access_list_tx = |addresses: u64| {
+            tx(alloy_consensus::TxEip1559 {
+                access_list: AccessList(
+                    (0..addresses)
+                        .map(|i| AccessListItem {
+                            address: Address::left_padding_from(&i.to_be_bytes()),
+                            storage_keys: vec![],
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            })
+        };
+        // 16,776,800 intrinsic regular gas fits the cap.
+        assert!(ensure_intrinsic_gas(&access_list_tx(4_010), &fork_tracker).is_ok());
+        // 16,780,980 exceeds it.
+        assert!(is_too_high(ensure_intrinsic_gas(&access_list_tx(4_011), &fork_tracker)));
+
+        // Zero-value call with `len` non-zero calldata bytes: the calldata floor (15,000 + 64 per
+        // byte) exceeds the cap while intrinsic regular gas (15,000 + 16 per byte) stays below it.
+        let calldata_tx = |len: usize| {
+            tx(alloy_consensus::TxEip1559 { input: vec![1; len].into(), ..Default::default() })
+        };
+        // 16,777,176 floor gas fits the cap.
+        assert!(ensure_intrinsic_gas(&calldata_tx(261_909), &fork_tracker).is_ok());
+        // 16,777,240 exceeds it.
+        assert!(is_too_high(ensure_intrinsic_gas(&calldata_tx(261_910), &fork_tracker)));
+
+        // Without the regular gas cap (pre EIP-8037), only the gas limit is checked.
+        let no_cap = amsterdam_fork_tracker();
+        assert!(ensure_intrinsic_gas(&access_list_tx(4_011), &no_cap).is_ok());
+        assert!(ensure_intrinsic_gas(&calldata_tx(261_910), &no_cap).is_ok());
+    }
+
     // <https://github.com/paradigmxyz/reth/issues/5178>
     #[tokio::test]
     async fn validate_transaction() {
@@ -1669,6 +1771,7 @@ mod tests {
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
             tx_gas_limit_cap: AtomicU64::new(0),
+            tx_regular_gas_cap: AtomicU64::new(0),
         };
 
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
