@@ -1,7 +1,7 @@
 //! Hands snap-downloaded state over to the staged pipeline.
 //!
-//! The merkle stage rebuilds the trie from the downloaded state, and only a matching root is
-//! published at the pivot and accepted.
+//! The merkle stage rebuilds the trie from the downloaded state, and only a matching root on a
+//! still canonical pivot is published and accepted.
 
 use alloy_eips::BlockNumHash;
 use reth_errors::{ConsensusError, RethError};
@@ -15,6 +15,7 @@ use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
 };
 use reth_tracing::tracing::info;
+use tokio_util::sync::CancellationToken;
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
 ///
@@ -31,8 +32,28 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         Self { factory }
     }
 
-    /// Publishes the state downloaded under `write` at `pivot`, rebuilds its trie and accepts it,
-    /// so the pipeline continues above the pivot.
+    /// Rebuilds the trie from the state downloaded at `pivot` and checks its root against the
+    /// pivot's header, committing progress so a restart resumes it. A mismatch abandons the
+    /// attempt, since nothing irreversible has happened yet. Returns early once `stop` fires.
+    pub fn rebuild(
+        &self,
+        pivot: BlockNumHash,
+        stop: &CancellationToken,
+    ) -> Result<(), PipelineError> {
+        let rebuilt = self.rebuild_trie(pivot, stop);
+        if let Err(PipelineError::Stage(StageError::Block {
+            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
+            ..
+        })) = &rebuilt
+        {
+            self.abandon()?;
+        }
+        rebuilt
+    }
+
+    /// Publishes the state downloaded under `write` at `pivot` and accepts it, so the pipeline
+    /// continues above the pivot. The pivot must still be canonical, and its trie is rebuilt
+    /// first if [`Self::rebuild`] hasn't finished.
     pub fn hand_off(
         &self,
         write: SnapWrite,
@@ -50,17 +71,8 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
             return Ok(Handoff::PivotReorged)
         }
 
-        // The root is checked before the irreversible publish, so a mismatch leaves nothing to
-        // undo: the attempt is dropped and the next run downloads the state again.
-        let rebuilt = self.rebuild_trie(pivot);
-        if let Err(PipelineError::Stage(StageError::Block {
-            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
-            ..
-        })) = &rebuilt
-        {
-            self.abandon()?;
-        }
-        rebuilt?;
+        // A trie already rebuilt to the pivot returns at once.
+        self.rebuild(pivot, &CancellationToken::new())?;
 
         self.publish(pivot.number)?;
         info!(target: "sync::snap", pivot = pivot.number, "Snap state published; history below it is unavailable");
@@ -81,11 +93,11 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
     }
 
     // The pivot of a publish that anchored the static files but stopped before its checkpoints
-    // committed: the attempt is unverified, the files start at its pivot, and execution is below
+    // committed: the attempt is unfinished, the files start at its pivot, and execution is below
     // it.
     fn interrupted_publish(&self) -> ProviderResult<Option<u64>> {
         let provider = self.factory.provider()?;
-        let Some(attempt) = provider.snap_attempt()?.filter(|attempt| !attempt.is_verified())
+        let Some(attempt) = provider.snap_attempt()?.filter(|attempt| attempt.is_unfinished())
         else {
             return Ok(None)
         };
@@ -123,9 +135,13 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
 
     // Rebuilds the trie from the downloaded state up to `pivot`, committing the stage's progress
     // in chunks so a restart resumes it. The stage checks the root against the pivot's header.
-    fn rebuild_trie(&self, pivot: BlockNumHash) -> Result<(), PipelineError> {
+    fn rebuild_trie(
+        &self,
+        pivot: BlockNumHash,
+        stop: &CancellationToken,
+    ) -> Result<(), PipelineError> {
         let mut stage = MerkleStage::default_execution();
-        loop {
+        while !stop.is_cancelled() {
             let provider = self.factory.database_provider_rw()?;
             let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute)?;
             let output =
@@ -133,9 +149,10 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
             provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint)?;
             provider.commit()?;
             if output.done {
-                return Ok(())
+                break
             }
         }
+        Ok(())
     }
 }
 
@@ -244,6 +261,33 @@ mod tests {
         assert_eq!(handoff, Handoff::PivotReorged);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stopped_rebuild_leaves_the_trie_unbuilt() {
+        let (factory, _) = downloading();
+        let pivot = factory.provider().unwrap().sealed_header(PIVOT).unwrap().unwrap().num_hash();
+        let stop = CancellationToken::new();
+        stop.cancel();
+
+        SnapHandoff::new(factory.clone()).rebuild(pivot, &stop).unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(), None);
+    }
+
+    #[test]
+    fn an_abandoned_attempt_is_not_an_interrupted_publish() {
+        let (factory, _) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.abandon_snap_attempt().unwrap();
+        provider.anchor_pruned_static_files(PIVOT).unwrap();
+        provider.commit().unwrap();
+
+        SnapHandoff::new(factory.clone()).resume_interrupted_publish().unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), None);
     }
 
     #[test]
