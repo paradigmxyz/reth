@@ -167,7 +167,8 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         self.tx_ref().clear::<tables::BlockBodyIndices>()?;
         self.tx_ref().clear::<tables::TransactionBlocks>()?;
         // Their withdrawals and ommers are appended per block, so writing above the pivot again
-        // would fail on the rows left behind.
+        // would fail on the rows left behind. These are the Ethereum body tables, a chain storage
+        // with body tables of its own has to clear them as well.
         self.tx_ref().clear::<tables::BlockWithdrawals>()?;
         self.tx_ref().clear::<tables::BlockOmmers>()?;
         self.clear_transaction_lookup()?;
