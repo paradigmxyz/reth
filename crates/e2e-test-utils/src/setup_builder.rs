@@ -39,7 +39,11 @@ use tracing::{span, Instrument, Level};
 /// Once launched, each node receives a forkchoice update that makes genesis the head, safe and
 /// finalized block, unless [dev mining](Self::with_dev_mining) is enabled.
 ///
-/// Configuration and tree configuration modifiers are applied in the order they are added.
+/// Configuration and tree configuration modifiers are applied in the order they are added. Like
+/// for a node launched from the command line, the tree configuration of a node is derived from its
+/// final node configuration, see [`NodeConfig::tree_config`], so the engine arguments and
+/// `--debug.skip-state-root` set by node configuration modifiers take effect. Tree configuration
+/// modifiers are applied last and take precedence over them.
 ///
 /// Use [`E2ETestSetupExt::test_setup_for`] to set up nodes on the [`test_chain_spec`] at a
 /// hardfork, or [`E2ETestSetupExt::test_setup`] for any other chain spec:
@@ -117,7 +121,9 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     /// Adds a modifier for the tree configuration.
     ///
     /// The closure receives the current tree config and returns a modified version. The base
-    /// config is the default config with a small cross block cache.
+    /// config is derived from the node configuration after all node configuration modifiers ran,
+    /// see [`NodeConfig::tree_config`]. Unless a node configuration modifier changes
+    /// `engine.cross_block_cache_size`, it uses a small cross block cache of 1 MiB.
     pub fn with_tree_config_modifier<G>(mut self, modifier: G) -> Self
     where
         G: Fn(TreeConfig) -> TreeConfig + Send + Sync + 'static,
@@ -128,7 +134,9 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
 
     /// Adds a modifier for the node configuration.
     ///
-    /// The closure receives the current node config and returns a modified version.
+    /// The closure receives the current node config and returns a modified version. Its engine
+    /// arguments and `debug.skip_state_root` configure the engine tree, unless a
+    /// [tree configuration modifier](Self::with_tree_config_modifier) overrides them.
     pub fn with_node_config_modifier<G>(mut self, modifier: G) -> Self
     where
         G: Fn(NodeConfig<N::ChainSpec>) -> NodeConfig<N::ChainSpec> + Send + Sync + 'static,
@@ -220,30 +228,22 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         );
         let dev_mining = self.dev_launcher.is_some();
         let launch = self.dev_launcher.unwrap_or(|args| Box::pin(launch_test_node::<N>(args)));
-        let runtime = self.runtime.unwrap_or_else(Runtime::test);
-        let attributes_generator = self.attributes_generator.unwrap_or_else(|| {
+        let runtime = self.runtime.clone().unwrap_or_else(Runtime::test);
+        let attributes_generator = self.attributes_generator.clone().unwrap_or_else(|| {
             let chain_spec = self.chain_spec.clone();
             Arc::new(move |timestamp| eth_payload_attributes(&chain_spec, timestamp).into())
         });
-        let tree_config = self
-            .tree_config_modifiers
-            .iter()
-            .fold(test_tree_config(), |config, modifier| modifier(config));
 
         let mut nodes = (0..self.num_nodes)
             .map(async |idx| {
-                let node_config = self.node_config_modifiers.iter().fold(
-                    test_node_config(self.chain_spec.clone())
-                        .with_storage(StorageArgs { v2: self.storage_v2 }),
-                    |config, modifier| modifier(config),
-                );
+                let (node_config, tree_config) = self.node_and_tree_config();
                 // The local miner of dev nodes drives forkchoice, unless a modifier disabled dev
                 // mode.
                 let mines = dev_mining && node_config.dev.dev;
                 let node = launch(LaunchArgs {
                     node_config,
                     runtime: runtime.clone(),
-                    tree_config: tree_config.clone(),
+                    tree_config,
                     datadir: reth_db::test_utils::tempdir_path(),
                     attributes_generator: attributes_generator.clone(),
                     dev_payload_attributes: self.dev_payload_attributes.clone(),
@@ -284,6 +284,23 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         ensure!(self.num_nodes == 1, "expected a single node setup, got {} nodes", self.num_nodes);
         let (mut nodes, wallet) = self.build().await?;
         Ok((nodes.pop().expect("one node was launched"), wallet))
+    }
+
+    /// Returns the configuration of a test node and the tree configuration derived from it.
+    ///
+    /// The node configuration modifiers run first, the tree configuration modifiers are applied to
+    /// the tree configuration of the resulting node configuration.
+    fn node_and_tree_config(&self) -> (NodeConfig<N::ChainSpec>, TreeConfig) {
+        let node_config = self.node_config_modifiers.iter().fold(
+            test_node_config(self.chain_spec.clone())
+                .with_storage(StorageArgs { v2: self.storage_v2 }),
+            |config, modifier| modifier(config),
+        );
+        let tree_config = self
+            .tree_config_modifiers
+            .iter()
+            .fold(node_config.tree_config(), |config, modifier| modifier(config));
+        (node_config, tree_config)
     }
 }
 
@@ -361,15 +378,11 @@ pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
     pub(crate) dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
 }
 
-/// Returns the base tree configuration of test nodes.
-pub(crate) fn test_tree_config() -> TreeConfig {
-    TreeConfig::default().with_cross_block_cache_size(1024 * 1024)
-}
-
 /// Returns the base configuration of a test node.
 ///
 /// Discovery is disabled, all ports are unused, all RPC modules except `testing` are served over
-/// HTTP and the node reports an idle sync state from startup.
+/// HTTP, the node reports an idle sync state from startup and the engine uses a cross block cache
+/// of 1 MiB.
 pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     let mut config = NodeConfig::new(chain_spec)
         .with_network(NetworkArgs {
@@ -386,6 +399,9 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     // Nodes otherwise report that they are syncing until their first canonical block, which
     // e.g. stops transaction gossip.
     config.debug.startup_sync_state_idle = true;
+    // The cross block cache is allocated up front, and the default of 4 GiB is far more than tests
+    // need. The size is in MiB.
+    config.engine.cross_block_cache_size = 1;
     config
 }
 
@@ -449,4 +465,45 @@ fn test_node_builder<N: NodeBuilderHelper>(
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons());
     (builder, datadir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_node_ethereum::EthereumNode;
+
+    #[test]
+    fn tree_config_uses_small_cross_block_cache() {
+        let (_, tree_config) =
+            EthereumNode::test_setup_for(EthereumHardfork::Cancun).node_and_tree_config();
+        assert_eq!(tree_config.cross_block_cache_size(), 1024 * 1024);
+    }
+
+    #[test]
+    fn tree_config_follows_node_config() {
+        let (_, tree_config) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+            .with_node_config_modifier(|mut config| {
+                config.engine.cross_block_cache_size = 2;
+                config.engine.persistence_threshold = 0;
+                config.debug.skip_state_root = true;
+                config
+            })
+            .node_and_tree_config();
+        assert_eq!(tree_config.cross_block_cache_size(), 2 * 1024 * 1024);
+        assert_eq!(tree_config.persistence_threshold(), 0);
+        assert!(tree_config.skip_state_root());
+    }
+
+    #[test]
+    fn tree_config_modifiers_override_node_config() {
+        // Tree config modifiers apply last, even if they are added before node config modifiers.
+        let (_, tree_config) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+            .with_tree_config_modifier(|config| config.with_state_root_fallback(false))
+            .with_node_config_modifier(|mut config| {
+                config.engine.state_root_fallback = true;
+                config
+            })
+            .node_and_tree_config();
+        assert!(!tree_config.state_root_fallback());
+    }
 }
