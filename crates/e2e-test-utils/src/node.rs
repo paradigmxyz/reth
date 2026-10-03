@@ -1,4 +1,5 @@
 use crate::{
+    engine::EngineTestContext,
     network::NetworkTestContext,
     payload::PayloadTestContext,
     rpc::RpcTestContext,
@@ -72,6 +73,9 @@ where
     pub network: NetworkTestContext<Node::Network>,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
+    /// Context for sending payloads and forkchoice updates to the engine independent of the
+    /// Engine API version.
+    pub engine: EngineTestContext<<Node::Types as NodeTypes>::Payload>,
     /// Canonical state events.
     pub canonical_stream: CanonStateNotificationStream<PrimitivesTy<Node::Types>>,
     /// Which blocks [`Self::import_payload`] marks as safe and finalized.
@@ -108,6 +112,7 @@ where
             payload,
             network: NetworkTestContext::new(node.network.clone()),
             rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
+            engine: EngineTestContext::new(node.add_ons_handle.beacon_engine_handle),
             canonical_stream: node.provider.canonical_state_stream(),
             finality: Finality::default(),
         })
@@ -948,6 +953,13 @@ mod tests {
         assert_send(node.advance_blocks(0));
         assert_send(node.advance_until_receipt(B256::ZERO));
         assert_send(node.advance_while(async {}));
+        assert_send(node.engine.new_payload(payload.clone()));
+        assert_send(node.engine.new_payload_from_block(payload.block().clone(), None));
+        assert_send(node.engine.forkchoice_updated(ForkchoiceState::default()));
+        assert_send(node.engine.forkchoice_updated_with_attributes(
+            ForkchoiceState::default(),
+            <EthEngineTypes as PayloadTypes>::PayloadAttributes::default(),
+        ));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
