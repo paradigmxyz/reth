@@ -30,6 +30,7 @@ use tracing::{span, Instrument, Level};
 /// Builder for configuring and launching test node setups.
 ///
 /// By default, the nodes:
+/// - are [`Default`] instances of `N`, see [`Self::with_node`],
 /// - run on a shared [`Runtime::test`] runtime,
 /// - build payloads with [`eth_payload_attributes`] for the hardforks active in the chain spec,
 ///   unless created with [`Self::new_with_attributes_generator`],
@@ -67,6 +68,8 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     storage_v2: bool,
     dev_launcher: Option<NodeLauncher<N>>,
     dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
+    node_factory: NodeFactory<N>,
+    node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
 }
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
@@ -110,6 +113,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             storage_v2: StorageArgs::default().v2,
             dev_launcher: None,
             dev_payload_attributes: None,
+            node_factory: Arc::new(|_| N::default()),
+            node_builder_modifiers: Vec::new(),
         }
     }
 
@@ -249,6 +254,41 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         self
     }
 
+    /// Sets the factory of the node instances, which is called with the index of each node when it
+    /// is launched.
+    ///
+    /// Defaults to [`Default::default`]. Use this to configure the node type, or to keep a handle
+    /// of the node instance, e.g. one that reads state of the node once it is launched.
+    pub fn with_node<F>(mut self, node: F) -> Self
+    where
+        F: Fn(usize) -> N + Send + Sync + 'static,
+    {
+        self.node_factory = Arc::new(node);
+        self
+    }
+
+    /// Adds a modifier for the node builder of each test node.
+    ///
+    /// The closure receives the [`TestNodeBuilder`] after the node types, components and add-ons
+    /// are configured, and returns it to be launched. It can e.g. install an `ExEx` with
+    /// [`install_exex`](NodeBuilderWithComponents::install_exex), extend the RPC modules with
+    /// [`extend_rpc_modules`](NodeBuilderWithComponents::extend_rpc_modules), set the
+    /// `on_component_initialized`, `on_node_started` and `on_rpc_started` hooks, or modify the
+    /// add-ons with [`map_add_ons`](NodeBuilderWithComponents::map_add_ons).
+    ///
+    /// Modifiers are applied to every node in the order they are added. The node builder keeps a
+    /// single hook of each kind, so a modifier that sets e.g. the `extend_rpc_modules` hook
+    /// replaces the one set by an earlier modifier. The datadir and tree configuration of the node
+    /// are derived before the modifiers run, so change the node configuration with
+    /// [`Self::with_node_config_modifier`] instead of `builder.config`.
+    pub fn with_node_builder_modifier<G>(mut self, modifier: G) -> Self
+    where
+        G: Fn(TestNodeBuilder<N>) -> TestNodeBuilder<N> + Send + Sync + 'static,
+    {
+        self.node_builder_modifiers.push(Arc::new(modifier));
+        self
+    }
+
     /// Builds and launches the test nodes.
     pub async fn build(self) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
         ensure!(
@@ -267,6 +307,9 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                 // mode.
                 let mines = dev_mining && node_config.dev.dev;
                 let node = launch(LaunchArgs {
+                    idx,
+                    node_factory: self.node_factory.clone(),
+                    node_builder_modifiers: self.node_builder_modifiers.clone(),
                     node_config,
                     runtime: runtime.clone(),
                     tree_config,
@@ -340,6 +383,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("node_config_modifiers", &self.node_config_modifiers.len())
             .field("storage_v2", &self.storage_v2)
             .field("dev_mining", &self.dev_launcher.is_some())
+            .field("node_builder_modifiers", &self.node_builder_modifiers.len())
             .finish_non_exhaustive()
     }
 }
@@ -384,18 +428,33 @@ pub(crate) type AttributesGenerator<N> = Arc<dyn Fn(u64) -> PayloadAttrTy<N> + S
 /// Closure that maps payload attributes.
 type PayloadAttributesMapper<N> = Arc<dyn Fn(PayloadAttrTy<N>) -> PayloadAttrTy<N> + Send + Sync>;
 
-/// Builder of a test node that is ready to be launched.
-type TestNodeBuilder<N> = NodeBuilderWithComponents<
+/// Builder of a test node with the node types, components and add-ons of `N`, which is ready to
+/// be launched.
+///
+/// This is what [`E2ETestSetupBuilder::with_node_builder_modifier`] receives.
+pub type TestNodeBuilder<N> = NodeBuilderWithComponents<
     TmpNodeAdapter<N>,
     <N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder,
     <N as Node<TmpNodeAdapter<N>>>::AddOns,
 >;
+
+/// Closure that returns the node instance of the test node with the given index.
+type NodeFactory<N> = Arc<dyn Fn(usize) -> N + Send + Sync>;
+
+/// Closure that modifies the node builder of each test node.
+type NodeBuilderModifier<N> = Arc<dyn Fn(TestNodeBuilder<N>) -> TestNodeBuilder<N> + Send + Sync>;
 
 /// Function that launches a single test node.
 type NodeLauncher<N> = fn(LaunchArgs<N>) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>;
 
 /// Arguments for launching a single test node.
 pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
+    /// The index of the node in the setup.
+    pub(crate) idx: usize,
+    /// Factory of the node instance, called with the index of the node.
+    pub(crate) node_factory: NodeFactory<N>,
+    /// Modifiers for the node builder, applied in order.
+    pub(crate) node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
     /// The node configuration.
     pub(crate) node_config: NodeConfig<N::ChainSpec>,
     /// The runtime to launch the node on.
@@ -441,8 +500,19 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
 pub(crate) async fn launch_test_node<N: NodeBuilderHelper>(
     args: LaunchArgs<N>,
 ) -> eyre::Result<NodeHelperType<N>> {
-    let LaunchArgs { node_config, runtime, tree_config, datadir, attributes_generator, .. } = args;
-    let (builder, datadir) = test_node_builder::<N>(node_config, datadir);
+    let LaunchArgs {
+        idx,
+        node_factory,
+        node_builder_modifiers,
+        node_config,
+        runtime,
+        tree_config,
+        datadir,
+        attributes_generator,
+        ..
+    } = args;
+    let (builder, datadir) =
+        test_node_builder(node_factory(idx), node_config, datadir, &node_builder_modifiers);
     let NodeHandle { node, node_exit_future: _ } =
         builder.launch_with(EngineNodeLauncher::new(runtime, datadir, tree_config)).await?;
 
@@ -455,6 +525,9 @@ where
     N: NodeBuilderHelper + DebugNode<Adapter<N>>,
 {
     let LaunchArgs {
+        idx,
+        node_factory,
+        node_builder_modifiers,
         node_config,
         runtime,
         tree_config,
@@ -462,7 +535,8 @@ where
         attributes_generator,
         dev_payload_attributes,
     } = args;
-    let (builder, datadir) = test_node_builder::<N>(node_config, datadir);
+    let (builder, datadir) =
+        test_node_builder(node_factory(idx), node_config, datadir, &node_builder_modifiers);
     let launch = builder.launch_with(DebugNodeLauncher::new(EngineNodeLauncher::new(
         runtime,
         datadir,
@@ -477,25 +551,28 @@ where
     NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await
 }
 
-/// Returns the builder of a test node with a temporary database in `datadir`, and the resolved
-/// datadir of the node.
+/// Returns the builder of the test node `node` with a temporary database in `datadir` and the
+/// node builder modifiers applied, and the resolved datadir of the node.
 ///
 /// The datadir is removed when the node is dropped.
 fn test_node_builder<N: NodeBuilderHelper>(
+    node: N,
     node_config: NodeConfig<N::ChainSpec>,
     datadir: PathBuf,
+    node_builder_modifiers: &[NodeBuilderModifier<N>],
 ) -> (TestNodeBuilder<N>, ChainPath<DataDirPath>) {
     let datadir_args =
         DatadirArgs { datadir: MaybePlatformPath::from(datadir), ..node_config.datadir.clone() };
     let node_config = node_config.with_datadir_args(datadir_args);
     let datadir = node_config.datadir();
     let database = reth_db::test_utils::create_test_rw_db_with_datadir(datadir.data_dir());
-    let node = N::default();
     let builder = NodeBuilder::new(node_config)
         .with_database(database)
         .with_types_and_provider::<N, BlockchainProvider<_>>()
         .with_components(node.components_builder())
         .with_add_ons(node.add_ons());
+    let builder =
+        node_builder_modifiers.iter().fold(builder, |builder, modifier| modifier(builder));
     (builder, datadir)
 }
 
@@ -549,5 +626,21 @@ mod tests {
         E2ETestSetupBuilder::new_with_attributes_generator(1, chain_spec, attributes_generator)
             .build()
             .await
+    }
+
+    /// The node builder modifier can use the hooks of the node builder for any node.
+    #[expect(dead_code)]
+    fn node_builder_modifier_can_use_builder_hooks<N: NodeBuilderHelper>(
+        setup: E2ETestSetupBuilder<N>,
+    ) -> E2ETestSetupBuilder<N> {
+        setup.with_node_builder_modifier(|builder| {
+            builder
+                .on_component_initialized(|_| Ok(()))
+                .on_node_started(|_| Ok(()))
+                .on_rpc_started(|_, _| Ok(()))
+                .extend_rpc_modules(|_| Ok(()))
+                .map_add_ons(|add_ons| add_ons)
+                .install_exex("exex", |_| async { Ok(async { Ok(()) }) })
+        })
     }
 }
