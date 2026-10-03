@@ -27,7 +27,8 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt, NodeHelperType,
+    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
+    NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -149,17 +150,11 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
         let hashes = [*first.tx_hash(), receipt.transaction_hash];
         let mut expected = Vec::new();
         if prewarm {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
-                    let (_, bal) =
-                        cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
-                    if bal.is_some() {
-                        return Ok::<_, eyre::Report>(());
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
+            poll_until(format!("prewarmed block access list of block {block_hash}"), || async {
+                let (_, bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+                Ok(bal.is_some().then_some(()))
             })
-            .await??;
+            .await?;
         } else {
             assert!(cache
                 .get_recovered_block_and_maybe_bal(block_hash)
