@@ -219,13 +219,13 @@ Computes the state root that results from applying the given `HashedPostState` o
 
 ## `debug_storageRangeAt`
 
-Returns a page of an account's storage as of the state the transaction at `tx_index` runs on, i.e. after executing the first `tx_index` transactions of the block. Passing the block's transaction count selects the state after its last transaction.
+Returns a page of an account's storage as of the state the transaction at `tx_index` runs on, i.e. after the block's pre-execution system calls and its first `tx_index` transactions; withdrawals and post-block system calls are not applied. Passing the block's transaction count selects the state after its last transaction.
 
 Slots are keyed and ordered by the keccak256 hash of their storage key. `key_start` is the hashed key, or a prefix of it, to start from: pass `0x` for the first page and the returned `nextKey` for the following ones. At most `limit` slots are returned, capped at 4096, and `nextKey` is `null` once the storage is exhausted.
 
-Reth stores no storage key preimages, so the `key` of a slot is `null` unless one of the replayed transactions accessed it.
+Reth stores no storage key preimages, so `key` is `null` unless the replay accessed the slot.
 
-The storage is read from the state of the parent block, which is only available for blocks still held in memory and for the most recent 128 persisted blocks. Older blocks return an error.
+The parent block's state must still be in memory or among the most recent 128 persisted blocks; otherwise the call returns an error.
 
 | Client | Method invocation                                                                            |
 | ------ | -------------------------------------------------------------------------------------------- |
