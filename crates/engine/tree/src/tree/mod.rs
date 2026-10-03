@@ -862,6 +862,7 @@ where
     /// so they are buffered (stored in memory) until their parent blocks are synced.
     ///
     /// Returns:
+    /// - `Valid`: Block is already known, so it is not validated again
     /// - `Syncing`: Payload successfully buffered
     /// - Error status: Payload is malformed or invalid
     fn try_buffer_payload(
@@ -874,6 +875,9 @@ where
         match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
+                if self.is_block_known(num_hash).map_err(InsertBlockFatalError::from)? {
+                    return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, Some(num_hash.hash)))
+                }
                 if let Err(error) = self.buffer_block(block) {
                     self.on_insert_block_error(error)
                 } else {
@@ -2726,6 +2730,14 @@ where
         Ok(())
     }
 
+    /// Returns whether the block is in the tree or the database.
+    fn is_block_known(&self, block: BlockNumHash) -> ProviderResult<bool> {
+        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
+        Ok(self.state.tree_state.contains_hash(&block.hash) ||
+            (block.number <= self.persistence_state.last_persisted_block.number &&
+                self.provider.sealed_header_by_hash(block.hash)?.is_some()))
+    }
+
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
@@ -3169,26 +3181,16 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        // Check if block already exists - first in memory, then DB only if it could be persisted
-        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-            convert_to_block(self, input)?;
-            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-        }
-
-        // Only query DB if block could be persisted (number <= last persisted block).
-        // New blocks from CL always have number > last persisted, so skip DB lookup for them.
-        if block_num_hash.number <= self.persistence_state.last_persisted_block.number {
-            match self.provider.sealed_header_by_hash(block_num_hash.hash) {
-                Err(err) => {
-                    let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
-                }
-                Ok(Some(_)) => {
-                    convert_to_block(self, input)?;
-                    return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
-                }
-                Ok(None) => {}
+        match self.is_block_known(block_num_hash) {
+            Ok(true) => {
+                convert_to_block(self, input)?;
+                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
             }
+            Err(err) => {
+                let block = convert_to_block(self, input)?;
+                return Err(InsertBlockError::new(block.split().0, err.into()).into());
+            }
+            Ok(false) => {}
         }
 
         // Ensure that the parent state is available.
