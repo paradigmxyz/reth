@@ -27,8 +27,10 @@
 mod context;
 mod handoff;
 mod run;
+mod selection;
 
 pub use handoff::{Handoff, SnapHandoff};
+pub use selection::{EthereumBackfill, EthereumBackfillSync};
 
 use alloy_primitives::B256;
 use futures::FutureExt;
