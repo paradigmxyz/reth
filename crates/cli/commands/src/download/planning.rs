@@ -207,12 +207,11 @@ pub(crate) fn collect_planned_archives(
         };
 
         if let Some(ComponentManifest::Chunked(chunked)) = manifest.component(*ty) &&
-            !chunked.chunk_files_are_consistent()
+            let Some((field, len)) = chunked.chunk_lengths_mismatch()
         {
             eyre::bail!(
-                "Invalid modular manifest: {} chunk_files length ({}) does not match chunk count ({})",
+                "Invalid modular manifest: {} {field} length ({len}) does not match chunk count ({})",
                 ty.key(),
-                chunked.chunk_files.len(),
                 chunked.num_chunks()
             );
         }
@@ -505,6 +504,52 @@ mod tests {
         assert!(
             err.to_string().contains("chunk_files length"),
             "expected chunk_files length error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn collect_planned_archives_rejects_mismatched_chunk_sizes_length() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "transactions".to_string(),
+            ComponentManifest::Chunked(ChunkedArchive {
+                blocks_per_file: 500_000,
+                total_blocks: 1_000_000,
+                chunk_sizes: vec![20],
+                chunk_decompressed_sizes: vec![200, 300],
+                chunk_files: vec![],
+                chunk_output_files: vec![
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-0".to_string(),
+                        size: 200,
+                        blake3: "h1".to_string(),
+                    }],
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-1".to_string(),
+                        size: 300,
+                        blake3: "h2".to_string(),
+                    }],
+                ],
+            }),
+        );
+
+        let manifest = SnapshotManifest {
+            block: 1_000_000,
+            chain_id: 1,
+            storage_version: 2,
+            timestamp: 0,
+            base_url: Some("https://example.com/mainnet".to_string()),
+            reth_version: None,
+            components,
+            extensions: Default::default(),
+        };
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::All)]);
+
+        let err = collect_planned_archives(&manifest, &selections).unwrap_err();
+        assert!(
+            err.to_string().contains("chunk_sizes length (1) does not match chunk count (2)"),
+            "expected chunk_sizes length error, got: {err}"
         );
     }
 }
