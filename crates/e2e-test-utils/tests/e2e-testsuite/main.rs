@@ -1,7 +1,7 @@
 //! Example tests using the test suite framework.
 
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
@@ -9,9 +9,9 @@ use reth_e2e_test_utils::{
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
-            expect_fcu_valid, Action, AssertChainTip, AssertMineBlock, BlockReference,
-            CaptureBlock, CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock,
-            MakeCanonical, ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
+            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
+            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
@@ -58,32 +58,6 @@ async fn test_apply_with_import() -> Result<()> {
     // Make the imported chain canonical first
     let mut make_canonical = MakeCanonical::new();
     make_canonical.execute(&mut env).await?;
-
-    // Imported blocks are already readable from the database while the engine may still be
-    // syncing. Wait for the engine to accept the imported head before building on top of it.
-    let head = test_blocks.last().expect("imported blocks").hash();
-    let engine = env.node_clients[0].engine.http_client();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let response =
-                reth_rpc_api::clients::EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-                    &engine,
-                    ForkchoiceState {
-                        head_block_hash: head,
-                        safe_block_hash: head,
-                        finalized_block_hash: B256::ZERO,
-                    },
-                    None,
-                )
-                .await?;
-            if !response.is_syncing() {
-                return expect_fcu_valid(&response, "imported head");
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .map_err(|_| eyre::eyre!("Timeout waiting for engine to accept imported head"))??;
 
     // Update block info again after making canonical
     let mut update_block_info_2 = UpdateBlockInfo::default();

@@ -359,7 +359,7 @@ where
         self
     }
 
-    /// Set the test setup with chain import from RLP file
+    /// Set the test setup with chain import from RLP file, see [`Setup::apply_with_import`].
     pub fn with_setup_and_import(
         mut self,
         mut setup: Setup<I>,
