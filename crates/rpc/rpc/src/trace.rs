@@ -129,10 +129,10 @@ where
             .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
-        let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
+        let at = block_id.unwrap_or_default();
 
         self.eth_api()
-            .spawn_with_state_at_block(at, move |this, mut db| {
+            .spawn_with_state_and_env_at_block(at, move |this, mut db, evm_env| {
                 let mut inspector =
                     TracingInspector::new(TracingInspectorConfig::from_parity_config(&trace_types));
                 let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
@@ -155,11 +155,9 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or_default();
-        let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
-
         // execute all transactions on top of each other and record the traces
         self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, mut db| {
+            .spawn_with_state_and_env_at_block(at, move |eth_api, mut db, evm_env| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
@@ -889,6 +887,7 @@ mod tests {
         },
         BlockWriter, StageCheckpointWriter,
     };
+    use reth_rpc_eth_types::builder::config::PendingBlockKind;
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
@@ -903,12 +902,14 @@ mod tests {
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        // The mock provider cannot open a local pending block's state.
         let eth_api = EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
         )
+        .pending_block_kind(PendingBlockKind::None)
         .build();
         let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
         let calls = vec![(TransactionRequest::default().to(target), HashSet::default())];
