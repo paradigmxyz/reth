@@ -1369,4 +1369,22 @@ mod tests {
         provider.commit().unwrap();
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(false).is_ok());
     }
+
+    #[test]
+    fn the_legacy_layout_only_refuses_snap_when_snap_would_run() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+
+        // A fresh database would snap sync into a layout snap can't write.
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
+
+        // Executed state keeps the staged pipeline, so its layout doesn't matter.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42)).unwrap();
+        provider.commit().unwrap();
+        assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
+    }
 }

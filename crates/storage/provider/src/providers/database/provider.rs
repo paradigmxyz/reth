@@ -1500,18 +1500,31 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         }
     }
 
-    /// Refuses a database the selected sync can't continue: snap needs the hashed state layout,
-    /// and only snap can finish an unverified snap attempt.
+    /// Refuses a database the selected sync can't continue: snap needs the hashed state layout
+    /// when it runs, and only snap can finish an unverified snap attempt.
     pub fn ensure_sync_mode(&self, snap: bool) -> ProviderResult<()> {
-        if snap {
+        // Snap runs on an unverified attempt or a database with nothing executed; anything else
+        // continues with the staged pipeline, whatever its layout.
+        let snap_runs = match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                if !snap {
+                    return Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+                }
+                true
+            }
+            Some(_) => false,
+            None => {
+                snap && self
+                    .get_stage_checkpoint(StageId::Execution)?
+                    .unwrap_or_default()
+                    .block_number ==
+                    0
+            }
+        };
+        if snap_runs {
             self.ensure_snap_sync_layout()?;
         }
-        match self.snap_attempt()? {
-            Some(attempt) if !snap && !attempt.is_verified() => {
-                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
-            }
-            _ => Ok(()),
-        }
+        Ok(())
     }
 }
 
