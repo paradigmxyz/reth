@@ -74,7 +74,8 @@ where
                 self.runtime.clone(),
                 context,
             )
-            .with_cancellation(run_stop.clone());
+            .with_cancellation(run_stop.clone())
+            .with_shutdown(self.stop.clone());
             let outcome = {
                 let mut run = pin!(session.run());
                 tokio::select! {
