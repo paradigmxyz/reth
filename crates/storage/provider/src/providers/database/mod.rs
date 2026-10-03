@@ -1374,6 +1374,9 @@ mod tests {
     fn the_legacy_layout_only_refuses_snap_when_snap_would_run() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_storage_settings(StorageSettings::v1()).unwrap();
+        provider.commit().unwrap();
 
         // A fresh database would snap sync into a layout snap can't write.
         assert!(matches!(
@@ -1385,6 +1388,14 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42)).unwrap();
         provider.commit().unwrap();
+        assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
+    }
+
+    #[test]
+    fn a_database_before_genesis_allows_snap() {
+        // Settings are stored at genesis, after startup recovery already ran.
+        let factory = create_test_provider_factory();
+
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
     }
 }
