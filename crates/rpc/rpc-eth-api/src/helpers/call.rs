@@ -38,7 +38,7 @@ use reth_rpc_eth_types::{
     cache::db::attach_bal_before_tx,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
+    EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
@@ -928,13 +928,29 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let mut cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
+                let mut cap = self.caller_gas_allowance(&mut *db, &evm_env, &tx_env)?;
                 // The allowance must not raise the already applied RPC gas cap.
                 if self.call_gas_limit() != 0 {
                     cap = cap.min(tx_env.gas_limit());
                 }
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
+            }
+        }
+
+        // Without fee charging the EVM skips the funding check, so reject a value the sender
+        // cannot afford before execution, as a transaction would be.
+        if evm_env.cfg_env.disable_fee_charge && !tx_env.value().is_zero() {
+            let balance = db
+                .basic(tx_env.caller())
+                .map_err(EthApiError::from)?
+                .map(|acc| acc.balance)
+                .unwrap_or_default();
+            if balance < tx_env.value() {
+                return Err(EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::InsufficientFunds { cost: tx_env.value(), balance },
+                )
+                .into())
             }
         }
 
