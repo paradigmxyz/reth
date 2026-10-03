@@ -1575,7 +1575,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Returns the first transaction number after `block`, or `None` if it can't be derived.
     ///
     /// Falls back to the `Bodies` prune checkpoint when bodies through `block` were never stored,
-    /// e.g. below a snap sync pivot.
+    /// e.g. below a snap sync pivot, where transaction numbers restart at 0.
     fn next_tx_num_after<Provider>(
         provider: &Provider,
         block: BlockNumber,
@@ -1588,8 +1588,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
         Ok(provider
             .get_prune_checkpoint(PruneSegment::Bodies)?
-            .filter(|pruned| pruned.block_number.is_some_and(|pruned| pruned >= block))
-            .map(|pruned| pruned.tx_number.map_or(0, |tx| tx + 1)))
+            .filter(|pruned| {
+                pruned.tx_number.is_none() &&
+                    pruned.block_number.is_some_and(|pruned| pruned >= block)
+            })
+            .map(|_| 0))
     }
 
     /// Checks consistency of the latest static file segment and throws an

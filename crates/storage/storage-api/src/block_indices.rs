@@ -18,7 +18,8 @@ pub trait BlockBodyIndicesProvider: Send {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>>;
 
-    /// Returns the first transaction number after `block`, including when its body was pruned.
+    /// Returns the first transaction number after `block`, including when its body indices were
+    /// never written, e.g. at a snap sync pivot.
     fn next_tx_num_after_block(&self, block: BlockNumber) -> ProviderResult<TxNumber> {
         if let Some(indices) = self.block_body_indices(block)? {
             return Ok(indices.next_tx_num())

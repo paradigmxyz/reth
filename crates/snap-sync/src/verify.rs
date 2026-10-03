@@ -159,10 +159,17 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
     where
         Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
     {
+        if pivot == 0 {
+            return Err(SnapSyncError::GenesisPivot)
+        }
         // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
         // transaction segments no longer hold.
         self.tx_ref().clear::<tables::BlockBodyIndices>()?;
         self.tx_ref().clear::<tables::TransactionBlocks>()?;
+        // Their withdrawals and ommers are appended per block, so writing above the pivot again
+        // would fail on the rows left behind.
+        self.tx_ref().clear::<tables::BlockWithdrawals>()?;
+        self.tx_ref().clear::<tables::BlockOmmers>()?;
         self.clear_transaction_lookup()?;
 
         let checkpoint = StageCheckpoint::new(pivot);
@@ -295,6 +302,7 @@ mod tests {
         SnapGeneration, SnapStorageStore, StorageChunk,
     };
     use alloy_consensus::TxLegacy;
+    use alloy_eips::eip4895::{Withdrawal, Withdrawals};
     use alloy_primitives::{map::B256Map, Bytes, Signature, U256};
     use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
@@ -594,6 +602,14 @@ mod tests {
     }
 
     #[test]
+    fn publishing_refuses_the_genesis_pivot() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        assert!(matches!(provider.publish_snap_state(0), Err(SnapSyncError::GenesisPivot)));
+    }
+
+    #[test]
     fn publishing_records_the_history_below_the_pivot_as_pruned() {
         let factory = hashed_factory();
         let provider = factory.database_provider_rw().unwrap();
@@ -604,6 +620,42 @@ mod tests {
             let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
             assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
         }
+    }
+
+    #[test]
+    fn bodies_downloaded_past_the_pivot_can_be_written_again_after_publishing() {
+        let factory = hashed_factory();
+        insert_chain(&factory, B256::ZERO);
+        let body = BlockBody {
+            withdrawals: Some(Withdrawals::new(vec![Withdrawal::default()])),
+            ..Default::default()
+        };
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .append_block_bodies(vec![
+                (0, None),
+                (1, Some(&body)),
+                (2, Some(&body)),
+                (3, Some(&body)),
+            ])
+            .unwrap();
+        provider.commit().unwrap();
+
+        // Publish at block 1 and reset the transaction file to it, as the caller does.
+        let static_files = factory.static_file_provider();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.publish_snap_state(1).unwrap();
+        static_files.delete_segment(StaticFileSegment::Transactions).unwrap();
+        static_files
+            .latest_writer(StaticFileSegment::Transactions)
+            .unwrap()
+            .ensure_at_block(1)
+            .unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+        provider.commit().unwrap();
     }
 
     #[test]
