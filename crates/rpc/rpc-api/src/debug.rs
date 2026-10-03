@@ -364,9 +364,14 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
     /// specifying the offset via `keyStart` (hash of storage key).
     ///
-    /// The state is the one after executing the first `txIdx` transactions of the block, i.e. the
-    /// state the transaction at `txIdx` runs on, matching geth. Passing the block's transaction
-    /// count addresses the state after its last transaction.
+    /// The state is the one the transaction at `txIdx` runs on, matching geth: after the block's
+    /// pre-execution system calls and its first `txIdx` transactions; withdrawals and post-block
+    /// system calls are not applied. Passing the block's transaction count addresses the state
+    /// after its last transaction.
+    ///
+    /// A slot's `key` is `null` unless the replay accessed the slot. The parent block's state must
+    /// still be in memory or among the most recent 128 persisted blocks; otherwise the call returns
+    /// an error.
     #[method(name = "storageRangeAt")]
     async fn debug_storage_range_at(
         &self,
@@ -391,8 +396,8 @@ pub trait DebugApi<TxReq: RpcObject> {
 /// Result of `debug_storageRangeAt`: a page of one account's storage.
 ///
 /// This mirrors geth's `StorageRangeResult`, which is keyed by hashed storage key. The plain key
-/// is only known for slots the replayed transactions touched and is `None` otherwise, just like
-/// geth reports slots whose preimage it is missing.
+/// is only known for slots the replay accessed and is `None` otherwise, the same way geth reports
+/// a slot whose preimage it lacks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HashedStorageRangeResult {

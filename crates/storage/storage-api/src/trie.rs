@@ -124,12 +124,13 @@ pub struct RangeResponse<T> {
 /// Caps on how much a [`StateRangeProvider`] range query reads.
 ///
 /// Both caps are enforced, whichever is hit first: `max_items` bounds the number of entries the
-/// cursor walks, `response_bytes` bounds their cumulative encoded size.
+/// cursor walks, `response_bytes` is a byte budget for their encoded size that the last returned
+/// item may exceed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RangeLimits {
     /// Maximum number of items to return.
     pub max_items: usize,
-    /// Maximum cumulative size of the returned items, in bytes.
+    /// Byte budget for the returned items; the item that exceeds it is still included.
     pub response_bytes: usize,
 }
 

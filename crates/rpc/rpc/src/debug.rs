@@ -875,8 +875,8 @@ where
     /// Returns a page of `address`'s storage in hashed key order, as of the state the transaction
     /// at `tx_index` of the given block runs on.
     ///
-    /// The parent block's persisted storage is merged with the slots the replayed transactions
-    /// touched, which is also where the returned key preimages come from. A page holds at most
+    /// The parent block's persisted storage is merged with the slots the replay touched, which is
+    /// also where the returned key preimages come from. A page holds at most
     /// `STORAGE_RANGE_MAX_RESULTS` slots.
     pub async fn debug_storage_range_at(
         &self,
