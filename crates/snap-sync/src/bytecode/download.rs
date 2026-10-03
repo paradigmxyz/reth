@@ -129,7 +129,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, byte_codes, generation, hashed_factory, insert_generation_headers, key,
-            state_root, verified_range, ScriptedSnapClient,
+            state_root, verified_range, verified_repair, ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore,
     };
@@ -217,6 +217,27 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
         assert!(coverage.is_complete());
+    }
+
+    #[tokio::test]
+    async fn a_repair_requests_only_the_code_of_its_account() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let write = range.write();
+        let (client, mut download) = download([byte_codes(1, &[code(2)])], factory);
+
+        // Key 2 holds no code, and the contract at key 3 only proves where its range ends.
+        let plain =
+            VerifiedRange::new(write, verified_repair(&accounts, 1..3, key(2), &[key(2), key(3)]));
+        assert!(matches!(download.next(&plain).await.unwrap(), BytecodeStep::Complete));
+        let contract =
+            VerifiedRange::new(write, verified_repair(&accounts, 3..4, key(4), &[key(4)]));
+        assert!(matches!(
+            download.next(&contract).await.unwrap(),
+            BytecodeStep::Committed { persisted: 1 }
+        ));
+
+        assert_eq!(*client.code_requests(), [vec![keccak256(code(2))]]);
     }
 
     #[tokio::test]

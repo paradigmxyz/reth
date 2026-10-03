@@ -208,6 +208,13 @@ Storage:
       --force
           Overwrite existing snapshot data by removing db, rocksdb, static_files, and reth.toml
 
+      --prune-unlisted
+          Remove files from db, rocksdb, static_files, and reth.toml that the selected snapshot plan does not list, then reuse the listed files that still verify.
+
+          Unlike `--force`, this keeps reusable snapshot files, so only missing or changed archives are downloaded. Unlike a plain re-run, the data dir ends up with exactly the snapshot's files, which is required when the node has written data past the snapshot block.
+
+          Components that are not selected are removed entirely, so `--prune-unlisted --minimal` over an archive node deletes its history. With `--non-interactive`, components must be selected explicitly with a preset or `--with-*` flags. reth.toml is always regenerated, which discards local edits. Symlinks below these paths are removed, not followed. Pruning refuses to run while a node holds the database lock, and happens before downloading, so a failed download leaves the data dir pruned, as with `--force`.
+
       --resumable [<RESUMABLE>]
           Enable resumable two-phase downloads (download to disk first, then extract).
 

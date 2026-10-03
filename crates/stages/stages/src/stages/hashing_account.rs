@@ -118,7 +118,7 @@ impl AccountHashingStage {
                 let prev_acc = Account {
                     nonce: nonce - 1,
                     balance: balance - U256::from(1),
-                    bytecode_hash: None,
+                    ..Default::default()
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, &acc_before_tx)?;
