@@ -157,11 +157,8 @@ where
             active_node_state.latest_header_time = fork_base_block.header.timestamp;
 
             // update fork choice state to the fork base
-            active_node_state.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: fork_base_block.header.hash,
-                safe_block_hash: fork_base_block.header.hash,
-                finalized_block_hash: fork_base_block.header.hash,
-            };
+            active_node_state.latest_fork_choice_state =
+                ForkchoiceState::same_hash(fork_base_block.header.hash);
 
             debug!(
                 "Set fork base to block {} (hash: {})",
@@ -192,11 +189,8 @@ where
             active_node_state.latest_header_time = block_info.timestamp;
 
             // update fork choice state to the fork base
-            active_node_state.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: block_info.hash,
-                safe_block_hash: block_info.hash,
-                finalized_block_hash: block_info.hash,
-            };
+            active_node_state.latest_fork_choice_state =
+                ForkchoiceState::same_hash(block_info.hash);
 
             debug!("Set fork base to block {} (hash: {})", block_info.number, block_info.hash);
 

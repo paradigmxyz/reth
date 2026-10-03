@@ -200,6 +200,10 @@ pub enum ProviderError {
         /// Version this build writes.
         supported: u32,
     },
+    /// Snap sync was selected on a database that predates the hashed state layout it downloads
+    /// into.
+    #[error("snap sync requires the hashed state layout, which this database predates")]
+    SnapStorageLayoutUnsupported,
     /// State a snap attempt is still downloading was about to be marked complete.
     #[error("snap attempt {attempt} has not verified the downloaded state")]
     UnverifiedSnapState {

@@ -1,11 +1,12 @@
 //! E2E tests for the testing RPC namespace.
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use jsonrpsee_core::client::ClientT;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_db::test_utils::create_test_rw_db;
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec};
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_builder::{NodeBuilder, NodeConfig};
 use reth_node_core::{
@@ -17,7 +18,7 @@ use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use serde_json::Value;
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 use tempfile::tempdir;
 use tokio::sync::oneshot;
 
@@ -54,15 +55,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 
             let chain = ctx.config().chain.clone();
             let parent_block_hash = chain.genesis_hash();
-            let payload_attributes = EthPayloadAttributes {
-                timestamp: chain.genesis().timestamp + 1,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: Address::ZERO,
-                withdrawals: None,
-                parent_beacon_block_root: None,
-                slot_number: None,
-                ..Default::default()
-            };
+            let payload_attributes = eth_payload_attributes(&chain, chain.genesis().timestamp + 1);
 
             let request = TestingBuildBlockRequestV1 {
                 parent_block_hash,
@@ -108,13 +101,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .amsterdam_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
     let config = NodeConfig::test()
         .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
@@ -136,16 +123,9 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             let chain = ctx.config().chain.clone();
             let timestamp = chain.genesis().timestamp + 1;
             let target_gas_limit = chain.genesis().gas_limit - 100;
-            #[allow(clippy::needless_update)]
             let payload_attributes = EthPayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-                slot_number: Some(timestamp),
                 target_gas_limit: Some(target_gas_limit),
-                ..Default::default()
+                ..eth_payload_attributes(&chain, timestamp)
             };
 
             tokio::spawn(async move {
