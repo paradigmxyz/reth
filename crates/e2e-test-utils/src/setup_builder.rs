@@ -7,6 +7,7 @@ use crate::{
     eth_payload_attributes, node::NodeTestContext, test_chain_spec, wallet::Wallet, Adapter,
     NodeBuilderHelper, NodeHelperType, TmpNodeAdapter,
 };
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::ensure;
 use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
@@ -31,6 +32,7 @@ use tracing::{span, Instrument, Level};
 /// By default, the nodes:
 /// - run on a shared [`Runtime::test`] runtime,
 /// - build payloads with [`eth_payload_attributes`] for the hardforks active in the chain spec,
+///   unless created with [`Self::new_with_attributes_generator`],
 /// - have discovery disabled, use unused ports and serve all RPC modules except `testing` over
 ///   HTTP,
 /// - report an idle sync state from startup, so they gossip transactions before their first block,
@@ -58,7 +60,7 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     runtime: Option<Runtime>,
-    attributes_generator: Option<AttributesGenerator<N>>,
+    attributes_generator: AttributesGenerator<N>,
     connect_nodes: bool,
     tree_config_modifiers: Vec<TreeConfigModifier>,
     node_config_modifiers: Vec<NodeConfigModifier<N::ChainSpec>>,
@@ -69,12 +71,39 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     /// Creates a new builder for `num_nodes` nodes of the given chain.
-    pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>) -> Self {
+    ///
+    /// The nodes build payloads with [`eth_payload_attributes`] for the chain spec, which requires
+    /// the payload attributes of the node to be convertible from Ethereum's. Use
+    /// [`Self::new_with_attributes_generator`] for other nodes.
+    pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>) -> Self
+    where
+        PayloadAttrTy<N>: From<PayloadAttributes>,
+    {
+        let attributes_chain_spec = chain_spec.clone();
+        Self::new_with_attributes_generator(num_nodes, chain_spec, move |timestamp| {
+            eth_payload_attributes(&attributes_chain_spec, timestamp).into()
+        })
+    }
+
+    /// Creates a new builder for `num_nodes` nodes of the given chain, whose payloads are built
+    /// with the attributes returned by `attributes_generator`, see
+    /// [`Self::with_attributes_generator`].
+    ///
+    /// Unlike [`Self::new`], this does not require the payload attributes of the node to be
+    /// convertible from Ethereum's.
+    pub fn new_with_attributes_generator<G>(
+        num_nodes: usize,
+        chain_spec: Arc<N::ChainSpec>,
+        attributes_generator: G,
+    ) -> Self
+    where
+        G: Fn(u64) -> PayloadAttrTy<N> + Send + Sync + 'static,
+    {
         Self {
             num_nodes,
             chain_spec,
             runtime: None,
-            attributes_generator: None,
+            attributes_generator: Arc::new(attributes_generator),
             connect_nodes: true,
             tree_config_modifiers: Vec::new(),
             node_config_modifiers: Vec::new(),
@@ -102,13 +131,14 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
 
     /// Sets the generator for the payload attributes of the payloads built by the test nodes.
     ///
-    /// The generator is called with the timestamp of the next payload. Defaults to
-    /// [`eth_payload_attributes`] for the chain spec of the setup.
+    /// The generator is called with the timestamp of the next payload. It replaces the generator
+    /// of the constructor, which is [`eth_payload_attributes`] for the chain spec of the setup for
+    /// [`Self::new`].
     pub fn with_attributes_generator<G>(mut self, generator: G) -> Self
     where
         G: Fn(u64) -> PayloadAttrTy<N> + Send + Sync + 'static,
     {
-        self.attributes_generator = Some(Arc::new(generator));
+        self.attributes_generator = Arc::new(generator);
         self
     }
 
@@ -229,10 +259,6 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         let dev_mining = self.dev_launcher.is_some();
         let launch = self.dev_launcher.unwrap_or(|args| Box::pin(launch_test_node::<N>(args)));
         let runtime = self.runtime.clone().unwrap_or_else(Runtime::test);
-        let attributes_generator = self.attributes_generator.clone().unwrap_or_else(|| {
-            let chain_spec = self.chain_spec.clone();
-            Arc::new(move |timestamp| eth_payload_attributes(&chain_spec, timestamp).into())
-        });
 
         let mut nodes = (0..self.num_nodes)
             .map(async |idx| {
@@ -245,7 +271,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                     runtime: runtime.clone(),
                     tree_config,
                     datadir: reth_db::test_utils::tempdir_path(),
-                    attributes_generator: attributes_generator.clone(),
+                    attributes_generator: self.attributes_generator.clone(),
                     dev_payload_attributes: self.dev_payload_attributes.clone(),
                 })
                 .instrument(span!(Level::INFO, "node", idx))
@@ -320,18 +346,24 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
 
 /// Extension trait to create an [`E2ETestSetupBuilder`] from a node type.
 pub trait E2ETestSetupExt: NodeBuilderHelper {
-    /// Returns an [`E2ETestSetupBuilder`] for `num_nodes` nodes of this type.
-    fn test_setup(num_nodes: usize, chain_spec: Arc<Self::ChainSpec>) -> E2ETestSetupBuilder<Self> {
+    /// Returns an [`E2ETestSetupBuilder`] for `num_nodes` nodes of this type, see
+    /// [`E2ETestSetupBuilder::new`].
+    fn test_setup(num_nodes: usize, chain_spec: Arc<Self::ChainSpec>) -> E2ETestSetupBuilder<Self>
+    where
+        PayloadAttrTy<Self>: From<PayloadAttributes>,
+    {
         E2ETestSetupBuilder::new(num_nodes, chain_spec)
     }
 
     /// Returns an [`E2ETestSetupBuilder`] for a single node of this type on the
-    /// [`test_chain_spec`] with every hardfork up to and including `fork` active at genesis.
+    /// [`test_chain_spec`] with every hardfork up to and including `fork` active at genesis, see
+    /// [`E2ETestSetupBuilder::new`].
     ///
     /// Use [`E2ETestSetupBuilder::with_num_nodes`] to launch more nodes.
     fn test_setup_for(fork: EthereumHardfork) -> E2ETestSetupBuilder<Self>
     where
         Self::ChainSpec: From<ChainSpec>,
+        PayloadAttrTy<Self>: From<PayloadAttributes>,
     {
         let chain_spec = Arc::unwrap_or_clone(test_chain_spec(fork));
         E2ETestSetupBuilder::new(1, Arc::new(chain_spec.into()))
@@ -505,5 +537,17 @@ mod tests {
             })
             .node_and_tree_config();
         assert!(!tree_config.state_root_fallback());
+    }
+
+    /// Nodes whose payload attributes are not convertible from Ethereum's can be set up with an
+    /// explicit attributes generator.
+    #[expect(dead_code)]
+    async fn build_with_attributes_generator<N: NodeBuilderHelper>(
+        chain_spec: Arc<N::ChainSpec>,
+        attributes_generator: fn(u64) -> PayloadAttrTy<N>,
+    ) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
+        E2ETestSetupBuilder::new_with_attributes_generator(1, chain_spec, attributes_generator)
+            .build()
+            .await
     }
 }
