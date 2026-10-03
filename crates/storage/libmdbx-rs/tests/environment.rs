@@ -18,6 +18,47 @@ fn test_open() {
 }
 
 #[test]
+fn test_writemap_without_prefault_commit_abort_and_reopen() {
+    let dir = tempdir().unwrap();
+    {
+        let env =
+            Environment::builder().write_map().set_prefault_write(false).open(dir.path()).unwrap();
+        assert!(matches!(
+            env.info().unwrap().mode(),
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        ));
+
+        // Repeatedly replace overflow values so later transactions reuse freed pages.
+        for round in 0..4u8 {
+            let txn = env.begin_rw_txn().unwrap();
+            let dbi = txn.open_db(None).unwrap().dbi();
+            for key in 0..64u32 {
+                txn.put(dbi, key.to_be_bytes(), vec![round; 8192], WriteFlags::UPSERT).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        {
+            let txn = env.begin_rw_txn().unwrap();
+            let dbi = txn.open_db(None).unwrap().dbi();
+            txn.put(dbi, 0u32.to_be_bytes(), b"uncommitted", WriteFlags::UPSERT).unwrap();
+            // Dropping the transaction must preserve the previously committed value.
+        }
+
+        let ops = env.info().unwrap().page_ops();
+        assert_eq!(ops.prefault, 0);
+        assert_eq!(ops.mincore, 0);
+    }
+
+    let env = Environment::builder().set_flags(Mode::ReadOnly.into()).open(dir.path()).unwrap();
+    let txn = env.begin_ro_txn().unwrap();
+    let dbi = txn.open_db(None).unwrap().dbi();
+    for key in 0..64u32 {
+        assert_eq!(txn.get::<Vec<u8>>(dbi, &key.to_be_bytes()).unwrap(), Some(vec![3; 8192]));
+    }
+}
+
+#[test]
 fn test_begin_txn() {
     let dir = tempdir().unwrap();
 
