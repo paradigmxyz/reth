@@ -85,6 +85,7 @@ pub mod manifest;
 pub mod manifest_cmd;
 mod planning;
 mod progress;
+mod prune;
 mod session;
 mod source;
 mod tui;
@@ -101,6 +102,7 @@ use eyre::Result;
 use manifest::{ComponentSelection, SnapshotComponentType, SnapshotManifest};
 use planning::{collect_planned_archives, summarize_download_startup, PlannedDownloads};
 use progress::{DownloadProgress, DownloadRequestLimiter};
+use prune::prune_unlisted_outputs;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
@@ -127,7 +129,7 @@ const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
-const FORCE_REMOVED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
+const MANAGED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -427,6 +429,22 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, conflicts_with = "list")]
     force: bool,
 
+    /// Remove files from db, rocksdb, static_files, and reth.toml that the selected snapshot
+    /// plan does not list, then reuse the listed files that still verify.
+    ///
+    /// Unlike `--force`, this keeps reusable snapshot files, so only missing or changed archives
+    /// are downloaded. Unlike a plain re-run, the data dir ends up with exactly the snapshot's
+    /// files, which is required when the node has written data past the snapshot block.
+    ///
+    /// Components that are not selected are removed entirely, so `--prune-unlisted --minimal`
+    /// over an archive node deletes its history. With `--non-interactive`, components must be
+    /// selected explicitly with a preset or `--with-*` flags. reth.toml is always regenerated,
+    /// which discards local edits. Symlinks below these paths are removed, not followed. Pruning
+    /// refuses to run while a node holds the database lock, and happens before downloading, so a
+    /// failed download leaves the data dir pruned, as with `--force`.
+    #[arg(long, conflicts_with_all = ["force", "list", "url"])]
+    prune_unlisted: bool,
+
     /// Enable resumable two-phase downloads (download to disk first, then extract).
     ///
     /// Archives are downloaded to a `.part` file with HTTP Range resume support
@@ -528,6 +546,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let _cancel_guard = cancel_token.drop_guard();
         if self.force {
             clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
+        } else if self.prune_unlisted {
+            prune_unlisted_outputs(&planned.archives, target_dir, static_files_dir.as_deref())?;
         }
         fs::create_dir_all(target_dir)?;
         let startup_summary =
@@ -757,6 +777,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         if self.non_interactive {
+            // The implicit minimal default would silently prune history from a full or archive
+            // node.
+            eyre::ensure!(
+                !self.prune_unlisted,
+                "--prune-unlisted with --non-interactive requires an explicit component selection: \
+                 --minimal, --full, --archive, or --with-* flags"
+            );
             return Ok(ResolvedComponents {
                 selections: self.minimal_preset_selections(manifest),
                 preset: Some(SelectionPreset::Minimal),
@@ -925,12 +952,8 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
 /// Removes existing snapshot data that is managed by `reth download`.
 fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
-    for entry in FORCE_REMOVED_DATADIR_PATHS {
-        let path = if *entry == "static_files" {
-            static_files_dir.map_or_else(|| target_dir.join(entry), Path::to_path_buf)
-        } else {
-            target_dir.join(entry)
-        };
+    for entry in MANAGED_DATADIR_PATHS {
+        let path = managed_datadir_path(entry, target_dir, static_files_dir);
         if !path.try_exists()? {
             continue;
         }
@@ -944,6 +967,19 @@ fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) ->
     }
 
     Ok(())
+}
+
+/// Resolves one of [`MANAGED_DATADIR_PATHS`], honoring a custom static files directory.
+fn managed_datadir_path(
+    entry: &str,
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+) -> PathBuf {
+    if entry == "static_files" {
+        static_files_dir.map_or_else(|| target_dir.join(entry), Path::to_path_buf)
+    } else {
+        target_dir.join(entry)
+    }
 }
 
 /// If all data components (txs, receipts, changesets) are `All`, automatically
@@ -1264,6 +1300,20 @@ mod tests {
         }
         assert!(parse(vec!["reth", "--retry-backoff=-1s"]).is_err());
         assert!(parse(vec!["reth", "--retry-backoff", "invalid"]).is_err());
+    }
+
+    #[test]
+    fn test_download_prune_unlisted_conflicts_with_force_list_and_url() {
+        let parse = |args: &[&str]| {
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from(args)
+        };
+
+        assert!(parse(&["reth", "--prune-unlisted"]).unwrap().args.prune_unlisted);
+        assert!(parse(&["reth", "--prune-unlisted", "--force"]).is_err());
+        assert!(parse(&["reth", "--prune-unlisted", "--list"]).is_err());
+        assert!(
+            parse(&["reth", "--prune-unlisted", "--url", "https://example.com/a.tar.zst"]).is_err()
+        );
     }
 
     #[test]
