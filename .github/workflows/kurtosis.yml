@@ -29,7 +29,8 @@ jobs:
     uses: ./.github/workflows/docker-test.yml
     with:
       hive_target: kurtosis
-    secrets: inherit
+    secrets:
+      DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
 
   test:
     timeout-minutes: 60
@@ -38,10 +39,13 @@ jobs:
     name: run kurtosis
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
+      id-token: write
       contents: read
     needs:
       - build-reth
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

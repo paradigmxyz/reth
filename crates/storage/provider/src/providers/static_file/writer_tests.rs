@@ -15,11 +15,15 @@ mod tests {
     use reth_static_file_types::{ChangesetOffset, ChangesetOffsetReader, StaticFileSegment};
     use std::{fs::OpenOptions, io::Write as _, path::PathBuf};
 
-    use crate::providers::{
-        static_file::manager::{StaticFileProviderBuilder, StaticFileWriter},
-        StaticFileProvider,
+    use crate::{
+        providers::{
+            static_file::manager::{StaticFileProviderBuilder, StaticFileWriter},
+            StaticFileProvider,
+        },
+        ChangeSetReader, ReceiptProvider,
     };
     use reth_chain_state::EthPrimitives;
+    use reth_ethereum_primitives::Receipt;
 
     // ==================== HELPER FUNCTIONS ====================
 
@@ -46,7 +50,7 @@ mod tests {
                     info: Some(Account {
                         nonce: block_num,
                         balance: U256::from(block_num * 1000 + i as u64),
-                        bytecode_hash: None,
+                        ..Default::default()
                     }),
                 }
             })
@@ -906,5 +910,249 @@ mod tests {
             provider.get_highest_static_file_block(StaticFileSegment::TransactionSenders),
             Some(250)
         );
+    }
+
+    #[test]
+    fn test_unwind_within_anchored_changesets() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for block in 11..=15 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(12).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=12).into()));
+        assert_eq!(header.changeset_offsets_len(), 3);
+        assert_eq!(get_nippy_row_count(&provider, 10), 4);
+        for block in 11..=12 {
+            assert_eq!(provider.account_block_changeset(block).unwrap().len(), 2, "{block}");
+        }
+        assert!(provider.account_block_changeset(13).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_unwind_below_anchor_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for block in 11..=12 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            assert!(writer.prune_account_changesets(9).is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=12).into()));
+        assert_eq!(get_nippy_row_count(&provider, 10), 4);
+    }
+
+    #[test]
+    fn test_anchor_outside_file_range_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        let mut writer = provider.get_writer(10, StaticFileSegment::AccountChangeSets).unwrap();
+        assert!(writer.initialize_pruned_anchor(150).is_err());
+        assert_eq!(writer.user_header().block_range(), None);
+    }
+
+    #[test]
+    fn test_unwind_within_anchored_receipts() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::Receipts;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for (block, txs) in [(11, 100..102), (12, 102..103)] {
+                writer.increment_block(block).unwrap();
+                for tx in txs {
+                    writer.append_receipt(tx, &Receipt::default()).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_receipts(1, 11).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=11).into()));
+        assert_eq!(header.tx_range(), Some((100..=101).into()));
+    }
+
+    #[test]
+    fn test_unwind_within_anchor_in_later_file() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=753 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            writer.prune_account_changesets(751).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((750..=751).into()));
+        assert_eq!(provider.account_block_changeset(751).unwrap().len(), 2);
+        assert!(!provider.directory().join(segment.filename(&(0..=499).into())).exists());
+    }
+
+    #[test]
+    fn test_unwind_below_anchor_in_earlier_file_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=753 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            assert!(writer.prune_account_changesets(499).is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((750..=753).into()));
+        assert!(!provider.directory().join(segment.filename(&(0..=499).into())).exists());
+    }
+
+    #[test]
+    fn test_unwind_below_anchor_from_later_file_errors() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 500);
+        let segment = StaticFileSegment::Receipts;
+
+        {
+            let mut writer = provider.get_writer(750, segment).unwrap();
+            writer.initialize_pruned_anchor(750).unwrap();
+            for block in 751..=1001 {
+                writer.increment_block(block).unwrap();
+            }
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.commit().unwrap();
+        }
+        {
+            let mut writer = provider.latest_writer(segment).unwrap();
+            assert!(writer.prune_receipts(1, 749).is_err());
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 500);
+        assert_eq!(provider.get_lowest_range(segment), Some((750..=999).into()));
+        assert_eq!(provider.get_highest_static_file_block(segment), Some(1001));
+    }
+
+    #[test]
+    fn test_unwind_below_boundary_anchor_errors() {
+        for committed in [false, true] {
+            let (static_dir, _) = create_test_static_files_dir();
+            let provider = setup_test_provider(&static_dir, 500);
+
+            for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
+                let mut writer = provider.get_writer(500, segment).unwrap();
+                writer.initialize_pruned_anchor(500).unwrap();
+                if segment.is_change_based() {
+                    writer.append_account_changeset(generate_test_changeset(501, 2), 501).unwrap();
+                } else {
+                    writer.increment_block(501).unwrap();
+                    writer.append_receipt(100, &Receipt::default()).unwrap();
+                }
+                if committed {
+                    writer.commit().unwrap();
+                }
+
+                let queued = if segment.is_change_based() {
+                    writer.prune_account_changesets(499)
+                } else {
+                    writer.prune_receipts(1, 499)
+                };
+                assert!(queued.is_err(), "{segment}, committed={committed}");
+                // A rejected unwind must leave pending data available to commit.
+                writer.commit().unwrap();
+            }
+            drop(provider);
+
+            let provider = setup_test_provider(&static_dir, 500);
+            assert_eq!(provider.account_block_changeset(501).unwrap().len(), 2);
+            assert_eq!(provider.receipt(100).unwrap(), Some(Receipt::default()));
+            for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::Receipts] {
+                let header = provider.latest_writer(segment).unwrap().user_header().clone();
+                assert_eq!(header.block_range(), Some((500..=501).into()), "{segment}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_unwind_within_anchor_before_first_commit() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let provider = setup_test_provider(&static_dir, 100);
+        let segment = StaticFileSegment::AccountChangeSets;
+
+        {
+            let mut writer = provider.get_writer(10, segment).unwrap();
+            writer.initialize_pruned_anchor(10).unwrap();
+            for block in 11..=12 {
+                writer.append_account_changeset(generate_test_changeset(block, 2), block).unwrap();
+            }
+            writer.prune_account_changesets(11).unwrap();
+            writer.commit().unwrap();
+        }
+        drop(provider);
+
+        let provider = setup_test_provider(&static_dir, 100);
+        let header = provider.latest_writer(segment).unwrap().user_header().clone();
+        assert_eq!(header.block_range(), Some((10..=11).into()));
+        assert_eq!(header.changeset_offsets_len(), 2);
+        assert_eq!(get_nippy_row_count(&provider, 10), 2);
+        assert_eq!(provider.account_block_changeset(11).unwrap(), generate_test_changeset(11, 2));
+        assert!(provider.account_block_changeset(12).unwrap().is_empty());
     }
 }

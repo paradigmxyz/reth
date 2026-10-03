@@ -10,6 +10,7 @@ use crate::{
 };
 use reth_storage_overlay::OverlayManager;
 
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -21,18 +22,25 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
+use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{
+    ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook,
+    DEFAULT_BACKFILL_RUN_THRESHOLD,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
+use reth_provider::{
+    test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
+};
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::ComputedTrieData;
+use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -43,6 +51,8 @@ use std::{
     time::Duration,
 };
 use tokio::sync::oneshot;
+use tracing::{span::Attributes, Id, Subscriber};
+use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, Layer};
 
 /// Wraps blocks as if they had been downloaded without any access list data.
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
@@ -345,6 +355,7 @@ impl TestHarness {
             .tree
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
+                    cause: tracing::Span::none(),
                     state: fcu_state,
                     payload_attrs: None,
                     tx,
@@ -739,9 +750,41 @@ fn backfill_action_waits_while_payload_build_is_active() {
     assert_eq!(emitted_action, action);
 }
 
+#[test]
+fn forkchoice_notifies_active_backfill_of_a_new_head() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    harness.tree.backfill_sync_state = BackfillSyncState::Active;
+    let head = B256::repeat_byte(0x42);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
+    ));
+    assert!(harness.tree.backfill_sync_state.is_active());
+}
+
+#[test]
+fn forkchoice_does_not_notify_a_backfill_awaiting_revalidation() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    harness.tree.backfill_sync_state = BackfillSyncState::PendingRevalidation;
+    let state = ForkchoiceState {
+        head_block_hash: B256::repeat_byte(0x42),
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
+    assert!(harness.from_tree_rx.try_recv().is_err());
+}
+
 fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillAction) {
-    let all_blocks: Vec<_> =
-        TestBlockBuilder::eth().get_executed_blocks(1..MIN_BLOCKS_FOR_PIPELINE_RUN + 10).collect();
+    let all_blocks: Vec<_> = TestBlockBuilder::eth()
+        .get_executed_blocks(1..DEFAULT_BACKFILL_RUN_THRESHOLD + 10)
+        .collect();
     let canonical_blocks = all_blocks[..6].to_vec();
     let target = all_blocks.last().unwrap().recovered_block().clone_sealed_block();
     let target_hash = target.hash();
@@ -853,7 +896,7 @@ fn deferred_backfill_uses_latest_sync_target() {
 
     let newer_chain = test_harness
         .block_builder
-        .create_fork(blocks[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 20);
+        .create_fork(blocks[0].recovered_block(), DEFAULT_BACKFILL_RUN_THRESHOLD + 20);
     let newer_target = newer_chain.last().unwrap().clone_sealed_block();
     let newer_target_hash = newer_target.hash();
     test_harness.tree.state.buffer.insert_block(newer_target.into());
@@ -1030,6 +1073,7 @@ async fn test_engine_request_during_backfill() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: B256::random(),
                     safe_block_hash: B256::random(),
@@ -1114,10 +1158,15 @@ fn test_validated_payload_bal_is_inserted_into_store() {
             child_block.block_with_parent(),
             child,
             |_, executed, _| {
-                Ok::<_, InsertPayloadError<Block>>(
-                    ValidationOutput::new(executed, None)
-                        .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
-                )
+                // `raw_bal` is the empty-list RLP, so the empty revm BAL is its decoded value.
+                let bal = DecodedBal::with_raw_bal(
+                    Arc::new(RevmBal::default()),
+                    RawBal::from(raw_bal.clone()),
+                );
+                Ok::<_, InsertPayloadError<Block>>(ValidationOutput::new(
+                    executed.with_bal(Some(Arc::new(bal))),
+                    None,
+                ))
             },
             |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
         )
@@ -1145,6 +1194,7 @@ async fn test_holesky_payload() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
+                cause: tracing::Span::none(),
                 payload: ExecutionData {
                     payload: payload.clone().into(),
                     sidecar: ExecutionPayloadSidecar::none(),
@@ -1180,6 +1230,7 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .to_tree_tx
         .send(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: B256::random(),
                     safe_block_hash: B256::random(),
@@ -1628,7 +1679,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     // extend main chain with enough blocks to trigger pipeline run but don't insert them
     let main_chain = test_harness
         .block_builder
-        .create_fork(base_chain[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 10);
+        .create_fork(base_chain[0].recovered_block(), DEFAULT_BACKFILL_RUN_THRESHOLD + 10);
 
     let main_chain_last_hash = main_chain.last().unwrap().hash();
     test_harness.send_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
@@ -1636,7 +1687,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     test_harness.check_fcu(main_chain_last_hash, ForkchoiceStatus::Syncing).await;
 
     // create event for backfill finished
-    let backfill_finished_block_number = MIN_BLOCKS_FOR_PIPELINE_RUN + 1;
+    let backfill_finished_block_number = DEFAULT_BACKFILL_RUN_THRESHOLD + 1;
     let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
         block_number: backfill_finished_block_number,
     });
@@ -1727,6 +1778,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: ancestor_block.hash(),
                     safe_block_hash: B256::ZERO,
@@ -3147,10 +3199,23 @@ fn test_backfill_target_hash_opstack_returns_head() {
 }
 
 #[test]
+fn test_exceeds_backfill_run_threshold_uses_configured_value() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let default_threshold = DEFAULT_BACKFILL_RUN_THRESHOLD;
+    assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold));
+    assert!(test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold + 1));
+
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(100);
+    assert!(!test_harness.tree.exceeds_backfill_run_threshold(10, 110));
+    assert!(test_harness.tree.exceeds_backfill_run_threshold(10, 111));
+    assert!(!test_harness.tree.exceeds_backfill_run_threshold(10, 9));
+}
+
+#[test]
 fn test_backfill_sync_target_without_sync_state_returns_none() {
     let test_harness = TestHarness::new(MAINNET.clone());
     assert_eq!(
-        test_harness.tree.backfill_sync_target(0, MIN_BLOCKS_FOR_PIPELINE_RUN + 100, None),
+        test_harness.tree.backfill_sync_target(0, DEFAULT_BACKFILL_RUN_THRESHOLD + 100, None),
         None
     );
 }
@@ -3175,9 +3240,9 @@ fn test_on_disconnected_downloaded_block_opstack_targets_head() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
     let missing_parent =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3216,9 +3281,9 @@ fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
     let missing_parent =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3256,9 +3321,9 @@ fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
     let missing_parent =
-        BlockNumHash::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3278,16 +3343,19 @@ fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
     }
 }
 
-/// Verifies that the post-backfill recheck path in `on_backfill_sync_finished` retriggers a
-/// new backfill targeting whichever block `backfill_target_hash` resolves to — head on OP
-/// Stack, finalized on Ethereum — when that block is buffered far ahead of where the
-/// just-finished pipeline landed.
-async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind: EngineApiKind) {
+/// Verifies that the post-backfill recheck chooses between backfill and live sync using the
+/// configured threshold and the buffered target (head on OP Stack, finalized on Ethereum).
+async fn assert_post_backfill_recheck_uses_threshold(
+    engine_kind: EngineApiKind,
+    threshold: u64,
+    expect_backfill: bool,
+) {
     reth_tracing::init_test_tracing();
 
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
     test_harness.tree.engine_kind = engine_kind;
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
 
     let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
     test_harness = test_harness.with_blocks(base_chain.clone());
@@ -3298,7 +3366,7 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
     // Long unsynced chain. The last block is what the helper should resolve to.
     let main_chain = test_harness
         .block_builder
-        .create_fork(base_chain[0].recovered_block(), MIN_BLOCKS_FOR_PIPELINE_RUN + 50);
+        .create_fork(base_chain[0].recovered_block(), DEFAULT_BACKFILL_RUN_THRESHOLD + 50);
     let target_block = main_chain.last().unwrap().clone();
     let target_hash = target_block.hash();
 
@@ -3319,8 +3387,8 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
         ForkchoiceStatus::Syncing,
     );
 
-    // Simulate backfill finishing far below the buffered target (gap > threshold).
-    let backfill_finished_block_number = MIN_BLOCKS_FOR_PIPELINE_RUN + 1;
+    // Simulate backfill finishing with a gap larger than the default threshold.
+    let backfill_finished_block_number = DEFAULT_BACKFILL_RUN_THRESHOLD + 1;
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
     let backfill_finished = FromOrchestrator::BackfillSyncFinished(ControlFlow::Continue {
@@ -3330,23 +3398,238 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target)) => {
+        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target))
+            if expect_backfill =>
+        {
             assert_eq!(
                 emitted_target.sync_target(),
                 Some(target_hash),
                 "post-backfill recheck should retrigger backfill to the buffered target"
             );
         }
-        _ => panic!("Expected BackfillAction(Start), got: {event:#?}"),
+        EngineApiEvent::Download(_) if !expect_backfill => {}
+        _ => panic!("Unexpected post-backfill event: {event:#?}"),
     }
 }
 
 #[tokio::test]
 async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_head() {
-    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::OpStack).await;
+    assert_post_backfill_recheck_uses_threshold(
+        EngineApiKind::OpStack,
+        DEFAULT_BACKFILL_RUN_THRESHOLD,
+        true,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
-    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
+    assert_post_backfill_recheck_uses_threshold(
+        EngineApiKind::Ethereum,
+        DEFAULT_BACKFILL_RUN_THRESHOLD,
+        true,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold() {
+    for engine_kind in [EngineApiKind::Ethereum, EngineApiKind::OpStack] {
+        assert_post_backfill_recheck_uses_threshold(engine_kind, 100, false).await;
+    }
+}
+
+#[test]
+fn test_backfill_threshold_above_header_limit_triggers_backfill() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let target_hash = B256::from([0xAA; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    let local_tip = BlockNumHash::new(10, B256::ZERO);
+    let parent_hash = B256::from([0xBB; 32]);
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(2048);
+    for gap in [1024, 1025] {
+        let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
+        let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::from([0xCC; 32]));
+        let event = test_harness.tree.on_disconnected_downloaded_block(
+            downloaded,
+            missing_parent,
+            local_tip,
+        );
+        match gap {
+            1024 => assert!(matches!(
+                event,
+                Some(TreeEvent::Download(DownloadRequest::BlockRange { hash, count: 1024, .. }))
+                    if hash == parent_hash
+            )),
+            _ => assert!(matches!(
+                event,
+                Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
+                    if target.sync_target() == Some(target_hash)
+            )),
+        }
+    }
+}
+
+/// A stale persisted hash must not count as an ancestor after an in-memory reorg.
+#[test]
+fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    test_harness = test_harness.with_blocks(old.clone());
+
+    let new: Vec<_> = test_harness
+        .block_builder
+        .create_fork(old[0].recovered_block(), 2)
+        .into_iter()
+        .map(|block| {
+            ExecutedBlock::new(
+                Arc::new(block),
+                Arc::new(BlockExecutionOutput::default()),
+                ComputedTrieData::default(),
+            )
+        })
+        .collect();
+    test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+        new: vec![new[0].clone()],
+        old: old[1..].to_vec(),
+    });
+
+    let state = ForkchoiceState {
+        head_block_hash: new[1].recovered_block().hash(),
+        safe_block_hash: old[1].recovered_block().hash(),
+        finalized_block_hash: old[0].recovered_block().hash(),
+    };
+    let update = NewCanonicalChain::Commit { new: vec![new[1].clone()] };
+    assert!(!test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+
+    let state = ForkchoiceState { safe_block_hash: new[0].recovered_block().hash(), ..state };
+    assert!(test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+}
+
+/// Reorgs from a persisted chain to a sibling branch of `sibling_len` blocks without advancing
+/// persistence, then asserts that an FCU back to the reorged-out tip makes it canonical again.
+async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len: u64) {
+    reth_tracing::init_test_tracing();
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..4).collect();
+    test_harness = test_harness.with_blocks(old.clone());
+    let old_tip = old[3].recovered_block().hash();
+
+    let new: Vec<_> = test_harness
+        .block_builder
+        .create_fork(old[0].recovered_block(), sibling_len)
+        .into_iter()
+        .map(|block| {
+            ExecutedBlock::new(
+                Arc::new(block),
+                Arc::new(BlockExecutionOutput::default()),
+                ComputedTrieData::default(),
+            )
+        })
+        .collect();
+    for block in &new {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+    let new_tip = new.last().unwrap().recovered_block().hash();
+
+    let fcu = |head_block_hash| ForkchoiceState {
+        head_block_hash,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+
+    let outcome = test_harness.tree.on_forkchoice_updated(fcu(new_tip), None).unwrap();
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), new_tip);
+
+    // Persistence is not advanced, so the reorged-out blocks are still found on disk.
+    assert!(test_harness.provider.header(old_tip).unwrap().is_some());
+
+    let outcome = test_harness.tree.on_forkchoice_updated(fcu(old_tip), None).unwrap();
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), old_tip);
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), old_tip);
+}
+
+/// A reorged-out head must become canonical again while its disk reorg is still pending.
+#[tokio::test]
+async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
+    assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(3).await;
+}
+
+/// Same as above, but the reorged-out head is above the tip of the shorter sibling branch.
+#[tokio::test]
+async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
+    assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
+}
+
+proptest::proptest! {
+    // Each case constructs a full engine harness.
+    #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+
+    #[test]
+    fn engine_messages_keep_sender_parent_on_another_thread(
+        requests in proptest::collection::vec((0..2usize, 0..3u8), 1..16),
+    ) {
+        let parents = EngineSpanParents::default();
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(parents.clone()));
+        tracing::dispatcher::with_default(&dispatch, || {
+            let (tx, mut rx) = unbounded_channel();
+            let engine = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
+            let callers = [tracing::info_span!("view_a"), tracing::info_span!("view_b")];
+            let payload = || ExecutionData {
+                payload: ExecutionPayloadV1::from_block_slow(&Block::default()).into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            };
+            for &(caller, kind) in &requests {
+                callers[caller].in_scope(|| match kind {
+                    0 => assert!(engine.new_payload(payload()).now_or_never().is_none()),
+                    1 => assert!(engine
+                        .fork_choice_updated(ForkchoiceState::default(), None)
+                        .now_or_never()
+                        .is_none()),
+                    _ => assert!(engine
+                        .reth_new_payload(payload(), false, false)
+                        .now_or_never()
+                        .is_none()),
+                });
+            }
+            let messages = (0..requests.len()).map(|_| rx.try_recv().unwrap()).collect::<Vec<_>>();
+            let expected = requests.iter().map(|&(caller, _)| callers[caller].id()).collect::<Vec<_>>();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    tracing::dispatcher::with_default(&dispatch, || {
+                        let mut harness = TestHarness::new(MAINNET.clone());
+                        let unrelated = tracing::info_span!("worker_background");
+                        let _entered = unrelated.enter();
+                        for message in messages {
+                            let _ = harness.tree.on_engine_message(
+                                FromEngine::Request(EngineApiRequest::Beacon(message)),
+                            ).unwrap();
+                            assert_eq!(tracing::Span::current().id(), unrelated.id());
+                        }
+                    });
+                }).join().unwrap();
+            });
+            assert_eq!(*parents.0.lock().unwrap(), expected);
+        });
+    }
+}
+
+#[derive(Clone, Default)]
+struct EngineSpanParents(Arc<std::sync::Mutex<Vec<Option<Id>>>>);
+
+impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        if matches!(attrs.metadata().name(), "on_new_payload" | "on_forkchoice_updated") {
+            self.0.lock().unwrap().push(ctx.span(id).unwrap().parent().map(|parent| parent.id()));
+        }
+    }
 }
