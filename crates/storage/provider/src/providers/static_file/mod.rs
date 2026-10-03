@@ -104,7 +104,8 @@ mod tests {
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{
-        ChangeSetReader, ReceiptProvider, StorageChangeSetReader, TransactionsProvider,
+        BlockHashReader, ChangeSetReader, ReceiptProvider, StorageChangeSetReader,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
@@ -1416,5 +1417,35 @@ mod tests {
         assert!(result.is_some(), "Should be able to read the changeset entry");
         let entry = result.unwrap();
         assert_eq!(entry.value, U256::from(42));
+    }
+
+    #[test]
+    fn test_read_headers_while_appending() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .build()
+                .expect("Failed to build static file provider");
+        let hash = |num: u64| B256::with_last_byte(num as u8 + 1);
+
+        let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = Header::default();
+        for num in 0..=2 {
+            header.number = num;
+            header_writer.append_header(&header, &hash(num)).unwrap();
+        }
+        header_writer.commit().unwrap();
+
+        // Writes the next header to disk without committing it, as persistence does before the
+        // database commit.
+        header.number = 3;
+        header_writer.append_header(&header, &hash(3)).unwrap();
+        header_writer.sync_all().unwrap();
+
+        // Reloads the jar from disk meanwhile, as every static file deletion by the pruner does.
+        sf_rw.initialize_index().unwrap();
+
+        assert_eq!(sf_rw.block_hash(2).unwrap(), Some(hash(2)));
+        assert_eq!(sf_rw.block_hash(3).unwrap(), None);
     }
 }

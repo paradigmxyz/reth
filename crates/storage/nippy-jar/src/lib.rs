@@ -841,6 +841,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_read_last_row_while_appending() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        // Appends a third row to the data file, without committing its offsets and the row count.
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        writer.append_column(Some(Ok(&col1[2]))).unwrap();
+        writer.append_column(Some(Ok(&col2[2]))).unwrap();
+        writer.data_file().flush().unwrap();
+
+        // A jar loaded meanwhile reads the last committed row as it was written.
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        assert_eq!(nippy.rows, 2);
+        let mut cursor = NippyJarCursor::new(&nippy).unwrap();
+        assert_eq!(
+            cursor.row_by_number(1).unwrap().unwrap().as_slice(),
+            [col1[1].as_slice(), col2[1].as_slice()]
+        );
+        assert!(cursor.row_by_number(2).unwrap().is_none());
+    }
+
     fn test_append_consistency_partial_commit(
         file_path: &Path,
         col1: &[Vec<u8>],
