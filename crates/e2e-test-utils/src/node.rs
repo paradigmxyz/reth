@@ -978,7 +978,7 @@ where
 {
     fn drop(&mut self) {
         if self.remove_data_dir {
-            let _ = std::fs::remove_dir_all(self.data_dir.data_dir());
+            let _ = reth_fs_util::remove_dir_all(self.data_dir.data_dir());
         }
     }
 }

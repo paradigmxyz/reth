@@ -1,3 +1,5 @@
+//! Tests for stopping a node and starting it again on its datadir.
+
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::Provider;
@@ -20,53 +22,56 @@ use std::sync::{
 use tokio::sync::mpsc;
 
 /// A restarted node reopens the chain it persisted, reinserts its pending local transactions and
-/// builds on its head.
+/// builds on its head, with both storage layouts.
 #[tokio::test]
 async fn restart_keeps_persisted_chain() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
-        .with_restartable_nodes()
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        })
-        .build_single()
-        .await?;
+    for storage_v2 in [false, true] {
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
+            .with_restartable_nodes()
+            .with_storage_v2(storage_v2)
+            .with_tree_config_modifier(|config| {
+                config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+            })
+            .build_single()
+            .await?;
 
-    let recipient = Address::random();
-    let mut account = wallet.account(0);
-    let raw_tx = account.transfer(recipient, U256::from(100)).await;
-    let (tx_hash, _) = node.inject_and_advance(raw_tx).await?;
-    let head = node.advance_block().await?.block().hash();
-    node.wait_for_persisted_block(2).await?;
-    let pending_tx_hash =
-        node.rpc.inject_tx(account.transfer(recipient, U256::from(1)).await).await?;
-    let exit_future =
-        node.take_exit_future().ok_or_else(|| eyre::eyre!("the node has no exit future"))?;
+        let recipient = Address::random();
+        let mut account = wallet.account(0);
+        let raw_tx = account.transfer(recipient, U256::from(100)).await;
+        let (tx_hash, _) = node.inject_and_advance(raw_tx).await?;
+        let head = node.advance_block().await?.block().hash();
+        node.wait_for_persisted_block(2).await?;
+        let pending_tx_hash =
+            node.rpc.inject_tx(account.transfer(recipient, U256::from(1)).await).await?;
+        let exit_future =
+            node.take_exit_future().ok_or_else(|| eyre::eyre!("the node has no exit future"))?;
 
-    let mut node = node.restart().await?;
+        let mut node = node.restart().await?;
 
-    // The consensus engine of the stopped node exited cleanly.
-    exit_future.await?;
-    assert_eq!(node.inner.provider.best_block_number()?, 2);
-    assert_eq!(node.block_hash(2), head);
-    assert_eq!(node.inner.provider.safe_block_hash()?, Some(head));
-    assert_eq!(node.inner.provider.finalized_block_hash()?, Some(head));
-    let receipt = node
-        .rpc
-        .transaction_receipt(tx_hash)
-        .await?
-        .ok_or_else(|| eyre::eyre!("receipt of {tx_hash} not found after the restart"))?;
-    assert_eq!(receipt.block_number, Some(1));
-    assert!(receipt.status());
-    assert_eq!(node.rpc_provider().get_balance(recipient).await?, U256::from(100));
+        // The consensus engine of the stopped node exited cleanly.
+        exit_future.await?;
+        assert_eq!(node.inner.provider.best_block_number()?, 2);
+        assert_eq!(node.block_hash(2), head);
+        assert_eq!(node.inner.provider.safe_block_hash()?, Some(head));
+        assert_eq!(node.inner.provider.finalized_block_hash()?, Some(head));
+        let receipt = node
+            .rpc
+            .transaction_receipt(tx_hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("receipt of {tx_hash} not found after the restart"))?;
+        assert_eq!(receipt.block_number, Some(1));
+        assert!(receipt.status());
+        assert_eq!(node.rpc_provider().get_balance(recipient).await?, U256::from(100));
 
-    node.wait_for_pool(|pool| pool.contains(&pending_tx_hash)).await?;
-    let payload = node.advance_block().await?;
-    let block = payload.block();
-    assert_eq!(block.number(), 3);
-    assert_eq!(block.parent_hash(), head);
-    assert!(block.body().transactions().any(|tx| *tx.hash() == pending_tx_hash));
+        node.wait_for_pool(|pool| pool.contains(&pending_tx_hash)).await?;
+        let payload = node.advance_block().await?;
+        let block = payload.block();
+        assert_eq!(block.number(), 3);
+        assert_eq!(block.parent_hash(), head);
+        assert!(block.body().transactions().any(|tx| *tx.hash() == pending_tx_hash));
+    }
 
     Ok(())
 }
