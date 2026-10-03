@@ -16,7 +16,6 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::SealedBlock;
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::Runtime;
-use reth_transaction_pool::TransactionPool;
 use std::{net::UdpSocket, sync::Arc, time::Duration};
 
 #[tokio::test]
@@ -356,7 +355,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Wait until all nodes have the transaction
     for node in &nodes {
-        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
+        node.wait_for_pooled([tx_hash]).await?;
     }
 
     // Build and send one more transaction to a random node
@@ -365,7 +364,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Wait until all nodes have the transaction
     for node in &nodes {
-        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
+        node.wait_for_pooled([tx_hash]).await?;
     }
 
     Ok(())

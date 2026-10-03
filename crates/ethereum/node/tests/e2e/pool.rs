@@ -308,3 +308,28 @@ async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {
 
     Ok(())
 }
+
+// Test that the pool transaction waits return once the transactions entered and left the pool.
+#[tokio::test]
+async fn wait_for_pooled_and_pool_removal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+
+    let mut account = wallet.account(0);
+    let mut hashes = Vec::new();
+    for _ in 0..2 {
+        let raw_tx = account.transfer(Address::random(), U256::from(100)).await;
+        hashes.push(node.rpc.inject_tx(raw_tx).await?);
+    }
+    node.wait_for_pooled(hashes.clone()).await?;
+
+    // the pool removes the mined transactions in the background
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().body().transactions().count(), hashes.len());
+    node.wait_for_pool_removal(hashes).await?;
+    assert!(node.inner.pool.is_empty());
+
+    Ok(())
+}

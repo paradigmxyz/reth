@@ -72,6 +72,9 @@ serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
