@@ -486,6 +486,9 @@ where
     /// Returns an error if the pool rejects a transaction, or, without importing the block, if the
     /// block does not include the expected transactions, listing the missing and the unexpected
     /// ones.
+    ///
+    /// Use [`Self::mine_pooled`] for transactions that are already in the pool, e.g. sent through
+    /// [`Self::rpc_provider_with_wallet`] or added with the pool API.
     pub async fn mine(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
@@ -531,6 +534,38 @@ where
         self.mine_txs(txs, false).await
     }
 
+    /// Mines the transactions with the given hashes like [`Self::mine`], for transactions that are
+    /// already in the pool, e.g. sent through [`Self::rpc_provider_with_wallet`] or added with the
+    /// pool API.
+    ///
+    /// The receipts are in the order of `hashes`.
+    ///
+    /// Before building a block, returns an error naming the first hash that is not in the pool,
+    /// e.g. of a transaction that was already mined or replaced. Transactions in any sub-pool pass
+    /// this check, not only pending ones, since the pool sorts transactions for its own view of the
+    /// next block, which can lag behind the block that is built. A transaction the block can not
+    /// include, e.g. one queued behind a nonce gap, is reported as missing like with
+    /// [`Self::mine`].
+    pub async fn mine_pooled(
+        &mut self,
+        hashes: impl IntoIterator<Item = B256>,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        self.mine_pooled_txs(hashes.into_iter().collect(), true).await
+    }
+
     /// Mines the raw transactions, see [`Self::mine`]. Unless `exclusive` is set, the block may
     /// include other pool transactions.
     async fn mine_txs(
@@ -559,6 +594,33 @@ where
                 .await
                 .wrap_err_with(|| format!("failed to inject transaction {index}"))?;
             hashes.push(hash);
+        }
+
+        self.mine_pooled_txs(hashes, exclusive).await
+    }
+
+    /// Mines the pool transactions with the given hashes, see [`Self::mine_pooled`]. Unless
+    /// `exclusive` is set, the block may include other pool transactions.
+    async fn mine_pooled_txs(
+        &mut self,
+        hashes: Vec<B256>,
+        exclusive: bool,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        for hash in &hashes {
+            ensure!(self.inner.pool.contains(hash), "transaction {hash} is not in the pool");
         }
 
         let payload = self.new_payload().await?;
@@ -1334,7 +1396,8 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     }
 }
 
-/// A block mined by [`NodeTestContext::mine`] or [`NodeTestContext::mine_including`].
+/// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`] or
+/// [`NodeTestContext::mine_pooled`].
 #[derive(Debug)]
 pub struct MinedBlock<Payload: BuiltPayload, Receipt> {
     /// The built payload of the block.
@@ -1529,6 +1592,7 @@ mod tests {
         ));
         assert_send(node.mine([Bytes::new()]));
         assert_send(node.mine_including(Vec::new()));
+        assert_send(node.mine_pooled([B256::ZERO]));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
