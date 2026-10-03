@@ -750,6 +750,37 @@ fn backfill_action_waits_while_payload_build_is_active() {
     assert_eq!(emitted_action, action);
 }
 
+#[test]
+fn forkchoice_notifies_active_backfill_of_a_new_head() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    harness.tree.backfill_sync_state = BackfillSyncState::Active;
+    let head = B256::repeat_byte(0x42);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
+    ));
+    assert!(harness.tree.backfill_sync_state.is_active());
+}
+
+#[test]
+fn forkchoice_does_not_notify_a_backfill_awaiting_revalidation() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    harness.tree.backfill_sync_state = BackfillSyncState::PendingRevalidation;
+    let state = ForkchoiceState {
+        head_block_hash: B256::repeat_byte(0x42),
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
+    assert!(harness.from_tree_rx.try_recv().is_err());
+}
+
 fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillAction) {
     let all_blocks: Vec<_> = TestBlockBuilder::eth()
         .get_executed_blocks(1..DEFAULT_BACKFILL_RUN_THRESHOLD + 10)
