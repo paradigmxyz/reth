@@ -12,9 +12,12 @@ use alloy_provider::{
     fillers::{FillProvider, RecommendedFillers, TxFiller},
     Provider, ProviderBuilder, RootProvider,
 };
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
+    PayloadStatusEnum,
+};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{ensure, eyre, Ok};
+use eyre::{bail, ensure, eyre, Ok};
 use futures_util::{
     future::{select, Either},
     Future,
@@ -228,6 +231,8 @@ where
     }
 
     /// Triggers payload building job and submits it to the engine.
+    ///
+    /// Returns an error if the engine reports the payload invalid, see [`Self::submit_payload`].
     pub async fn build_and_submit_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
 
@@ -602,12 +607,56 @@ where
         self.update_forkchoice(B256::ZERO, hash).await
     }
 
-    /// Submits a payload to the engine.
+    /// Submits a payload to the engine with `newPayload` and returns its block hash.
+    ///
+    /// This only inserts the block, it does not make it canonical, see [`Self::import_payload`].
+    /// Returns the block hash if the engine reports the payload:
+    /// - `VALID`: the engine executed the block on top of its parent, or knew it as valid already.
+    /// - `SYNCING` or `ACCEPTED`: the engine did not execute the block, e.g. because its parent is
+    ///   unknown, so the block is not known to be valid yet, see
+    ///   [`Self::submit_payload_with_status`].
+    ///
+    /// Returns an error with the validation error and the latest valid hash if the engine reports
+    /// the payload `INVALID`. Use [`Self::submit_payload_with_status`] to inspect the status
+    /// instead, e.g. to test that a payload is rejected.
     pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = payload.block().hash();
-        self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?;
+        let status = self.submit_payload_with_status(payload).await?;
+        if let PayloadStatusEnum::Invalid { validation_error } = status.status {
+            let latest_valid_hash = status
+                .latest_valid_hash
+                .map_or_else(|| "none".to_string(), |hash| hash.to_string());
+            bail!(
+                "payload {block_hash} is invalid (latest valid hash: {latest_valid_hash}): \
+                 {validation_error}"
+            )
+        }
 
         Ok(block_hash)
+    }
+
+    /// Submits a payload to the engine with `newPayload` and returns the payload status the engine
+    /// reports.
+    ///
+    /// Unlike [`Self::submit_payload`], this returns `INVALID` statuses instead of an error. This
+    /// only inserts the block, it does not make it canonical. The engine reports:
+    /// - `VALID` if it executed the block on top of its parent, or knew it as valid already. The
+    ///   latest valid hash is the block hash.
+    /// - `INVALID` if the block failed validation, or descends from a block that did. The latest
+    ///   valid hash is the hash of the most recent valid ancestor, or `None` if the engine can't
+    ///   determine it, e.g. because the block hash does not match the payload.
+    /// - `SYNCING` if it did not execute the block because the parent of the block is unknown, in
+    ///   which case it buffers the block and executes it once the parent is inserted, or because
+    ///   the node is syncing.
+    /// - `ACCEPTED` if it accepted the block without executing it. The reth engine tree does not
+    ///   report this status.
+    ///
+    /// Returns an error if the engine fails to process the payload, e.g. because it shut down.
+    pub async fn submit_payload_with_status(
+        &self,
+        payload: Payload::BuiltPayload,
+    ) -> eyre::Result<PayloadStatus> {
+        Ok(self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?)
     }
 
     /// Submits a payload to the engine and makes its block the canonical head, returning the block
@@ -620,8 +669,9 @@ where
     /// pool processes the new block in the background, see [`Self::wait_for_pool`].
     ///
     /// The parent of the payload must be known to the node, e.g. to import a payload built by
-    /// another node into its peers. Returns an error if the engine does not report the forkchoice
-    /// update valid, e.g. because the payload is invalid.
+    /// another node into its peers. Returns an error if the engine reports the payload invalid, see
+    /// [`Self::submit_payload`], or does not report the forkchoice update valid, e.g. because the
+    /// parent is unknown.
     pub async fn import_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = self.submit_payload(payload).await?;
         let updated = self.update_forkchoice(block_hash, block_hash).await?;
@@ -791,6 +841,8 @@ mod tests {
         assert_send(node.wait_for_prune_checkpoint(PruneSegment::SenderRecovery, 0));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.submit_payload(payload.clone()));
+        assert_send(node.submit_payload_with_status(payload.clone()));
         assert_send(node.import_payload(payload));
     }
 }
