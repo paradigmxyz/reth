@@ -5,6 +5,7 @@ use alloy_eips::{
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B256};
+pub use cells::BlobTxCellSidecar;
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -19,6 +20,7 @@ use std::{
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+mod cells;
 mod converter;
 pub mod disk;
 mod mem;
@@ -35,6 +37,19 @@ pub struct BlobCellAvailability(Arc<[AtomicU64; 2]>);
 impl BlobCellAvailability {
     const LOW_WORD: usize = 0;
     const HIGH_WORD: usize = 1;
+
+    /// Creates availability for the supplied numeric cell mask.
+    pub fn new(mask: BlobCellMask) -> Self {
+        Self(Arc::new([
+            AtomicU64::new(mask.bits() as u64),
+            AtomicU64::new((mask.bits() >> 64) as u64),
+        ]))
+    }
+
+    /// Returns whether the stored cells suffice to reconstruct every blob.
+    pub fn is_recoverable(&self) -> bool {
+        self.get().count() >= 64
+    }
 
     /// Returns full availability for all blob cells.
     pub fn full() -> Self {
@@ -66,19 +81,68 @@ impl PartialEq for BlobCellAvailability {
 impl Eq for BlobCellAvailability {}
 
 /// A blob sidecar paired with its shared cell availability.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailability,
+    cells: Option<Arc<BlobTxCellSidecar>>,
+    recovered: Arc<parking_lot::Mutex<Option<Arc<BlobTransactionSidecarVariant>>>>,
 }
 
 impl PooledBlobSidecar {
     /// Creates a sidecar with the given shared cell availability.
-    pub const fn new(
-        sidecar: BlobTransactionSidecarVariant,
-        availability: BlobCellAvailability,
-    ) -> Self {
-        Self { sidecar, availability }
+    pub fn new(sidecar: BlobTransactionSidecarVariant, availability: BlobCellAvailability) -> Self {
+        Self {
+            sidecar,
+            availability,
+            cells: None,
+            recovered: Arc::new(parking_lot::Mutex::new(None)),
+        }
+    }
+
+    /// Creates a cell-backed sidecar without reconstructing its blob payloads.
+    pub fn from_cells(cells: BlobTxCellSidecar) -> Self {
+        Self {
+            sidecar: cells.elided().into(),
+            availability: BlobCellAvailability::new(cells.mask()),
+            cells: Some(Arc::new(cells)),
+            recovered: Arc::new(parking_lot::Mutex::new(None)),
+        }
+    }
+
+    /// Returns the stored cells, when this sidecar uses sparse storage.
+    pub fn cells(&self) -> Option<&BlobTxCellSidecar> {
+        self.cells.as_deref()
+    }
+
+    /// Returns a full sidecar when it is locally recoverable, memoizing reconstruction.
+    pub fn full_sidecar(
+        &self,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        let mut cached = self.recovered.lock();
+        if let Some(cached) = cached.as_ref() {
+            return Ok(Some(cached.clone()))
+        }
+        let full = if let Some(cells) = &self.cells {
+            if !cells.is_recoverable() {
+                return Ok(None)
+            }
+            cells.recover(alloy_eips::eip4844::env_settings::EnvKzgSettings::Default.get())?.into()
+        } else {
+            self.sidecar.clone()
+        };
+        let full = Arc::new(full);
+        *cached = Some(full.clone());
+        Ok(Some(full))
+    }
+
+    /// Returns an elided v1 wrapper, preserving legacy sidecars unchanged.
+    pub fn elided_sidecar(&self) -> BlobTransactionSidecarVariant {
+        let mut sidecar = self.sidecar.clone();
+        if let BlobTransactionSidecarVariant::Eip7594(v1) = &mut sidecar {
+            v1.blobs.clear();
+        }
+        sidecar
     }
 
     /// Returns the wrapped sidecar.
@@ -101,6 +165,16 @@ impl PooledBlobSidecar {
         self.sidecar
     }
 }
+
+impl PartialEq for PooledBlobSidecar {
+    fn eq(&self, other: &Self) -> bool {
+        self.sidecar == other.sidecar &&
+            self.cells == other.cells &&
+            self.availability == other.availability
+    }
+}
+
+impl Eq for PooledBlobSidecar {}
 
 impl Deref for PooledBlobSidecar {
     type Target = BlobTransactionSidecarVariant;
