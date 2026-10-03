@@ -70,6 +70,7 @@ impl<D: BodyDownloader> BodyStage<D> {
 /// Ensures that static files and database are in sync.
 pub(crate) fn ensure_consistency<Provider>(
     provider: &Provider,
+    checkpoint: u64,
     unwind_block: Option<u64>,
 ) -> Result<(), StageError>
 where
@@ -97,7 +98,13 @@ where
         // the database commit in a previous stage run. So, our only solution is to unwind the
         // static files and proceed from the database expected height.
         Ordering::Greater => {
-            let highest_db_block = provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64;
+            let highest_db_block = provider
+                .tx_ref()
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .last()?
+                .map(|(block, _)| block)
+                // Nothing is stored when the bodies up to the checkpoint were never downloaded.
+                .unwrap_or(checkpoint);
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
             static_file_producer
@@ -192,7 +199,7 @@ where
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
-        ensure_consistency(provider, None)?;
+        ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, "Commencing sync");
 
@@ -224,7 +231,7 @@ where
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
-        ensure_consistency(provider, Some(input.unwind_to))?;
+        ensure_consistency(provider, input.checkpoint.block_number, Some(input.unwind_to))?;
         provider.remove_bodies_above(input.unwind_to)?;
 
         Ok(UnwindOutput {
@@ -254,10 +261,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestStageDB,
+        UnwindStageTestRunner,
     };
+    use alloy_consensus::TxLegacy;
+    use alloy_primitives::Signature;
     use assert_matches::assert_matches;
-    use reth_provider::StaticFileProviderFactory;
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
 
@@ -465,6 +476,78 @@ mod tests {
         );
 
         assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
+    }
+
+    #[test]
+    fn ensure_consistency_heals_to_the_highest_db_block() {
+        let db = TestStageDB::default();
+        let factory = &db.factory;
+        let static_files = factory.static_file_provider();
+        let body = |nonce| BlockBody {
+            transactions: vec![TransactionSigned::new_unhashed(
+                Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                Signature::test_signature(),
+            )],
+            ..Default::default()
+        };
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(0, None), (1, Some(&body(0)))]).unwrap();
+        provider.commit().unwrap();
+
+        // The static files commit block 2, the database does not.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
+        static_files.commit().unwrap();
+        drop(provider);
+
+        // Bodies stage healing alone, without startup recovery.
+        let provider = factory.database_provider_rw().unwrap();
+        ensure_consistency(&provider, 1, None).unwrap();
+        provider.commit().unwrap();
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(1)
+        );
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
+    }
+
+    #[test]
+    fn ensure_consistency_heals_to_the_checkpoint_without_stored_bodies() {
+        const CHECKPOINT: u64 = 10;
+        let db = TestStageDB::default();
+        let factory = &db.factory;
+        let static_files = factory.static_file_provider();
+        let body = BlockBody {
+            transactions: vec![TransactionSigned::new_unhashed(
+                Transaction::Legacy(TxLegacy::default()),
+                Signature::test_signature(),
+            )],
+            ..Default::default()
+        };
+
+        // The transaction files start after the checkpoint, no body is stored up to it.
+        static_files
+            .latest_writer(StaticFileSegment::Transactions)
+            .unwrap()
+            .ensure_at_block(CHECKPOINT)
+            .unwrap();
+        static_files.commit().unwrap();
+
+        // The static files commit the next block, the database does not.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
+        static_files.commit().unwrap();
+        drop(provider);
+
+        let provider = factory.database_provider_rw().unwrap();
+        ensure_consistency(&provider, CHECKPOINT, None).unwrap();
+        assert_eq!(
+            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(CHECKPOINT)
+        );
+        provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
     }
 
     mod test_utils {
