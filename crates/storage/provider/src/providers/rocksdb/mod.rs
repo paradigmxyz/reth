@@ -9,4 +9,4 @@ pub use provider::{
     RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
     RocksReadSnapshot, RocksTx,
 };
-pub(crate) use provider::{PendingRocksDBBatches, RocksDBWriteCtx};
+pub(crate) use provider::{PendingRocksDBBatches, PendingRocksDBHistoryCache, RocksDBWriteCtx};
