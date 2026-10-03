@@ -402,6 +402,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.db.path(),
             self.database_provider_metrics.clone(),
         )
+        .with_bal_store(self.bal_store.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
@@ -426,6 +427,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.database_provider_metrics.clone(),
             )
             .with_reader_txn_tracker(self.db.clone())
+            .with_bal_store(self.bal_store.clone())
             .with_minimum_pruning_distance(self.minimum_pruning_distance),
         ))
     }
@@ -454,6 +456,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.database_provider_metrics.clone(),
         )
         .with_reader_txn_tracker(self.db.clone())
+        .with_bal_store(self.bal_store.clone())
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
@@ -1009,7 +1012,8 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         TransactionsProvider,
     };
-    use alloy_primitives::{TxNumber, B256};
+    use alloy_eips::NumHash;
+    use alloy_primitives::{Bytes, TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
@@ -1019,6 +1023,7 @@ mod tests {
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
+    use reth_storage_api::RawBal;
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1246,5 +1251,26 @@ mod tests {
             factory.database_provider_ro().unwrap().ensure_snap_sync_layout(),
             Err(ProviderError::SnapStorageLayoutUnsupported)
         );
+    }
+
+    fn assert_shared_bal_store(provider: &impl BalProvider, factory: &impl BalProvider) {
+        let block = NumHash::new(1, B256::repeat_byte(1));
+        let bal = Bytes::from_static(&[0xc0]);
+        assert_eq!(provider.bal_store().get_by_hash(block.hash).unwrap(), None);
+        factory.bal_store().insert(block, RawBal::new(bal.clone())).unwrap();
+        assert_eq!(provider.bal_store().get_by_hash(block.hash).unwrap(), Some(bal));
+    }
+
+    #[test]
+    fn database_providers_share_the_factory_bal_store() {
+        let factory = create_test_provider_factory();
+        let factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::default()));
+        assert_shared_bal_store(&factory.provider().unwrap(), &factory);
+
+        let factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::default()));
+        assert_shared_bal_store(&factory.provider_rw().unwrap(), &factory);
+
+        let factory = factory.with_bal_store(BalStoreHandle::new(InMemoryBalStore::default()));
+        assert_shared_bal_store(&factory.unwind_provider_rw().unwrap(), &factory);
     }
 }

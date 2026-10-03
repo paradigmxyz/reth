@@ -14,15 +14,15 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
-    HeaderProvider, HeaderSyncGapProvider, HistoryWriter, LatestStateProviderRef,
-    OriginalValuesKnown, PersistenceFrontiers, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter,
+    AccountReader, BalProvider, BalStoreHandle, BlockBodyWriter, BlockExecutionWriter,
+    BlockHashReader, BlockNumReader, BlockReader, BlockWriter, BundleStateInit,
+    ChainStateBlockReader, ChainStateBlockWriter, DBProvider, DbTxProvider, EitherReader,
+    EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider, HeaderSyncGapProvider,
+    HistoryWriter, LatestStateProviderRef, OriginalValuesKnown, PersistenceFrontiers,
+    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit,
+    RocksBatchArg, RocksDBProviderFactory, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -171,6 +171,12 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
     }
 }
 
+impl<DB: Database, N: NodeTypes> BalProvider for DatabaseProviderRW<DB, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        self.0.bal_store()
+    }
+}
+
 /// Mode for [`DatabaseProvider::save_blocks_inner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SaveBlocksMode {
@@ -229,6 +235,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     metrics: Arc<DatabaseProviderMetrics>,
     /// Database handle used to inspect active MDBX readers during unwind commits.
     reader_txn_tracker: Option<Arc<dyn ReaderTxnTracker>>,
+    /// BAL store shared with the factory and its other providers.
+    bal_store: BalStoreHandle,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -247,6 +255,7 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("commit_order", &self.commit_order)
             .field("minimum_pruning_distance", &self.minimum_pruning_distance)
             .field("reader_txn_tracker", &"<reader txn tracker>")
+            .field("bal_store", &self.bal_store)
             .finish()
     }
 }
@@ -270,6 +279,18 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
+    }
+
+    /// Sets the BAL store shared with other providers from the same factory.
+    pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
+        self.bal_store = bal_store;
+        self
+    }
+}
+
+impl<TX, N: NodeTypes> BalProvider for DatabaseProvider<TX, N> {
+    fn bal_store(&self) -> &BalStoreHandle {
+        &self.bal_store
     }
 }
 
@@ -399,6 +420,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
             reader_txn_tracker: None,
+            bal_store: BalStoreHandle::noop(),
         }
     }
 
@@ -1048,6 +1070,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
             reader_txn_tracker: None,
+            bal_store: BalStoreHandle::noop(),
         }
     }
 
