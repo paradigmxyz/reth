@@ -251,7 +251,7 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<TableHandles>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
@@ -674,6 +674,30 @@ impl Deref for DatabaseEnv {
     }
 }
 
+/// Environment-local handles, with direct access for built-in tables.
+#[derive(Debug, Clone)]
+pub(crate) struct TableHandles {
+    by_id: [Option<ffi::MDBX_dbi>; Tables::COUNT],
+    by_name: FxHashMap<&'static str, ffi::MDBX_dbi>,
+}
+
+impl Default for TableHandles {
+    fn default() -> Self {
+        Self { by_id: [None; Tables::COUNT], by_name: FxHashMap::default() }
+    }
+}
+
+impl TableHandles {
+    fn extend(&mut self, handles: impl IntoIterator<Item = (&'static str, ffi::MDBX_dbi)>) {
+        for (name, handle) in handles {
+            if let Some(id) = Tables::id_by_name(name) {
+                self.by_id[id] = Some(handle);
+            }
+            self.by_name.insert(name, handle);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,6 +720,63 @@ mod tests {
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
+
+    #[test]
+    fn table_handles_follow_names_and_remain_environment_local() {
+        #[derive(Debug)]
+        struct CustomTable;
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+            type Key = u64;
+            type Value = u64;
+        }
+
+        impl reth_db_api::table::TableInfo for CustomTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        struct CustomTables;
+        impl TableSet for CustomTables {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn reth_db_api::table::TableInfo>>> {
+                Box::new(std::iter::once(
+                    Box::new(CustomTable) as Box<dyn reth_db_api::table::TableInfo>
+                ))
+            }
+        }
+
+        assert_eq!(CustomTable::TABLE_ID, None);
+        let (_dir, first) = create_test_db(DatabaseEnvKind::RW);
+        let dir = tempfile::tempdir().unwrap();
+        let mut second = DatabaseEnv::open(
+            dir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        // Allocate a custom handle first so built-in DBIs differ between environments.
+        second.create_and_track_tables_for::<CustomTables>().unwrap();
+        second.create_tables().unwrap();
+        let first_tx = first.tx().unwrap();
+        let second_tx = second.tx_mut().unwrap();
+        assert_ne!(first_tx.get_dbi::<Headers>().unwrap(), second_tx.get_dbi::<Headers>().unwrap());
+        assert_eq!(
+            second_tx.get_dbi::<Headers>().unwrap(),
+            second_tx.get_dbi_raw(<Headers as Table>::NAME).unwrap()
+        );
+        assert_eq!(
+            second_tx.get_dbi::<tables::RawTable<Headers>>().unwrap(),
+            second_tx.get_dbi::<Headers>().unwrap()
+        );
+        second_tx.put::<CustomTable>(7, 42).unwrap();
+        assert_eq!(second_tx.get::<CustomTable>(7).unwrap(), Some(42));
+        second_tx.commit().unwrap();
+    }
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
     fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
