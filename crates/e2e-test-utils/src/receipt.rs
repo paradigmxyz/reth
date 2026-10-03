@@ -20,14 +20,20 @@ pub trait PendingTransactionExt<N: Network> {
 impl<N: Network> PendingTransactionExt<N> for PendingTransactionBuilder<N> {
     async fn successful_receipt(self) -> eyre::Result<N::ReceiptResponse> {
         let receipt = self.get_receipt().await?;
-        ensure!(
-            receipt.status(),
-            "transaction {} reverted after using {} gas",
-            receipt.transaction_hash(),
-            receipt.gas_used()
-        );
+        ensure_successful(&receipt)?;
         Ok(receipt)
     }
+}
+
+/// Returns an error naming the transaction and its gas usage if the receipt reports a revert.
+pub(crate) fn ensure_successful(receipt: &impl ReceiptResponse) -> eyre::Result<()> {
+    ensure!(
+        receipt.status(),
+        "transaction {} reverted after using {} gas",
+        receipt.transaction_hash(),
+        receipt.gas_used()
+    );
+    Ok(())
 }
 
 /// Waits for the receipts of all transactions in order, failing if any of them reverted.
