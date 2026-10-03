@@ -5,7 +5,10 @@ use reth_trie::{
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
-use std::time::Duration;
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
@@ -133,8 +136,7 @@ impl ProofTaskCursorMetricsCache {
     }
 }
 
-/// Metrics shared by all proof workers spawned by one
-/// [`ProofWorkerHandle`](crate::proof_task::ProofWorkerHandle).
+/// Metrics shared by all proof workers.
 ///
 /// Every worker records into the same metric series, so the handles are registered once and
 /// shared instead of being registered again by each worker.
@@ -144,4 +146,14 @@ pub struct ProofWorkerMetrics {
     pub trie: ProofTaskTrieMetrics,
     /// Trie and hashed cursor operation metrics.
     pub cursor: ProofTaskCursorMetrics,
+}
+
+impl ProofWorkerMetrics {
+    /// Returns the process-wide instance, registering the metrics on first use.
+    ///
+    /// The handles stay bound to the recorder that was installed when this is first called.
+    pub fn shared() -> Arc<Self> {
+        static METRICS: OnceLock<Arc<ProofWorkerMetrics>> = OnceLock::new();
+        METRICS.get_or_init(Default::default).clone()
+    }
 }

@@ -196,10 +196,10 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        // Registered once and shared by all workers of both pools, which record into the same
-        // metric series.
+        // Registered once per process and shared by all workers of both pools, which record into
+        // the same metric series.
         #[cfg(feature = "metrics")]
-        let metrics = Arc::new(ProofWorkerMetrics::default());
+        let metrics = ProofWorkerMetrics::shared();
 
         let storage_rt = runtime.clone();
         {
