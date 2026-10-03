@@ -763,7 +763,7 @@ fn forkchoice_notifies_active_backfill_of_a_new_head() {
     assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
     assert!(matches!(
         harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target.sync_target() == Some(head)
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
     ));
     assert!(harness.tree.backfill_sync_state.is_active());
 }

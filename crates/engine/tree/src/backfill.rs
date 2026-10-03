@@ -7,6 +7,7 @@
 //!
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
+use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
@@ -66,9 +67,9 @@ pub trait BackfillSync: Send {
 pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
-    /// Moves the target of a running backfill, as forkchoice advances, without starting another
+    /// Moves the target of a running backfill to the new forkchoice head, without starting another
     /// run. It may arrive when no run is active, in which case it should be ignored.
-    UpdateTarget(PipelineTarget),
+    UpdateTarget(B256),
 }
 
 /// The events that can be emitted on backfill sync.
@@ -380,7 +381,7 @@ mod tests {
     async fn target_updates_do_not_start_the_pipeline() {
         let TestHarness { mut pipeline_sync, tip } = TestHarness::new(10, 5);
 
-        pipeline_sync.on_action(BackfillAction::UpdateTarget(PipelineTarget::Sync(tip)));
+        pipeline_sync.on_action(BackfillAction::UpdateTarget(tip));
 
         assert_matches!(poll!(poll_fn(|cx| pipeline_sync.poll(cx))), Poll::Pending);
         assert!(pipeline_sync.is_pipeline_idle());
@@ -388,9 +389,11 @@ mod tests {
 
     #[test]
     fn only_a_new_backfill_run_clears_downloads() {
-        let target = PipelineTarget::Sync(B256::repeat_byte(1));
-        let actions =
-            VecDeque::from([BackfillAction::UpdateTarget(target), BackfillAction::Start(target)]);
+        let head = B256::repeat_byte(1);
+        let actions = VecDeque::from([
+            BackfillAction::UpdateTarget(head),
+            BackfillAction::Start(PipelineTarget::Sync(head)),
+        ]);
         let downloader = CountedClears::default();
         let clears = Arc::clone(&downloader.0);
         let mut handler =

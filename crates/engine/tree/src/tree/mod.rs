@@ -1206,7 +1206,7 @@ where
             // awaiting revalidation has not started and reads the latest head when it does.
             if self.backfill_sync_state.is_pending() || self.backfill_sync_state.is_active() {
                 self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
-                    state.head_block_hash.into(),
+                    state.head_block_hash,
                 )));
             }
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
