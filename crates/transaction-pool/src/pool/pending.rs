@@ -145,7 +145,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             let tx_id = *tx.id();
             let transaction = PendingTransaction { submission_id, transaction: tx, priority };
             if best.ancestor(&tx_id).is_none() {
-                best.independent.insert(transaction.clone());
+                best.independent.push(transaction.clone());
             }
             best.all.insert(tx_id, transaction);
         }
