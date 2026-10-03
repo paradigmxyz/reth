@@ -1,5 +1,5 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::{Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
+use alloy_consensus::{Signed, Transaction as _, TxEip4844WithSidecar};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
@@ -101,8 +101,7 @@ where
     fn process_block(&mut self, block: &RecoveredBlock<reth_ethereum::Block>) {
         let txs: Vec<_> = block
             .body()
-            .transactions()
-            .filter(|tx| tx.is_eip4844())
+            .eip4844_transactions_iter()
             .map(|tx| (tx.clone(), tx.blob_count().unwrap_or(0) as usize))
             .collect();
 
@@ -197,8 +196,7 @@ where
                             for block in old.blocks().values() {
                                 let txs: Vec<BlobTransactionEvent> = block
                                     .body()
-                                    .transactions()
-                                    .filter(|tx| tx.is_eip4844())
+                                    .eip4844_transactions_iter()
                                     .map(|tx| {
                                         let transaction_hash = *tx.tx_hash();
                                         let block_metadata = BlockMetadata {

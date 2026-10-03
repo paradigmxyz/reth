@@ -20,7 +20,7 @@ reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["chain-state"] }
 reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
@@ -109,4 +109,13 @@ js-tracer = [
     "revm-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
+]
+account-ext = [
+    "reth-rpc-eth-api/account-ext",
+    "reth-primitives-traits/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-provider/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
 ]
