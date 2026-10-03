@@ -1007,7 +1007,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        TransactionsProvider,
+        StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
@@ -1291,6 +1291,43 @@ mod tests {
         let static_files = factory.static_file_provider();
         for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
             assert_eq!(static_files.get_highest_static_file_block(segment), None, "{segment}");
+        }
+    }
+
+    #[test]
+    fn rejected_unwind_below_the_anchor_leaves_the_database_untouched() {
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(StorageSettings::v2());
+            let provider = factory.database_provider_rw().unwrap();
+            provider.anchor_pruned_static_files(10).unwrap();
+            provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();
+            provider.commit().unwrap();
+
+            // An unwind must fail before its updated MDBX checkpoint can be committed.
+            let provider = factory.unwind_provider_rw().unwrap();
+            provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
+            let queued = {
+                let static_files = factory.static_file_provider();
+                let mut writer = static_files.latest_writer(segment).unwrap();
+                match segment {
+                    StaticFileSegment::Transactions => writer.prune_transactions(0, 5),
+                    StaticFileSegment::Receipts => writer.prune_receipts(0, 5),
+                    StaticFileSegment::TransactionSenders => writer.prune_transaction_senders(0, 5),
+                    StaticFileSegment::AccountChangeSets => writer.prune_account_changesets(5),
+                    StaticFileSegment::StorageChangeSets => writer.prune_storage_changesets(5),
+                    StaticFileSegment::Headers => unreachable!(),
+                }
+            };
+            assert!(queued.and_then(|()| provider.commit()).is_err(), "{segment}");
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(
+                provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+                Some(StageCheckpoint::new(10)),
+                "{segment}"
+            );
+            assert_eq!(factory.static_file_provider().check_consistency(&provider).unwrap(), None);
         }
     }
 }

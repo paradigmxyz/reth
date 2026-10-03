@@ -1593,6 +1593,17 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Adds an instruction to prune elements during commit using the specified strategy.
     fn queue_prune(&mut self, strategy: PruneStrategy) -> ProviderResult<()> {
         self.ensure_no_queued_prune()?;
+        // Unwinds commit MDBX before static files, so reject invalid targets before queuing them.
+        match strategy {
+            PruneStrategy::Transactions { last_block, .. } |
+            PruneStrategy::Receipts { last_block, .. } |
+            PruneStrategy::TransactionSenders { last_block, .. } |
+            PruneStrategy::AccountChangeSets { last_block } |
+            PruneStrategy::StorageChangeSets { last_block } => {
+                self.ensure_above_pruned_anchor(last_block)?;
+            }
+            PruneStrategy::Headers { .. } => {}
+        }
         self.prune_on_commit = Some(strategy);
         Ok(())
     }

@@ -960,8 +960,7 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            writer.prune_account_changesets(9).unwrap();
-            assert!(writer.commit().is_err());
+            assert!(writer.prune_account_changesets(9).is_err());
         }
         drop(provider);
 
@@ -1055,8 +1054,7 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            writer.prune_account_changesets(499).unwrap();
-            assert!(writer.commit().is_err());
+            assert!(writer.prune_account_changesets(499).is_err());
         }
         drop(provider);
 
@@ -1083,8 +1081,7 @@ mod tests {
         }
         {
             let mut writer = provider.latest_writer(segment).unwrap();
-            writer.prune_receipts(1, 749).unwrap();
-            assert!(writer.commit().is_err());
+            assert!(writer.prune_receipts(1, 749).is_err());
         }
         drop(provider);
 
@@ -1112,12 +1109,12 @@ mod tests {
                     writer.commit().unwrap();
                 }
 
-                if segment.is_change_based() {
-                    writer.prune_account_changesets(499).unwrap();
+                let queued = if segment.is_change_based() {
+                    writer.prune_account_changesets(499)
                 } else {
-                    writer.prune_receipts(1, 499).unwrap();
-                }
-                assert!(writer.commit().is_err(), "{segment}, committed={committed}");
+                    writer.prune_receipts(1, 499)
+                };
+                assert!(queued.is_err(), "{segment}, committed={committed}");
                 // A rejected unwind must leave pending data available to commit.
                 writer.commit().unwrap();
             }
