@@ -86,6 +86,7 @@ where
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
             scope,
+            runtime,
             evm_config,
             make_db,
             input_bal,
@@ -102,6 +103,7 @@ where
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     scope: &rayon::Scope<'scope>,
+    runtime: &Runtime,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -220,8 +222,12 @@ where
     let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
+    let bundle = canonical_state.take_bundle();
+    // The account cache holds every account and slot the block touched. The result no longer needs
+    // it, and freeing it here would delay returning the executed block.
+    runtime.spawn_drop(std::mem::take(&mut canonical_state.cache));
     Ok((
-        BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
+        BlockExecutionOutput { state: bundle, result: block_result },
         senders,
         built_bal,
         input_bal_revm,
