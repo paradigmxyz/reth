@@ -108,6 +108,9 @@ pub async fn setup_engine_with_chain_import(
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
         let node = launch_test_node::<EthereumNode>(LaunchArgs {
+            idx,
+            node_factory: Arc::new(|_| EthereumNode::default()),
+            node_builder_modifiers: Vec::new(),
             node_config,
             runtime: runtime.clone(),
             tree_config: tree_config.clone(),
