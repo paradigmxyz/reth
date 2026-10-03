@@ -241,6 +241,15 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
+    /// Enable experimental snap/2: advertise and serve it, and bootstrap a fresh database from a
+    /// post-Amsterdam pivot.
+    ///
+    /// Databases with execution progress, and chains that never activate Amsterdam, continue with
+    /// the staged pipeline. While the node's own snap state is unverified, the state it serves
+    /// over snap/2 is incomplete.
+    #[arg(long = "snap.v2")]
+    pub snap_v2: bool,
+
     #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs or ENRs of trusted peers for P2P connections.
     ///
@@ -591,6 +600,7 @@ impl NetworkArgs {
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
+            .with_snap(self.snap_v2)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -726,6 +736,7 @@ impl Default for NetworkArgs {
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
+            snap_v2: false,
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
@@ -1599,6 +1610,31 @@ mod tests {
                 .args;
 
         assert!(args.ip_filter().is_err());
+    }
+
+    #[test]
+    fn snap_v2_flag_controls_advertisement() {
+        for (cli, enabled) in [(vec!["reth"], false), (vec!["reth", "--snap.v2"], true)] {
+            let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
+            assert_eq!(args.snap_v2, enabled);
+            let config = args
+                .network_config::<reth_network::EthNetworkPrimitives>(
+                    &Config::default(),
+                    MAINNET.clone(),
+                    SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+                    PathBuf::new(),
+                    Runtime::test(),
+                )
+                .build_with_noop_provider(MAINNET.clone());
+            let versions = config
+                .hello_message
+                .protocols
+                .iter()
+                .filter(|protocol| protocol.cap.name == "snap")
+                .map(|protocol| protocol.cap.version)
+                .collect::<Vec<_>>();
+            assert_eq!(versions, if enabled { vec![2] } else { vec![] });
+        }
     }
 
     #[test]
