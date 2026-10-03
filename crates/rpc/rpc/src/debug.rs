@@ -44,7 +44,10 @@ use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
     HashedStorage,
 };
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
+use revm::{
+    database::states::{bundle_state::BundleRetention, CacheAccount},
+    Database, DatabaseCommit,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -938,7 +941,7 @@ where
                 // state is positioned by execution rather than by attaching the block's BAL.
                 eth_api.replay_block_until(&mut db, &block, tx_index, None)?;
 
-                let (touched, wiped) = Self::replayed_storage(&db, address);
+                let (touched, wiped) = replayed_storage(db.cache.accounts.get(&address));
                 if wiped {
                     return Ok(merge_storage_range(Vec::new(), touched, start_key, max_result))
                 }
@@ -959,30 +962,6 @@ where
                 Ok(merge_storage_range(persisted, touched, start_key, max_result))
             })
             .await
-    }
-
-    /// Returns the storage slots of `address` held in the replay cache, keyed by hashed slot and
-    /// paired with their preimage and value, and whether they are the account's entire storage.
-    ///
-    /// They are the entire storage once the replay destroyed the account or found it missing,
-    /// since none of the account's persisted slots is visible past that point.
-    fn replayed_storage(
-        db: &StateCacheDb,
-        address: Address,
-    ) -> (BTreeMap<B256, (B256, U256)>, bool) {
-        let Some(account) = db.cache.accounts.get(&address) else { return Default::default() };
-        let Some(plain_account) = &account.account else { return (BTreeMap::new(), true) };
-
-        let touched = plain_account
-            .storage
-            .iter()
-            .map(|(slot, value)| {
-                let slot = B256::from(*slot);
-                (keccak256(slot), (slot, *value))
-            })
-            .collect();
-
-        (touched, account.status.was_destroyed())
     }
 }
 
@@ -1700,12 +1679,33 @@ fn merge_storage_range(
     result
 }
 
+/// Returns the storage slots a block replay left in an account's cache entry, keyed by hashed slot
+/// and paired with their preimage and value, and whether they are the account's entire storage.
+///
+/// They are the entire storage once the replay destroyed the account or found it missing, since
+/// none of the account's persisted slots is visible past that point.
+fn replayed_storage(account: Option<&CacheAccount>) -> (BTreeMap<B256, (B256, U256)>, bool) {
+    let Some(account) = account else { return (BTreeMap::new(), false) };
+    let Some(plain_account) = &account.account else { return (BTreeMap::new(), true) };
+
+    let touched = plain_account
+        .storage
+        .iter()
+        .map(|(slot, value)| {
+            let slot = B256::from(*slot);
+            (keccak256(slot), (slot, *value))
+        })
+        .collect();
+
+    (touched, account.status.was_destroyed())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Header, TxLegacy};
-    use alloy_primitives::{keccak256, Signature, TxKind, U256};
+    use alloy_primitives::{Signature, TxKind};
     use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
@@ -1721,7 +1721,7 @@ mod tests {
     use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
-        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
+        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState, PlainAccount},
         state::AccountInfo as RevmAccountInfo,
     };
 
@@ -2036,6 +2036,48 @@ mod tests {
                 ]),
                 next_key: Some(hashed_key(4)),
             }
+        );
+    }
+
+    fn cache_account_with_slot(slot: u64, value: u64, status: AccountStatus) -> CacheAccount {
+        let storage = std::iter::once((U256::from(slot), U256::from(value))).collect();
+        CacheAccount { account: Some(PlainAccount::new_empty_with_storage(storage)), status }
+    }
+
+    fn replayed_slot(slot: u64, value: u64) -> (B256, (B256, U256)) {
+        let slot = B256::from(U256::from(slot));
+        (keccak256(slot), (slot, U256::from(value)))
+    }
+
+    #[test]
+    fn replayed_storage_without_cache_entry_keeps_persisted_storage() {
+        assert_eq!(replayed_storage(None), (BTreeMap::new(), false));
+    }
+
+    #[test]
+    fn replayed_storage_of_destroyed_account_is_empty_and_wiped() {
+        let account = CacheAccount { account: None, status: AccountStatus::Destroyed };
+
+        assert_eq!(replayed_storage(Some(&account)), (BTreeMap::new(), true));
+    }
+
+    #[test]
+    fn replayed_storage_of_recreated_account_hides_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::DestroyedChanged);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), true)
+        );
+    }
+
+    #[test]
+    fn replayed_storage_of_loaded_account_keeps_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::Loaded);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), false)
         );
     }
 }
