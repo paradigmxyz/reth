@@ -61,9 +61,7 @@ use std::{
 use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::{
-    ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
-};
+use crate::proof_task_metrics::{ProofTaskCursorMetricsCache, ProofWorkerMetrics};
 
 /// Type alias for the V2 account proof calculator with instrumented cursors.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
@@ -199,21 +197,23 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
+        // Registered once and shared by all workers of both pools, which record into the same
+        // metric series.
+        #[cfg(feature = "metrics")]
+        let metrics = Arc::new(ProofWorkerMetrics::default());
+
         let parent_span = tracing::Span::current();
         for worker_id in 0..storage_worker_count {
             let task_ctx = task_ctx.clone();
             let work_rx = storage_work_rx.clone();
             let availability = storage_availability.clone();
             let result_tx = proof_result_tx.clone();
+            #[cfg(feature = "metrics")]
+            let metrics = metrics.clone();
             let parent_span = parent_span.clone();
             storage_pool.spawn(move || {
                 let span = debug_span!(target: "trie::proof_task", parent: &parent_span, "storage_worker", ?worker_id);
                 let _guard = span.enter();
-
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let worker = StorageProofWorker::new(
                     task_ctx,
@@ -222,8 +222,6 @@ impl ProofWorkerHandle {
                     availability,
                     #[cfg(feature = "metrics")]
                     metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
                     error!(
@@ -249,15 +247,12 @@ impl ProofWorkerHandle {
             let availability = account_availability.clone();
             let storage_tx = storage_work_tx.clone();
             let result_tx = proof_result_tx.clone();
+            #[cfg(feature = "metrics")]
+            let metrics = metrics.clone();
             let parent_span = parent_span.clone();
             account_pool.spawn(move || {
                 let span = debug_span!(target: "trie::proof_task", parent: &parent_span, "account_worker", ?worker_id);
                 let _guard = span.enter();
-
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
 
                 let worker = AccountProofWorker::new(
                     task_ctx,
@@ -267,8 +262,6 @@ impl ProofWorkerHandle {
                     availability,
                     #[cfg(feature = "metrics")]
                     metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
                 );
                 if let Err(error) = worker.run() {
                     error!(
@@ -609,12 +602,9 @@ struct StorageProofWorker<Factory> {
     worker_id: usize,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
-    /// Metrics collector for this worker
+    /// Metrics shared by all workers of the handle.
     #[cfg(feature = "metrics")]
-    metrics: ProofTaskTrieMetrics,
-    /// Cursor metrics for this worker
-    #[cfg(feature = "metrics")]
-    cursor_metrics: ProofTaskCursorMetrics,
+    metrics: Arc<ProofWorkerMetrics>,
 }
 
 impl<Factory> StorageProofWorker<Factory>
@@ -627,8 +617,7 @@ where
         work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         availability: Arc<AvailabilitySheet>,
-        #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
-        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
+        #[cfg(feature = "metrics")] metrics: Arc<ProofWorkerMetrics>,
     ) -> Self {
         Self {
             task_ctx,
@@ -637,8 +626,6 @@ where
             availability,
             #[cfg(feature = "metrics")]
             metrics,
-            #[cfg(feature = "metrics")]
-            cursor_metrics,
         }
     }
 
@@ -659,7 +646,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(mut self) -> ProviderResult<()> {
+    fn run(self) -> ProviderResult<()> {
         // Create provider from factory
         let provider = self.task_ctx.factory.database_provider_ro()?;
         let proof_tx = ProofTaskTx::new(provider, self.worker_id);
@@ -741,8 +728,8 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            self.metrics.record_storage_worker_idle_time(total_idle_time);
-            self.cursor_metrics.record(&mut cursor_metrics_cache);
+            self.metrics.trie.record_storage_worker_idle_time(total_idle_time);
+            self.metrics.cursor.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -816,12 +803,9 @@ struct AccountProofWorker<Factory> {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Per-worker availability flags
     availability: Arc<AvailabilitySheet>,
-    /// Metrics collector for this worker
+    /// Metrics shared by all workers of the handle.
     #[cfg(feature = "metrics")]
-    metrics: ProofTaskTrieMetrics,
-    /// Cursor metrics for this worker
-    #[cfg(feature = "metrics")]
-    cursor_metrics: ProofTaskCursorMetrics,
+    metrics: Arc<ProofWorkerMetrics>,
 }
 
 impl<Factory> AccountProofWorker<Factory>
@@ -835,8 +819,7 @@ where
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         availability: Arc<AvailabilitySheet>,
-        #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
-        #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
+        #[cfg(feature = "metrics")] metrics: Arc<ProofWorkerMetrics>,
     ) -> Self {
         Self {
             task_ctx,
@@ -846,8 +829,6 @@ where
             availability,
             #[cfg(feature = "metrics")]
             metrics,
-            #[cfg(feature = "metrics")]
-            cursor_metrics,
         }
     }
 
@@ -868,7 +849,7 @@ where
     ///
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
-    fn run(mut self) -> ProviderResult<()> {
+    fn run(self) -> ProviderResult<()> {
         let provider = self.task_ctx.factory.database_provider_ro()?;
 
         trace!(
@@ -985,9 +966,9 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            self.metrics.record_account_worker_idle_time(total_idle_time);
-            self.cursor_metrics.record(&mut cursor_metrics_cache);
-            self.metrics.record_value_encoder_stats(&value_encoder_stats_cache);
+            self.metrics.trie.record_account_worker_idle_time(total_idle_time);
+            self.metrics.cursor.record(&mut cursor_metrics_cache);
+            self.metrics.trie.record_value_encoder_stats(&value_encoder_stats_cache);
         }
 
         Ok(())
