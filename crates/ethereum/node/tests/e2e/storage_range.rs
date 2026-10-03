@@ -187,6 +187,21 @@ async fn storage_range_at_replays_block_transactions() -> eyre::Result<()> {
     }
     assert_eq!(paged, full.storage);
 
+    // A shorter key start is a prefix, right-padded with zeros to a hashed key.
+    let last_key = *full.storage.keys().last().ok_or_else(|| eyre!("empty storage"))?;
+    let mut padded = B256::ZERO;
+    padded[0] = last_key[0];
+    let suffix = full
+        .storage
+        .range(padded..)
+        .map(|(hashed_slot, entry)| (*hashed_slot, entry.clone()))
+        .collect::<BTreeMap<_, _>>();
+    assert!(suffix.len() < full.storage.len());
+    let prefix = Bytes::from(vec![last_key[0]]);
+    let range = storage_range_at(&provider, block_hash, 3, contract, prefix, 100).await?;
+    assert_eq!(range.storage, suffix);
+    assert_eq!(range.next_key, None);
+
     // A later block overwrites a slot.
     let value_a_updated = B256::from(U256::from(0x33));
     let tx = write_tx(signer.address(), contract, writes.len() as u64, slot_a, value_a_updated);
@@ -215,6 +230,27 @@ async fn storage_range_at_replays_block_transactions() -> eyre::Result<()> {
     let unknown = Address::repeat_byte(0xee);
     let range = storage_range_at(&provider, next_block_hash, 1, unknown, Bytes::new(), 100).await?;
     assert_eq!(range, HashedStorageRangeResult::default());
+
+    // A block clears the slot with the lowest hashed key.
+    let mut live_slots = seeded_storage()
+        .into_keys()
+        .chain([slot_a, slot_b])
+        .filter(|slot| expected.contains_key(&keccak256(slot)))
+        .collect::<Vec<_>>();
+    live_slots.sort_by_key(|slot| keccak256(slot));
+    let tx =
+        write_tx(signer.address(), contract, writes.len() as u64 + 1, live_slots[0], B256::ZERO);
+    let pending = provider.send_transaction(tx).await?;
+    node.advance_block().await?;
+    pending.successful_receipt().await?;
+    let (clearing_block_hash, _) = latest_block(&provider).await?;
+
+    // A page of one past that clear still reports where to resume, which takes reading persisted
+    // slots beyond the cleared one.
+    let range =
+        storage_range_at(&provider, clearing_block_hash, 1, contract, Bytes::new(), 1).await?;
+    assert_eq!(range.storage.keys().copied().collect::<Vec<_>>(), [keccak256(live_slots[1])]);
+    assert_eq!(range.next_key, Some(keccak256(live_slots[2])));
 
     Ok(())
 }
