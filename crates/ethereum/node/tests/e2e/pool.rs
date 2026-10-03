@@ -103,10 +103,8 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     txpool.add_transaction(TransactionOrigin::External, pooled_tx).await.unwrap();
     assert_eq!(txpool.len(), 1);
 
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-    // stale tx should be evicted
-    assert_eq!(txpool.len(), 0);
+    poll_until("stale transaction to be evicted", || async { Ok(txpool.is_empty().then_some(())) })
+        .await?;
 
     Ok(())
 }
