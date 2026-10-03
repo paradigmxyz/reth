@@ -5,11 +5,12 @@ use rayon::prelude::*;
 use reth_fs_util::{self as fs, FsPathError};
 use std::{
     io::{ErrorKind, Read},
+    mem,
     path::Path,
 };
 
 /// Read size per hash update. Large enough for `update_rayon` to split across threads.
-const HASH_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+const HASH_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 
 /// Verifies and cleans up extracted output files in one target directory.
 pub(crate) struct OutputVerifier<'a> {
@@ -89,6 +90,9 @@ impl<'a> OutputVerifier<'a> {
     }
 
     /// Computes the hex-encoded BLAKE3 checksum for one plain output file.
+    ///
+    /// The next buffer is read while the current one is hashed, so disk reads overlap hashing
+    /// instead of alternating with it.
     fn file_blake3_hex(
         path: &Path,
         size: u64,
@@ -96,21 +100,44 @@ impl<'a> OutputVerifier<'a> {
     ) -> Result<String> {
         let mut file = fs::open(path)?;
         let mut hasher = Hasher::new();
-        let mut buf = vec![0_u8; size.min(HASH_BUFFER_SIZE as u64) as usize];
+        let buf_len = size.min(HASH_BUFFER_SIZE as u64) as usize;
+        let mut current = vec![0_u8; buf_len];
+        let mut next = vec![0_u8; buf_len];
 
-        loop {
-            let n = file.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update_rayon(&buf[..n]);
+        let mut filled = read_full(&mut file, &mut current)?;
+        while filled > 0 {
+            let (_, read) = rayon::join(
+                || {
+                    hasher.update_rayon(&current[..filled]);
+                },
+                || read_full(&mut file, &mut next),
+            );
             if let Some(progress) = progress {
-                progress.record_verified(n as u64);
+                progress.record_verified(filled as u64);
             }
+            filled = read?;
+            mem::swap(&mut current, &mut next);
         }
 
         Ok(hasher.finalize().to_hex().to_string())
     }
+}
+
+/// Reads until `buf` is full or the reader is exhausted, returning the number of bytes read.
+///
+/// Full buffers keep every `update_rayon` call aligned, so BLAKE3 can hash it as parallel
+/// subtrees.
+fn read_full(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
 }
 
 #[cfg(test)]
