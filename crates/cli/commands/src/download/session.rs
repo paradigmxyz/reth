@@ -61,13 +61,6 @@ impl DownloadSession {
         &self.cancel_token
     }
 
-    /// Records one archive whose outputs were already reusable on disk.
-    pub(crate) fn record_reused_archive(&self, download_bytes: u64, output_bytes: u64) {
-        if let Some(progress) = self.progress() {
-            progress.record_reused_archive(download_bytes, output_bytes);
-        }
-    }
-
     /// Records one archive whose extracted outputs fully verified.
     pub(crate) fn record_archive_output_complete(&self, bytes: u64) {
         if let Some(progress) = self.progress() {
