@@ -136,6 +136,7 @@ pub fn convert_receipts(
     Ok(ReceiptsSsz(converted))
 }
 
+pub mod eip6466;
 mod provider;
 mod snapshot;
 mod tree;

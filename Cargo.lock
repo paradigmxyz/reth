@@ -10079,6 +10079,7 @@ version = "2.7.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "ethereum_ssz",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-provider",
