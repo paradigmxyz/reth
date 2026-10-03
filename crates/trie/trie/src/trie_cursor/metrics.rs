@@ -60,7 +60,7 @@ impl TrieCursorMetrics {
     ///
     /// This method adds the current counter values from the cache to the Prometheus metrics
     /// and then resets all cache counters to zero.
-    pub fn record(&mut self, cache: &mut TrieCursorMetricsCache) {
+    pub fn record(&self, cache: &mut TrieCursorMetricsCache) {
         self.next_histogram.record(cache.next_count as f64);
         self.seek_histogram.record(cache.seek_count as f64);
         self.seek_exact_histogram.record(cache.seek_exact_count as f64);
