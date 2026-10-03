@@ -4,6 +4,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
+use futures::FutureExt;
 use jsonrpsee_core::client::Error;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
@@ -343,6 +344,37 @@ async fn fcu_unwinds_canonical_chain_to_genesis() -> eyre::Result<()> {
         genesis,
         "unwinding to genesis must make it the canonical head"
     );
+
+    Ok(())
+}
+
+/// Payload jobs the harness did not start or did not resolve must not affect the next block it
+/// builds, e.g. a job started by a forkchoice update with payload attributes sent by the test, or
+/// by a cancelled `advance_block`.
+#[tokio::test]
+async fn advance_block_ignores_foreign_payload_jobs() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
+    let genesis = node.block_hash(0);
+    let engine = node.auth_server_handle().http_client();
+
+    let attributes = eth_payload_attributes(&chain_spec, node.payload.timestamp + 10);
+    let updated = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+        &engine,
+        ForkchoiceState::same_hash(genesis),
+        Some(attributes),
+    )
+    .await?;
+    assert!(updated.payload_id.is_some());
+
+    // The first poll sends the forkchoice update that starts the payload job.
+    assert!(node.advance_block().now_or_never().is_none());
+
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().parent_hash, genesis);
+    assert_eq!(node.block_hash(1), payload.block().hash());
 
     Ok(())
 }
