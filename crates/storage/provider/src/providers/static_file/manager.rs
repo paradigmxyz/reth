@@ -1572,6 +1572,26 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .is_some_and(|checkpoint| checkpoint.prune_mode.is_full())
     }
 
+    /// Returns the first transaction number after `block`, or `None` if it can't be derived.
+    ///
+    /// Falls back to the `Bodies` prune checkpoint when bodies through `block` were never stored,
+    /// e.g. below a snap sync pivot.
+    fn next_tx_num_after<Provider>(
+        provider: &Provider,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<TxNumber>>
+    where
+        Provider: BlockReader + PruneCheckpointReader,
+    {
+        if let Some(indices) = provider.block_body_indices(block)? {
+            return Ok(Some(indices.next_tx_num()))
+        }
+        Ok(provider
+            .get_prune_checkpoint(PruneSegment::Bodies)?
+            .filter(|pruned| pruned.block_number.is_some_and(|pruned| pruned >= block))
+            .map(|pruned| pruned.tx_number.map_or(0, |tx| tx + 1)))
+    }
+
     /// Checks consistency of the latest static file segment and throws an
     /// error if at fault.
     ///
@@ -1806,12 +1826,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::Transactions |
             StaticFileSegment::Receipts |
             StaticFileSegment::TransactionSenders => {
-                if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                if let Some(next_tx_num) =
+                    Self::next_tx_num_after(provider, checkpoint_block_number)?
+                {
                     // `last_tx_num()` saturates to zero for an empty genesis block, but row zero
                     // belongs to the first non-empty block and must be removed as well.
-                    let number = highest_static_file_entry
-                        .saturating_add(1)
-                        .saturating_sub(block.next_tx_num());
+                    let number =
+                        highest_static_file_entry.saturating_add(1).saturating_sub(next_tx_num);
                     debug!(target: "reth::providers::static_file", prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
 
                     match segment {

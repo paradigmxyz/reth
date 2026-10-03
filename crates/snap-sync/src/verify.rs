@@ -648,6 +648,55 @@ mod tests {
     }
 
     #[test]
+    fn startup_heals_an_interrupted_first_write_after_publishing() {
+        // An empty block is covered too, since transaction counts alone can't see its height.
+        for tx_count in [0, 1] {
+            let factory = hashed_factory();
+            insert_chain(&factory, B256::ZERO);
+            let static_files = factory.static_file_provider();
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(1).unwrap();
+            static_files
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap()
+                .ensure_at_block(1)
+                .unwrap();
+            provider.commit().unwrap();
+
+            let body = BlockBody {
+                transactions: (0..tx_count)
+                    .map(|nonce| {
+                        TransactionSigned::new_unhashed(
+                            Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                            Signature::test_signature(),
+                        )
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+
+            // The static files commit, the database does not.
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            static_files.commit().unwrap();
+            drop(provider);
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(static_files.check_consistency(&provider).unwrap(), None, "{tx_count}");
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(1),
+                "{tx_count}"
+            );
+            drop(provider);
+
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            provider.commit().unwrap();
+        }
+    }
+
+    #[test]
     fn publishing_clears_transaction_lookups_in_the_active_backend() {
         for settings in [StorageSettings::v1(), StorageSettings::v2()] {
             let factory = hashed_factory();
