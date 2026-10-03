@@ -99,7 +99,7 @@ impl<B> EngineNodeLauncher<B> {
             <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
         >,
     {
-        let Self { ctx, engine_tree_config, backfill } = self;
+        let Self { ctx, engine_tree_config, mut backfill } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
@@ -126,11 +126,13 @@ impl<B> EngineNodeLauncher<B> {
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            // Create the provider factory with the shared overlay manager
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
+            // Create the provider factory with the shared overlay manager, letting the backfill
+            // finish writes an earlier run left half-committed before the consistency check
+            .with_provider_factory_and_recovery::<_, <CB::Components as NodeComponents<T>>::Evm>(
                 overlay_manager.clone(),
                 rocksdb_provider,
                 disabled_stages,
+                |factory| backfill.recover(factory),
             )
             .await?
             .inspect(|_| {

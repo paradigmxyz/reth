@@ -15,6 +15,13 @@ pub trait BackfillSyncBuilder<N: ProviderNodeTypes, C>: Send {
 
     /// Builds the backfill from the node's staged pipeline, block client and database.
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill>;
+
+    /// Recovers from an earlier run that stopped mid-write, before the node checks the database
+    /// for consistency. A backfill that commits static files and the database separately uses it
+    /// so a crash between the two isn't treated as corruption. Does nothing by default.
+    fn recover(&mut self, _provider_factory: &ProviderFactory<N>) -> eyre::Result<()> {
+        Ok(())
+    }
 }
 
 /// What the launcher hands a [`BackfillSyncBuilder`].
