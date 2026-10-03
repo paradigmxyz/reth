@@ -28,6 +28,8 @@ pub(crate) struct NodeSnapContext<N: ProviderNodeTypes, C> {
     client: C,
     // Forkchoice targets forwarded by the engine.
     targets: watch::Receiver<B256>,
+    // Finalized blocks forwarded by the engine, the zero hash until one arrives.
+    finalized: watch::Receiver<B256>,
     interval: Duration,
     retry: Duration,
 }
@@ -37,11 +39,13 @@ impl<N: ProviderNodeTypes, C> NodeSnapContext<N, C> {
         factory: ProviderFactory<N>,
         client: C,
         targets: watch::Receiver<B256>,
+        finalized: watch::Receiver<B256>,
     ) -> Self {
         Self {
             factory,
             client,
             targets,
+            finalized,
             interval: DEFAULT_SAMPLE_INTERVAL,
             retry: DEFAULT_RETRY_INTERVAL,
         }
@@ -62,6 +66,15 @@ where
 {
     fn head(&self) -> Result<u64, SnapSyncError> {
         Ok(self.factory.database_provider_ro()?.last_block_number()?)
+    }
+
+    fn finalized(&self) -> Option<u64> {
+        let hash = *self.finalized.borrow();
+        if hash.is_zero() {
+            return None
+        }
+        // Only a finalized block whose header is synced can anchor the pivot.
+        self.factory.provider().ok()?.block_number(hash).ok()?
     }
 
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
@@ -91,8 +104,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
+    use reth_db::{tables, transaction::DbTxMut};
     use reth_network_peers::PeerId;
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, insert_headers, MockNodeTypesWithDB},
+        DBProvider,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const TEST_INTERVAL: Duration = Duration::from_millis(5);
@@ -102,9 +121,48 @@ mod tests {
         peers: &TestPeers,
     ) -> (watch::Sender<B256>, NodeSnapContext<MockNodeTypesWithDB, &TestPeers>) {
         let (targets, receiver) = watch::channel(B256::repeat_byte(1));
-        let context = NodeSnapContext::new(create_test_provider_factory(), peers, receiver)
-            .with_intervals(TEST_INTERVAL, TEST_RETRY);
+        let finalized = watch::channel(B256::ZERO).1;
+        let context =
+            NodeSnapContext::new(create_test_provider_factory(), peers, receiver, finalized)
+                .with_intervals(TEST_INTERVAL, TEST_RETRY);
         (targets, context)
+    }
+
+    #[test]
+    fn the_finalized_block_resolves_once_its_header_is_synced() {
+        let factory = create_test_provider_factory();
+        let mut parent = B256::ZERO;
+        let headers: Vec<_> = (0..=3)
+            .map(|number| {
+                let header = SealedHeader::seal_slow(Header {
+                    number,
+                    parent_hash: parent,
+                    ..Default::default()
+                });
+                parent = header.hash();
+                header
+            })
+            .collect();
+        insert_headers(&factory, &headers);
+        // The header stage indexes hashes alongside the headers.
+        let provider = factory.database_provider_rw().unwrap();
+        for header in &headers {
+            provider.tx_ref().put::<tables::HeaderNumbers>(header.hash(), header.number).unwrap();
+        }
+        provider.commit().unwrap();
+        let peers = TestPeers::default();
+        let (finalized, receiver) = watch::channel(B256::ZERO);
+        let context = NodeSnapContext::new(factory, &peers, watch::channel(B256::ZERO).1, receiver);
+
+        // Nothing is known as finalized until the engine reports a block.
+        assert_eq!(context.finalized(), None);
+
+        finalized.send(headers[2].hash()).unwrap();
+        assert_eq!(context.finalized(), Some(2));
+
+        // A finalized block whose header isn't synced yet can't anchor a pivot.
+        finalized.send(B256::repeat_byte(0xff)).unwrap();
+        assert_eq!(context.finalized(), None);
     }
 
     #[tokio::test]
