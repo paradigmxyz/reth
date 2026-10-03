@@ -5624,4 +5624,64 @@ mod tests {
         assert_eq!(t2.id().nonce, 2, "expected nonce 2, got {}", t2.id().nonce);
         assert_eq!(t3.id().nonce, 3, "expected nonce 3, got {}", t3.id().nonce);
     }
+
+    /// Reorg reinsert: an iterator opened after nonce 0 was mined must still yield nonce 0
+    /// before nonce 1 once nonce 0 is put back. Nonce 1 has the higher tip.
+    #[test]
+    fn best_transactions_nonce_order_on_reorg_reinsert() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = Address::random();
+        let balance = U256::from(10_000_000);
+
+        // nonce 0 is cheaper. nonce 1 pays a higher tip, so a tip-only ordering yields it first.
+        let tx0 = MockTransaction::eip1559()
+            .with_sender(sender)
+            .with_priority_fee(100)
+            .with_max_fee(100)
+            .with_gas_limit(21_000);
+        let tx1 = tx0.next().with_priority_fee(200).with_max_fee(200);
+
+        let v0 = f.validated(tx0);
+        let v1 = f.validated(tx1);
+        let hash0 = *v0.hash();
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+
+        pool.add_transaction(v0.clone(), balance, 0, None).unwrap();
+        pool.add_transaction(v1, balance, 0, None).unwrap();
+
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 0;
+
+        // Chain A mines nonce 0.
+        let mut mined = FxHashMap::default();
+        mined.insert(sender_id, SenderInfo { state_nonce: 1, balance });
+        pool.on_canonical_state_change(block_info, vec![hash0], mined, PoolUpdateKind::Commit);
+
+        // Payload builder is already holding the pending iterator: only nonce 1 is pending.
+        let mut best = pool.best_transactions();
+
+        // Reorg to chain B. Nonce 0 was not mined there, so maintenance puts it back.
+        let mut restored = FxHashMap::default();
+        restored.insert(sender_id, SenderInfo { state_nonce: 0, balance });
+        pool.on_canonical_state_change(block_info, vec![], restored, PoolUpdateKind::Reorg);
+        pool.add_transaction(v0, balance, 0, None).unwrap();
+
+        let first = best.next().expect("should yield a transaction");
+        let second = best.next().expect("should yield a transaction");
+
+        assert_eq!(
+            first.id().nonce,
+            0,
+            "first yielded tx should be nonce 0, got {}",
+            first.id().nonce
+        );
+        assert_eq!(
+            second.id().nonce,
+            1,
+            "second yielded tx should be nonce 1, got {}",
+            second.id().nonce
+        );
+    }
 }
