@@ -97,6 +97,12 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Connect two nodes | `a.connect(&mut b)`, done by `build()` unless disabled |
 | Give a node the block of another node | `follower.import_payload(payload)`; the parent must be known |
 | Let a node download a chain from its peers | `follower.sync_to(hash)`, which makes the block head, safe and finalized |
+| **Stopping and restarting** | |
+| Make nodes restartable | `with_restartable_nodes()`; opt-in because each node then runs on a runtime of its own, which costs a few threads per node; not combinable with `with_runtime` |
+| Stop a node and keep its datadir | `node.stop()`, which returns a `StoppedNode`; `stopped.data_dir()` while it is stopped; dropping it removes the datadir |
+| Launch a stopped node again | `stopped.start()`, which returns a new `NodeTestContext` |
+| Stop and start in one step | `node.restart()` |
+| Notice that the engine of a node exited | `node.take_exit_future()`, which resolves with `Ok` once the node is stopped and with an error if the engine exits on a fatal error |
 | **Waits** | |
 | Wait for any condition | `wait::poll_until(what, poll)`; `poll_until_with(PollOpts { .. }, ..)` for another timeout or interval |
 | Assert that something does not happen | `wait::assert_holds_for(duration, what, check)` |
@@ -355,6 +361,32 @@ async fn persists_and_prunes() -> eyre::Result<()> {
 }
 ```
 
+A restart, after which the node still has its chain and builds on its head:
+
+```rust,no_run
+use alloy_primitives::{Address, U256};
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::E2ETestSetupExt;
+use reth_node_ethereum::EthereumNode;
+
+async fn restart_keeps_chain() -> eyre::Result<()> {
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_restartable_nodes()
+        .build_single()
+        .await?;
+    let mut account = wallet.account(0);
+    let recipient = Address::with_last_byte(1);
+    let head = node.mine([account.transfer(recipient, U256::from(1)).await]).await?.block().hash();
+
+    // Persists the canonical chain, closes the database and launches the node on its datadir.
+    let mut node = node.restart().await?;
+    assert_eq!(node.block_hash(1), head);
+    let next = node.mine([account.transfer(recipient, U256::from(2)).await]).await?;
+    assert_eq!(next.block().parent_hash, head);
+    Ok(())
+}
+```
+
 An ExEx installed through the node builder:
 
 ```rust,no_run
@@ -469,6 +501,23 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
   later commit, see `wait_for_prune_checkpoint`. The account history checkpoint is the last pruned
   block that changed an account, so it can stay below the pruning target if the last blocks in
   the range changed none, e.g. empty blocks.
+- **`stop` needs the database to itself.** `stop` and `restart` consume the context and wait until
+  the harness holds the last handle of the node's database. A clone of `inner.provider`, a
+  `NodeClient` from `to_node_client`, or a handle of `inner.provider.rocksdb_provider()` makes them
+  fail after `node::DATABASE_RELEASE_TIMEOUT` (10 seconds), an open `database_provider_ro`
+  transaction right away. Drop those first. Payloads, `MinedBlock` with its `chain`, clones of
+  `node.engine` and alloy providers do not hold the database.
+- **A restart keeps the chain, not the context.** Stopping persists every canonical block and saves
+  the local transactions of the pool, which the node reinserts when it starts; blocks that are not
+  canonical, e.g. only submitted or reorged out, are lost. Unless it mines in dev mode, the
+  restarted node gets a forkchoice update that restates the head, safe and finalized blocks it
+  persisted. It also gets a new `NodeTestContext`: its finality policy is `Finality::Head` again,
+  and its `canonical_stream` only sees notifications from the restart on.
+- **A restarted node does not reconnect.** It keeps its peer id but listens on new ports, and test
+  nodes do not persist their peers. Connect it with `restarted.connect(&mut peer)` once the peer
+  noticed the disconnect, e.g. once `peer.inner.network.num_connected_peers()` dropped.
+  `peer.connect(&mut restarted)` panics, because the network events of the peer still hold the
+  disconnect.
 
 ## Rules for new tests
 
