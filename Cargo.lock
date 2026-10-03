@@ -9129,6 +9129,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "codspeed-criterion-compat",
  "eyre",
  "futures",
  "itertools 0.14.0",
