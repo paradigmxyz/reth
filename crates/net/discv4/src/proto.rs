@@ -209,10 +209,8 @@ impl alloy_rlp::Decodable for PingNodeEndpoint {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
+        // Payload length checked by Header::decode.
         let started_len = b.len();
-        if started_len < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
 
         // Geth allows the ipaddr to be possibly empty:
         // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/discover/v4_udp.go#L206-L209>
@@ -436,6 +434,15 @@ pub struct Ping {
 }
 
 impl Encodable for Ping {
+    fn length(&self) -> usize {
+        let mut payload_length =
+            4u32.length() + self.from.length() + self.to.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
@@ -528,6 +535,14 @@ pub struct Pong {
 }
 
 impl Encodable for Pong {
+    fn length(&self) -> usize {
+        let mut payload_length = self.to.length() + self.echo.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct PongMessageEIP868<'a> {
@@ -648,8 +663,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -666,8 +685,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -684,8 +707,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -702,8 +729,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 

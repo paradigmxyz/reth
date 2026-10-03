@@ -25,19 +25,22 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
+use alloy_eips::BlockHashOrNumber;
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
-use alloy_rpc_types::{AccountInfo, BlockId};
+use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_eth::AccountInfo;
 use dashmap::DashMap;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -304,7 +307,7 @@ where
         self.block_on_async(async {
             let block = self
                 .provider
-                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
+                .get_block(BlockId::latest())
                 .await
                 .map_err(ProviderError::other)?
                 .ok_or(ProviderError::HeaderNotFound(0.into()))?;
@@ -493,13 +496,13 @@ where
         Ok(Some(block))
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -737,8 +740,18 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -879,6 +892,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
@@ -1017,11 +1032,19 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
     }
 
     /// Get account information from RPC
+    #[allow(clippy::needless_update)]
     fn get_account(&self, address: Address) -> Result<Option<Account>, ProviderError>
     where
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
+        // Only `eth_getAccountInfo` returns account extensions.
+        if Account::EXTENSIONS_ENABLED && !self.reth_rpc_support {
+            return Err(ProviderError::other(std::io::Error::other(
+                "account extensions require an eth_getAccountInfo endpoint (reth_rpc_support)",
+            )));
+        }
+
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
             if self.reth_rpc_support {
@@ -1043,6 +1066,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
+                ..Default::default()
             };
 
             let code_hash = account_info.code_hash();
@@ -1054,19 +1078,17 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             Ok(account_info)
         })?;
 
-        // Only return account if it exists (has balance, nonce, or code)
-        if account_info.balance.is_zero() && account_info.nonce == 0 && account_info.code.is_empty()
-        {
+        // Only return accounts that exist.
+        if account_info.is_empty() {
             Ok(None)
         } else {
             let bytecode_hash =
                 if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
-            Ok(Some(Account {
-                balance: account_info.balance,
-                nonce: account_info.nonce,
-                bytecode_hash,
-            }))
+            let account = Account::new(account_info.nonce, account_info.balance, bytecode_hash);
+            #[cfg(feature = "account-ext")]
+            let account = account.with_extension(account_info.extension);
+            Ok(Some(account))
         }
     }
 }
@@ -1514,13 +1536,14 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block(&self) -> Result<Option<RecoveredBlock<Self::Block>>, ProviderError> {
+    fn pending_block(&self) -> Result<Option<Arc<RecoveredBlock<Self::Block>>>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> Result<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>, ProviderError> {
+    ) -> Result<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>, ProviderError>
+    {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1794,8 +1817,18 @@ where
     N: Network,
     Self: Clone + 'static,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
