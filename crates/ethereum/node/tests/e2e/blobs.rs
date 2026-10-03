@@ -1,4 +1,4 @@
-use alloy_eips::Decodable2718;
+use alloy_eips::{merge::SLOT_DURATION_SECS, Decodable2718};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
     test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, E2ETestSetupExt,
@@ -7,10 +7,7 @@ use reth_ethereum_engine_primitives::BlobSidecars;
 use reth_ethereum_primitives::PooledTransactionVariant;
 use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
-use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::Arc;
 
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {
@@ -101,9 +98,10 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    // Osaka activates in 2 slots
-    let osaka_timestamp = current_timestamp + 24;
+    // Keep genesis outside the conversion window. Importing the Prague payload below starts
+    // conversion two slots before Osaka, after all legacy sidecar assertions have completed.
+    let prague_timestamp = 2 * SLOT_DURATION_SECS;
+    let osaka_timestamp = prague_timestamp + 2 * SLOT_DURATION_SECS;
 
     let chain_spec = Arc::new(
         test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
@@ -112,13 +110,6 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
-
-    // build a dummy payload at `current_timestamp`
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
-    node.rpc.inject_tx(raw_tx).await?;
-    node.set_next_payload_timestamp(current_timestamp)?;
-    let dummy_payload = node.advance_block().await?;
-    assert_eq!(dummy_payload.block().timestamp, current_timestamp);
 
     // build blob txs
     let first_blob = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(1)).await?;
@@ -150,9 +141,10 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     TransactionTestContext::validate_sidecar(envelope);
 
     // build last Prague payload
-    node.set_next_payload_timestamp(current_timestamp + 2)?;
+    node.set_next_payload_timestamp(prague_timestamp)?;
     let prague_payload = node.new_payload().await?;
-    assert_eq!(prague_payload.block().timestamp, current_timestamp + 2);
+    assert_eq!(prague_payload.block().timestamp, prague_timestamp);
+    assert!(prague_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
     assert!(matches!(prague_payload.sidecars(), BlobSidecars::Eip4844(_)));
 
     // inject second blob tx to the pool
@@ -163,6 +155,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     assert!(envelope.as_eip4844().unwrap().tx().sidecar().unwrap().is_eip4844());
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
+
+    // Import the Prague payload to trigger conversion only after checking both legacy sidecars.
+    node.import_payload(prague_payload).await?;
 
     // wait for the pool to convert the sidecar ahead of the Osaka activation
     node.wait_for_pool(|pool| {
@@ -176,9 +171,6 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     assert!(envelope.as_eip4844().unwrap().tx().sidecar().unwrap().is_eip7594());
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
-
-    // import the Prague payload
-    node.import_payload(prague_payload).await?;
 
     // Build first Osaka payload
     node.set_next_payload_timestamp(osaka_timestamp)?;

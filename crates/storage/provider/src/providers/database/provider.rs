@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    HashedPostStateSorted,
+    ComputedTrieData, HashedPostStateSorted,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -1433,6 +1433,34 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Deletes the transaction, receipt, sender and changeset static files and restarts each
+    /// segment after `pivot`, so the next block appended is `pivot + 1`. Headers are kept.
+    ///
+    /// Each segment gets an empty file anchored at `pivot`. Blocks below it read as expired history
+    /// although the pruner never ran, and `pivot` itself reads as missing since nothing is stored
+    /// for it.
+    ///
+    /// CAUTION: destructive. The files are deleted immediately, while the anchor is written on
+    /// commit. The caller moves the stage and prune checkpoints to `pivot` in the same commit and
+    /// must be able to resume if the process stops between the static file and database commits.
+    /// Errors unless storage v2 is enabled.
+    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        if !self.cached_storage_settings().storage_v2 {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor requires storage v2",
+            )))
+        }
+        let static_files = self.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            static_files.delete_segment(segment)?;
+            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
+        }
+        // The pivot's own body is never stored, so reads of `pivot` find nothing while blocks
+        // below it are reported as expired.
+        static_files.set_earliest_history_height(pivot);
         Ok(())
     }
 }
@@ -2839,10 +2867,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // get transaction receipts
-        let from_transaction_num = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let from_transaction_num = self.next_tx_num_after_block(block)?;
 
         let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if self.cached_storage_settings().storage_v2 {
@@ -3607,8 +3632,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            Default::default(),
-            Default::default(),
+            ComputedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -3700,10 +3724,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             .prune_headers(highest_static_file_block.saturating_sub(block))?;
 
         // First transaction to be removed
-        let unwind_tx_from = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let unwind_tx_from = self.next_tx_num_after_block(block)?;
 
         // Last transaction to be removed
         let unwind_tx_to = self
@@ -3742,10 +3763,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         self.storage.writer().remove_block_bodies_above(self, block)?;
 
         // First transaction to be removed
-        let unwind_tx_from = self
-            .block_body_indices(block)?
-            .map(|b| b.next_tx_num())
-            .ok_or(ProviderError::BlockBodyIndicesNotFound(block))?;
+        let unwind_tx_from = self.next_tx_num_after_block(block)?;
 
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
@@ -3860,6 +3878,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         debug!(target: "providers::db", range = ?first_number..=last_block_number, actions = ?durations_recorder.actions, "Appended blocks");
 
         Ok(())
+    }
+
+    fn clear_transaction_lookup(&self) -> ProviderResult<()> {
+        if self.cached_storage_settings().storage_v2 {
+            self.rocksdb_provider.clear::<tables::TransactionHashNumbers>()
+        } else {
+            self.tx.clear::<tables::TransactionHashNumbers>().map_err(Into::into)
+        }
     }
 }
 
@@ -4054,7 +4080,8 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
-        HashedPostState, KeccakKeyHasher, Nibbles, StoredNibbles, StoredNibblesSubKey,
+        HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
+        StoredNibblesSubKey,
     };
     use revm::{database::BundleState, state::AccountInfo};
     use std::{sync::mpsc, time::Duration};
@@ -4767,8 +4794,10 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            Arc::new(full_persist_hashed_state),
-            Arc::new(full_persist_trie_updates),
+            ComputedTrieData::new(
+                Arc::new(full_persist_hashed_state),
+                Arc::new(full_persist_trie_updates),
+            ),
         );
 
         let deferred_trie_hashed_state = HashedPostStateSorted::new(
@@ -4790,8 +4819,10 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            Arc::new(deferred_trie_hashed_state),
-            Arc::new(deferred_trie_updates),
+            ComputedTrieData::new(
+                Arc::new(deferred_trie_hashed_state),
+                Arc::new(deferred_trie_updates),
+            ),
         );
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -5516,8 +5547,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            Default::default(),
-            Default::default(),
+            ComputedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5586,8 +5616,9 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                Arc::new(hashed_state),
-                Default::default(),
+                ComputedTrieData {
+                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+                },
             );
             blocks.push(executed);
         }

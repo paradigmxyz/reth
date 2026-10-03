@@ -21,7 +21,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
-use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostState};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
     state::bal::Bal,
@@ -310,8 +310,8 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub execution_result: BlockExecutionResult<N::Receipt>,
     /// Hashed state after execution.
     pub hashed_state: HashedPostState,
-    /// Sorted trie updates collected during state root calculation.
-    pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Trie updates collected during state root calculation.
+    pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
     /// Block access list built during execution (EIP-7928, Amsterdam), with its RLP bytes and
@@ -371,12 +371,12 @@ pub trait BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`].
     ///
     /// When `state_root_precomputed` is `None`, the state root is computed internally via
-    /// `state_root_with_updates()` and its updates are sorted. When `Some`, the provided root
-    /// and shared sorted updates are used directly (e.g. when using the sparse trie pipeline).
+    /// `state_root_with_updates()`. When `Some`, the provided root and trie updates are used
+    /// directly, skipping the expensive computation (e.g. when using the sparse trie pipeline).
     fn finish(
         self,
         state_provider: impl StateProvider,
-        state_root_precomputed: Option<(B256, Arc<TrieUpdatesSorted>)>,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
@@ -503,7 +503,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
-        state_root_precomputed: Option<(B256, Arc<TrieUpdatesSorted>)>,
+        state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -523,12 +523,9 @@ where
             state.hashed_post_state(&db.bundle_state).map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = match state_root_precomputed {
             Some(precomputed) => precomputed,
-            None => {
-                let (root, updates) = state
-                    .state_root_with_updates(hashed_state.clone())
-                    .map_err(BlockExecutionError::other)?;
-                (root, Arc::new(updates.into_sorted()))
-            }
+            None => state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?,
         };
 
         let (transactions, senders) =
