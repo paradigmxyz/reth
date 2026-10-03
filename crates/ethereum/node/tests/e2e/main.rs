@@ -11,6 +11,7 @@ mod invalid_payload;
 mod p2p;
 mod pool;
 mod prestate;
+mod reorg;
 mod rpc;
 mod selfdestruct;
 mod simulate;

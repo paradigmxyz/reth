@@ -4,7 +4,8 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
+    node::Finality, test_chain_spec, transaction::TransactionTestContext, wait::poll_until,
+    E2ETestSetupExt,
 };
 use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
@@ -126,6 +127,8 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    // keep genesis finalized, so the block with tx1 can be reorged
+    node.set_finality(Finality::Keep);
     let runtime = node.inner.task_executor.clone();
 
     let (w1, w2) = (wallet.signer(0), wallet.signer(1));
@@ -174,26 +177,10 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     txpool.add_transaction(TransactionOrigin::External, pooled_tx2).await.unwrap();
 
     // inject tx1, make the node advance and eventually generate `CanonStateNotification::Commit`
-    // event to propagate to the pool
+    // event to propagate to the pool. Wait for the node's own pool to drop tx1, so the block of the
+    // reorg below can't include it.
     let _ = node.rpc.inject_tx(envelop1.encoded_2718().into()).await.unwrap();
-
-    // build a payload based on tx1
-    let payload1 = node.new_payload().await?;
-
-    // clean up the internal pool of the provider node
-    node.inner.pool.remove_transactions(vec![tx_hash1]);
-
-    // inject tx2, make the node reorg and eventually generate `CanonStateNotification::Reorg` event
-    // to propagate to the pool
-    let _ = node.rpc.inject_tx(envelop2.encoded_2718().into()).await.unwrap();
-
-    // build a payload based on tx2
-    let payload2 = node.new_payload().await?;
-
-    // submit payload1
-    let block_hash1 = node.submit_payload(payload1).await?;
-
-    node.update_forkchoice(genesis_hash, block_hash1).await?;
+    node.advance_block_synced().await?;
 
     // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally tx1
     // will be removed and tx2 is still in the pool.
@@ -202,10 +189,10 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     })
     .await?;
 
-    // submit payload2
-    let block_hash2 = node.submit_payload(payload2).await?;
-
-    node.update_forkchoice(genesis_hash, block_hash2).await?;
+    // inject tx2 and mine it in a block on genesis, make the node reorg and eventually generate
+    // `CanonStateNotification::Reorg` event to propagate to the pool
+    let _ = node.rpc.inject_tx(envelop2.encoded_2718().into()).await.unwrap();
+    node.advance_block_on(genesis_hash).await?;
 
     // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
     // will be added back to the pool and tx2 will be removed.

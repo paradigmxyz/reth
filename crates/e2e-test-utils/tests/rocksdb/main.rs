@@ -7,7 +7,7 @@ use eyre::Result;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
-use reth_e2e_test_utils::{wait::poll_until, E2ETestSetupExt};
+use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
 use reth_prune_types::PruneSegment;
@@ -312,7 +312,8 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 ///
 /// This test exercises `unwind_trie_state_from` which previously failed with
 /// `UnsortedInput` errors because it read changesets directly from MDBX tables
-/// instead of using storage-aware methods that check `is_v2()`.
+/// instead of using storage-aware methods that check `is_v2()`. It reorgs out the persisted
+/// blocks 2 and 3, and checks that the unwind removed their transactions from `RocksDB`.
 #[tokio::test]
 async fn test_rocksdb_reorg_unwind() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -324,6 +325,8 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
         })
         .build_single()
         .await?;
+    // Keep genesis finalized, so the mined blocks can be reorged.
+    node.set_finality(Finality::Keep);
 
     // Use two separate accounts to avoid nonce conflicts during reorg
     let (mut account1, mut account2) = (wallet.account(0), wallet.account(1));
@@ -363,48 +366,51 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let tx_number3 = poll_tx_in_rocksdb(&node.inner.provider, tx_hash3).await?;
     assert_eq!(tx_number3, 2, "Third tx should have tx_number 2");
 
-    // Now create an alternate block 2 using account2 (different wallet, avoids nonce conflict)
-    // Inject a tx from account2 (nonce 0) before building the alternate block
+    // The reorg must unwind blocks 2 and 3 from disk. Also wait for the pool to drop their
+    // transactions, so the alternate block can't include tx2.
+    node.wait_for_persisted_block(3).await?;
+    node.wait_for_pool_head(payload3.block().hash()).await?;
+
+    // Reorg blocks 2 and 3 out with an alternate block 2 on block 1, which only includes a tx
+    // from account2 (nonce 0).
     let raw_alt_tx = account2.transfer(Address::random(), U256::from(100)).await;
-    node.rpc.inject_tx(raw_alt_tx).await?;
+    let alt_tx_hash = node.rpc.inject_tx(raw_alt_tx).await?;
+    let alt_payload = node.advance_block_on(block1_hash).await?;
+    let alt_block_hash = alt_payload.block().hash();
+    assert_eq!(alt_payload.block().number(), 2);
+    assert_eq!(
+        alt_payload.block().body().transactions().map(|tx| *tx.hash()).collect::<Vec<_>>(),
+        [alt_tx_hash]
+    );
+    assert_eq!(node.block_hash(2), alt_block_hash);
 
-    // Build an alternate payload (this builds on top of the current head, i.e., block 3)
-    // But we want to reorg back to block 1, so we'll use the payload and then FCU to it
-    let alt_payload = node.new_payload().await?;
-    let alt_block_hash = node.submit_payload(alt_payload.clone()).await?;
-
-    // Trigger reorg: make the alternate chain canonical by sending FCU pointing to block 1's hash
-    // as finalized, which should trigger an unwind of blocks 2 and 3
-    // The alt block becomes the new head
-    node.update_forkchoice(block1_hash, alt_block_hash).await?;
-
-    // Give time for the reorg to complete
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Verify we can still query transactions and the chain is consistent
-    // If unwind_trie_state_from failed, this would have errored during reorg
-    let latest: Option<alloy_rpc_types_eth::Block> =
-        client.request("eth_getBlockByNumber", ("latest", false)).await?;
-    let latest = latest.expect("Latest block should exist");
-    // The alt block is at height 4 (on top of block 3)
-    assert!(latest.header.number >= 3, "Should be at height >= 3 after operation");
+    // The engine unwinds blocks 2 and 3 before it persists the alternate block 2, whose tx reuses
+    // tx number 1.
+    let alt_tx_number = poll_tx_in_rocksdb(&node.inner.provider, alt_tx_hash).await?;
+    assert_eq!(alt_tx_number, 1, "Alternate tx should reuse tx_number 1");
+    let rocksdb = node.inner.provider.rocksdb_provider();
+    assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(tx_hash1)?, Some(0));
+    for tx_hash in [tx_hash2, tx_hash3] {
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?, None);
+    }
 
     // tx1 from block 1 should still be there
     let tx1: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash1]).await?;
     assert!(tx1.is_some(), "tx1 from block 1 should still be queryable");
     assert_eq!(tx1.unwrap().block_number, Some(1));
 
-    // Mine another block to verify the chain can continue
+    // Mine another block to verify the chain continues on the alternate block 2
     let raw_tx_final = account2.transfer(Address::random(), U256::from(100)).await;
     let tx_hash_final = node.rpc.inject_tx(raw_tx_final).await?;
 
     let final_payload = node.advance_block().await?;
-    assert!(final_payload.block().number() > 3, "Should be able to mine block after reorg");
+    assert_eq!(final_payload.block().number(), 3);
+    assert_eq!(final_payload.block().parent_hash(), alt_block_hash);
 
     // Verify tx_final is included
-    let tx_final: Option<Transaction> =
-        client.request("eth_getTransactionByHash", [tx_hash_final]).await?;
-    assert!(tx_final.is_some(), "final tx should be in latest block");
+    let receipt: Option<TransactionReceipt> =
+        client.request("eth_getTransactionReceipt", [tx_hash_final]).await?;
+    assert_eq!(receipt.expect("final tx should be mined").block_number, Some(3));
 
     Ok(())
 }

@@ -15,8 +15,8 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
-    PayloadStatusEnum,
+    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated,
+    PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::{bail, ensure, eyre, Ok, WrapErr};
@@ -26,6 +26,7 @@ use futures_util::{
 };
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
+use reth_engine_primitives::BeaconForkChoiceUpdateError;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
     Block, BlockBody, BlockTy, FullNodeComponents, NodePrimitives, PayloadTypes, PrimitivesTy,
@@ -238,14 +239,20 @@ where
     ///
     /// [`PayloadKind::WaitForPending`]: reth_payload_primitives::PayloadKind::WaitForPending
     pub async fn new_payload(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        self.build_payload(self.current_forkchoice_state()?).await
+    }
+
+    /// Builds a payload on the head of `state` with the next payload attributes and returns it
+    /// without submitting it.
+    ///
+    /// Returns an error if the engine does not report the forkchoice update valid, see
+    /// [`Self::build_payload_on`].
+    async fn build_payload(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> eyre::Result<Payload::BuiltPayload> {
         let attributes = self.payload.next_attributes();
-        let state = self.current_forkchoice_state()?;
-        let updated = self
-            .inner
-            .add_ons_handle
-            .beacon_engine_handle
-            .fork_choice_updated(state, Some(attributes))
-            .await?;
+        let updated = self.send_forkchoice_updated(state, Some(attributes)).await?;
         let payload_id = updated.payload_id.ok_or_else(|| {
             eyre!(
                 "forkchoice update to block {} with payload attributes started no payload job: {}",
@@ -301,6 +308,72 @@ where
         let mut chain = Vec::with_capacity(length as usize);
         for _ in 0..length {
             chain.push(self.advance_block().await?);
+        }
+        Ok(chain)
+    }
+
+    /// Builds a payload on the block with the given hash with the next payload attributes and
+    /// returns it without submitting it, like [`Self::new_payload`] does for the head.
+    ///
+    /// The payload job is started with a forkchoice update to `parent` that keeps the safe and
+    /// finalized blocks of the node. Its effect depends on `parent`:
+    /// - The head, or a canonical ancestor of it that is not below the finalized block: the head
+    ///   stays, the engine builds on `parent` without changing the canonical chain. The exception
+    ///   is a tree config with both `always_process_payload_attributes_on_canonical_head` and
+    ///   `unwind_canonical_header`, under which the engine moves the head back to an ancestor.
+    /// - A block on a side chain: the engine first makes the side chain canonical, so `parent`
+    ///   becomes the head, reorging the chain.
+    /// - A canonical block below the finalized block, or a side chain block that does not descend
+    ///   from the finalized block: the engine rejects the update and this returns an error, the
+    ///   head stays. Blocks imported under [`Finality::Head`] are finalized, import them under
+    ///   [`Finality::Keep`] or [`Finality::Lag`] to build on them later, see
+    ///   [`Self::set_finality`].
+    /// - A block the node does not know: the engine starts no payload job and requests the block
+    ///   from its peers, and this returns an error.
+    ///
+    /// The payload includes transactions of the pool, which tracks the head: transactions mined in
+    /// the blocks above `parent` are not in the pool anymore, so the payload does not include them,
+    /// and pool transactions that are invalid on `parent` are skipped.
+    pub async fn build_payload_on(&mut self, parent: B256) -> eyre::Result<Payload::BuiltPayload> {
+        self.build_payload(ForkchoiceState {
+            head_block_hash: parent,
+            ..self.current_forkchoice_state()?
+        })
+        .await
+    }
+
+    /// Builds a block on the block with the given hash and imports it with
+    /// [`Self::import_payload`], so it becomes the head.
+    ///
+    /// If `parent` is not the head, this reorgs the chain, so `parent` must be the finalized block
+    /// or descend from it, see [`Self::build_payload_on`]. The safe and finalized blocks follow
+    /// the [`Finality`] policy of the context. The transaction pool processes the reorg in the
+    /// background, see [`Self::reorg_to`].
+    pub async fn advance_block_on(&mut self, parent: B256) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.build_payload_on(parent).await?;
+
+        self.import_payload(payload.clone()).await?;
+
+        Ok(payload)
+    }
+
+    /// Builds a chain of `length` blocks on the block with the given hash and makes its tip the
+    /// head, see [`Self::advance_block_on`].
+    ///
+    /// The first block is built on `parent` and each further block on the previous one, so this
+    /// reorgs the chain if `parent` is not the head. Returns the built payloads, does nothing for
+    /// a length of 0.
+    pub async fn advance_fork(
+        &mut self,
+        parent: B256,
+        length: u64,
+    ) -> eyre::Result<Vec<Payload::BuiltPayload>> {
+        let mut chain = Vec::with_capacity(length as usize);
+        let mut parent = parent;
+        for _ in 0..length {
+            let payload = self.advance_block_on(parent).await?;
+            parent = payload.block().hash();
+            chain.push(payload);
         }
         Ok(chain)
     }
@@ -838,7 +911,7 @@ where
                 ForkchoiceState { head_block_hash: block_hash, ..self.current_forkchoice_state()? }
             }
         };
-        self.ensure_forkchoice_updated(state).await?;
+        self.send_forkchoice_updated(state, None).await?;
 
         // Look up the block at the lagging height only now that the block is canonical, so it is an
         // ancestor of the block even if the block reorged the chain.
@@ -850,31 +923,113 @@ where
                 .is_none_or(|finalized| number > finalized) &&
             let Some(finalized) = self.inner.provider.block_hash(number)?
         {
-            self.ensure_forkchoice_updated(ForkchoiceState {
-                head_block_hash: block_hash,
-                safe_block_hash: finalized,
-                finalized_block_hash: finalized,
-            })
+            self.send_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: block_hash,
+                    safe_block_hash: finalized,
+                    finalized_block_hash: finalized,
+                },
+                None,
+            )
             .await?;
         }
 
         Ok(block_hash)
     }
 
-    /// Sends the forkchoice state to the engine and returns an error if the engine does not report
-    /// it valid.
-    async fn ensure_forkchoice_updated(&self, state: ForkchoiceState) -> eyre::Result<()> {
-        let updated =
-            self.inner.add_ons_handle.beacon_engine_handle.fork_choice_updated(state, None).await?;
+    /// Makes the known block with the given hash the head of the node, keeping its safe and
+    /// finalized blocks, and returns once the block is the latest block.
+    ///
+    /// The engine makes a block on a side chain canonical, which reorgs the chain, e.g. back to a
+    /// chain the node left with [`Self::advance_fork`]. This requires the block to descend from
+    /// the finalized block, so blocks imported under [`Finality::Head`] can't be reorged away
+    /// from, import them under [`Finality::Keep`] or [`Finality::Lag`], see
+    /// [`Self::set_finality`]. The engine does not move the head back to a canonical ancestor, so
+    /// this returns an error for those, build a block on the ancestor with
+    /// [`Self::advance_block_on`] instead.
+    ///
+    /// The transaction pool processes the reorg in the background: once
+    /// [`Self::wait_for_pool_head`] returns for the block, the pool has removed the transactions
+    /// mined in the new chain and updated sender nonces and fees to it, while the maintenance task
+    /// re-injects the transactions of the reorged blocks only afterwards, wait for them with
+    /// [`Self::wait_for_pool`].
+    ///
+    /// Returns an error if the node does not know the block or one of its ancestors, if the block
+    /// is invalid, or if it does not descend from the safe and finalized blocks.
+    pub async fn reorg_to(&self, hash: B256) -> eyre::Result<()> {
+        let state = ForkchoiceState { head_block_hash: hash, ..self.current_forkchoice_state()? };
+        self.send_forkchoice_updated(state, None).await?;
+
+        let latest = self
+            .inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or_else(|| eyre!("latest block not found"))?;
+        ensure!(
+            latest.hash() == hash,
+            "block {hash} is a canonical ancestor of the head {}, which the engine does not move \
+             the head back to, build a block on it with `advance_block_on` instead",
+            latest.hash()
+        );
+
+        Ok(())
+    }
+
+    /// Sends the forkchoice state to the engine and returns its response, or an error that
+    /// explains why the engine did not report it valid.
+    async fn send_forkchoice_updated(
+        &self,
+        state: ForkchoiceState,
+        attributes: Option<Payload::PayloadAttributes>,
+    ) -> eyre::Result<ForkchoiceUpdated> {
+        let head = state.head_block_hash;
+        let updated = self
+            .inner
+            .add_ons_handle
+            .beacon_engine_handle
+            .fork_choice_updated(state, attributes)
+            .await
+            .map_err(|err| self.explain_forkchoice_error(err, head))?;
+        ensure!(
+            !updated.is_syncing(),
+            "the node does not know block {head} or one of its ancestors, or is syncing, submit \
+             the blocks first, e.g. with `submit_payload`"
+        );
         ensure!(
             updated.is_valid(),
-            "forkchoice update to head {}, safe {}, finalized {} is not valid: {}",
-            state.head_block_hash,
+            "forkchoice update to head {head}, safe {}, finalized {} is not valid: {}",
             state.safe_block_hash,
             state.finalized_block_hash,
             updated.payload_status.status
         );
-        Ok(())
+        Ok(updated)
+    }
+
+    /// Converts an error of a forkchoice update to `head` into a report, explaining how to avoid it
+    /// if the engine rejected the update because `head` does not descend from the finalized block.
+    fn explain_forkchoice_error(
+        &self,
+        err: BeaconForkChoiceUpdateError,
+        head: B256,
+    ) -> eyre::Report {
+        if !matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                ForkchoiceUpdateError::TooDeepReorg | ForkchoiceUpdateError::InvalidState
+            )
+        ) {
+            return err.into()
+        }
+        let finalized = match self.inner.provider.finalized_block_num_hash() {
+            Result::Ok(Some(finalized)) => format!("{} ({})", finalized.number, finalized.hash),
+            _ => "unknown".to_string(),
+        };
+        eyre::Report::new(err).wrap_err(format!(
+            "the node can't reorg to block {head}: it does not descend from the safe and finalized \
+             blocks of the node (finalized: {finalized}). Only blocks above the finalized block \
+             can be reorged, import them under `Finality::Keep` or `Finality::Lag`, see \
+             `NodeTestContext::set_finality`"
+        ))
     }
 
     /// Returns the RPC URL.
@@ -1125,6 +1280,10 @@ mod tests {
         assert_send(node.advance_block_synced());
         assert_send(node.inject_and_advance(Bytes::new()));
         assert_send(node.advance_blocks(0));
+        assert_send(node.build_payload_on(B256::ZERO));
+        assert_send(node.advance_block_on(B256::ZERO));
+        assert_send(node.advance_fork(B256::ZERO, 0));
+        assert_send(node.reorg_to(B256::ZERO));
         assert_send(node.advance_until_receipt(B256::ZERO));
         assert_send(node.advance_while(async {}));
         assert_send(node.engine.new_payload(payload.clone()));
