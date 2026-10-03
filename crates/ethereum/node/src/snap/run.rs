@@ -29,6 +29,8 @@ pub(super) struct SnapRun<N: ProviderNodeTypes, C> {
     pub(super) header_refresh: Duration,
     // Cancelled when the backfill is dropped.
     pub(super) stop: CancellationToken,
+    // Latest finalized block the engine reported.
+    pub(super) finalized: watch::Receiver<B256>,
 }
 
 impl<N, C> SnapRun<N, C>
@@ -66,8 +68,12 @@ where
             }
 
             let run_stop = self.stop.child_token();
-            let context =
-                NodeSnapContext::new(self.factory.clone(), self.client.clone(), targets.clone());
+            let context = NodeSnapContext::new(
+                self.factory.clone(),
+                self.client.clone(),
+                targets.clone(),
+                self.finalized.clone(),
+            );
             let mut session = SnapBootstrap::new(
                 self.client.clone(),
                 self.factory.clone(),
@@ -350,6 +356,7 @@ mod tests {
             runtime: Runtime::test(),
             header_refresh: Duration::ZERO,
             stop: stop.clone(),
+            finalized: watch::channel(B256::ZERO).1,
         };
         (run, stop)
     }

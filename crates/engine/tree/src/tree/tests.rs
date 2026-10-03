@@ -781,6 +781,30 @@ fn forkchoice_does_not_notify_a_backfill_awaiting_revalidation() {
     assert!(harness.from_tree_rx.try_recv().is_err());
 }
 
+#[test]
+fn forkchoice_notifies_active_backfill_of_the_finalized_block() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    harness.tree.backfill_sync_state = BackfillSyncState::Active;
+    let head = B256::repeat_byte(0x42);
+    let finalized = B256::repeat_byte(0x41);
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+
+    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
+
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
+    ));
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
+    ));
+}
+
 fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillAction) {
     let all_blocks: Vec<_> = TestBlockBuilder::eth()
         .get_executed_blocks(1..DEFAULT_BACKFILL_RUN_THRESHOLD + 10)

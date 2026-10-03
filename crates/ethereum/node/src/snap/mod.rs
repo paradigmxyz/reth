@@ -60,6 +60,8 @@ pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
     state: SnapBackfillState<N>,
     // Target queued by the engine, started on the next poll.
     pending_target: Option<PipelineTarget>,
+    // Latest finalized block the engine reported, kept across runs.
+    finalized: watch::Sender<B256>,
 }
 
 impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
@@ -76,6 +78,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
             runtime,
             state: SnapBackfillState::Idle(Some(Box::new(pipeline))),
             pending_target: None,
+            finalized: watch::channel(B256::ZERO).0,
         }
     }
 }
@@ -133,6 +136,7 @@ where
             runtime: self.runtime.clone(),
             header_refresh: HEADER_REFRESH,
             stop: stop.clone(),
+            finalized: self.finalized.subscribe(),
         };
         // Node shutdown drops this task as it does the pipeline's; every bootstrap step has either
         // committed or left nothing behind.
@@ -164,7 +168,8 @@ where
         match action {
             // The zero hash is never a usable target.
             BackfillAction::Start(PipelineTarget::Sync(hash)) |
-            BackfillAction::UpdateTarget(hash)
+            BackfillAction::UpdateTarget(hash) |
+            BackfillAction::UpdateFinalized(hash)
                 if hash.is_zero() => {}
             BackfillAction::Start(target) => self.pending_target = Some(target),
             BackfillAction::UpdateTarget(hash) => {
@@ -175,6 +180,14 @@ where
                         changed
                     });
                 }
+            }
+            // Kept while idle too, so the next run anchors its pivot to known finality.
+            BackfillAction::UpdateFinalized(hash) => {
+                self.finalized.send_if_modified(|current| {
+                    let changed = *current != hash;
+                    *current = hash;
+                    changed
+                });
             }
         }
     }
@@ -325,6 +338,18 @@ mod tests {
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::ZERO)));
 
+        assert!(poll_once(&mut backfill).is_pending());
+    }
+
+    #[test]
+    fn the_finalized_block_is_kept_while_idle() {
+        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let finalized = backfill.finalized.subscribe();
+
+        backfill.on_action(BackfillAction::UpdateFinalized(TARGET));
+        backfill.on_action(BackfillAction::UpdateFinalized(B256::ZERO));
+
+        assert_eq!(*finalized.borrow(), TARGET);
         assert!(poll_once(&mut backfill).is_pending());
     }
 
