@@ -560,9 +560,11 @@ impl ArchiveExtractionProgressHandle {
 }
 
 /// Tracks one active archive verification attempt.
+///
+/// Bytes are recorded through a shared reference because output files are hashed in parallel.
 pub(crate) struct ArchiveVerificationProgress<'a> {
     progress: Option<&'a Arc<SharedProgress>>,
-    verified: u64,
+    verified: AtomicU64,
     completed: bool,
 }
 
@@ -572,12 +574,12 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if let Some(progress) = progress {
             progress.verification_started();
         }
-        Self { progress, verified: 0, completed: false }
+        Self { progress, verified: AtomicU64::new(0), completed: false }
     }
 
     /// Adds plain-output bytes hashed by this verification attempt.
-    pub(crate) fn record_verified(&mut self, bytes: u64) {
-        self.verified += bytes;
+    pub(crate) fn record_verified(&self, bytes: u64) {
+        self.verified.fetch_add(bytes, Ordering::Relaxed);
         if let Some(progress) = self.progress {
             progress.add_active_verified_output_bytes(bytes);
         }
@@ -588,11 +590,11 @@ impl<'a> ArchiveVerificationProgress<'a> {
         if self.completed {
             return;
         }
+        let verified = std::mem::take(self.verified.get_mut());
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(verified);
             progress.record_archive_output_complete(total_bytes);
         }
-        self.verified = 0;
         self.completed = true;
     }
 }
@@ -600,7 +602,7 @@ impl<'a> ArchiveVerificationProgress<'a> {
 impl Drop for ArchiveVerificationProgress<'_> {
     fn drop(&mut self) {
         if let Some(progress) = self.progress {
-            progress.sub_active_verified_output_bytes(self.verified);
+            progress.sub_active_verified_output_bytes(*self.verified.get_mut());
             progress.verification_finished();
         }
     }
