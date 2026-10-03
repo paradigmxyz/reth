@@ -1289,6 +1289,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unpriced_blob_calls_run_at_zero_blob_base_fee() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Return BLOBBASEFEE.
+        let code = Bytes::from_static(&[0x4a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(10).pow(U256::from(18))));
+        provider.add_account(contract, ExtendedAccount::new(0, U256::ZERO).with_bytecode(code));
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let mut blob_hash = B256::repeat_byte(0x11);
+        blob_hash[0] = 0x01;
+
+        // Blob versioned hashes, max fee per blob gas and the expected BLOBBASEFEE.
+        for (blob_versioned_hashes, max_fee_per_blob_gas, blob_base_fee) in [
+            (None, None, 1),
+            (Some(vec![blob_hash]), None, 0),
+            (Some(vec![blob_hash]), Some(0), 0),
+            (Some(vec![blob_hash]), Some(1), 1),
+        ] {
+            let request = TransactionRequest {
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                ..TransactionRequest::default().with_from(sender).with_to(contract)
+            };
+            let output =
+                EthCall::call(&api, request, Some(BlockId::latest()), EvmOverrides::default())
+                    .await
+                    .unwrap();
+            assert_eq!(U256::from_be_slice(&output), U256::from(blob_base_fee));
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_transfer_respects_rpc_gas_cap() {
         let provider = MockEthProvider::default();
         provider.add_block(
