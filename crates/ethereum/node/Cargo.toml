@@ -98,6 +98,17 @@ reth-rpc-layer.workspace = true
 
 [features]
 default = []
+account-ext = [
+    "reth-provider/account-ext",
+    "revm/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-revm/account-ext",
+    "reth-stages-types/account-ext",
+    "reth-rpc/account-ext",
+    "reth-rpc-eth-api/account-ext",
+]
 jit = ["reth-evm-ethereum/jit"]
 gmp = ["reth-evm-ethereum/gmp"]
 asm-keccak = [

@@ -73,6 +73,19 @@ impl SnapSyncSession {
         Some((generation, self.cancellation.clone()))
     }
 
+    /// Takes over the target of an attempt a previous run recorded, as [`Self::start`] does for a
+    /// selected one.
+    ///
+    /// Only a session that has not handed out a target can take one over.
+    pub fn resume(&mut self, generation: SnapGeneration) -> Option<CancellationToken> {
+        if !matches!(self.state, SnapSyncSessionState::Waiting | SnapSyncSessionState::Selected(_))
+        {
+            return None
+        }
+        self.state = SnapSyncSessionState::Downloading(generation);
+        Some(self.cancellation.clone())
+    }
+
     /// Re-anchors the downloaded target once it lags too far behind `head`, returning the new
     /// write.
     ///
@@ -238,6 +251,23 @@ mod tests {
 
         assert!(session.start().is_some());
         assert!(session.start().is_none());
+    }
+
+    #[test]
+    fn a_recorded_target_is_resumed_once() {
+        let (factory, _, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        let attempt = provider.authorize_snap_write(write).unwrap();
+        let recorded = SnapGeneration::new(attempt.pivot(), attempt.state_root());
+        let mut session = SnapSyncSession::new(policy().with_advance_after(1));
+
+        assert!(session.resume(recorded).is_some());
+        assert!(session.resume(recorded).is_none());
+        assert!(session.start().is_none());
+        assert_eq!(session.state(), &SnapSyncSessionState::Downloading(recorded));
+        // A resumed target advances like a started one.
+        assert!(session.advance(&provider, write, 3, None).unwrap().is_some());
+        assert_eq!(session.target().unwrap().target().number, 2);
     }
 
     #[test]

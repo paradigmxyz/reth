@@ -47,6 +47,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                 last_hashed_key: value.last_account_key,
             },
             storage_root_state: value.storage_root_checkpoint.map(|checkpoint| {
+                let account = checkpoint.account();
                 IntermediateStorageRootState {
                     state: IntermediateRootState {
                         hash_builder: HashBuilder::from(checkpoint.state),
@@ -57,11 +58,7 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                             .collect(),
                         last_hashed_key: checkpoint.last_storage_key,
                     },
-                    account: Account {
-                        nonce: checkpoint.account_nonce,
-                        balance: checkpoint.account_balance,
-                        bytecode_hash: Some(checkpoint.account_bytecode_hash),
-                    },
+                    account,
                 }
             }),
         }

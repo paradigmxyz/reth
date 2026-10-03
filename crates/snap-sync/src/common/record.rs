@@ -30,6 +30,12 @@ pub(crate) trait SnapRecord: Serialize + DeserializeOwned {
         Ok(Some(serde_json::from_value(value).map_err(ProviderError::other)?))
     }
 
+    /// Removes the record, whichever version wrote it.
+    fn clear(provider: &impl MetadataWriter) -> Result<(), SnapSyncError> {
+        provider.delete_metadata(Self::KEY)?;
+        Ok(())
+    }
+
     /// Writes this record under its key.
     fn write(&self, provider: &impl MetadataWriter) -> Result<(), SnapSyncError> {
         provider
