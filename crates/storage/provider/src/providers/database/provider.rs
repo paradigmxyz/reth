@@ -1435,6 +1435,34 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         Ok(())
     }
+
+    /// Deletes the transaction, receipt, sender and changeset static files and restarts each
+    /// segment after `pivot`, so the next block appended is `pivot + 1`. Headers are kept.
+    ///
+    /// Each segment gets an empty file anchored at `pivot`. Blocks below it read as expired history
+    /// although the pruner never ran, and `pivot` itself reads as missing since nothing is stored
+    /// for it.
+    ///
+    /// CAUTION: destructive. The files are deleted immediately, while the anchor is written on
+    /// commit. The caller moves the stage and prune checkpoints to `pivot` in the same commit and
+    /// must be able to resume if the process stops between the static file and database commits.
+    /// Errors unless storage v2 is enabled.
+    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        if !self.cached_storage_settings().storage_v2 {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor requires storage v2",
+            )))
+        }
+        let static_files = self.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            static_files.delete_segment(segment)?;
+            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
+        }
+        // The pivot's own body is never stored, so reads of `pivot` find nothing while blocks
+        // below it are reported as expired.
+        static_files.set_earliest_history_height(pivot);
+        Ok(())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
