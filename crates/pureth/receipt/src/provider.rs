@@ -12,6 +12,7 @@ use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, ProviderError, ReceiptProvider, TransactionVariant,
 };
+use std::fmt;
 
 pub const DETERMINISTIC_PRODUCER_REVISION: &str = "deterministic-receipt-provider-v0";
 pub const RETH_HISTORICAL_PRODUCER_REVISION: &str = "reth-historical-receipt-provider-v0";
@@ -219,6 +220,30 @@ pub enum ProviderBuildError {
     TreeConstruction(TreeConstructionError),
 }
 
+impl fmt::Display for ProviderBuildError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RecoveredBlock => formatter.write_str("deterministic block recovery failed"),
+            Self::ReceiptConversion(error) => {
+                write!(formatter, "receipt conversion failed: {error}")
+            }
+            Self::TreeConstruction(error) => {
+                write!(formatter, "receipt tree construction failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProviderBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RecoveredBlock => None,
+            Self::ReceiptConversion(error) => Some(error),
+            Self::TreeConstruction(error) => Some(error),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum HistoricalAcquisitionError {
     ConsistentView(ProviderError),
@@ -231,6 +256,68 @@ pub enum HistoricalAcquisitionError {
     TreeConstruction(TreeConstructionError),
 }
 
+impl HistoricalAcquisitionError {
+    pub const fn is_unavailable(&self) -> bool {
+        match self {
+            Self::BlockUnavailable | Self::ReceiptsUnavailable => true,
+            Self::BlockRead(error) => matches!(
+                error,
+                ProviderError::BlockExpired { .. } |
+                    ProviderError::BlockHashNotFound(_) |
+                    ProviderError::UnknownBlockHash(_) |
+                    ProviderError::HeaderNotFound(_)
+            ),
+            Self::ReceiptsRead(error) => matches!(
+                error,
+                ProviderError::BlockExpired { .. } | ProviderError::ReceiptNotFound(_)
+            ),
+            Self::ConsistentView(_) |
+            Self::CanonicalHashRead(_) |
+            Self::ReceiptConversion(_) |
+            Self::TreeConstruction(_) => false,
+        }
+    }
+}
+
+impl fmt::Display for HistoricalAcquisitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConsistentView(error) => {
+                write!(formatter, "consistent provider view failed: {error}")
+            }
+            Self::BlockRead(error) => write!(formatter, "historical block read failed: {error}"),
+            Self::CanonicalHashRead(error) => {
+                write!(formatter, "canonical hash read failed: {error}")
+            }
+            Self::ReceiptsRead(error) => {
+                write!(formatter, "historical receipt read failed: {error}")
+            }
+            Self::BlockUnavailable => formatter.write_str("requested block is unavailable"),
+            Self::ReceiptsUnavailable => formatter.write_str("requested receipts are unavailable"),
+            Self::ReceiptConversion(error) => {
+                write!(formatter, "historical receipt conversion failed: {error}")
+            }
+            Self::TreeConstruction(error) => {
+                write!(formatter, "historical receipt tree construction failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HistoricalAcquisitionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ConsistentView(error) |
+            Self::BlockRead(error) |
+            Self::CanonicalHashRead(error) |
+            Self::ReceiptsRead(error) => Some(error),
+            Self::ReceiptConversion(error) => Some(error),
+            Self::TreeConstruction(error) => Some(error),
+            Self::BlockUnavailable | Self::ReceiptsUnavailable => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookupError {
     UnknownBlock,
@@ -238,10 +325,40 @@ pub enum LookupError {
     UnsupportedSchema,
 }
 
+impl fmt::Display for LookupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::UnknownBlock => "requested block is unknown",
+            Self::UnsupportedObject => "requested object is unsupported",
+            Self::UnsupportedSchema => "requested schema is unsupported",
+        })
+    }
+}
+
+impl std::error::Error for LookupError {}
+
 #[derive(Debug)]
 pub enum RethRootProviderError {
     Lookup(LookupError),
     Acquisition(HistoricalAcquisitionError),
+}
+
+impl fmt::Display for RethRootProviderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Lookup(error) => write!(formatter, "receipt lookup failed: {error}"),
+            Self::Acquisition(error) => write!(formatter, "receipt acquisition failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RethRootProviderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Lookup(error) => Some(error),
+            Self::Acquisition(error) => Some(error),
+        }
+    }
 }
 
 fn singleton_snapshot() -> Result<ProviderSnapshot, ProviderBuildError> {
@@ -644,6 +761,71 @@ mod tests {
                 ProviderError::HeaderNotFound(_)
             ))
         ));
+    }
+
+    #[test]
+    fn acquisition_errors_separate_unavailability_from_internal_failures() {
+        let expired = HistoricalAcquisitionError::BlockRead(ProviderError::BlockExpired {
+            requested: 1,
+            earliest_available: 2,
+        });
+        assert!(expired.is_unavailable());
+        assert!(HistoricalAcquisitionError::BlockUnavailable.is_unavailable());
+        assert!(HistoricalAcquisitionError::ReceiptsUnavailable.is_unavailable());
+        assert!(HistoricalAcquisitionError::BlockRead(ProviderError::BlockHashNotFound(
+            B256::ZERO
+        ),)
+        .is_unavailable());
+        assert!(
+            HistoricalAcquisitionError::BlockRead(ProviderError::UnknownBlockHash(B256::ZERO),)
+                .is_unavailable()
+        );
+        assert!(!HistoricalAcquisitionError::ConsistentView(ProviderError::BlockExpired {
+            requested: 1,
+            earliest_available: 2
+        },)
+        .is_unavailable());
+        assert!(!HistoricalAcquisitionError::BlockRead(ProviderError::InvalidStorageOutput,)
+            .is_unavailable());
+    }
+
+    #[test]
+    fn provider_errors_display_stage_and_preserve_source_chain() {
+        use std::error::Error;
+
+        let error = RethRootProviderError::Acquisition(HistoricalAcquisitionError::BlockRead(
+            ProviderError::BlockExpired { requested: 1, earliest_available: 2 },
+        ));
+        assert!(error.to_string().contains("historical block read failed"));
+        let acquisition = error.source().unwrap();
+        assert!(acquisition.downcast_ref::<HistoricalAcquisitionError>().is_some());
+        assert!(matches!(
+            acquisition.source().unwrap().downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockExpired { requested: 1, earliest_available: 2 })
+        ));
+
+        let conversion =
+            ReceiptConversionError::ReceiptCountMismatch { transactions: 2, receipts: 1 };
+        let error = HistoricalAcquisitionError::ReceiptConversion(conversion.clone());
+        assert_eq!(error.to_string(), "historical receipt conversion failed: receipt count mismatch: 2 transactions, 1 receipts");
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<ReceiptConversionError>(),
+            Some(&conversion)
+        );
+
+        let tree = TreeConstructionError::InvalidWidth { width: 0 };
+        let error = ProviderBuildError::TreeConstruction(tree);
+        assert!(error.to_string().contains("receipt tree construction failed"));
+        assert_eq!(error.source().unwrap().downcast_ref::<TreeConstructionError>(), Some(&tree));
+        assert!(ProviderBuildError::RecoveredBlock.source().is_none());
+        assert!(HistoricalAcquisitionError::BlockUnavailable.source().is_none());
+        assert!(HistoricalAcquisitionError::ReceiptsUnavailable.source().is_none());
+        assert_eq!(LookupError::UnsupportedSchema.to_string(), "requested schema is unsupported");
+        let error = RethRootProviderError::Lookup(LookupError::UnknownBlock);
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<LookupError>(),
+            Some(&LookupError::UnknownBlock)
+        );
     }
 
     #[test]
