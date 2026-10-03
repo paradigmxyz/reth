@@ -40,7 +40,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::ComputedTrieData;
+use reth_trie::{ComputedTrieData, HashedPostState, KeccakKeyHasher};
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{
@@ -68,7 +68,6 @@ mod metrics;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
-pub mod precompile_cache;
 pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
@@ -85,8 +84,9 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
+    precompile_cache, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+    TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
     Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
@@ -2380,11 +2380,15 @@ where
         let bundle_state = execution_output.state();
         // `get_state` can return an in-memory execution outcome that retains destruction statuses.
         // Hashing it requires the parent provider to expand a pre-existing destroyed account's
-        // storage into zero-valued slots.
-        let hashed_state = self
-            .provider
-            .state_by_block_hash(block.parent_hash())?
-            .hashed_post_state(bundle_state)?;
+        // storage into zero-valued slots. Genesis has no parent state, and no account existed
+        // before it to be destroyed.
+        let hashed_state = if block.parent_hash().is_zero() {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        } else {
+            self.provider
+                .state_by_block_hash(block.parent_hash())?
+                .hashed_post_state(bundle_state)?
+        };
 
         debug!(
             target: "engine::tree",

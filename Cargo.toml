@@ -429,7 +429,7 @@ reth-zstd-compressors = { version = "0.8.2", default-features = false }
 # revm
 revm = { version = "43.0.3", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.44.0"
+revm-inspectors = "0.44.1"
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -512,7 +512,6 @@ serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
-slotmap = "1"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
 thiserror = { version = "2.0.0", default-features = false }

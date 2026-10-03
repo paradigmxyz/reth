@@ -1797,6 +1797,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
+ "rayon-core",
 ]
 
 [[package]]
@@ -3366,6 +3367,7 @@ name = "ef-tests"
 version = "2.7.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -8501,6 +8503,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-api",
@@ -8616,7 +8619,6 @@ dependencies = [
  "indexmap 2.14.2",
  "metrics",
  "metrics-util",
- "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.6",
@@ -9071,8 +9073,11 @@ dependencies = [
  "alloy-primitives",
  "fixed-cache",
  "metrics",
+ "metrics-util",
+ "moka",
  "parking_lot",
  "reth-errors",
+ "reth-evm",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
@@ -10964,6 +10969,7 @@ dependencies = [
  "metrics",
  "rand 0.9.4",
  "reth-chainspec",
+ "reth-db-common",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",
@@ -11002,7 +11008,6 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",
- "slotmap",
  "smallvec",
  "strum 0.27.2",
  "tracing",
@@ -11151,9 +11156,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.44.0"
+version = "0.44.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c1f17ebaa6be220728837731a3c87d1a542bf31a68138e9364a3a33b149415c"
+checksum = "3584d48ecc82f4df573c0b68994a27f46da53e06dfae224e446b1aa868bc1665"
 dependencies = [
  "alloy-eip2930",
  "alloy-primitives",
@@ -12251,15 +12256,6 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
-
-[[package]]
-name = "slotmap"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
-dependencies = [
- "version_check",
-]
 
 [[package]]
 name = "small_btree"
