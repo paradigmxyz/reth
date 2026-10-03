@@ -67,7 +67,7 @@ pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
     /// Moves the target of a running backfill, as forkchoice advances, without starting another
-    /// run.
+    /// run. It may arrive when no run is active, in which case it should be ignored.
     UpdateTarget(PipelineTarget),
 }
 
