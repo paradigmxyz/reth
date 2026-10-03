@@ -58,25 +58,15 @@ pub(crate) fn policy() -> SnapPivotPolicy {
 }
 
 /// A header with a state root distinctive to its number, and a commitment when one is given.
-///
-/// A commitment comes with the fields of the forks before it, as real headers carry them, so the
-/// header encodes and decodes the same.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
     block_access_list_hash: Option<B256>,
 ) -> Header {
-    let forked = block_access_list_hash.is_some();
     Header {
         number,
         parent_hash,
         state_root: B256::repeat_byte(number as u8),
-        base_fee_per_gas: forked.then_some(0),
-        withdrawals_root: forked.then_some(B256::ZERO),
-        blob_gas_used: forked.then_some(0),
-        excess_blob_gas: forked.then_some(0),
-        parent_beacon_block_root: forked.then_some(B256::ZERO),
-        requests_hash: forked.then_some(B256::ZERO),
         block_access_list_hash,
         ..Default::default()
     }

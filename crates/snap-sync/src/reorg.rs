@@ -7,51 +7,87 @@
 
 use crate::{common::SnapRecord, SnapSyncError};
 use alloy_eips::BlockNumHash;
-use alloy_primitives::Bytes;
-use alloy_rlp::Decodable;
+use alloy_primitives::{Sealable, B256};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
     BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId,
 };
-use reth_storage_errors::provider::ProviderError;
 use serde::{Deserialize, Serialize};
 
-// Blocks of headers an attempt keeps through its pivot, bounding how deep a recoverable reorg
-// can reach.
-const KEPT_HEADERS: u64 = 64;
+// Blocks an attempt keeps through its pivot, bounding how deep a recoverable reorg can reach.
+const KEPT_BLOCKS: u64 = 64;
 
 /// Where a reorg left an attempt: the last block both branches share and the orphaned blocks
 /// after it.
 #[derive(Clone, Debug)]
-pub struct SnapReorg<H> {
+pub struct SnapReorg {
     // Last block both branches share.
     ancestor: BlockNumHash,
-    // Headers of the orphaned blocks through the pivot, oldest first. Empty while the pivot is
-    // canonical.
-    orphaned: Vec<SealedHeader<H>>,
+    // Orphaned blocks through the pivot, oldest first. Empty while the pivot is canonical.
+    orphaned: Vec<KeptBlock>,
 }
 
-impl<H> SnapReorg<H> {
+impl SnapReorg {
     /// Last block both branches share.
     pub const fn ancestor(&self) -> BlockNumHash {
         self.ancestor
     }
 
-    /// Headers of the orphaned blocks through the pivot, oldest first.
-    pub fn orphaned(&self) -> &[SealedHeader<H>] {
+    /// Orphaned blocks through the pivot, oldest first.
+    pub fn orphaned(&self) -> &[KeptBlock] {
         &self.orphaned
     }
 }
 
-// Headers an attempt keeps of the blocks through its pivot, as RLP.
+/// A block an attempt keeps through its pivot, holding what recovery from a reorg reads of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptBlock {
+    // Block number.
+    number: u64,
+    // Block hash.
+    hash: B256,
+    // Hash of the parent block.
+    parent_hash: B256,
+    // Block access list commitment, absent before their activation.
+    commitment: Option<B256>,
+}
+
+impl KeptBlock {
+    /// Keeps what recovery reads of `header`.
+    pub fn of<H: AlloyBlockHeader + Sealable>(header: &SealedHeader<H>) -> Self {
+        Self {
+            number: header.number(),
+            hash: header.hash(),
+            parent_hash: header.parent_hash(),
+            commitment: header.block_access_list_hash(),
+        }
+    }
+
+    /// Block number and hash.
+    pub const fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number, self.hash)
+    }
+
+    /// Hash of the parent block.
+    pub const fn parent_hash(&self) -> B256 {
+        self.parent_hash
+    }
+
+    /// Block access list commitment, absent before their activation.
+    pub const fn commitment(&self) -> Option<B256> {
+        self.commitment
+    }
+}
+
+// Blocks an attempt keeps through its pivot.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StoredAncestry {
     // Encoding version, checked before the rest is decoded.
     version: u32,
-    // Attempt the headers belong to.
+    // Attempt the blocks belong to.
     attempt: SnapAttemptId,
-    // Encoded headers, oldest first and ending at the pivot.
-    headers: Vec<Bytes>,
+    // Kept blocks, oldest first and ending at the pivot.
+    blocks: Vec<KeptBlock>,
 }
 
 impl SnapRecord for StoredAncestry {
@@ -60,50 +96,45 @@ impl SnapRecord for StoredAncestry {
 }
 
 impl StoredAncestry {
-    // Keeps the canonical headers of the last `KEPT_HEADERS` blocks through `pivot` for `attempt`.
-    // Keeps none unless they reach the pivot, leaving a reorg unrecoverable.
+    // Keeps the canonical blocks of the last `KEPT_BLOCKS` through `pivot` for `attempt`. Keeps
+    // none unless they reach the pivot, leaving a reorg unrecoverable.
     pub(crate) fn record<P: HeaderProvider + MetadataWriter>(
         provider: &P,
         attempt: SnapAttemptId,
         pivot: BlockNumHash,
     ) -> Result<(), SnapSyncError> {
-        let from = pivot.number.saturating_sub(KEPT_HEADERS) + 1;
+        let from = pivot.number.saturating_sub(KEPT_BLOCKS) + 1;
         let headers = provider.sealed_headers_range(from..=pivot.number)?;
         let contiguous = headers.windows(2).all(|pair| pair[1].parent_hash() == pair[0].hash());
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
             return Self::clear(provider)
         }
-        let headers =
-            headers.iter().map(|header| alloy_rlp::encode(header.header()).into()).collect();
-        Self { version: Self::VERSION, attempt, headers }.write(provider)
+        let blocks = headers.iter().map(KeptBlock::of).collect();
+        Self { version: Self::VERSION, attempt, blocks }.write(provider)
     }
 
-    // Finds where the canonical chain diverges from the headers `attempt` keeps. `None` when they
+    // Finds where the canonical chain diverges from the blocks `attempt` keeps. `None` when they
     // do not reach back to where the branches part.
-    pub(crate) fn reorg<P: MetadataProvider + HeaderProvider + BlockHashReader>(
+    pub(crate) fn reorg<P: MetadataProvider + BlockHashReader>(
         provider: &P,
         attempt: &SnapAttempt,
-    ) -> Result<Option<SnapReorg<P::Header>>, SnapSyncError> {
-        let Some(stored) = Self::read(provider)?.filter(|stored| stored.attempt == attempt.id())
+    ) -> Result<Option<SnapReorg>, SnapSyncError> {
+        let Some(mut blocks) = Self::read(provider)?
+            .filter(|stored| stored.attempt == attempt.id())
+            .map(|stored| stored.blocks)
         else {
             return Ok(None)
         };
-        let mut headers = stored
-            .headers
-            .iter()
-            .map(|header| P::Header::decode(&mut header.as_ref()).map(SealedHeader::seal_slow))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ProviderError::other)?;
-        // Kept headers end at the pivot they were recorded for.
-        if headers.last().map(SealedHeader::num_hash) != Some(attempt.pivot()) {
+        // Kept blocks end at the pivot they were recorded for.
+        if blocks.last().map(KeptBlock::num_hash) != Some(attempt.pivot()) {
             return Ok(None)
         }
 
         // The highest kept block still canonical is where the branches part.
         let mut split = None;
-        for (index, header) in headers.iter().enumerate().rev() {
-            if provider.block_hash(header.number())? == Some(header.hash()) {
-                split = Some((header.num_hash(), index + 1));
+        for (index, block) in blocks.iter().enumerate().rev() {
+            if provider.block_hash(block.number)? == Some(block.hash) {
+                split = Some((block.num_hash(), index + 1));
                 break
             }
         }
@@ -111,15 +142,15 @@ impl StoredAncestry {
             Some(split) => split,
             None => {
                 // Otherwise they part just below the lowest kept block, or further down.
-                let lowest = &headers[0];
-                let Some(parent) = lowest.number().checked_sub(1) else { return Ok(None) };
-                if provider.block_hash(parent)? != Some(lowest.parent_hash()) {
+                let lowest = blocks[0];
+                let Some(parent) = lowest.number.checked_sub(1) else { return Ok(None) };
+                if provider.block_hash(parent)? != Some(lowest.parent_hash) {
                     return Ok(None)
                 }
-                (BlockNumHash::new(parent, lowest.parent_hash()), 0)
+                (BlockNumHash::new(parent, lowest.parent_hash), 0)
             }
         };
-        Ok(Some(SnapReorg { ancestor, orphaned: headers.split_off(from) }))
+        Ok(Some(SnapReorg { ancestor, orphaned: blocks.split_off(from) }))
     }
 }
 
@@ -193,8 +224,12 @@ mod tests {
         (factory, write)
     }
 
-    fn reorg(factory: &Factory, write: SnapWrite) -> Option<SnapReorg<alloy_consensus::Header>> {
+    fn reorg(factory: &Factory, write: SnapWrite) -> Option<SnapReorg> {
         factory.database_provider_ro().unwrap().snap_reorg(write).unwrap()
+    }
+
+    fn kept(headers: &[SealedHeader]) -> Vec<KeptBlock> {
+        headers.iter().map(KeptBlock::of).collect()
     }
 
     // A verified list carrying `changes`.
@@ -222,7 +257,7 @@ mod tests {
         let reorg = reorg(&factory, write).unwrap();
 
         assert_eq!(reorg.ancestor(), old.block(0));
-        assert_eq!(reorg.orphaned(), &old.headers[3..]);
+        assert_eq!(reorg.orphaned(), kept(&old.headers[3..]));
     }
 
     #[test]
@@ -236,13 +271,13 @@ mod tests {
         let reorg = reorg(&factory, write).unwrap();
 
         assert_eq!(reorg.ancestor(), old.block(0));
-        assert_eq!(reorg.orphaned(), &old.headers[1..]);
+        assert_eq!(reorg.orphaned(), kept(&old.headers[1..]));
     }
 
     #[test]
     fn a_reorg_below_the_kept_headers_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
-        let depth = KEPT_HEADERS + 2;
+        let depth = KEPT_BLOCKS + 2;
         let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
         let new = BalChain::new(1, (0..depth).map(|n| credit(address, n + 100)));
         let (factory, write) = started(&old, 1 + depth);
