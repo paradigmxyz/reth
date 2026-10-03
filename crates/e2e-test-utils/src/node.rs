@@ -435,6 +435,50 @@ where
             .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
     }
 
+    /// Advances the chain one block at a time until the transaction pool has no pending
+    /// transactions left, returning the built payloads.
+    ///
+    /// Pending transactions are the ones the pool considers ready for the next block, which the
+    /// payload builder picks from. This does not wait for the other transactions of the pool,
+    /// which stay in it: queued transactions, e.g. behind a nonce gap, and transactions whose fee
+    /// cap is below the base fee or blob fee of the next block. Transactions that become pending
+    /// once a built block is processed, e.g. because it lowered the base fee, are included in the
+    /// following blocks. The pool decides when to stop, not the content of the blocks, since
+    /// payload builders can add transactions of their own that are not pool transactions.
+    ///
+    /// The pool processes new blocks in the background, so this waits until it processed the
+    /// current head before it looks at the pool, see [`Self::wait_for_pool_head`], and advances
+    /// with [`Self::advance_block_synced`]. No block is built once the pool has no pending
+    /// transactions: the last payload is the block after which none were left, not an extra empty
+    /// block, and no payload is returned if the pool has none to begin with.
+    ///
+    /// Returns an error if the pool does not process the current head within [`WAIT_TIMEOUT`],
+    /// e.g. because it was synced by backfill, or, listing them, if pending transactions are left
+    /// after [`WAIT_TIMEOUT`], e.g. because the payload builder skips them.
+    pub async fn advance_until_pool_drained(&mut self) -> eyre::Result<Vec<Payload::BuiltPayload>> {
+        let head = self
+            .inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or_else(|| eyre!("latest block not found"))?;
+        self.wait_for_pool_head(head.hash()).await?;
+
+        let wait = async {
+            let mut chain = Vec::new();
+            while self.inner.pool.pool_size().pending > 0 {
+                chain.push(self.advance_block_synced().await?);
+            }
+            Ok(chain)
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait).await.map_err(|_| {
+            eyre!(
+                "timed out advancing the chain until the transaction pool has no pending \
+                 transactions, {}",
+                describe_pending_transactions(&self.inner.pool)
+            )
+        })?
+    }
+
     /// Drives `fut` to completion while advancing the chain one block every [`POLL_INTERVAL`],
     /// returning its output.
     ///
@@ -1464,6 +1508,27 @@ async fn wait_for_pool_transactions<P: TransactionPool>(
     .map_err(|err| eyre!("{err}, {pending_kind}: {pending:?}"))
 }
 
+/// Describes the pending transactions of `pool` for an error message, listing at most ten.
+fn describe_pending_transactions<P: TransactionPool>(pool: &P) -> String {
+    const MAX_LISTED: usize = 10;
+
+    let pending = pool.pending_transactions();
+    let mut listed = pending
+        .iter()
+        .take(MAX_LISTED)
+        .map(|tx| format!("{} (sender {}, nonce {})", tx.hash(), tx.sender(), tx.nonce()))
+        .collect::<Vec<_>>();
+    if pending.len() > MAX_LISTED {
+        listed.push(format!("and {} more", pending.len() - MAX_LISTED));
+    }
+    format!(
+        "the pool still has {} at block {}: {}",
+        pending.len(),
+        pool.block_info().last_seen_block_number,
+        listed.join(", ")
+    )
+}
+
 /// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`] or
 /// [`NodeTestContext::mine_pooled`].
 #[derive(Debug)]
@@ -1651,6 +1716,7 @@ mod tests {
         assert_send(node.advance_fork(B256::ZERO, 0));
         assert_send(node.reorg_to(B256::ZERO));
         assert_send(node.advance_until_receipt(B256::ZERO));
+        assert_send(node.advance_until_pool_drained());
         assert_send(node.advance_while(async {}));
         assert_send(node.engine.new_payload(payload.clone()));
         assert_send(node.engine.new_payload_from_block(payload.block().clone(), None));
