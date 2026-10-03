@@ -2,12 +2,13 @@ use crate::{
     engine::EngineTestContext,
     network::NetworkTestContext,
     payload::PayloadTestContext,
+    receipt::ensure_successful,
     rpc::RpcTestContext,
     wait::{poll_until, POLL_INTERVAL, WAIT_TIMEOUT},
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_network::{Ethereum, IntoWallet};
+use alloy_network::{Ethereum, IntoWallet, ReceiptResponse};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_provider::{
     fillers::{FillProvider, RecommendedFillers, TxFiller},
@@ -18,7 +19,7 @@ use alloy_rpc_types_engine::{
     PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{bail, ensure, eyre, Ok};
+use eyre::{bail, ensure, eyre, Ok, WrapErr};
 use futures_util::{
     future::{select, Either},
     Future,
@@ -26,13 +27,16 @@ use futures_util::{
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
+use reth_node_api::{
+    Block, BlockBody, BlockTy, FullNodeComponents, NodePrimitives, PayloadTypes, PrimitivesTy,
+};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_payload_primitives::BuiltPayload;
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    CanonStateNotificationStream, CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider,
-    PruneCheckpointReader, StageCheckpointReader,
+    CanonStateNotificationStream, CanonStateSubscriptions, Chain, DatabaseProviderFactory,
+    HeaderProvider, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_rpc_api::TestingBuildBlockRequestV1;
@@ -366,6 +370,133 @@ where
             .map_err(|_| eyre!("timed out advancing the chain until the future completed"))?
     }
 
+    /// Injects the raw transactions into the pool in the given order, advances the node one block
+    /// and returns the mined block with the receipts of the transactions.
+    ///
+    /// The block must include all given transactions, in any order, and no other transaction of the
+    /// pool, so a transaction that is dropped or that rides along fails instead of going unnoticed.
+    /// An empty `txs` mines a block without pool transactions. Transactions that the payload
+    /// builder adds by itself, e.g. from the payload attributes, are not pool transactions and may
+    /// be included. Use [`Self::mine_including`] if other pool transactions may be included too.
+    ///
+    /// The receipts are in the order of `txs` and can report reverted transactions, see
+    /// [`MinedBlock::ensure_success`]. The committed chain segment is taken from
+    /// [`Self::canonical_stream`], whose notifications up to the one of the mined block are
+    /// consumed, so the stream does not need to be aligned with the mined blocks before.
+    ///
+    /// The block is imported with [`Self::import_payload`], so the transaction pool processes it in
+    /// the background, see [`Self::advance_block_synced`].
+    ///
+    /// Returns an error if the pool rejects a transaction, or, without importing the block, if the
+    /// block does not include the expected transactions, listing the missing and the unexpected
+    /// ones.
+    pub async fn mine(
+        &mut self,
+        txs: impl IntoIterator<Item = Bytes>,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        // Implied by `NodeTypes`, but not derived by the compiler through the `Payload` parameter.
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        self.mine_txs(txs, true).await
+    }
+
+    /// Mines the raw transactions like [`Self::mine`], but the block may also include other
+    /// transactions of the pool, e.g. transactions that peers gossiped to the node.
+    ///
+    /// Only the receipts of the given transactions are returned.
+    pub async fn mine_including(
+        &mut self,
+        txs: impl IntoIterator<Item = Bytes>,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        self.mine_txs(txs, false).await
+    }
+
+    /// Mines the raw transactions, see [`Self::mine`]. Unless `exclusive` is set, the block may
+    /// include other pool transactions.
+    async fn mine_txs(
+        &mut self,
+        txs: impl IntoIterator<Item = Bytes>,
+        exclusive: bool,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        let mut hashes = Vec::new();
+        for (index, raw_tx) in txs.into_iter().enumerate() {
+            let hash = self
+                .rpc
+                .inject_tx(raw_tx)
+                .await
+                .wrap_err_with(|| format!("failed to inject transaction {index}"))?;
+            hashes.push(hash);
+        }
+
+        let payload = self.new_payload().await?;
+        let (number, block_hash) = (payload.block().number(), payload.block().hash());
+        let body = payload.block().body();
+        let missing: Vec<_> =
+            hashes.iter().filter(|hash| !body.contains_transaction(hash)).collect();
+        // The pool only removes the transactions of a block once it is canonical, so all pool
+        // transactions of the block are still in the pool before the import.
+        let unexpected: Vec<_> = body
+            .transaction_hashes_iter()
+            .filter(|hash| exclusive && !hashes.contains(hash) && self.inner.pool.contains(hash))
+            .collect();
+        ensure!(
+            missing.is_empty() && unexpected.is_empty(),
+            "block {number} does not include the expected transactions: missing {missing:?}, \
+             unexpected pool transactions {unexpected:?}"
+        );
+
+        self.import_payload(payload.clone()).await?;
+        let chain =
+            wait_for_committed_chain(&mut self.canonical_stream, block_hash, number).await?;
+
+        let mut receipts = Vec::with_capacity(hashes.len());
+        for hash in hashes {
+            let receipt = self.rpc.transaction_receipt(hash).await?.ok_or_else(|| {
+                eyre!("receipt of transaction {hash} in block {number} not found")
+            })?;
+            receipts.push(receipt);
+        }
+
+        Ok(MinedBlock { payload, receipts, chain })
+    }
+
     /// Waits for block to be available on node.
     ///
     /// Returns an error if the block is not available within [`WAIT_TIMEOUT`].
@@ -518,29 +649,13 @@ where
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        // The stream buffers every canonical notification since the context was created, e.g. of
-        // blocks mined with `advance_block`, so skip notifications until the one that commits the
-        // block, then verify the tx is included in it.
-        let wait = async {
-            loop {
-                let notification = self
-                    .canonical_stream
-                    .next()
-                    .await
-                    .ok_or_else(|| eyre!("canonical state stream closed"))?;
-                let committed = notification.committed();
-                if let Some(block) = committed.blocks().get(&block_number) &&
-                    block.hash() == block_hash
-                {
-                    return eyre::Ok(Arc::clone(block))
-                }
-            }
-        };
-        let block = tokio::time::timeout(WAIT_TIMEOUT, wait)
-            .await
-            .map_err(|_| eyre!("timed out waiting for block {block_number}"))??;
+        let chain =
+            wait_for_committed_chain(&mut self.canonical_stream, block_hash, block_number).await?;
         ensure!(
-            block.body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
+            chain
+                .blocks()
+                .get(&block_number)
+                .is_some_and(|block| block.body().contains_transaction(&tip_tx_hash)),
             "transaction {tip_tx_hash} is not included in block {block_number}"
         );
 
@@ -890,6 +1005,65 @@ where
     }
 }
 
+/// Skips canonical state notifications until the one that commits the block with the given hash
+/// and number, returning the chain segment it commits.
+///
+/// The stream buffers every canonical notification since it was created, e.g. of blocks mined with
+/// [`NodeTestContext::advance_block`], so it does not need to be aligned with the block.
+///
+/// Returns an error if the block is not committed within [`WAIT_TIMEOUT`].
+async fn wait_for_committed_chain<N: NodePrimitives>(
+    stream: &mut CanonStateNotificationStream<N>,
+    block_hash: B256,
+    block_number: BlockNumber,
+) -> eyre::Result<Arc<Chain<N>>> {
+    let wait = async {
+        loop {
+            let notification =
+                stream.next().await.ok_or_else(|| eyre!("canonical state stream closed"))?;
+            let committed = notification.committed();
+            if committed.blocks().get(&block_number).is_some_and(|block| block.hash() == block_hash)
+            {
+                return Ok(committed)
+            }
+        }
+    };
+    tokio::time::timeout(WAIT_TIMEOUT, wait)
+        .await
+        .map_err(|_| eyre!("timed out waiting for block {block_number}"))?
+}
+
+/// A block mined by [`NodeTestContext::mine`] or [`NodeTestContext::mine_including`].
+#[derive(Debug)]
+pub struct MinedBlock<Payload: BuiltPayload, Receipt> {
+    /// The built payload of the block.
+    pub payload: Payload,
+    /// The RPC receipts of the mined transactions, in the order they were passed.
+    pub receipts: Vec<Receipt>,
+    /// The chain segment committed by the canonical state notification of the block.
+    ///
+    /// The block is built on the canonical head, so the segment consists of this block only and
+    /// its execution outcome, e.g. the bundle state, is the outcome of the block.
+    pub chain: Arc<Chain<Payload::Primitives>>,
+}
+
+impl<Payload: BuiltPayload, Receipt: ReceiptResponse> MinedBlock<Payload, Receipt> {
+    /// Returns the mined block.
+    pub fn block(&self) -> &SealedBlock<<Payload::Primitives as NodePrimitives>::Block> {
+        self.payload.block()
+    }
+
+    /// Returns the mined block if none of the mined transactions reverted.
+    ///
+    /// Returns an error naming the first reverted transaction otherwise.
+    pub fn ensure_success(self) -> eyre::Result<Self> {
+        for receipt in &self.receipts {
+            ensure_successful(receipt)?;
+        }
+        Ok(self)
+    }
+}
+
 /// Which blocks [`NodeTestContext::import_payload`] marks as safe and finalized when it makes a
 /// block the head.
 ///
@@ -960,6 +1134,8 @@ mod tests {
             ForkchoiceState::default(),
             <EthEngineTypes as PayloadTypes>::PayloadAttributes::default(),
         ));
+        assert_send(node.mine([Bytes::new()]));
+        assert_send(node.mine_including(Vec::new()));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
