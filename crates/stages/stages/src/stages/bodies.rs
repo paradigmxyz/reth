@@ -140,7 +140,20 @@ where
                 )?)
             }
         }
-        Ordering::Equal => {}
+        Ordering::Equal => {
+            // Empty blocks advance the file's height without changing its transaction count.
+            if let Some((highest_db_block, _)) =
+                provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?.last()? &&
+                static_file_provider
+                    .get_highest_static_file_block(StaticFileSegment::Transactions)
+                    .is_some_and(|block| block > highest_db_block)
+            {
+                let mut writer =
+                    static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+                writer.prune_transactions(0, highest_db_block)?;
+                writer.commit()?;
+            }
+        }
     }
 
     Ok(())
@@ -477,37 +490,40 @@ mod tests {
 
     #[test]
     fn ensure_consistency_heals_to_the_highest_db_block() {
-        let db = TestStageDB::default();
-        let factory = &db.factory;
-        let static_files = factory.static_file_provider();
-        let body = |nonce| BlockBody {
-            transactions: vec![TransactionSigned::new_unhashed(
-                Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
-                Signature::test_signature(),
-            )],
-            ..Default::default()
-        };
+        for empty in [false, true] {
+            let db = TestStageDB::default();
+            let factory = &db.factory;
+            let static_files = factory.static_file_provider();
+            let body = |nonce| BlockBody {
+                transactions: vec![TransactionSigned::new_unhashed(
+                    Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                    Signature::test_signature(),
+                )],
+                ..Default::default()
+            };
 
-        let provider = factory.database_provider_rw().unwrap();
-        provider.append_block_bodies(vec![(0, None), (1, Some(&body(0)))]).unwrap();
-        provider.commit().unwrap();
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(0, None), (1, Some(&body(0)))]).unwrap();
+            provider.commit().unwrap();
 
-        // The static files commit block 2, the database does not.
-        let provider = factory.database_provider_rw().unwrap();
-        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
-        static_files.commit().unwrap();
-        drop(provider);
+            // The static files commit block 2, the database does not.
+            let interrupted_body = if empty { BlockBody::default() } else { body(1) };
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&interrupted_body))]).unwrap();
+            static_files.commit().unwrap();
+            drop(provider);
 
-        // Bodies stage healing alone, without startup recovery.
-        let provider = factory.database_provider_rw().unwrap();
-        ensure_consistency(&provider, 1, None).unwrap();
-        provider.commit().unwrap();
-        assert_eq!(
-            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
-            Some(1)
-        );
-        let provider = factory.database_provider_rw().unwrap();
-        provider.append_block_bodies(vec![(2, Some(&body(1)))]).unwrap();
+            // Bodies stage healing alone, without startup recovery.
+            let provider = factory.database_provider_rw().unwrap();
+            ensure_consistency(&provider, 1, None).unwrap();
+            provider.commit().unwrap();
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(1)
+            );
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&interrupted_body))]).unwrap();
+        }
     }
 
     #[test]
