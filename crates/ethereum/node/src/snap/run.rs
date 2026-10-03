@@ -95,6 +95,12 @@ where
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
                 }
                 SnapBootstrapOutcome::TrieRebuild { write, pivot } => {
+                    // Forkchoice may have moved during the download, so headers catch up before
+                    // the handoff checks the pivot is still canonical.
+                    let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
+                        return stopped
+                    };
+                    headers?;
                     let handoff = SnapHandoff::new(self.factory.clone());
                     // Publishing and the trie rebuild read every account, so they run on the
                     // blocking pool.
