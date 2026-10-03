@@ -58,15 +58,25 @@ pub(crate) fn policy() -> SnapPivotPolicy {
 }
 
 /// A header with a state root distinctive to its number, and a commitment when one is given.
+///
+/// A commitment comes with the fields of the forks before it, as real headers carry them, so the
+/// header encodes and decodes the same.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
     block_access_list_hash: Option<B256>,
 ) -> Header {
+    let forked = block_access_list_hash.is_some();
     Header {
         number,
         parent_hash,
         state_root: B256::repeat_byte(number as u8),
+        base_fee_per_gas: forked.then_some(0),
+        withdrawals_root: forked.then_some(B256::ZERO),
+        blob_gas_used: forked.then_some(0),
+        excess_blob_gas: forked.then_some(0),
+        parent_beacon_block_root: forked.then_some(B256::ZERO),
+        requests_hash: forked.then_some(B256::ZERO),
         block_access_list_hash,
         ..Default::default()
     }
@@ -131,8 +141,9 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
 }
 
 /// Root of the account trie holding `accounts`.
+#[allow(clippy::cloned_instead_of_copied)]
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
-    state_root_unsorted(accounts.iter().copied())
+    state_root_unsorted(accounts.iter().cloned())
 }
 
 // Root of the account trie, and the proof nodes on the paths to `targets`.
@@ -196,12 +207,34 @@ pub(crate) fn verified_range(
     origin: B256,
     proof_targets: &[B256],
 ) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, MAX_HASH, proof_targets)
+}
+
+/// Like [`verified_range`], but for a repair's request of the account at `origin` alone, so an
+/// account served past it only proves the interval and is dropped.
+pub(crate) fn verified_repair(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, origin, proof_targets)
+}
+
+// Verifies [`account_range`]'s answer to a request from `origin` through `limit`.
+fn verified_accounts(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    limit: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
     let client = ScriptedSnapClient::new([account_range(1, accounts, served, proof_targets)]);
     let request = GetAccountRangeMessage {
         request_id: 1,
         root_hash: state_root(accounts),
         starting_hash: origin,
-        limit_hash: MAX_HASH,
+        limit_hash: limit,
         response_bytes: DEFAULT_RESPONSE_BYTES,
     };
     let downloader = AccountRangeDownloader::new(client, request, Runtime::test()).unwrap();
@@ -296,6 +329,15 @@ impl BalChain {
         writer.commit().unwrap();
     }
 
+    /// Replaces the canonical blocks after `ancestor` with this chain's, as a reorg to it does.
+    pub(crate) fn replace_after(
+        &self,
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        ancestor: u64,
+    ) {
+        factory.replace_headers_after(ancestor, &self.headers[ancestor as usize + 1..]);
+    }
+
     /// The block `nth` after the pivot, which is the pivot itself at zero.
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
@@ -318,6 +360,27 @@ impl BalChain {
             block_access_lists: BlockAccessLists(block_access_lists),
         };
         Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
+    }
+}
+
+/// Reorgs of a test database's canonical headers.
+pub(crate) trait ReorgFactoryExt {
+    /// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]);
+}
+
+impl ReorgFactoryExt for ProviderFactory<MockNodeTypesWithDB> {
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]) {
+        let static_files = self.static_file_provider();
+        let highest =
+            static_files.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.prune_headers(highest - ancestor).unwrap();
+        writer.commit().unwrap();
+        for header in headers {
+            writer.append_header(header.header(), &header.hash()).unwrap();
+        }
+        writer.commit().unwrap();
     }
 }
 

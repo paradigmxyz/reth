@@ -32,17 +32,13 @@ use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    receipt::await_successful_receipts,
-    trie::{assert_trie_consistency, wait_for_persisted_block},
+    receipt::await_successful_receipts, trie::assert_trie_consistency, wallet::TestAccount,
     E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
 use reth_revm::db::BundleAccount;
-use std::{sync::Arc, time::Duration};
-
-const MAX_FEE_PER_GAS: u128 = 20_000_000_000;
-const MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+use std::sync::Arc;
 
 const ETH: u128 = 1_000_000_000_000_000_000;
 
@@ -77,15 +73,13 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
         })
         .build_single()
         .await?;
-    let signer = wallet.inner.clone();
-    let provider = node.rpc_provider_with_wallet(signer.clone());
+    let provider = node.rpc_provider();
 
     let mut ctx = SuiteCtx {
         node,
         provider,
         fork,
-        signer: signer.address(),
-        nonce: 0,
+        account: wallet.account(0).with_gas_limit(TX_GAS_LIMIT),
         factory: Address::ZERO,
         last_committed: None,
     };
@@ -107,8 +101,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
     for _ in 0..4 {
         ctx.mine_block(vec![]).await?;
     }
-    wait_for_persisted_block(&ctx.node.inner.provider, scenario_tip, Duration::from_secs(30))
-        .await?;
+    ctx.node.wait_for_persisted_block(scenario_tip).await?;
     assert_trie_consistency(&ctx.node.inner.provider)?;
 
     Ok(())
@@ -119,8 +112,8 @@ struct SuiteCtx<P> {
     node: NodeHelperType<EthereumNode>,
     provider: P,
     fork: EthereumHardfork,
-    signer: Address,
-    nonce: u64,
+    /// The account sending all transactions.
+    account: TestAccount,
     /// The mode-switched `CREATE2` factory all scenarios deploy through.
     factory: Address,
     /// The chain segment committed by the most recently mined block.
@@ -130,7 +123,7 @@ struct SuiteCtx<P> {
 impl<P: Provider> SuiteCtx<P> {
     /// Sends the given transactions from the signer and mines a block containing exactly them.
     ///
-    /// Nonces and fees are filled in automatically in transaction order.
+    /// Nonces, gas limits and fees are filled in by the account in transaction order.
     async fn mine_block(
         &mut self,
         txs: Vec<TransactionRequest>,
@@ -138,14 +131,8 @@ impl<P: Provider> SuiteCtx<P> {
         let expected = txs.len();
         let mut pending = Vec::with_capacity(expected);
         for tx in txs {
-            let nonce = self.nonce;
-            self.nonce += 1;
-            let tx = tx
-                .with_from(self.signer)
-                .with_nonce(nonce)
-                .with_max_fee_per_gas(MAX_FEE_PER_GAS)
-                .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
-            pending.push(self.provider.send_transaction(tx).await?);
+            let raw_tx = self.account.sign_tx_bytes(tx).await;
+            pending.push(self.provider.send_raw_transaction(&raw_tx).await?);
         }
 
         let payload = self.node.advance_block().await?;
@@ -231,12 +218,12 @@ struct Fixtures {
 /// Deploys the `CREATE2` factory and the fixture contracts for the pre-existing and revert
 /// scenarios.
 async fn deploy_fixtures<P: Provider>(ctx: &mut SuiteCtx<P>) -> eyre::Result<Fixtures> {
-    let base_nonce = ctx.nonce;
-    ctx.factory = ctx.signer.create(base_nonce);
-    let self_destructing_to_self = ctx.signer.create(base_nonce + 1);
-    let revert_child = ctx.signer.create(base_nonce + 2);
-    let reverter = ctx.signer.create(base_nonce + 3);
-    let revert_wrapper = ctx.signer.create(base_nonce + 4);
+    let (signer, base_nonce) = (ctx.account.address(), ctx.account.nonce());
+    ctx.factory = signer.create(base_nonce);
+    let self_destructing_to_self = signer.create(base_nonce + 1);
+    let revert_child = signer.create(base_nonce + 2);
+    let reverter = signer.create(base_nonce + 3);
+    let revert_wrapper = signer.create(base_nonce + 4);
 
     let receipts = ctx
         .mine_block(vec![
@@ -516,26 +503,23 @@ async fn destroy_and_recreate_in_same_block<P: Provider>(
 
 // Transaction builders
 //
-// All transactions use a generous fixed gas limit: Amsterdam repricing raises costs well above
-// the historic values (a plain transfer no longer fits into 21k gas), and gas estimation cannot
-// be used because some transactions depend on contracts created earlier in the same block.
+// All transactions use the generous fixed gas limit of the account: Amsterdam repricing raises
+// costs well above the historic values (a plain transfer no longer fits into 21k gas), and gas
+// estimation cannot be used because some transactions depend on contracts created earlier in the
+// same block.
 
 const TX_GAS_LIMIT: u64 = 1_000_000;
 
 fn create_tx(initcode: Bytes, value: U256) -> TransactionRequest {
-    TransactionRequest::default()
-        .with_kind(TxKind::Create)
-        .with_input(initcode)
-        .with_value(value)
-        .with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_kind(TxKind::Create).with_input(initcode).with_value(value)
 }
 
 fn call_tx(to: Address) -> TransactionRequest {
-    TransactionRequest::default().with_to(to).with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(to)
 }
 
 fn transfer_tx(to: Address, value: U256) -> TransactionRequest {
-    TransactionRequest::default().with_to(to).with_value(value).with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(to).with_value(value)
 }
 
 /// Calls the factory to `CREATE2`-deploy the given initcode, optionally calling the deployed
@@ -551,11 +535,7 @@ fn factory_create_tx(
     input.extend_from_slice(&U256::from(call_after_create as u8).to_be_bytes::<32>());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(initcode);
-    TransactionRequest::default()
-        .with_to(factory)
-        .with_input(input)
-        .with_value(value)
-        .with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(factory).with_input(input).with_value(value)
 }
 
 // Scenario parameters and small conversion helpers

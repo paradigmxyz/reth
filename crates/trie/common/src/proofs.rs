@@ -861,6 +861,7 @@ impl AccountProof {
         slots: Vec<alloy_serde::JsonStorageKey>,
         zero_empty_account: bool,
     ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        // The proof nodes carry the complete account RLP, including any account extension.
         let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
         let (code_hash, storage_hash) = if is_non_existent && zero_empty_account {
@@ -891,6 +892,7 @@ impl AccountProof {
     /// [`AccountProof`].
     ///
     /// This is the inverse of [`Self::into_eip1186_response`]
+    #[allow(clippy::needless_update)]
     pub fn from_eip1186_proof(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
         let alloy_rpc_types_eth::EIP1186AccountProofResponse {
             nonce,
@@ -904,10 +906,17 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
+        // EIP-1186's summary fields omit the account extension, so take it from the account leaf
+        // of an inclusion proof.
+        let leaf_account = Account::EXTENSIONS_ENABLED
+            .then(|| inclusion_proof_account(address, &account_proof))
+            .flatten();
+
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == alloy_consensus::constants::KECCAK_EMPTY || code_hash.is_zero())
+            (code_hash == alloy_consensus::constants::KECCAK_EMPTY || code_hash.is_zero()) &&
+            !leaf_account.as_ref().is_some_and(Account::has_extension)
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
@@ -919,7 +928,15 @@ impl AccountProof {
             // See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
-            (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
+            (
+                storage_hash,
+                Some(Account {
+                    nonce,
+                    balance,
+                    bytecode_hash: code_hash.into(),
+                    ..leaf_account.unwrap_or_default()
+                }),
+            )
         };
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }
@@ -931,6 +948,22 @@ impl From<alloy_rpc_types_eth::EIP1186AccountProofResponse> for AccountProof {
     fn from(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
         Self::from_eip1186_proof(proof)
     }
+}
+
+/// Returns the account committed by the leaf of an inclusion proof for `address`.
+///
+/// The leaf has to lie on the full path of `address`, so an exclusion proof cannot supply another
+/// account. This does not authenticate the proof root; callers still have to verify the proof
+/// against a trusted state root.
+#[cfg(feature = "eip1186")]
+fn inclusion_proof_account(address: Address, proof: &[Bytes]) -> Option<Account> {
+    let root = keccak256(proof.first()?);
+    let TrieNode::Leaf(leaf) = alloy_rlp::decode_exact::<TrieNode>(proof.last()?).ok()? else {
+        return None
+    };
+    verify_proof(root, Nibbles::unpack(keccak256(address)), Some(leaf.value.clone()), proof)
+        .ok()?;
+    alloy_rlp::decode_exact::<TrieAccount>(&leaf.value).ok().map(Account::from)
 }
 
 impl Default for AccountProof {
@@ -1591,6 +1624,56 @@ mod tests {
         // Should be interpreted as a non-existent account (info = None)
         assert!(acc.info.is_none());
         assert_eq!(acc.storage_root, EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn from_eip1186_proof_recovers_account_extension() {
+        if !Account::EXTENSIONS_ENABLED {
+            return;
+        }
+
+        // An account that only has an extension, encoded as the fifth field of the trie account.
+        let extension = [0x82, 0xaa];
+        let payload_length = 0u64.length() +
+            U256::ZERO.length() +
+            EMPTY_ROOT_HASH.length() +
+            KECCAK_EMPTY.length() +
+            extension[..].length();
+        let mut value = Vec::new();
+        alloy_rlp::Header { list: true, payload_length }.encode(&mut value);
+        0u64.encode(&mut value);
+        U256::ZERO.encode(&mut value);
+        EMPTY_ROOT_HASH.encode(&mut value);
+        KECCAK_EMPTY.encode(&mut value);
+        extension[..].encode(&mut value);
+
+        // A trie holding only this account, so its leaf is the root.
+        let address = Address::with_last_byte(1);
+        let leaf = alloy_rlp::encode(LeafNode::new(Nibbles::unpack(keccak256(address)), value));
+        let root = keccak256(&leaf);
+        let response = alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            address,
+            balance: U256::ZERO,
+            code_hash: KECCAK_EMPTY,
+            nonce: 0,
+            storage_hash: EMPTY_ROOT_HASH,
+            account_proof: vec![leaf.into()],
+            storage_proof: vec![],
+        };
+
+        let proof = AccountProof::from_eip1186_proof(response.clone());
+        assert!(proof.info.as_ref().is_some_and(Account::has_extension));
+        assert_eq!(proof.verify(root), Ok(()));
+
+        // An exclusion proof for another address ends in the same leaf, which is not its account.
+        let other =
+            AccountProof::from_eip1186_proof(alloy_rpc_types_eth::EIP1186AccountProofResponse {
+                address: Address::with_last_byte(2),
+                ..response
+            });
+        assert_eq!(other.info, None);
+        assert_eq!(other.verify(root), Ok(()));
     }
 
     #[test]

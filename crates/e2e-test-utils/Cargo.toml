@@ -42,6 +42,7 @@ reth-primitives-traits.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
+reth-prune-types.workspace = true
 
 revm.workspace = true
 tempfile.workspace = true
