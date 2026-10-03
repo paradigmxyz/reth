@@ -39,10 +39,13 @@
 //! Archive processing is modeled around `ModularDownloadJob`, which schedules work, and
 //! `ArchiveProcessor`, which owns the explicit retry state machine for one archive.
 //! `ArchiveMode` decides whether that archive should be fetched through the cache or streamed
-//! directly:
+//! directly.
 //!
-//! - reuse verified plain output files when possible,
-//! - otherwise fetch and extract the archive,
+//! Before any archive is scheduled, `PlannedDownloads::partition_reusable` hashes the existing
+//! output files once and skips archives whose outputs already verify. Each remaining archive is
+//! processed as follows:
+//!
+//! - fetch and extract the archive,
 //! - verify the declared output files,
 //! - retry the entire archive attempt if extraction succeeded but verification failed.
 //!
@@ -530,7 +533,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
         }
         fs::create_dir_all(target_dir)?;
-        let planned = {
+        let downloads = {
             let (target_dir, static_files_dir) =
                 (target_dir.to_path_buf(), static_files_dir.clone());
             tokio::task::spawn_blocking(move || {
@@ -539,20 +542,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             .await??
         };
         info!(target: "reth::cli",
-            reusable = planned.reused.len(),
-            needs_download = planned.archives.len(),
+            reusable = downloads.reused.len(),
+            needs_download = downloads.pending.len(),
             "Startup integrity summary (plain output files)"
         );
 
         info!(target: "reth::cli",
-            archives = planned.total_archives(),
-            download_total = %DownloadProgress::format_size(planned.total_download_size),
-            output_total = %DownloadProgress::format_size(planned.total_output_size),
+            archives = downloads.total_archives(),
+            download_total = %DownloadProgress::format_size(downloads.total_download_size),
+            output_total = %DownloadProgress::format_size(downloads.total_output_size),
             "Downloading all archives"
         );
 
         run_modular_downloads(
-            planned,
+            downloads,
             target_dir,
             static_files_dir.as_deref(),
             self.download_concurrency.max(1),

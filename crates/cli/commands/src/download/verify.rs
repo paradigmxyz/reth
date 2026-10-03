@@ -60,19 +60,15 @@ impl<'a> OutputVerifier<'a> {
             }
         }
 
-        let failure = output_files.par_iter().zip(paths).find_map_any(|(expected, path)| {
-            match Self::file_blake3_hex(&path, expected.size, progress) {
-                Ok(actual) if actual.eq_ignore_ascii_case(&expected.blake3) => None,
-                Ok(_) => Some(Ok(())),
-                Err(error) => Some(Err(error)),
-            }
-        });
-
-        match failure {
-            None => Ok(true),
-            Some(Ok(())) => Ok(false),
-            Some(Err(error)) => Err(error),
-        }
+        output_files
+            .par_iter()
+            .zip(paths)
+            .map(|(expected, path)| {
+                Self::file_blake3_hex(&path, expected.size, progress)
+                    .map(|actual| actual.eq_ignore_ascii_case(&expected.blake3))
+            })
+            .find_any(|verified| !matches!(verified, Ok(true)))
+            .unwrap_or(Ok(true))
     }
 
     /// Removes any declared output files so a fresh archive attempt can restart cleanly.

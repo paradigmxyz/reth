@@ -2,7 +2,7 @@ use super::{
     extract::{extract_archive_raw, streaming_download_and_extract, CompressionFormat},
     fetch::ArchiveFetcher,
     manifest::SnapshotArchive,
-    planning::{PlannedArchive, PlannedDownloads},
+    planning::{CheckedDownloads, PlannedArchive},
     progress::{
         spawn_progress_display, ArchiveDownloadProgress, ArchiveExtractionProgress,
         ArchiveVerificationProgress, DownloadRequestLimiter, SharedProgress,
@@ -23,7 +23,7 @@ const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 
 /// Runs all planned modular archive downloads for one command invocation.
 pub(crate) async fn run_modular_downloads(
-    planned_downloads: PlannedDownloads,
+    planned_downloads: CheckedDownloads,
     target_dir: &Path,
     static_files_dir: Option<&Path>,
     download_concurrency: usize,
@@ -70,7 +70,7 @@ impl ModularDownloadJob {
     }
 
     /// Runs all planned archives and waits for the shared progress task to finish.
-    async fn run(self, planned_downloads: PlannedDownloads) -> Result<()> {
+    async fn run(self, planned_downloads: CheckedDownloads) -> Result<()> {
         let shared = Arc::clone(
             self.ctx.session().progress().expect("modular downloads always use shared progress"),
         );
@@ -80,7 +80,7 @@ impl ModularDownloadJob {
             shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
         }
         let ctx = self.ctx.clone();
-        let results: Vec<Result<()>> = stream::iter(planned_downloads.archives)
+        let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
             .map(move |archive| {
                 let ctx = ctx.clone();
                 async move { Self::process_archive(ctx, archive).await }
@@ -121,7 +121,7 @@ enum ArchiveAttemptState {
     Fail,
 }
 
-/// Processes one modular archive from reuse check through extraction and verification.
+/// Processes one modular archive through fetch, extraction, and verification.
 struct ArchiveProcessor {
     /// The concrete archive and component being processed.
     archive: PlannedArchive,

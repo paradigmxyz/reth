@@ -117,10 +117,8 @@ pub(crate) struct PlannedArchive {
 /// The archive list for a modular snapshot download.
 #[derive(Debug)]
 pub(crate) struct PlannedDownloads {
-    /// Concrete archives that still need processing.
+    /// Concrete archives that still need reuse checks or processing.
     pub(crate) archives: Vec<PlannedArchive>,
-    /// Archives whose declared outputs already verified on disk at startup.
-    pub(crate) reused: Vec<PlannedArchive>,
     /// Total compressed download size of all planned archives.
     pub(crate) total_download_size: u64,
     /// Total extracted plain-output size of all planned archives.
@@ -128,33 +126,54 @@ pub(crate) struct PlannedDownloads {
 }
 
 impl PlannedDownloads {
-    /// Returns the number of concrete archives queued for this snapshot selection.
-    pub(crate) const fn total_archives(&self) -> usize {
-        self.archives.len() + self.reused.len()
-    }
-
-    /// Verifies every archive's existing outputs in parallel and moves archives that already
-    /// match into [`Self::reused`], so each output file is hashed at most once before work
-    /// begins.
+    /// Verifies every archive's existing outputs in parallel and splits off the archives that
+    /// already match, so each output file is hashed at most once before work begins.
     pub(crate) fn partition_reusable(
-        mut self,
+        self,
         target_dir: &Path,
         static_files_dir: Option<&Path>,
-    ) -> Result<Self> {
+    ) -> Result<CheckedDownloads> {
         let verifier = OutputVerifier::new(target_dir, static_files_dir);
-        let checked = std::mem::take(&mut self.archives)
+        let checked = self
+            .archives
             .into_par_iter()
             .map(|planned| Ok((verifier.verify(&planned.archive.output_files)?, planned)))
             .collect::<Result<Vec<_>>>()?;
 
+        let mut downloads = CheckedDownloads {
+            pending: Vec::new(),
+            reused: Vec::new(),
+            total_download_size: self.total_download_size,
+            total_output_size: self.total_output_size,
+        };
         for (reusable, planned) in checked {
             if reusable {
-                self.reused.push(planned);
+                downloads.reused.push(planned);
             } else {
-                self.archives.push(planned);
+                downloads.pending.push(planned);
             }
         }
-        Ok(self)
+        Ok(downloads)
+    }
+}
+
+/// Planned archives split by the startup reuse check.
+#[derive(Debug)]
+pub(crate) struct CheckedDownloads {
+    /// Archives that still need to be fetched and extracted.
+    pub(crate) pending: Vec<PlannedArchive>,
+    /// Archives whose declared outputs already verified on disk.
+    pub(crate) reused: Vec<PlannedArchive>,
+    /// Total compressed download size of all planned archives.
+    pub(crate) total_download_size: u64,
+    /// Total extracted plain-output size of all planned archives.
+    pub(crate) total_output_size: u64,
+}
+
+impl CheckedDownloads {
+    /// Returns the number of concrete archives in this snapshot selection, including reused ones.
+    pub(crate) const fn total_archives(&self) -> usize {
+        self.pending.len() + self.reused.len()
     }
 }
 
@@ -242,7 +261,7 @@ pub(crate) fn collect_planned_archives(
     }
 
     sort_planned_archives(&mut archives);
-    Ok(PlannedDownloads { archives, reused: Vec::new(), total_download_size, total_output_size })
+    Ok(PlannedDownloads { archives, total_download_size, total_output_size })
 }
 
 #[cfg(test)]
@@ -302,21 +321,17 @@ mod tests {
             },
         ];
 
-        let planned = PlannedDownloads {
-            archives: planned,
-            reused: Vec::new(),
-            total_download_size: 30,
-            total_output_size: 5,
-        }
-        .partition_reusable(target_dir, None)
-        .unwrap();
-        assert_eq!(planned.total_archives(), 3);
+        let downloads =
+            PlannedDownloads { archives: planned, total_download_size: 30, total_output_size: 5 }
+                .partition_reusable(target_dir, None)
+                .unwrap();
+        assert_eq!(downloads.total_archives(), 3);
 
         let names = |archives: &[PlannedArchive]| {
             archives.iter().map(|planned| planned.archive.file_name.clone()).collect::<Vec<_>>()
         };
-        assert_eq!(names(&planned.reused), ["ok.tar.zst"]);
-        assert_eq!(names(&planned.archives), ["missing.tar.zst", "bad-size.tar.zst"]);
+        assert_eq!(names(&downloads.reused), ["ok.tar.zst"]);
+        assert_eq!(names(&downloads.pending), ["missing.tar.zst", "bad-size.tar.zst"]);
     }
 
     #[test]
