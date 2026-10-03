@@ -29,9 +29,9 @@ use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes,
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateNotificationStream,
-    CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader,
-    StageCheckpointReader,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    CanonStateNotificationStream, CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider,
+    PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_rpc_api::TestingBuildBlockRequestV1;
@@ -74,6 +74,8 @@ where
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
     /// Canonical state events.
     pub canonical_stream: CanonStateNotificationStream<PrimitivesTy<Node::Types>>,
+    /// Which blocks [`Self::import_payload`] marks as safe and finalized.
+    finality: Finality,
 }
 
 impl<Node, Payload, AddOns> NodeTestContext<Node, AddOns>
@@ -107,6 +109,7 @@ where
             network: NetworkTestContext::new(node.network.clone()),
             rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
             canonical_stream: node.provider.canonical_state_stream(),
+            finality: Finality::default(),
         })
     }
 
@@ -243,6 +246,9 @@ where
 
     /// Advances the node forward one block by building a payload and importing it with
     /// [`Self::import_payload`].
+    ///
+    /// The block becomes the head, the safe and finalized blocks follow the [`Finality`] policy of
+    /// the context.
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.new_payload().await?;
 
@@ -551,7 +557,9 @@ where
 
     /// Sends FCU and waits for the node to sync to the given block.
     ///
-    /// Returns an error if the node does not sync within [`WAIT_TIMEOUT`].
+    /// The forkchoice update makes the block the head, safe and finalized block, regardless of the
+    /// [`Finality`] policy of the context. Returns an error if the node does not sync within
+    /// [`WAIT_TIMEOUT`].
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
         let sync = async {
             while self
@@ -578,6 +586,9 @@ where
     }
 
     /// Sends a forkchoice update message to the engine and returns its response.
+    ///
+    /// The update makes `new_head` the head and `current_head` the safe and finalized block,
+    /// regardless of the [`Finality`] policy of the context.
     pub async fn update_forkchoice(
         &self,
         current_head: B256,
@@ -659,29 +670,77 @@ where
         Ok(self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?)
     }
 
+    /// Sets which blocks [`Self::import_payload`] and the block producing helpers built on it, such
+    /// as [`Self::advance_block`], mark as safe and finalized, see [`Finality`].
+    ///
+    /// The policy applies from the next imported block on, the current safe and finalized blocks
+    /// are not changed. Defaults to [`Finality::Head`].
+    pub const fn set_finality(&mut self, finality: Finality) {
+        self.finality = finality;
+    }
+
     /// Submits a payload to the engine and makes its block the canonical head, returning the block
     /// hash.
     ///
-    /// The forkchoice update marks the block as head, safe, and finalized block, like
-    /// [`Self::advance_block`] does, so the node can't reorg to a chain without the block
-    /// afterwards. The engine only reports the forkchoice update valid after making the head
-    /// canonical, so the block is the latest block of the node once this returns. The transaction
-    /// pool processes the new block in the background, see [`Self::wait_for_pool`].
+    /// The forkchoice update marks the safe and finalized blocks according to the [`Finality`]
+    /// policy of the context, see [`Self::set_finality`]. Under the default [`Finality::Head`],
+    /// the block also becomes the safe and finalized block, so only a forkchoice update that moves
+    /// the finalized block to another chain can reorg it. The engine only reports the forkchoice
+    /// update valid after making the head canonical, so the block is the latest block of the node
+    /// once this returns. The transaction pool processes the new block in the background, see
+    /// [`Self::wait_for_pool`].
     ///
     /// The parent of the payload must be known to the node, e.g. to import a payload built by
     /// another node into its peers. Returns an error if the engine reports the payload invalid, see
     /// [`Self::submit_payload`], or does not report the forkchoice update valid, e.g. because the
-    /// parent is unknown.
+    /// parent is unknown, or because the block does not descend from the safe and finalized blocks
+    /// that [`Finality::Keep`] and [`Finality::Lag`] keep.
     pub async fn import_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
+        let block_number = payload.block().number();
         let block_hash = self.submit_payload(payload).await?;
-        let updated = self.update_forkchoice(block_hash, block_hash).await?;
-        ensure!(
-            updated.is_valid(),
-            "forkchoice update to block {block_hash} is not valid: {}",
-            updated.payload_status.status
-        );
+        let state = match self.finality {
+            Finality::Head => ForkchoiceState::same_hash(block_hash),
+            Finality::Keep | Finality::Lag(_) => {
+                ForkchoiceState { head_block_hash: block_hash, ..self.current_forkchoice_state()? }
+            }
+        };
+        self.ensure_forkchoice_updated(state).await?;
+
+        // Look up the block at the lagging height only now that the block is canonical, so it is an
+        // ancestor of the block even if the block reorged the chain.
+        if let Finality::Lag(lag) = self.finality &&
+            let Some(number) = block_number.checked_sub(lag) &&
+            self.inner
+                .provider
+                .finalized_block_number()?
+                .is_none_or(|finalized| number > finalized) &&
+            let Some(finalized) = self.inner.provider.block_hash(number)?
+        {
+            self.ensure_forkchoice_updated(ForkchoiceState {
+                head_block_hash: block_hash,
+                safe_block_hash: finalized,
+                finalized_block_hash: finalized,
+            })
+            .await?;
+        }
 
         Ok(block_hash)
+    }
+
+    /// Sends the forkchoice state to the engine and returns an error if the engine does not report
+    /// it valid.
+    async fn ensure_forkchoice_updated(&self, state: ForkchoiceState) -> eyre::Result<()> {
+        let updated =
+            self.inner.add_ons_handle.beacon_engine_handle.fork_choice_updated(state, None).await?;
+        ensure!(
+            updated.is_valid(),
+            "forkchoice update to head {}, safe {}, finalized {} is not valid: {}",
+            state.head_block_hash,
+            state.safe_block_hash,
+            state.finalized_block_hash,
+            updated.payload_status.status
+        );
+        Ok(())
     }
 
     /// Returns the RPC URL.
@@ -810,6 +869,44 @@ where
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }
+}
+
+/// Which blocks [`NodeTestContext::import_payload`] marks as safe and finalized when it makes a
+/// block the head.
+///
+/// The policy applies to [`NodeTestContext::import_payload`] and the block producing helpers built
+/// on it, e.g. [`NodeTestContext::advance_block`], [`NodeTestContext::advance`] and
+/// [`NodeTestContext::advance_while`]. [`NodeTestContext::update_forkchoice`] and
+/// [`NodeTestContext::sync_to`] send the forkchoice state given by their arguments, and
+/// [`NodeTestContext::new_payload`] keeps the safe and finalized blocks the node reports.
+///
+/// The engine accepts a forkchoice update only if its safe and finalized blocks are ancestors of
+/// its head, and rejects moving the head back to a canonical block below the finalized block. So
+/// while the finalized block stays, e.g. under [`Finality::Keep`], only blocks above it can be
+/// reorged.
+///
+/// Finality does not hold back persistence: the engine persists canonical blocks and evicts them
+/// from memory once more of them than the persistence threshold are in memory, and the pruner runs
+/// on the persisted tip, so [`NodeTestContext::wait_for_persisted_block`] and
+/// [`NodeTestContext::wait_for_prune_checkpoint`] behave the same under every policy. The engine
+/// only evicts a side chain from memory once the finalized block passes its fork point, and the
+/// transaction pool keeps the blob sidecars of mined transactions until their block is finalized,
+/// so under [`Finality::Keep`] both remain available for reorgs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Finality {
+    /// The imported block becomes the safe and finalized block.
+    #[default]
+    Head,
+    /// The safe and finalized blocks stay what the node reports, e.g. genesis after the setup, so
+    /// the imported blocks can be reorged.
+    Keep,
+    /// The safe and finalized blocks trail the imported block by the given number of blocks.
+    ///
+    /// After importing the block at height `h`, its ancestor at height `h - n` becomes the safe
+    /// and finalized block if it is above the current finalized block. Otherwise they stay, so
+    /// they never move backwards, e.g. after switching from [`Finality::Head`], and stay at
+    /// genesis until the chain is `n` blocks past it. The latest `n` blocks can be reorged.
+    Lag(u64),
 }
 
 #[cfg(test)]
