@@ -1435,6 +1435,31 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
         Ok(())
     }
+
+    /// Deletes the transaction, receipt, sender and changeset static files and restarts each
+    /// segment after `pivot`, so the next block appended is `pivot + 1`. Headers are kept.
+    ///
+    /// Each segment gets an empty file anchored at `pivot`: nothing is stored for `pivot` itself,
+    /// and blocks at or below it read as pruned history although the pruner never ran.
+    ///
+    /// CAUTION: destructive. The files are deleted immediately, while the anchor is written on
+    /// commit. Errors unless storage v2 is enabled.
+    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        if !self.cached_storage_settings().storage_v2 {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "pruned anchor requires storage v2",
+            )))
+        }
+        let static_files = self.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            static_files.delete_segment(segment)?;
+            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
+        }
+        // The pivot's own body is never stored, so reads of `pivot` find nothing while blocks
+        // below it are reported as expired.
+        static_files.set_earliest_history_height(pivot);
+        Ok(())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -1470,25 +1495,6 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         } else {
             Err(ProviderError::SnapStorageLayoutUnsupported)
         }
-    }
-
-    /// Empties the non-header static files and anchors them at `pivot`, so the next append
-    /// starts at `pivot + 1`.
-    ///
-    /// CAUTION: destructive. Deletes the existing files immediately, not on commit.
-    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
-        if !self.cached_storage_settings().storage_v2 {
-            return Err(ProviderError::other(StaticFileWriterError::new(
-                "pruned anchor requires storage v2",
-            )))
-        }
-        let static_files = self.static_file_provider();
-        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
-            static_files.delete_segment(segment)?;
-            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
-        }
-        static_files.set_earliest_history_height(pivot);
-        Ok(())
     }
 }
 
