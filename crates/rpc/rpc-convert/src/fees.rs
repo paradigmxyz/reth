@@ -28,26 +28,19 @@ impl CallFees {
             max_priority_fee_per_gas: Option<U256>,
             block_base_fee: U256,
         ) -> Result<U256, CallFeesError> {
-            match max_fee_per_gas {
-                Some(max_fee) => {
-                    let priority_fee = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
-                    if !(max_fee.is_zero() && priority_fee.is_zero()) && max_fee < block_base_fee {
-                        return Err(CallFeesError::FeeCapTooLow)
-                    }
-                    if max_fee < priority_fee {
-                        return Err(CallFeesError::TipAboveFeeCap)
-                    }
-                    Ok(min(
-                        max_fee,
-                        block_base_fee
-                            .checked_add(priority_fee)
-                            .ok_or(CallFeesError::TipVeryHigh)?,
-                    ))
-                }
-                None => block_base_fee
-                    .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
-                    .ok_or(CallFeesError::TipVeryHigh),
+            // An omitted fee cap defaults to zero, as in geth's `CallDefaults`.
+            let max_fee = max_fee_per_gas.unwrap_or(U256::ZERO);
+            let priority_fee = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
+            if max_fee < priority_fee {
+                return Err(CallFeesError::TipAboveFeeCap)
             }
+            if !(max_fee.is_zero() && priority_fee.is_zero()) && max_fee < block_base_fee {
+                return Err(CallFeesError::FeeCapTooLow)
+            }
+            Ok(min(
+                max_fee,
+                block_base_fee.checked_add(priority_fee).ok_or(CallFeesError::TipVeryHigh)?,
+            ))
         }
 
         let has_blob_hashes = blob_versioned_hashes.is_some_and(|hashes| !hashes.is_empty());
@@ -80,6 +73,16 @@ impl CallFees {
                     max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
                 })
             }
+            (Some(gas_price), None, None, Some(max_fee_per_blob_gas)) => {
+                if !has_blob_hashes {
+                    return Err(CallFeesError::BlobTransactionMissingBlobHashes)
+                }
+                Ok(Self {
+                    gas_price,
+                    max_priority_fee_per_gas: None,
+                    max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
+                })
+            }
             _ => Err(CallFeesError::ConflictingFeeFieldsInRequest),
         }
     }
@@ -103,4 +106,79 @@ pub enum CallFeesError {
     /// A blob transaction has no versioned hashes.
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GWEI: u64 = 1_000_000_000;
+
+    #[test]
+    fn omitted_fee_cap_defaults_to_zero() {
+        let base_fee = U256::from(15 * GWEI);
+
+        let CallFees { gas_price, .. } =
+            CallFees::ensure_fees(None, None, Some(U256::ZERO), base_fee, None, None, None)
+                .unwrap();
+        assert!(gas_price.is_zero());
+
+        let call_fees =
+            CallFees::ensure_fees(None, None, Some(U256::from(GWEI)), base_fee, None, None, None);
+        assert!(matches!(call_fees, Err(CallFeesError::TipAboveFeeCap)));
+
+        // A tip above a fee cap that is also below the base fee reports the tip.
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::ZERO),
+            Some(U256::from(GWEI)),
+            base_fee,
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(call_fees, Err(CallFeesError::TipAboveFeeCap)));
+    }
+
+    #[test]
+    fn blob_fees_with_legacy_gas_price() {
+        let hashes = [B256::ZERO];
+
+        let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
+            Some(U256::from(2 * GWEI)),
+            None,
+            None,
+            U256::from(GWEI),
+            Some(&hashes),
+            Some(U256::from(1)),
+            Some(U256::from(1)),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(2 * GWEI));
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(1)));
+
+        // Only the blob fee is set, so execution runs free.
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            None,
+            None,
+            U256::from(GWEI),
+            Some(&hashes),
+            Some(U256::from(1)),
+            Some(U256::from(1)),
+        )
+        .unwrap();
+        assert!(gas_price.is_zero());
+
+        let call_fees = CallFees::ensure_fees(
+            Some(U256::from(2 * GWEI)),
+            None,
+            None,
+            U256::from(GWEI),
+            None,
+            Some(U256::from(1)),
+            Some(U256::from(1)),
+        );
+        assert!(matches!(call_fees, Err(CallFeesError::BlobTransactionMissingBlobHashes)));
+    }
 }
