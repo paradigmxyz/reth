@@ -477,6 +477,38 @@ where
         .await
     }
 
+    /// Waits until the block with the given hash is the latest block of the node, i.e. its
+    /// canonical head.
+    ///
+    /// This only observes the node and sends nothing to the engine, so the block has to become the
+    /// head otherwise, e.g. through a forkchoice update the test sent itself, which may start a
+    /// backfill sync to the block. [`Self::sync_to`] instead keeps sending forkchoice updates that
+    /// make the block the head, safe and finalized block until it is the head, and then waits
+    /// briefly for the transaction pool, which this does not, see [`Self::wait_for_pool_head`].
+    /// [`Self::wait_block`] waits for the header at a block number, which a canonical block that is
+    /// not the head also satisfies, and after a backfill sync it can return before the engine made
+    /// the synced block its head, even when it waits for the `Finish` checkpoint of the pipeline.
+    ///
+    /// Returns an error naming the head of the node if the block is not the head within
+    /// [`WAIT_TIMEOUT`], e.g. because the node made another block its head.
+    pub async fn wait_for_head(&self, hash: BlockHash) -> eyre::Result<()> {
+        let provider = &self.inner.provider;
+        let latest = || provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest);
+        let wait = async {
+            while latest()?.is_none_or(|head| head.hash() != hash) {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            Ok(())
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait).await.map_err(|_| {
+            let head = latest().ok().flatten().map_or_else(
+                || "unknown".to_string(),
+                |head| format!("block {} ({})", head.number(), head.hash()),
+            );
+            eyre!("timed out waiting for block {hash} to become the head, the head is {head}")
+        })?
+    }
+
     /// Asserts that a new block has been added to the blockchain and the tx has been included in
     /// the block, at any position.
     ///
@@ -789,6 +821,7 @@ mod tests {
         assert_send(node.wait_for_pool_head(B256::ZERO));
         assert_send(node.wait_for_persisted_block(0));
         assert_send(node.wait_for_prune_checkpoint(PruneSegment::SenderRecovery, 0));
+        assert_send(node.wait_for_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
         assert_send(node.import_payload(payload));
