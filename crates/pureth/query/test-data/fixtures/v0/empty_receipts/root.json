@@ -1,0 +1,13 @@
+{
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "case_id": "empty_receipts",
+  "schema_id": "pureth-receipt-v0",
+  "schema_digest": "0xffc41ae4abb3e6f04594d5658814b7d0446f1dabcc347982e7a37ef23ee0dace",
+  "fixture_sha256": "0x182b12b72c3cbe83a7c84bfb349c7b085b9916f1e6169472d9820de31d4d04fe",
+  "object_kind": "receipts",
+  "root_type": "ReceiptsSSZ",
+  "receipt_count": 0,
+  "log_counts": [],
+  "root": "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+  "root_context": "deterministic_test_data"
+}
