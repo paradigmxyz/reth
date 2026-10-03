@@ -5,7 +5,9 @@ use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
+use jsonrpsee::{
+    core::RpcResult, Extensions, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink,
+};
 use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
@@ -16,6 +18,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
+use reth_rpc_server_types::subscriptions::track_subscription;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ChangeSetReader, StateProvider, StateProviderFactory,
     TransactionVariant,
@@ -266,10 +269,15 @@ where
     async fn reth_subscribe_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
+        ext: &Extensions,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
-        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
+        self.inner.task_spawner.spawn_task(track_subscription(
+            ext,
+            "",
+            pipe_from_stream(sink, stream),
+        ));
 
         Ok(())
     }
@@ -278,10 +286,15 @@ where
     async fn reth_subscribe_persisted_block(
         &self,
         pending: PendingSubscriptionSink,
+        ext: &Extensions,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
-        self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
+        self.inner.task_spawner.spawn_task(track_subscription(
+            ext,
+            "",
+            pipe_from_stream(sink, stream),
+        ));
 
         Ok(())
     }
@@ -290,14 +303,15 @@ where
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
+        ext: &Extensions,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();
-        self.inner.task_spawner.spawn_task(finalized_chain_notifications(
-            sink,
-            canon_stream,
-            finalized_stream,
+        self.inner.task_spawner.spawn_task(track_subscription(
+            ext,
+            "",
+            finalized_chain_notifications(sink, canon_stream, finalized_stream),
         ));
 
         Ok(())
