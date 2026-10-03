@@ -272,6 +272,22 @@ mod tests {
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
     }
 
+    #[tokio::test]
+    async fn the_pipeline_finishes_to_the_latest_target() {
+        let (tip, _) = watch::channel(B256::ZERO);
+        let pipeline_tip = tip.subscribe();
+        let (mut pipeline, factory) =
+            pipeline_with(TestStage::new(StageId::Finish).add_exec(headers_done(1)), tip);
+        let (targets, mut receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        // Forkchoice moved while the state was downloading.
+        targets.send(NEXT_TARGET).unwrap();
+        run.finish(&mut pipeline, &mut receiver).await.unwrap();
+
+        assert_eq!(*pipeline_tip.borrow(), NEXT_TARGET);
+    }
+
     // A header stage that waits for `gate`, then records whether a snap attempt exists at each
     // pass.
     #[derive(Debug)]

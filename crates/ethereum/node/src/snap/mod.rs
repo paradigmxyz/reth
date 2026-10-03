@@ -328,6 +328,16 @@ mod tests {
         assert!(poll_once(&mut backfill).is_pending());
     }
 
+    #[test]
+    fn a_target_update_while_idle_starts_nothing() {
+        let mut backfill = backfill(TestStage::new(StageId::Headers));
+
+        backfill.on_action(BackfillAction::UpdateTarget(TARGET));
+
+        assert!(poll_once(&mut backfill).is_pending());
+        assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
+    }
+
     #[tokio::test]
     async fn an_active_bootstrap_holds_the_pipeline_and_coalesces_targets() {
         let mut backfill = backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
