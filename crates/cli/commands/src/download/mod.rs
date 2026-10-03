@@ -129,7 +129,7 @@ const RETH_SNAPSHOTS_BASE_URL: &str = "https://snapshots-r2.reth.rs";
 const RETH_SNAPSHOTS_API_URL: &str = "https://snapshots.reth.rs/api/snapshots";
 const RETH_SNAPSHOTS_SOURCE: &str = "https://snapshots.reth.rs (default)";
 const SNAPSHOT_API_PATH: &str = "/api/snapshots";
-const FORCE_REMOVED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
+const MANAGED_DATADIR_PATHS: &[&str] = &["db", "rocksdb", "static_files", "reth.toml"];
 
 /// Maximum number of simultaneous HTTP downloads across the entire snapshot job.
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
@@ -437,9 +437,11 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// files, which is required when the node has written data past the snapshot block.
     ///
     /// Components that are not selected are removed entirely, so `--prune-unlisted --minimal`
-    /// over an archive node deletes its history. reth.toml is always regenerated, which discards
-    /// local edits. Symlinks below these paths are removed, not followed. Pruning happens before
-    /// downloading, so a failed download leaves the data dir pruned, as with `--force`.
+    /// over an archive node deletes its history. With `--non-interactive`, components must be
+    /// selected explicitly with a preset or `--with-*` flags. reth.toml is always regenerated,
+    /// which discards local edits. Symlinks below these paths are removed, not followed. Pruning
+    /// refuses to run while a node holds the database lock, and happens before downloading, so a
+    /// failed download leaves the data dir pruned, as with `--force`.
     #[arg(long, conflicts_with_all = ["force", "list", "url"])]
     prune_unlisted: bool,
 
@@ -775,6 +777,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         }
 
         if self.non_interactive {
+            // The implicit minimal default would silently prune history from a full or archive
+            // node.
+            eyre::ensure!(
+                !self.prune_unlisted,
+                "--prune-unlisted with --non-interactive requires an explicit component selection: \
+                 --minimal, --full, --archive, or --with-* flags"
+            );
             return Ok(ResolvedComponents {
                 selections: self.minimal_preset_selections(manifest),
                 preset: Some(SelectionPreset::Minimal),
@@ -943,7 +952,7 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
 /// Removes existing snapshot data that is managed by `reth download`.
 fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
-    for entry in FORCE_REMOVED_DATADIR_PATHS {
+    for entry in MANAGED_DATADIR_PATHS {
         let path = managed_datadir_path(entry, target_dir, static_files_dir);
         if !path.try_exists()? {
             continue;
@@ -960,7 +969,7 @@ fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) ->
     Ok(())
 }
 
-/// Resolves one of [`FORCE_REMOVED_DATADIR_PATHS`], honoring a custom static files directory.
+/// Resolves one of [`MANAGED_DATADIR_PATHS`], honoring a custom static files directory.
 fn managed_datadir_path(
     entry: &str,
     target_dir: &Path,
