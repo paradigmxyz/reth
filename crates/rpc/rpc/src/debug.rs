@@ -902,6 +902,10 @@ where
             .recovered_block(block_id)
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        // The range is read from the parent state, which does not exist for the genesis block.
+        if block.number() == 0 {
+            return Err(EthApiError::GenesisNotTraceable.into())
+        }
         let transaction_count = block.transaction_count();
         if tx_index > transaction_count {
             return Err(EthApiError::InvalidParams(format!(
@@ -913,45 +917,44 @@ where
         let parent_hash = block.parent_hash();
         self.eth_api()
             .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                let parent = eth_api
+                    .provider()
+                    .header(parent_hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(parent_hash.into()))?;
+                let range = eth_api
+                    .provider()
+                    .state_range_provider(parent.state_root())
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or_else(|| {
+                        EthApiError::InvalidParams(format!(
+                            "storage range of block {} is unavailable, state ranges are only \
+                             retained for recent blocks",
+                            block.number()
+                        ))
+                    })?;
+
                 // The replay cache is what yields the touched slots and their preimages, so the
                 // state is positioned by execution rather than by attaching the block's BAL.
                 eth_api.replay_block_until(&mut db, &block, tx_index, None)?;
 
                 let (touched, wiped) = Self::replayed_storage(&db, address);
+                if wiped {
+                    return Ok(merge_storage_range(Vec::new(), touched, start_key, max_result))
+                }
 
-                let persisted = if wiped {
-                    Vec::new()
-                } else {
-                    let parent = eth_api
-                        .provider()
-                        .header(parent_hash)
-                        .map_err(Eth::Error::from_eth_err)?
-                        .ok_or(EthApiError::HeaderNotFound(parent_hash.into()))?;
-                    let range = eth_api
-                        .provider()
-                        .state_range_provider(parent.state_root())
-                        .map_err(Eth::Error::from_eth_err)?
-                        .ok_or_else(|| {
-                            EthApiError::InvalidParams(format!(
-                                "storage range of block {} is unavailable, state ranges are only \
-                                 retained for recent blocks",
-                                block.number()
-                            ))
-                        })?;
-
-                    // See `merge_storage_range` for why this many slots are enough.
-                    let max_slots = max_result.saturating_add(1).saturating_add(touched.len());
-                    range
-                        .storage_range(
-                            keccak256(address),
-                            start_key,
-                            B256::repeat_byte(0xff),
-                            RangeLimits::items(max_slots),
-                        )
-                        .map_err(Eth::Error::from_eth_err)?
-                        .map(|RangeResponse { items, .. }| items)
-                        .unwrap_or_default()
-                };
+                // See `merge_storage_range` for why this many slots are enough.
+                let max_slots = max_result.saturating_add(1).saturating_add(touched.len());
+                let persisted = range
+                    .storage_range(
+                        keccak256(address),
+                        start_key,
+                        B256::repeat_byte(0xff),
+                        RangeLimits::items(max_slots),
+                    )
+                    .map_err(Eth::Error::from_eth_err)?
+                    .map(|RangeResponse { items, .. }| items)
+                    .unwrap_or_default();
 
                 Ok(merge_storage_range(persisted, touched, start_key, max_result))
             })
@@ -1700,15 +1703,22 @@ fn merge_storage_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
-    use alloy_primitives::{keccak256, U256};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{keccak256, Signature, TxKind, U256};
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_primitives_traits::{RecoveredBlock, SignerRecoverable, StorageEntry};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, ExtendedAccount, MockEthProvider, NoopProvider,
+    };
     use reth_rpc_eth_api::EthApiServer;
+    use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
         database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
@@ -1781,6 +1791,70 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, EthApiError::InvalidParams(_)));
+    }
+
+    #[tokio::test]
+    async fn storage_range_at_requires_range_view_for_destroyed_account() {
+        // The mock provider has no range view unless a range is pushed to it.
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // CALLER, SELFDESTRUCT.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode("33ff".parse().unwrap()),
+        );
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy { gas_limit: 100_000, to: TxKind::Call(target), ..Default::default() }.into(),
+            Signature::test_signature(),
+        );
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000_000)));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let debug_api = DebugApi::new(
+            eth_api,
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+
+        // Replaying the call destroys `target`, which alone would yield an empty page.
+        let err = debug_api
+            .debug_storage_range_at(block_hash.into(), 1, target, Bytes::new(), 1)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
     }
 
     #[test]
