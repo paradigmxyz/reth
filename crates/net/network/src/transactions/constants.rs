@@ -56,6 +56,16 @@ pub mod tx_manager {
     /// tasks. When the budget is exhausted, new events are dropped (see metric
     /// `total_dropped_tx_events_at_full_capacity`).
     pub const DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+
+    /// Default limit for blobless eth/72 transaction bodies buffered pending cell delivery.
+    ///
+    /// Default is 256 bodies.
+    pub const DEFAULT_MAX_COUNT_BUFFERED_BLOB_TXS: usize = 256;
+
+    /// Default time-to-live for buffered blobless eth/72 bodies.
+    ///
+    /// Default is 2 minutes.
+    pub const BLOB_BUFFER_TTL_SECS: u64 = 120;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
