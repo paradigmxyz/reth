@@ -3,6 +3,7 @@ use crate::{
     payload::PayloadTestContext,
     rpc::RpcTestContext,
     wait::{poll_until, POLL_INTERVAL, WAIT_TIMEOUT},
+    TmpDB,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
@@ -14,21 +15,26 @@ use alloy_provider::{
 };
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{ensure, eyre, Ok};
+use eyre::{bail, ensure, eyre, Ok, WrapErr};
 use futures_util::{
-    future::{select, Either},
+    future::{select, BoxFuture, Either},
     Future,
 };
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    exit::NodeExitFuture,
+};
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateNotificationStream,
-    CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader,
-    StageCheckpointReader,
+    providers::RocksDBProvider, BlockNumReader, BlockReader, BlockReaderIdExt,
+    CanonStateNotificationStream, CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider,
+    PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_rpc_api::TestingBuildBlockRequestV1;
@@ -41,8 +47,8 @@ use reth_stages_types::StageId;
 use reth_transaction_pool::TransactionPool;
 use std::{
     pin::{pin, Pin},
-    sync::Arc,
-    time::Duration,
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 use tokio_stream::StreamExt;
 use url::Url;
@@ -53,6 +59,13 @@ use url::Url;
 /// Much shorter than alloy's default for local nodes, since test nodes build blocks on demand or
 /// with short dev block times.
 pub const RPC_PROVIDER_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Maximum time [`NodeTestContext::stop`] waits for the database of a node to be released after
+/// the node shut down.
+///
+/// The node itself releases it within milliseconds, so running into this timeout means that
+/// something else still holds a handle of the database.
+pub const DATABASE_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
@@ -71,6 +84,14 @@ where
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
     /// Canonical state events.
     pub canonical_stream: CanonStateNotificationStream<PrimitivesTy<Node::Types>>,
+    /// What [`Self::stop`] needs to stop the node and launch it again, only set for restartable
+    /// nodes of [`E2ETestSetupBuilder`](crate::E2ETestSetupBuilder).
+    pub(crate) restart: Option<NodeRestart<Self>>,
+    /// Resolves when the consensus engine of the node exits, see [`Self::take_exit_future`].
+    ///
+    /// The future is not `Sync`, but the context must be, so that helpers borrowing it return
+    /// `Send` futures.
+    pub(crate) exit_future: Mutex<Option<NodeExitFuture>>,
 }
 
 impl<Node, Payload, AddOns> NodeTestContext<Node, AddOns>
@@ -104,6 +125,8 @@ where
             network: NetworkTestContext::new(node.network.clone()),
             rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
             canonical_stream: node.provider.canonical_state_stream(),
+            restart: None,
+            exit_future: Mutex::new(None),
         })
     }
 
@@ -760,7 +783,218 @@ where
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }
+
+    /// Stops the node and closes its database, keeping its datadir to launch the node again with
+    /// [`StoppedNode::start`].
+    ///
+    /// The node shuts down like a node that receives `SIGTERM`: the engine persists every block of
+    /// its canonical chain together with its state, and the tasks of the node exit. Blocks that
+    /// are not canonical, e.g. payloads that were only submitted with [`Self::submit_payload`],
+    /// are lost. Local transactions of the pool are saved to the datadir and reinserted when the
+    /// node starts again.
+    ///
+    /// Returns once the node released its database, so the database, static files and `RocksDB`
+    /// are closed and nothing writes to the datadir anymore, including the pruner that runs after
+    /// the last save. Peers of the node notice the disconnect in the background.
+    ///
+    /// Only restartable nodes, see
+    /// [`E2ETestSetupBuilder::with_restartable_nodes`](crate::E2ETestSetupBuilder::with_restartable_nodes),
+    /// can be stopped. Returns an error for other nodes, if the node does not shut down within
+    /// [`WAIT_TIMEOUT`], or if the test keeps the database open:
+    /// - a handle of the node that holds its database, e.g. a clone of `inner.provider` or a
+    ///   [`NodeClient`](crate::testsuite::NodeClient), makes this fail once the database is still
+    ///   in use [`DATABASE_RELEASE_TIMEOUT`] after the node shut down,
+    /// - an open database transaction, e.g. a provider of `database_provider_ro`, makes this fail
+    ///   right away,
+    /// - a handle of `RocksDB`, e.g. of `inner.provider.rocksdb_provider()`, makes this fail once
+    ///   `RocksDB` is still open [`DATABASE_RELEASE_TIMEOUT`] after the node shut down.
+    ///
+    /// Drop such handles before stopping the node.
+    pub async fn stop(mut self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+        let Some(NodeRestart { database, relaunch }) = self.restart.take() else {
+            bail!(
+                "the node is not restartable, launch it with \
+                 `E2ETestSetupBuilder::with_restartable_nodes` to stop it"
+            )
+        };
+        let data_dir = self.inner.data_dir.clone();
+        let runtime = self.inner.task_executor.clone();
+        // Stop the RPC servers even if the test kept handles to them, which would otherwise keep
+        // the database open.
+        let _ = self.inner.rpc_server_handle().clone().stop();
+        let _ = self.inner.auth_server_handle().clone().stop();
+        drop(self);
+
+        // The consensus engine is a graceful task that persists the canonical chain before it
+        // exits. Waiting for graceful tasks blocks the thread.
+        let shut_down = tokio::task::spawn_blocking(move || {
+            runtime.graceful_shutdown_with_timeout(WAIT_TIMEOUT)
+        })
+        .await?;
+        ensure!(shut_down, "the node did not shut down within {WAIT_TIMEOUT:?}");
+
+        close_database(database, &data_dir).await?;
+        Ok(StoppedNode { data_dir, relaunch, remove_data_dir: true })
+    }
+
+    /// Stops the node with [`Self::stop`] and starts it again with [`StoppedNode::start`],
+    /// returning its new test context.
+    pub async fn restart(self) -> eyre::Result<Self> {
+        self.stop().await?.start().await
+    }
+
+    /// Takes the future that resolves when the consensus engine of the node exits.
+    ///
+    /// It resolves with an error if the engine exits because of a fatal error, and with `Ok` once
+    /// the node is stopped, so a test can use it to notice a node that died. Returns `None` if the
+    /// future was already taken or the node was not launched by
+    /// [`E2ETestSetupBuilder`](crate::E2ETestSetupBuilder).
+    pub fn take_exit_future(&mut self) -> Option<NodeExitFuture> {
+        self.exit_future.get_mut().unwrap_or_else(PoisonError::into_inner).take()
+    }
 }
+
+/// Waits until `database` is the last handle of the database of a stopped node, closes the
+/// database without removing its datadir, and waits until `RocksDB` is closed.
+///
+/// Returns an error if the database or `RocksDB` is still open afterwards.
+async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<()> {
+    let released = tokio::time::timeout(DATABASE_RELEASE_TIMEOUT, async {
+        while Arc::strong_count(&database) > 1 {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await;
+    if released.is_err() {
+        bail!(
+            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
+             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
+             of `inner.provider`, before stopping it"
+        )
+    }
+    let database = Arc::into_inner(database)
+        .ok_or_else(|| eyre!("the database of the stopped node is still in use"))?;
+    // Unlike dropping the temporary database, this keeps the datadir.
+    drop(database.into_inner_db());
+
+    // A database transaction keeps the database open without a handle of it. MDBX does not open
+    // a database twice in a process, so opening it fails until the transaction is dropped.
+    open_db_read_only(data_dir.db(), DatabaseArguments::test()).wrap_err(
+        "the database of the stopped node is still open: drop all database transactions of the \
+         node, e.g. providers of `database_provider_ro`, before stopping it",
+    )?;
+
+    // Providers drop their database handle before their `RocksDB` handle, whose drop flushes and
+    // closes `RocksDB`, so the last provider can still be closing it. `RocksDB` does not open a
+    // database twice in a process either, so wait until opening it succeeds.
+    let deadline = Instant::now() + DATABASE_RELEASE_TIMEOUT;
+    loop {
+        let path = data_dir.rocksdb();
+        let opened = tokio::task::spawn_blocking(move || {
+            RocksDBProvider::builder(path).with_default_tables().build().map(drop)
+        })
+        .await?;
+        match opened {
+            Result::Ok(()) => return Ok(()),
+            Err(err) if Instant::now() >= deadline => {
+                return Err(err).wrap_err(format!(
+                    "the RocksDB of the stopped node is still open {DATABASE_RELEASE_TIMEOUT:?} \
+                     after the node shut down: drop all handles of it, e.g. of \
+                     `inner.provider.rocksdb_provider()`, before stopping the node"
+                ))
+            }
+            Err(_) => tokio::time::sleep(POLL_INTERVAL).await,
+        }
+    }
+}
+
+/// A test node that was stopped with [`NodeTestContext::stop`].
+///
+/// The datadir of the node is kept until the node is launched again with [`Self::start`], and
+/// removed when this is dropped.
+pub struct StoppedNode<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: RethRpcAddOns<Node>,
+{
+    data_dir: ChainPath<DataDirPath>,
+    relaunch: Relaunch<NodeTestContext<Node, AddOns>>,
+    /// Whether the datadir is removed on drop, which is unset once a launched node owns it.
+    remove_data_dir: bool,
+}
+
+impl<Node, AddOns> StoppedNode<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: RethRpcAddOns<Node>,
+{
+    /// Returns the datadir of the node.
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
+        &self.data_dir
+    }
+
+    /// Launches the node again on its datadir and returns its new test context.
+    ///
+    /// The node is launched like by
+    /// [`E2ETestSetupBuilder::build`](crate::E2ETestSetupBuilder::build), with the same node
+    /// factory, node builder modifiers, node and tree configuration and attributes generator,
+    /// on a new runtime. It opens the database, static files and `RocksDB` in its datadir
+    /// again, so it recovers from disk like a node restarted from the command line.
+    ///
+    /// Its head is the canonical head it had when it was stopped, and its safe and finalized blocks
+    /// are the ones it persisted, which are the head after [`NodeTestContext::advance_block`].
+    /// Unless the node mines in dev mode, it receives a forkchoice update that restates these
+    /// blocks instead of the forkchoice update to genesis of a new node, and
+    /// [`NodeTestContext::advance_block`] builds on its head right away.
+    ///
+    /// The node keeps its peer identity, which is stored in its datadir, but listens on new ports
+    /// and does not reconnect to its peers. Connect it with `node.connect(&mut peer)` once `peer`
+    /// noticed that the stopped node disconnected, e.g. once its number of connected peers
+    /// dropped. `peer.connect(&mut node)` panics instead, because the network events of `peer`
+    /// still contain the disconnect of the stopped node.
+    ///
+    /// Returns an error if the node can not be launched, or if the forkchoice update is not valid.
+    pub async fn start(mut self) -> eyre::Result<NodeTestContext<Node, AddOns>> {
+        // The database of the launched node removes the datadir once it is dropped.
+        self.remove_data_dir = false;
+        (self.relaunch)().await
+    }
+}
+
+impl<Node, AddOns> std::fmt::Debug for StoppedNode<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: RethRpcAddOns<Node>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoppedNode").field("data_dir", &self.data_dir).finish_non_exhaustive()
+    }
+}
+
+impl<Node, AddOns> Drop for StoppedNode<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: RethRpcAddOns<Node>,
+{
+    fn drop(&mut self) {
+        if self.remove_data_dir {
+            let _ = std::fs::remove_dir_all(self.data_dir.data_dir());
+        }
+    }
+}
+
+/// What a restartable node of [`E2ETestSetupBuilder`](crate::E2ETestSetupBuilder) needs to be
+/// stopped and launched again.
+pub(crate) struct NodeRestart<Ctx> {
+    /// A handle of the database of the node, to wait until the stopped node released it.
+    pub(crate) database: TmpDB,
+    /// Launches the node again on its datadir.
+    pub(crate) relaunch: Relaunch<Ctx>,
+}
+
+/// Closure that launches a stopped node again, returning its new test context.
+pub(crate) type Relaunch<Ctx> =
+    Arc<dyn Fn() -> BoxFuture<'static, eyre::Result<Ctx>> + Send + Sync>;
 
 #[cfg(test)]
 mod tests {
@@ -792,5 +1026,15 @@ mod tests {
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
         assert_send(node.import_payload(payload));
+    }
+
+    /// Like [`test_helper_futures_are_send`], for the helpers that stop and restart a node.
+    #[expect(dead_code)]
+    fn test_restart_futures_are_send(
+        node: NodeHelperType<EthereumNode>,
+        other: NodeHelperType<EthereumNode>,
+    ) {
+        assert_send(node.stop());
+        assert_send(other.restart());
     }
 }
