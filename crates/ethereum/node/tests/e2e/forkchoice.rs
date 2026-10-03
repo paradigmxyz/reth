@@ -6,9 +6,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{
-    eth_payload_attributes, test_chain_spec, trie::wait_for_persisted_block, E2ETestSetupExt,
-};
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
@@ -231,7 +229,7 @@ async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyr
         }
         if branch == 0 {
             node.update_forkchoice(genesis, chains[0][3]).await?;
-            wait_for_persisted_block(&node.inner.provider, 3, Duration::from_secs(30)).await?;
+            node.wait_for_persisted_block(3).await?;
         }
     }
     let [a, b] = chains;

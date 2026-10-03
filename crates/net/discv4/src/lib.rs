@@ -1256,11 +1256,11 @@ impl Discv4Service {
             self.try_ping(record, PingReason::InitialInsert);
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
-        } else if is_proven {
+        } else {
             // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
-            if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
+            if is_proven && let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
                 if self.pending_find_nodes.contains_key(&record.id) {
                     // there's already another pending request, unmark it so the next round can
                     // try to send it
@@ -1271,7 +1271,7 @@ impl Discv4Service {
                     self.find_node(&record, ctx);
                 }
             }
-        } else {
+
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
                 (Some(new), Some(old)) if new > old => {
@@ -1416,35 +1416,34 @@ impl Discv4Service {
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
-        if let Some(resp) = self.pending_enr_requests.remove(&id) {
-            // ensure the ENR's public key matches the expected node id
-            let enr_id = pk2id(&msg.enr.public_key());
-            if id != enr_id {
-                return
-            }
+        let Entry::Occupied(request) = self.pending_enr_requests.entry(id) else { return };
 
-            if resp.echo_hash == msg.request_hash {
-                let key = kad_key(id);
-                let fork_id = msg.eth_fork_id();
-                let (record, old_fork_id) = match self.kbuckets.entry(&key) {
-                    kbucket::Entry::Present(mut entry, _) => {
-                        let id = entry.value_mut().update_with_fork_id(fork_id);
-                        (entry.value().record, id)
-                    }
-                    kbucket::Entry::Pending(mut entry, _) => {
-                        let id = entry.value_mut().update_with_fork_id(fork_id);
-                        (entry.value().record, id)
-                    }
-                    _ => return,
-                };
-                match (fork_id, old_fork_id) {
-                    (Some(new), Some(old)) if new != old => {
-                        self.notify(DiscoveryUpdate::EnrForkId(record, new))
-                    }
-                    (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
-                    _ => {}
-                }
+        // A delayed response to an earlier request must not consume its replacement.
+        // Also ensure the ENR's public key matches the expected node id.
+        if request.get().echo_hash != msg.request_hash || id != pk2id(&msg.enr.public_key()) {
+            return
+        }
+        request.remove();
+
+        let key = kad_key(id);
+        let fork_id = msg.eth_fork_id();
+        let (record, old_fork_id) = match self.kbuckets.entry(&key) {
+            kbucket::Entry::Present(mut entry, _) => {
+                let id = entry.value_mut().update_with_fork_id(fork_id);
+                (entry.value().record, id)
             }
+            kbucket::Entry::Pending(mut entry, _) => {
+                let id = entry.value_mut().update_with_fork_id(fork_id);
+                (entry.value().record, id)
+            }
+            _ => return,
+        };
+        match (fork_id, old_fork_id) {
+            (Some(new), Some(old)) if new != old => {
+                self.notify(DiscoveryUpdate::EnrForkId(record, new))
+            }
+            (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
+            _ => {}
         }
     }
 
@@ -1630,9 +1629,23 @@ impl Discv4Service {
     }
 
     fn evict_expired_requests(&mut self, now: Instant) {
-        self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.enr_expiration
+        let mut failed_enr_requests = Vec::new();
+        self.pending_enr_requests.retain(|node_id, enr_request| {
+            if now.duration_since(enr_request.sent_at) < self.config.enr_expiration {
+                return true
+            }
+            failed_enr_requests.push(*node_id);
+            false
         });
+
+        // forget the announced enr seq, so the next ping or pong requests the ENR again.
+        for node_id in failed_enr_requests {
+            match self.kbuckets.entry(&kad_key(node_id)) {
+                kbucket::Entry::Present(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                kbucket::Entry::Pending(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                _ => {}
+            }
+        }
 
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
@@ -2688,6 +2701,42 @@ mod tests {
         assert_eq!(&expected[..], encoded.as_slice());
     }
 
+    #[tokio::test]
+    async fn test_request_enr_of_proven_node() {
+        reth_tracing::init_test_tracing();
+        let mut rng = rand_08::thread_rng();
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let addr: SocketAddr = (Ipv4Addr::new(10, 0, 0, 1), DEFAULT_DISCOVERY_PORT).into();
+        let mut entry = NodeEntry::new_proven(NodeRecord::new(addr, id));
+        entry.last_enr_seq = Some(1);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            entry,
+            NodeStatus {
+                direction: ConnectionDirection::Outgoing,
+                state: ConnectionState::Connected,
+            },
+        );
+        let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
+            from: rng_endpoint(rng),
+            to: rng_endpoint(rng),
+            expire: service.ping_expiration(),
+            enr_sq: Some(2),
+        };
+
+        // the node announces a newer record.
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
+
+        // the request goes unanswered, so the next ping has to ask again.
+        service.evict_expired_requests(Instant::now() + service.config.enr_expiration * 2);
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
+    }
+
     #[test]
     fn test_local_rotator() {
         let id = PeerId::random();
@@ -3392,5 +3441,71 @@ mod tests {
 
         // flag should be false when lookups are disabled
         assert!(!service.pending_lookup_reset);
+    }
+
+    #[tokio::test]
+    async fn test_enr_response_preserves_pending_request() {
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        let mut config = Discv4Config::default();
+        config.add_eip868_pair("eth", EnrForkIdEntry::from(fork_id));
+        let (_remote, mut remote) = create_discv4_with_config(config).await;
+        let (_discv4, mut service) = create_discv4().await;
+        let record = remote.local_node_record;
+        let id = record.id;
+        let addr = record.udp_addr();
+        insert_proven_node(&mut service, record);
+        service.update_on_reping(record, remote.enr_seq());
+        let old_enr = remote.local_eip_868_enr.clone();
+
+        // Model a request sent in the previous second without waiting for the wall clock.
+        let (_, old_hash) =
+            Message::EnrRequest(EnrRequest { expire: service.enr_request_expiration() - 1 })
+                .encode(&service.secret_key);
+        service.pending_enr_requests.get_mut(&id).unwrap().echo_hash = old_hash;
+
+        // A newer sequence replaces the pending request before its response arrives.
+        remote.local_eip_868_enr.set_tcp4(30304, &remote.secret_key).unwrap();
+        service.on_ping(
+            Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: remote.enr_seq(),
+            },
+            addr,
+            id,
+            B256::random(),
+        );
+        let request_hash = service.pending_enr_requests[&id].echo_hash;
+        assert_ne!(request_hash, old_hash);
+
+        service.on_enr_response(EnrResponse { request_hash: old_hash, enr: old_enr }, addr, id);
+        assert_eq!(service.pending_enr_requests[&id].echo_hash, request_hash);
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(None));
+
+        // A response with the right hash but a different node identity is also ignored.
+        service.on_enr_response(
+            EnrResponse { request_hash, enr: service.local_eip_868_enr.clone() },
+            addr,
+            id,
+        );
+        assert_eq!(service.pending_enr_requests[&id].echo_hash, request_hash);
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(None));
+
+        let mut updates = service.update_stream().into_inner();
+        service.on_enr_response(
+            EnrResponse { request_hash, enr: remote.local_eip_868_enr.clone() },
+            addr,
+            id,
+        );
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(Some(fork_id)));
+        assert_matches::assert_matches!(
+            updates.try_recv().unwrap(),
+            DiscoveryUpdate::EnrForkId(found_record, found_fork_id) => {
+                assert_eq!(found_record, record);
+                assert_eq!(found_fork_id, fork_id);
+            }
+        );
     }
 }
