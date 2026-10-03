@@ -583,8 +583,12 @@ mod tests {
 
         provider.publish_snap_state(7).unwrap();
 
+        // Every stage must be classified, so a new one fails here until it is.
+        let kept = [StageId::Era, StageId::Headers, StageId::MerkleExecute, StageId::Finish];
         for stage in StageId::ALL {
-            let expected = PUBLISHED_STAGES.contains(&stage).then(|| StageCheckpoint::new(7));
+            let published = PUBLISHED_STAGES.contains(&stage);
+            assert_ne!(published, kept.contains(&stage), "{stage} must be published or kept");
+            let expected = published.then(|| StageCheckpoint::new(7));
             assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), expected, "{stage}");
         }
     }
