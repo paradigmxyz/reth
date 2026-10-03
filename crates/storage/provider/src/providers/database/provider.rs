@@ -1504,10 +1504,16 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// layout, and state an unfinished attempt left behind is only ever completed by snap.
     pub fn ensure_snap_backfill_eligible(&self, snap_enabled: bool) -> ProviderResult<()> {
         if snap_enabled {
-            self.ensure_snap_sync_layout()?;
+            self.ensure_snap_sync_layout()
+        } else {
+            self.ensure_snap_state_verified()
         }
+    }
+
+    /// Refuses state reads while a snap attempt's downloaded state is unverified.
+    pub(crate) fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
         match self.snap_attempt()? {
-            Some(attempt) if !snap_enabled && !attempt.is_verified() => {
+            Some(attempt) if !attempt.is_verified() => {
                 Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
             }
             _ => Ok(()),

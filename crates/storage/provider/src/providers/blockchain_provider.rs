@@ -157,23 +157,27 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
+    ///
+    /// Rejects snapshots containing unverified snap state.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
+    ) -> ProviderResult<StateProviderBox> {
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
             provider,
             self.database.overlay_manager().overlay_builder(block_hash),
-        ))
+        )))
     }
 
     /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
@@ -749,11 +753,12 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         parent_hash: BlockHash,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -796,14 +801,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        self.state_provider_from_database(provider.into_database_provider(), hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        self.state_provider_from_database(provider.into_database_provider(), block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1073,7 +1078,11 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db_api::{
+        models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -1086,9 +1095,10 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
         TransactionsProvider,
     };
     use reth_testing_utils::generators::{
@@ -3564,6 +3574,83 @@ mod tests {
             .expect("account must have storage");
         assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn latest_state_rejects_unverified_snap_accounts() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let address = Address::with_last_byte(1);
+        let account = Account { balance: U256::from(42), ..Default::default() };
+        let before_download = provider.latest()?;
+        assert_eq!(before_download.basic_account(&address)?, None);
+
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        let writer = factory.database_provider_rw()?;
+        writer.write_snap_attempt(&attempt)?;
+        writer.tx_ref().put::<tables::HashedAccounts>(keccak256(address), account.clone())?;
+        writer.commit()?;
+
+        // A reader opened before the download retains its original, uncontaminated snapshot.
+        assert_eq!(before_download.basic_account(&address)?, None);
+        drop(before_download);
+        for abandoned in [false, true] {
+            if abandoned {
+                attempt.abandon();
+                let writer = factory.database_provider_rw()?;
+                writer.write_snap_attempt(&attempt)?;
+                writer.commit()?;
+            }
+            for result in [
+                provider.latest(),
+                provider.pending(),
+                provider.state_by_block_number_or_tag(BlockNumberOrTag::Latest),
+                provider.history_by_block_number(0),
+            ] {
+                assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+            }
+        }
+
+        attempt.verify();
+        let writer = factory.database_provider_rw()?;
+        writer.write_snap_attempt(&attempt)?;
+        writer.commit()?;
+        assert_eq!(provider.latest()?.basic_account(&address)?, Some(account));
+        Ok(())
+    }
+
+    #[test]
+    fn in_memory_state_rejects_unverified_snap_accounts() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, _, blocks, _) =
+            provider_with_random_blocks(&mut rng, 2, 1, BlockRangeParams::default())?;
+        assert!(provider.canonical_in_memory_state.head_state().is_some());
+        assert!(provider.latest().is_ok());
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        let writer = provider.database.database_provider_rw()?;
+        writer.write_snap_attempt(&attempt)?;
+        writer.commit()?;
+        for result in
+            [provider.latest(), provider.pending(), provider.state_by_block_hash(blocks[0].hash())]
+        {
+            assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        }
+
+        attempt.verify();
+        let writer = provider.database.database_provider_rw()?;
+        writer.write_snap_attempt(&attempt)?;
+        writer.commit()?;
+        assert!(provider.latest().is_ok());
         Ok(())
     }
 }
