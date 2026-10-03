@@ -28,7 +28,7 @@ use reth_revm::{
     },
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
-use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
+use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
 use std::{
     collections::HashMap,
     sync::{
@@ -163,7 +163,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let hash = provider.block_hash(block_number).unwrap().unwrap();
                         StateProviderDatabase(
                             state_provider_factory
-                                .state_provider_from_database(provider, hash),
+                                .state_provider_from_database(provider, hash)
+                                .into_evm_state_provider(),
                         )
                     }
                 };

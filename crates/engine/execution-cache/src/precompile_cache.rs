@@ -7,7 +7,7 @@ use alloy_primitives::{
 use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
-use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
+use reth_revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use std::{hash::Hash, sync::Arc};
 use tracing::error;
 

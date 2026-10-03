@@ -13,8 +13,8 @@ use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
-    TransactionVariant,
+    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProvider,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -79,7 +79,8 @@ where
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider
                 .history_by_block_number(self.range.start().saturating_sub(1))
-                .map_err(BlockExecutionError::other)?,
+                .map_err(BlockExecutionError::other)?
+                .into_evm_state_provider(),
         ));
 
         let mut fetch_block_duration = Duration::default();
@@ -217,7 +218,8 @@ where
         let executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider
                 .history_by_block_number(block_number.saturating_sub(1))
-                .map_err(BlockExecutionError::other)?,
+                .map_err(BlockExecutionError::other)?
+                .into_evm_state_provider(),
         ));
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");

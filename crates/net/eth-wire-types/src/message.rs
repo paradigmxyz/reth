@@ -22,7 +22,7 @@ use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
 };
-use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use alloy_rlp::{Decodable, Encodable, Header};
 use core::fmt::Debug;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
@@ -856,11 +856,8 @@ where
     }
 
     fn length(&self) -> usize {
-        let mut length = 0;
-        length += self.request_id.length();
-        length += self.message.length();
-        length += length_of_length(length);
-        length
+        let payload_length = self.request_id.length() + self.message.length();
+        Header { list: true, payload_length }.length_with_payload()
     }
 }
 
