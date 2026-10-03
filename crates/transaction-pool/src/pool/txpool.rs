@@ -1694,6 +1694,21 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     } else {
                         tx.state.insert(TxState::ENOUGH_BALANCE);
                     }
+                } else if !tx.state.has_nonce_gap() {
+                    // The sender's on-chain nonce moved below its lowest pooled nonce, which
+                    // happens when a reorg reverts the transactions in between. The whole
+                    // sequence has a nonce gap now and must not be considered pending.
+                    tx.state.remove(TxState::NO_NONCE_GAPS);
+                    Self::record_subpool_update(updates, tx);
+                    while let Some((peek, tx)) = iter.peek_mut() {
+                        if peek.sender != id.sender {
+                            break
+                        }
+                        tx.state.remove(TxState::NO_NONCE_GAPS);
+                        Self::record_subpool_update(updates, tx);
+                        iter.next();
+                    }
+                    continue 'transactions
                 }
 
                 Some(&info.balance)
@@ -4822,6 +4837,47 @@ mod tests {
         assert!(pool.queued_transactions().is_empty());
         assert_eq!(2, pool.pending_transactions().len());
     }
+    #[test]
+    fn account_updates_nonce_decrease_parks_gapped_transactions() {
+        let on_chain_balance = U256::from(10_000);
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // sender is at nonce 2 on chain, its next transactions are pending
+        let tx_2 = MockTransaction::eip1559().set_gas_price(100).inc_limit().with_nonce(2);
+        let tx_3 = tx_2.next();
+        let v2 = f.validated(tx_2);
+        let v3 = f.validated(tx_3);
+        pool.add_transaction(v2.clone(), on_chain_balance, 2, None).unwrap();
+        pool.add_transaction(v3, on_chain_balance, 2, None).unwrap();
+        assert_eq!(2, pool.pending_transactions().len());
+
+        // a reorg reverts the block that included nonces 0 and 1: the sender is back at nonce 0
+        let mut updated_accounts = HashMap::default();
+        updated_accounts
+            .insert(v2.sender_id(), SenderInfo { state_nonce: 0, balance: on_chain_balance });
+        pool.update_accounts(updated_accounts);
+
+        // nonces 2 and 3 now have a nonce gap and must not be offered for inclusion
+        assert!(pool.pending_transactions().is_empty(), "gapped transactions must be parked");
+        assert_eq!(2, pool.queued_transactions().len());
+        assert!(pool.best_transactions().next().is_none());
+        pool.assert_invariants();
+
+        // re-adding the reverted transactions fills the gap again
+        let tx_0 = MockTransaction::eip1559()
+            .with_sender(v2.sender())
+            .set_gas_price(100)
+            .inc_limit()
+            .with_nonce(0);
+        let tx_1 = tx_0.next();
+        pool.add_transaction(f.validated(tx_0), on_chain_balance, 0, None).unwrap();
+        pool.add_transaction(f.validated(tx_1), on_chain_balance, 0, None).unwrap();
+        assert_eq!(4, pool.pending_transactions().len());
+        assert!(pool.queued_transactions().is_empty());
+        pool.assert_invariants();
+    }
+
     #[test]
     fn test_transaction_removal() {
         let on_chain_balance = U256::from(10_000);
