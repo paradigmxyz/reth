@@ -82,6 +82,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Mine transactions that are already in the pool, e.g. sent through a provider | `node.mine_pooled(hashes)`, with the checks of `mine` and an error for a hash that is not in the pool |
 | Produce blocks from the pool | `advance_block()`, `advance_blocks(n)`; `advance_block_synced()` also waits for the pool to process the block |
 | Produce blocks until a transaction is included | `advance_until_receipt(hash)` |
+| Produce blocks until the pool has no pending transactions | `advance_until_pool_drained()`, which returns the payloads and leaves queued transactions in the pool |
 | Produce blocks while a future runs, e.g. `eth_sendRawTransactionSync` | `advance_while(fut)` |
 | Build a payload without submitting it | `new_payload()`; on another parent `build_payload_on(parent)` |
 | Control block timestamps, e.g. around a fork | `set_next_payload_timestamp(timestamp)` |
@@ -97,7 +98,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | **Multiple nodes** | |
 | Connect two nodes | `a.connect(&mut b)`, done by `build()` unless disabled |
 | Give a node the block of another node | `follower.import_payload(payload)`; the parent must be known |
-| Let a node download a chain from its peers | `follower.sync_to(hash)`, which makes the block head, safe and finalized |
+| Let a node download a chain from its peers | `follower.sync_to(hash)`, which makes the block head, safe and finalized; after a forkchoice update of the test's own, `wait_for_head(hash)` |
 | **Stopping and restarting** | |
 | Make nodes restartable | `with_restartable_nodes()`; opt-in because each node then runs on a runtime of its own, which costs a few threads per node; not combinable with `with_runtime` |
 | Stop a node and keep its datadir | `node.stop()`, which returns a `StoppedNode`; `stopped.data_dir()` while it is stopped; dropping it removes the datadir |
@@ -108,6 +109,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Wait for any condition | `wait::poll_until(what, poll)`; `poll_until_with(PollOpts { .. }, ..)` for another timeout or interval |
 | Assert that something does not happen | `wait::assert_holds_for(duration, what, check)` |
 | Wait for a block, or a pool state | `wait_block(n, hash, wait_finish_checkpoint)`, `wait_for_pool(condition)`, `wait_for_pool_head(hash)` |
+| Wait until a block is the head | `wait_for_head(hash)`, which only observes the node; `wait_block` is also satisfied by a canonical block below the head |
 | Wait for transactions to enter or leave the pool | `wait_for_pooled(hashes)`, `wait_for_pool_removal(hashes)`, which returns right away for transactions that never entered |
 | Wait for persistence or pruning | `wait_for_persisted_block(n)`, `wait_for_prune_checkpoint(segment, n)` |
 | **Assertions and inspection** | |
@@ -461,7 +463,9 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
 - **`update_forkchoice(current_head, new_head)`** makes its first argument the safe and finalized
   block, not the previous head, and returns the engine's response without checking it, so a
   `SYNCING` or `INVALID` update does not fail the test. Use `import_payload`, `reorg_to`, or
-  `node.engine.forkchoice_updated` with an explicit `ForkchoiceState` and assert on the result.
+  `node.engine.forkchoice_updated` with an explicit `ForkchoiceState` and assert on the result. If
+  the update makes the node sync, wait for the block with `wait_for_head`: `wait_block` can return
+  before the engine made a backfilled block its head.
 - **`new_payload` only builds.** It starts a payload job and resolves it; the engine has not seen
   the block. `build_and_submit_payload` inserts it without making it canonical.
 - **Every imported block is finalized by default.** Under `Finality::Head`, `import_payload` and
