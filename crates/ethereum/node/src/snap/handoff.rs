@@ -1,17 +1,19 @@
 //! Hands snap-downloaded state over to the staged pipeline.
 //!
-//! The state is published at its pivot, the merkle stage rebuilds its trie, and only a matching
-//! root accepts it.
+//! The merkle stage rebuilds the trie from the downloaded state, and only a matching root is
+//! published at the pivot and accepted.
 
 use alloy_eips::BlockNumHash;
-use reth_errors::RethError;
+use reth_errors::{ConsensusError, RethError};
 use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, HeaderProvider,
     MetadataProvider, ProviderFactory, ProviderResult, StageCheckpointReader,
     StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment,
 };
 use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
-use reth_stages::{stages::MerkleStage, ExecInput, PipelineError, Stage, StageId};
+use reth_stages::{
+    stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
+};
 use reth_tracing::tracing::info;
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
@@ -36,22 +38,32 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         write: SnapWrite,
         pivot: BlockNumHash,
     ) -> Result<Handoff, PipelineError> {
-        let provider = self.factory.database_provider_rw()?;
         // Forkchoice can reorg the pivot out while its state downloads, and publishing anchors
         // the node to it, so the attempt is dropped instead of published.
-        let canonical =
-            provider.sealed_header(pivot.number)?.is_some_and(|header| header.hash() == pivot.hash);
+        let canonical = self
+            .factory
+            .provider()?
+            .sealed_header(pivot.number)?
+            .is_some_and(|header| header.hash() == pivot.hash);
         if !canonical {
-            provider.abandon_snap_attempt().map_err(RethError::other)?;
-            provider.commit()?;
+            self.abandon()?;
             return Ok(Handoff::PivotReorged)
         }
-        drop(provider);
+
+        // The root is checked before the irreversible publish, so a mismatch leaves nothing to
+        // undo: the attempt is dropped and the next run downloads the state again.
+        let rebuilt = self.rebuild_trie(pivot);
+        if let Err(PipelineError::Stage(StageError::Block {
+            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
+            ..
+        })) = &rebuilt
+        {
+            self.abandon()?;
+        }
+        rebuilt?;
 
         self.publish(pivot.number)?;
         info!(target: "sync::snap", pivot = pivot.number, "Snap state published; history below it is unavailable");
-
-        self.rebuild_trie(pivot)?;
 
         let provider = self.factory.database_provider_rw()?;
         provider.verify_state_root(write).map_err(RethError::other)?;
@@ -87,6 +99,14 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
             provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number <
                 pivot;
         Ok((anchored && behind).then_some(pivot))
+    }
+
+    // Drops the attempt, so the next run starts a new one.
+    fn abandon(&self) -> Result<(), PipelineError> {
+        let provider = self.factory.database_provider_rw()?;
+        provider.abandon_snap_attempt().map_err(RethError::other)?;
+        provider.commit()?;
+        Ok(())
     }
 
     // Anchors the static files at `pivot` and moves the checkpoints there. Repeats safely, since
@@ -134,6 +154,8 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
+    use reth_db::{tables, transaction::DbTxMut};
+    use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, MetadataWriter, StaticFileWriter, StorageSettings, StorageSettingsCache,
@@ -222,6 +244,32 @@ mod tests {
         assert_eq!(handoff, Handoff::PivotReorged);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_root_mismatch_abandons_the_attempt_before_publishing() {
+        let (factory, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        // State whose root differs from the empty root the pivot header commits to.
+        provider
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                B256::repeat_byte(3),
+                Account { nonce: 1, ..Default::default() },
+            )
+            .unwrap();
+        provider.commit().unwrap();
+        let pivot = factory.provider().unwrap().sealed_header(PIVOT).unwrap().unwrap().num_hash();
+
+        assert!(SnapHandoff::new(factory.clone()).hand_off(write, pivot).is_err());
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.active_snap_write().unwrap().is_none());
+        assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), None);
+        assert_eq!(
+            factory.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions),
+            None
+        );
     }
 
     #[test]
