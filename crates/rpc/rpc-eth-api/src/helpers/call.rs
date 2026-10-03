@@ -389,7 +389,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 for (bundle_index, bundle) in bundles.into_iter().enumerate() {
                     let Bundle { transactions, block_override } = bundle;
                     if transactions.is_empty() {
-                        // Skip empty bundles
+                        // Keep the response aligned with the request: an empty bundle yields an
+                        // empty result set at the same index.
+                        all_results.push(Vec::new());
                         continue;
                     }
 
