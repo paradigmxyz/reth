@@ -1,4 +1,4 @@
-//! Utilities for end-to-end tests.
+#![doc = include_str!("../README.md")]
 
 use node::NodeTestContext;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
