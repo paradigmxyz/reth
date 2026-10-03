@@ -1416,14 +1416,22 @@ impl Discv4Service {
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
-        let Entry::Occupied(request) = self.pending_enr_requests.entry(id) else { return };
+        let Some(request) = self.pending_enr_requests.get(&id) else { return };
 
         // A delayed response to an earlier request must not consume its replacement.
         // Also ensure the ENR's public key matches the expected node id.
-        if request.get().echo_hash != msg.request_hash || id != pk2id(&msg.enr.public_key()) {
+        if request.echo_hash != msg.request_hash || id != pk2id(&msg.enr.public_key()) {
             return
         }
-        request.remove();
+        // Requests sent within one second can share a hash, so also check the announced sequence.
+        if self
+            .on_entry(id, |entry| entry.last_enr_seq)
+            .flatten()
+            .is_some_and(|seq| msg.enr.seq() < seq)
+        {
+            return
+        }
+        self.pending_enr_requests.remove(&id);
 
         let key = kad_key(id);
         let fork_id = msg.eth_fork_id();
@@ -3507,5 +3515,60 @@ mod tests {
                 assert_eq!(found_fork_id, fork_id);
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_enr_response_rejects_outdated_sequence() {
+        let old_fork = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        let new_fork = ForkId { hash: ForkHash([5, 6, 7, 8]), next: 0 };
+        let mut config = Discv4Config::default();
+        config.add_eip868_pair("eth", EnrForkIdEntry::from(old_fork));
+        let (_remote, mut remote) = create_discv4_with_config(config).await;
+        let (_discv4, mut service) = create_discv4().await;
+        let record = remote.local_node_record;
+        let id = record.id;
+        let addr = record.udp_addr();
+        insert_proven_node(&mut service, record);
+        service.update_on_reping(record, remote.enr_seq());
+        let old_enr = remote.local_eip_868_enr.clone();
+
+        remote
+            .local_eip_868_enr
+            .insert_raw_rlp(
+                "eth",
+                alloy_rlp::encode(EnrForkIdEntry::from(new_fork)).into(),
+                &remote.secret_key,
+            )
+            .unwrap();
+        service.on_ping(
+            Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: remote.enr_seq(),
+            },
+            addr,
+            id,
+            B256::random(),
+        );
+        // Requests within one second have the same expiration and deterministic signature.
+        let expire = service.enr_request_expiration();
+        let (_, old_hash) = Message::EnrRequest(EnrRequest { expire }).encode(&service.secret_key);
+        let (_, request_hash) =
+            Message::EnrRequest(EnrRequest { expire }).encode(&service.secret_key);
+        assert_eq!(old_hash, request_hash);
+        // Model both requests having this expiration, without depending on the wall clock.
+        service.pending_enr_requests.get_mut(&id).unwrap().echo_hash = request_hash;
+        service.on_enr_response(EnrResponse { request_hash: old_hash, enr: old_enr }, addr, id);
+        assert!(service.pending_enr_requests.contains_key(&id));
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(None));
+
+        service.on_enr_response(
+            EnrResponse { request_hash, enr: remote.local_eip_868_enr.clone() },
+            addr,
+            id,
+        );
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(Some(new_fork)));
     }
 }
