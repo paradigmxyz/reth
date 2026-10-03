@@ -659,3 +659,17 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "77a82662279395921decde8b1e3940cebe3786c1" }
