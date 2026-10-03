@@ -21,8 +21,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
+    eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -1127,7 +1126,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
 
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
+            block_gas_limit: tip.gas_limit().into(),
             client,
             chain_id: chain_spec.chain().id(),
             evm_config,
@@ -1595,10 +1594,12 @@ mod tests {
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
+        eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1607,6 +1608,20 @@ mod tests {
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()
+    }
+
+    /// Mainnet with a 30M genesis gas limit instead of 5,000, since the validator takes its block
+    /// gas limit from the latest header.
+    fn mock_provider() -> MockEthProvider {
+        mock_provider_with_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
+    }
+
+    fn mock_provider_with_gas_limit(gas_limit: u64) -> MockEthProvider {
+        let mut genesis = MAINNET.genesis.clone();
+        genesis.gas_limit = gas_limit;
+        MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().genesis(genesis).build())
+            .with_genesis_block()
     }
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1781,7 +1796,7 @@ mod tests {
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1806,7 +1821,7 @@ mod tests {
     #[test]
     fn accepts_sender_with_empty_bytecode() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
@@ -1821,7 +1836,7 @@ mod tests {
 
     #[test]
     fn validates_nonce_bound() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |nonce| {
@@ -1849,7 +1864,7 @@ mod tests {
 
     #[test]
     fn validates_configured_chain_id() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |chain_id| {
@@ -1915,7 +1930,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_fee_cap_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1952,7 +1967,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_zero_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1970,7 +1985,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_normal_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1988,7 +2003,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_max_tx_gas_limit_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2020,7 +2035,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_disabled() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2038,7 +2053,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_within_limit() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2056,7 +2071,7 @@ mod tests {
     // Helper function to set up common test infrastructure for priority fee tests
     fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2271,7 +2286,7 @@ mod tests {
     #[tokio::test]
     async fn valid_with_disabled_balance_check() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
 
         // Set account with 0 balance
         provider.add_account(
@@ -2303,5 +2318,36 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    #[test]
+    fn block_gas_limit_from_latest_header() {
+        let gas_limit = 60_000_000;
+        let validator = EthTransactionValidatorBuilder::new(
+            mock_provider_with_gas_limit(gas_limit),
+            test_evm_config(),
+        )
+        .build(InMemoryBlobStore::default());
+        let transaction = |gas_limit| {
+            EthPooledTransaction::try_from_consensus(
+                TransactionBuilder::default()
+                    .chain_id(validator.chain_id())
+                    .gas_limit(gas_limit)
+                    .to(Address::ZERO)
+                    .into_eip1559()
+                    .try_into_recovered()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(validator.block_gas_limit(), gas_limit);
+        assert!(validator
+            .validate_stateless(TransactionOrigin::External, &transaction(gas_limit))
+            .is_ok());
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
+            Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
+        ));
     }
 }
