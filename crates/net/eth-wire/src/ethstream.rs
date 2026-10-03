@@ -7,7 +7,10 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
-    message::{EthBroadcastMessage, MAX_MESSAGE_SIZE, TX_MEMORY_BUDGET_MULTIPLIER},
+    message::{
+        EthBroadcastMessage, MessageError, RawResponse, MAX_MESSAGE_SIZE,
+        TX_MEMORY_BUDGET_MULTIPLIER,
+    },
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     UnifiedStatus,
@@ -110,6 +113,9 @@ pub struct EthStreamInner<N> {
     /// When true, `NewBlock` (0x07) and `NewBlockHashes` (0x01) messages are rejected before RLP
     /// decoding to avoid any memory impact for non-PoW networks.
     reject_block_announcements: bool,
+    /// When true, response messages are yielded as [`EthMessage::RawResponse`] with their payload
+    /// still encoded, so the consumer can correlate the request id before decoding the payload.
+    lazy_responses: bool,
     _pd: std::marker::PhantomData<N>,
 }
 
@@ -128,6 +134,7 @@ where
             version,
             max_message_size,
             reject_block_announcements: false,
+            lazy_responses: false,
             _pd: std::marker::PhantomData,
         }
     }
@@ -144,6 +151,17 @@ where
         self.reject_block_announcements = reject;
     }
 
+    /// Sets whether to defer decoding of response messages.
+    ///
+    /// When enabled, responses (`BlockHeaders`, `BlockBodies`, `PooledTransactions`, `Receipts`,
+    /// ...) are yielded as [`EthMessage::RawResponse`] instead of their typed variants. The
+    /// consumer is expected to correlate the [request id](RawResponse::request_id) with its
+    /// pending requests first and only decode the payload of responses it actually asked for, via
+    /// [`Self::decode_raw_response`].
+    pub const fn set_lazy_responses(&mut self, lazy: bool) {
+        self.lazy_responses = lazy;
+    }
+
     /// Decodes incoming bytes into an [`EthMessage`].
     pub fn decode_message(&self, bytes: BytesMut) -> Result<EthMessage<N>, EthStreamError> {
         if bytes.len() > self.max_message_size {
@@ -157,6 +175,18 @@ where
             return Err(EthStreamError::UnsupportedMessage { message_id: id });
         }
 
+        let bytes = bytes.freeze();
+        if self.lazy_responses &&
+            let Some(&id) = bytes.first() &&
+            let Ok(message_id) = EthMessageID::try_from(id as usize) &&
+            let Some(resp) = RawResponse::new(message_id, bytes.slice(1..).into())
+        {
+            if !message_id.is_valid_for_version(self.version) {
+                return Err(MessageError::Invalid(self.version, message_id).into());
+            }
+            return Ok(EthMessage::RawResponse(resp));
+        }
+
         let msg = match ProtocolMessage::decode_message_with_tx_memory_budget(
             self.version,
             &mut bytes.as_ref(),
@@ -164,14 +194,9 @@ where
         ) {
             Ok(m) => m,
             Err(err) => {
-                let msg = if bytes.len() > 50 {
-                    format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
-                } else {
-                    format!("{bytes:02x?}")
-                };
                 debug!(
                     version=?self.version,
-                    %msg,
+                    msg=%hex_snippet(&bytes),
                     "failed to decode protocol message"
                 );
                 return Err(EthStreamError::InvalidMessage(err));
@@ -183,6 +208,28 @@ where
         }
 
         Ok(msg.message)
+    }
+
+    /// Decodes a response yielded as [`EthMessage::RawResponse`] into its typed variant, applying
+    /// the same limits as [`Self::decode_message`].
+    pub fn decode_raw_response(
+        &self,
+        response: &RawResponse,
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        response
+            .decode_with_tx_memory_budget(
+                self.version,
+                self.max_message_size * TX_MEMORY_BUDGET_MULTIPLIER,
+            )
+            .map_err(|err| {
+                debug!(
+                    version=?self.version,
+                    message_id=?response.message_id(),
+                    msg=%hex_snippet(response.payload()),
+                    "failed to decode response payload"
+                );
+                EthStreamError::InvalidMessage(err)
+            })
     }
 
     /// Encodes an [`EthMessage`] to bytes.
@@ -236,6 +283,21 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
     /// RLP decoding.
     pub const fn set_reject_block_announcements(&mut self, reject: bool) {
         self.eth.set_reject_block_announcements(reject);
+    }
+
+    /// Sets whether to defer decoding of response messages, see
+    /// [`EthStreamInner::set_lazy_responses`].
+    pub const fn set_lazy_responses(&mut self, lazy: bool) {
+        self.eth.set_lazy_responses(lazy);
+    }
+
+    /// Decodes a response yielded as [`EthMessage::RawResponse`], see
+    /// [`EthStreamInner::decode_raw_response`].
+    pub fn decode_raw_response(
+        &self,
+        response: &RawResponse,
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        self.eth.decode_raw_response(response)
     }
 
     /// Returns the underlying stream.
@@ -353,6 +415,15 @@ where
     }
 }
 
+/// Formats the start and end of a message for logging, without dumping the whole message.
+fn hex_snippet(bytes: &[u8]) -> String {
+    if bytes.len() > 50 {
+        format!("{:02x?}...{:x?}", &bytes[..10], &bytes[bytes.len() - 10..])
+    } else {
+        format!("{bytes:02x?}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::UnauthedEthStream;
@@ -361,9 +432,10 @@ mod tests {
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
+        message::RequestPair,
         p2pstream::UnauthedP2PStream,
-        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
-        ProtocolVersion, Status, StatusMessage,
+        EthMessage, EthMessageID, EthStream, EthVersion, HelloMessageWithProtocols,
+        PassthroughCodec, ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
     use alloy_primitives::{bytes::Bytes, B256, U256};
@@ -826,6 +898,47 @@ mod tests {
             vec![BlockHashNumber { hash: B256::random(), number: 5 }].into(),
         );
         client_stream.send(test_msg).await.unwrap();
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lazy_responses_defer_decoding() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let response = EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+            request_id: 42,
+            message: Default::default(),
+        });
+        let broadcast = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
+            vec![BlockHashNumber { hash: B256::random(), number: 5 }].into(),
+        );
+
+        let (expected_response, expected_broadcast) = (response.clone(), broadcast.clone());
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = PassthroughCodec::default().framed(incoming);
+            let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth68, stream);
+            stream.set_lazy_responses(true);
+
+            // the response arrives with its payload still encoded
+            let EthMessage::RawResponse(raw) = stream.next().await.unwrap().unwrap() else {
+                panic!("expected a raw response")
+            };
+            assert_eq!(raw.message_id(), EthMessageID::BlockBodies);
+            assert_eq!(raw.request_id().unwrap(), 42);
+            assert_eq!(stream.decode_raw_response(&raw).unwrap(), expected_response);
+
+            // everything else is still decoded eagerly
+            assert_eq!(stream.next().await.unwrap().unwrap(), expected_broadcast);
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = PassthroughCodec::default().framed(outgoing);
+        let mut client_stream = EthStream::new(EthVersion::Eth68, sink);
+        client_stream.send(response).await.unwrap();
+        client_stream.send(broadcast).await.unwrap();
 
         handle.await.unwrap();
     }
