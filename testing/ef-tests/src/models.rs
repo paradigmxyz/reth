@@ -89,6 +89,10 @@ pub struct Header {
     pub requests_hash: Option<B256>,
     /// Target blobs per block.
     pub target_blobs_per_block: Option<U256>,
+    /// Block access list hash.
+    pub block_access_list_hash: Option<B256>,
+    /// Slot number.
+    pub slot_number: Option<U256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -115,8 +119,8 @@ impl From<Header> for SealedHeader {
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_hash: value.requests_hash,
-            block_access_list_hash: None,
-            slot_number: None,
+            block_access_list_hash: value.block_access_list_hash,
+            slot_number: value.slot_number.map(|v| v.to::<u64>()),
         };
         Self::new(header, value.hash)
     }
@@ -318,6 +322,8 @@ pub enum ForkSpec {
     Prague,
     /// Osaka
     Osaka,
+    /// Amsterdam
+    Amsterdam,
 }
 
 impl ForkSpec {
@@ -386,6 +392,7 @@ impl ForkSpec {
                 .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(15_000)),
             Self::Prague => spec_builder.prague_activated(),
             Self::Osaka => spec_builder.osaka_activated(),
+            Self::Amsterdam => spec_builder.amsterdam_activated(),
         }
         .build()
     }
