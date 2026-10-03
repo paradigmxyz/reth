@@ -160,6 +160,20 @@ async fn storage_range_at_replays_block_transactions() -> eyre::Result<()> {
         .unwrap_err();
     assert_eq!(err.as_error_resp().map(|payload| payload.code), Some(-32602));
 
+    // The genesis block has no parent state to replay on.
+    let genesis =
+        provider.get_block(BlockId::number(0)).await?.ok_or_else(|| eyre!("missing genesis"))?;
+    let err = provider
+        .client()
+        .request::<_, HashedStorageRangeResult>(
+            "debug_storageRangeAt",
+            (genesis.header.hash, 0, contract, Bytes::new(), 100),
+        )
+        .await
+        .unwrap_err();
+    let payload = err.as_error_resp().ok_or_else(|| eyre!("expected an error response"))?;
+    assert_eq!((payload.code, payload.message.as_ref()), (-32000, "genesis is not traceable"));
+
     // Paging walks the same entries.
     let mut paged = BTreeMap::new();
     let mut start = Bytes::new();
