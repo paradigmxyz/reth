@@ -6,7 +6,9 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::StreamExt;
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt};
+use reth_e2e_test_utils::{
+    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt,
+};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_network::{test_utils::Testnet, NetworkInfo, Peers, PeersInfo};
@@ -281,14 +283,10 @@ async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> 
     // FCU when pipeline sync completes, without relying on another FCU.
     second_node.update_forkchoice(target.header.hash, target.header.hash).await?;
 
-    tokio::time::timeout(Duration::from_secs(40), async {
-        while second_provider.get_block_number().await? != TARGET_BLOCK {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        eyre::Ok(())
+    poll_until(format!("pipeline sync to block {TARGET_BLOCK}"), || async {
+        Ok((second_provider.get_block_number().await? == TARGET_BLOCK).then_some(()))
     })
-    .await
-    .map_err(|_| eyre::eyre!("timed out waiting for pipeline sync to block {TARGET_BLOCK}"))??;
+    .await?;
 
     let finalized = second_provider
         .get_block_by_number(BlockNumberOrTag::Finalized)

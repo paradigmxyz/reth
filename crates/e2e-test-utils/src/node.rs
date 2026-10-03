@@ -926,7 +926,10 @@ pub enum Finality {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NodeHelperType;
+    use crate::{
+        wait::{assert_holds_for, poll_until_with, PollOpts},
+        NodeHelperType,
+    };
     use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 
     fn assert_send<T: Send>(_: T) {}
@@ -956,5 +959,7 @@ mod tests {
         assert_send(node.submit_payload(payload.clone()));
         assert_send(node.submit_payload_with_status(payload.clone()));
         assert_send(node.import_payload(payload));
+        assert_send(poll_until_with(PollOpts::default(), "", || async { Ok(Some(())) }));
+        assert_send(assert_holds_for(Duration::ZERO, "", || async { Ok(true) }));
     }
 }
