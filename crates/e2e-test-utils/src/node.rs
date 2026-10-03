@@ -312,6 +312,11 @@ where
 
     /// Advances the node forward one block like [`Self::advance_block`] and waits until the
     /// transaction pool processed the new block, see [`Self::wait_for_pool_head`].
+    ///
+    /// This only waits for the canonical state update of the pool itself, which removes the
+    /// transactions mined in the block and updates sender nonces and pending fees. Nodes that run
+    /// additional pool maintenance tasks on new blocks have to wait for the expected contents of
+    /// the pool instead, e.g. with [`Self::wait_for_pool_removal`] for the mined transactions.
     pub async fn advance_block_synced(&mut self) -> eyre::Result<Payload::BuiltPayload> {
         let payload = self.advance_block().await?;
         self.wait_for_pool_head(payload.block().hash()).await?;
@@ -725,8 +730,15 @@ where
     /// outdated sender nonces and pending fees. The pool updates its last seen block together with
     /// these, so they are up to date once this returns. Exceptions are reorgs, after which the
     /// maintenance task re-injects the transactions of the old chain only afterwards, so wait for
-    /// them with [`Self::wait_for_pool`], and commits deeper than the maximum update depth of the
+    /// them with [`Self::wait_for_pooled`], and commits deeper than the maximum update depth of the
     /// maintenance task, e.g. after a long sync, which only update the last seen block.
+    ///
+    /// This only covers the canonical state update of the pool itself. Nodes can run additional
+    /// pool maintenance tasks on new blocks, e.g. to remove mined transactions from a separate
+    /// sub-pool or to evict transactions by their own rules, and the pool can report the new head
+    /// before these processed the block. Tests of such nodes have to wait for the expected
+    /// contents of the pool instead, with [`Self::wait_for_pool_removal`],
+    /// [`Self::wait_for_pooled`] or [`Self::wait_for_pool`].
     ///
     /// Returns an error if the pool does not process the block within [`WAIT_TIMEOUT`], e.g.
     /// because the block is not the canonical head, the pool already processed a newer head, or
@@ -738,6 +750,38 @@ where
             async move { Ok(ready.then_some(())) }
         })
         .await
+    }
+
+    /// Waits until all transactions with the given hashes are in the transaction pool of the
+    /// node.
+    ///
+    /// The transactions must be in the pool at the same time, so this keeps waiting if one of them
+    /// leaves the pool again, e.g. because it is mined or replaced, before the others entered.
+    ///
+    /// Returns an error listing the transactions that are still missing if they are not all in
+    /// the pool within [`WAIT_TIMEOUT`].
+    pub async fn wait_for_pooled(
+        &self,
+        hashes: impl IntoIterator<Item = B256>,
+    ) -> eyre::Result<()> {
+        wait_for_pool_transactions(&self.inner.pool, hashes, true).await
+    }
+
+    /// Waits until none of the transactions with the given hashes is in the transaction pool of
+    /// the node, regardless of why they left, e.g. because they were mined, replaced or evicted.
+    ///
+    /// Unlike [`Self::wait_for_pool_head`], this does not depend on which task removes the
+    /// transactions, so it also covers nodes with additional pool maintenance tasks. It returns
+    /// right away for transactions that never entered the pool, so wait for transactions that
+    /// arrive in the background, e.g. from peers, with [`Self::wait_for_pooled`] first.
+    ///
+    /// Returns an error listing the transactions that are still pooled if they do not all leave
+    /// the pool within [`WAIT_TIMEOUT`].
+    pub async fn wait_for_pool_removal(
+        &self,
+        hashes: impl IntoIterator<Item = B256>,
+    ) -> eyre::Result<()> {
+        wait_for_pool_transactions(&self.inner.pool, hashes, false).await
     }
 
     /// Waits until the node has persisted at least the block with the given number to disk.
@@ -1396,6 +1440,30 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     }
 }
 
+/// Waits until all `hashes` are in `pool` if `pooled` is true, or none of them otherwise.
+///
+/// On timeout, the error lists the transactions that are still missing or still pooled.
+async fn wait_for_pool_transactions<P: TransactionPool>(
+    pool: &P,
+    hashes: impl IntoIterator<Item = B256>,
+    pooled: bool,
+) -> eyre::Result<()> {
+    let hashes = hashes.into_iter().collect::<Vec<_>>();
+    let (what, pending_kind) = if pooled {
+        ("transactions to enter the pool", "still missing")
+    } else {
+        ("transactions to leave the pool", "still pooled")
+    };
+    let mut pending = Vec::new();
+    poll_until(what, || {
+        pending = hashes.iter().copied().filter(|hash| pool.contains(hash) != pooled).collect();
+        let done = pending.is_empty();
+        async move { Ok(done.then_some(())) }
+    })
+    .await
+    .map_err(|err| eyre!("{err}, {pending_kind}: {pending:?}"))
+}
+
 /// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`] or
 /// [`NodeTestContext::mine_pooled`].
 #[derive(Debug)]
@@ -1562,6 +1630,7 @@ mod tests {
         NodeHelperType,
     };
     use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
 
     fn assert_send<T: Send>(_: T) {}
 
@@ -1597,6 +1666,8 @@ mod tests {
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
         assert_send(node.wait_for_pool_head(B256::ZERO));
+        assert_send(node.wait_for_pooled([B256::ZERO]));
+        assert_send(node.wait_for_pool_removal([B256::ZERO]));
         assert_send(node.wait_for_persisted_block(0));
         assert_send(node.wait_for_prune_checkpoint(PruneSegment::SenderRecovery, 0));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
@@ -1616,5 +1687,33 @@ mod tests {
     ) {
         assert_send(node.stop());
         assert_send(other.restart());
+    }
+
+    // The paused clock lets the waits run into their timeout without waiting for it.
+    #[tokio::test(start_paused = true)]
+    async fn pool_transaction_waits_list_pending_transactions_on_timeout() {
+        let pool = testing_pool();
+        let tx = MockTransaction::eip1559();
+        let pooled = *tx.get_hash();
+        pool.add_external_transaction(tx).await.unwrap();
+        let absent = B256::repeat_byte(1);
+
+        let err = wait_for_pool_transactions(&pool, [pooled, absent], true).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "timed out after 60s waiting for transactions to enter the pool, still missing: \
+                 [{absent}]"
+            )
+        );
+
+        let err = wait_for_pool_transactions(&pool, [pooled, absent], false).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "timed out after 60s waiting for transactions to leave the pool, still pooled: \
+                 [{pooled}]"
+            )
+        );
     }
 }
