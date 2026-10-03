@@ -531,9 +531,9 @@ mod tests {
         assert_eq!(config.0.len(), 3);
 
         // Check that the args were parsed correctly.
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
-        let addr3: Address = "0x0000000000000000000000000000000000000003".parse().unwrap();
+        let addr1: Address = address!("0x0000000000000000000000000000000000000001");
+        let addr2: Address = address!("0x0000000000000000000000000000000000000002");
+        let addr3: Address = address!("0x0000000000000000000000000000000000000003");
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
@@ -550,8 +550,8 @@ mod tests {
         let config = result.unwrap();
         assert_eq!(config.0.len(), 2);
 
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
+        let addr1: Address = address!("0x0000000000000000000000000000000000000001");
+        let addr2: Address = address!("0x0000000000000000000000000000000000000002");
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));

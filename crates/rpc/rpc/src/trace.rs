@@ -875,6 +875,7 @@ mod tests {
     use crate::EthApiBuilder;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
+    use alloy_primitives::bytes;
     use alloy_rpc_types_eth::TransactionRequest;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
@@ -898,8 +899,7 @@ mod tests {
         // Return NUMBER as a 32-byte word.
         provider.add_account(
             target,
-            ExtendedAccount::new(0, U256::ZERO)
-                .with_bytecode("4360005260206000f3".parse().unwrap()),
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("4360005260206000f3")),
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });

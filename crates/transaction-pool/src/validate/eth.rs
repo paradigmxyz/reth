@@ -1129,7 +1129,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
             client,
-            chain_id: chain_spec.chain().id(),
+            chain_id: chain_spec.chain_id(),
             evm_config,
             minimum_priority_fee: None,
             additional_tasks: 1,

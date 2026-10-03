@@ -383,13 +383,13 @@ mod tests {
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
-            B256::from(U256::from(1)),
+            B256::with_last_byte(1),
             Some(Account { nonce: 1, balance: U256::from(10), ..Default::default() }),
         );
-        hashed_state.accounts.insert(B256::from(U256::from(2)), None);
+        hashed_state.accounts.insert(B256::with_last_byte(2), None);
         hashed_state.storages.insert(
-            B256::from(U256::from(1)),
-            HashedStorage::from_iter([(B256::from(U256::from(3)), U256::from(30))]),
+            B256::with_last_byte(1),
+            HashedStorage::from_iter([(B256::with_last_byte(3), U256::from(30))]),
         );
 
         let sorted = hashed_state.into_sorted();
@@ -440,8 +440,8 @@ mod tests {
 
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
-        let slot1 = B256::from(U256::from(11));
-        let slot2 = B256::from(U256::from(22));
+        let slot1 = B256::with_last_byte(11);
+        let slot2 = B256::with_last_byte(22);
 
         // Account changesets: only first occurrence per address should be kept.
         provider
@@ -547,8 +547,8 @@ mod tests {
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
 
-        let plain_slot1 = B256::from(U256::from(11));
-        let plain_slot2 = B256::from(U256::from(22));
+        let plain_slot1 = B256::with_last_byte(11);
+        let plain_slot2 = B256::with_last_byte(22);
         let hashed_slot1 = keccak256(plain_slot1);
         let hashed_slot2 = keccak256(plain_slot2);
 
@@ -650,8 +650,8 @@ mod tests {
 
         let address1 = Address::with_last_byte(1);
         let address2 = Address::with_last_byte(2);
-        let plain_slot1 = B256::from(U256::from(11));
-        let plain_slot2 = B256::from(U256::from(22));
+        let plain_slot1 = B256::with_last_byte(11);
+        let plain_slot2 = B256::with_last_byte(22);
 
         provider
             .tx_ref()

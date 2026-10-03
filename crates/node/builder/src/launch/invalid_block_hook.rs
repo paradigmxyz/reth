@@ -44,7 +44,7 @@ where
             data_dir,
             self.node.provider().clone(),
             self.node.evm_config().clone(),
-            self.node.provider().chain_spec().chain().id(),
+            self.node.provider().chain_spec().chain_id(),
         )
         .await
     }

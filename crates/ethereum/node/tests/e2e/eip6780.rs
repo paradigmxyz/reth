@@ -532,7 +532,7 @@ fn factory_create_tx(
     value: U256,
 ) -> TransactionRequest {
     let mut input = Vec::with_capacity(64 + initcode.len());
-    input.extend_from_slice(&U256::from(call_after_create as u8).to_be_bytes::<32>());
+    input.extend_from_slice(B256::with_last_byte(call_after_create as u8).as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(initcode);
     TransactionRequest::default().with_to(factory).with_input(input).with_value(value)

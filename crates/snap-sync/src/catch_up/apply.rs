@@ -216,7 +216,7 @@ mod tests {
         assert_eq!(update.state.accounts[&hashed_address].as_ref().unwrap().bytecode_hash, None);
         assert_eq!(
             update.state.storages[&hashed_address],
-            HashedStorage::from_iter([(keccak256(B256::from(U256::from(1))), U256::ZERO)])
+            HashedStorage::from_iter([(keccak256(B256::with_last_byte(1)), U256::ZERO)])
         );
         assert!(update.bytecodes.is_empty());
     }
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(
             post.1,
             BTreeMap::from([(
-                (keccak256(SENDER), keccak256(B256::from(U256::from(1)))),
+                (keccak256(SENDER), keccak256(B256::with_last_byte(1))),
                 U256::from(5)
             )])
         );
