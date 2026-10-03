@@ -30,8 +30,9 @@ use tokio_util::sync::CancellationToken;
 /// running.
 pub const DEFAULT_SCAN_CHUNK: u64 = 100_000;
 
-// Stages the downloaded state covers. Headers and era import run on their own, the merkle stage
-// still rebuilds the trie, and `Finish` waits for verification.
+// Stages publishing moves to the pivot, since the downloaded state replaces their output. Headers
+// and era import run on their own, the merkle stage still rebuilds the trie, and `Finish` waits
+// for verification.
 const PUBLISHED_STAGES: [StageId; 11] = [
     StageId::Bodies,
     StageId::SenderRecovery,
@@ -74,11 +75,17 @@ pub trait SnapStateVerifier {
     where
         Self: DBProvider;
 
-    /// Records the state downloaded at `pivot` as the pipeline's starting point: the stages it
-    /// covers move to `pivot`, and the history below it counts as pruned.
+    /// Publishes the state downloaded at `pivot`: makes it the node's state at that block, so the
+    /// pipeline resumes at `pivot + 1` instead of executing from genesis.
     ///
-    /// The trie is not rebuilt yet, so `Finish` and the merkle stage stay where they were.
-    /// `RocksDB` transaction lookups are cleared immediately.
+    /// - Moves the stages the downloaded state covers to `pivot`.
+    /// - Records history below `pivot` as pruned.
+    /// - Clears body indices and transaction lookups, so transaction numbers restart at 0 above
+    ///   `pivot`. `RocksDB` lookups are cleared immediately, not on commit.
+    ///
+    /// Publishing is not verification: the merkle stage and `Finish` wait for the trie rebuild.
+    /// It cannot be undone, the node must not unwind below `pivot`, and the caller resets the
+    /// static files to `pivot` in the same commit.
     fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
     where
         Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
