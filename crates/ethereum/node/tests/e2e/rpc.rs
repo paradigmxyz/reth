@@ -1241,5 +1241,33 @@ async fn test_mine() -> eyre::Result<()> {
         )
     );
 
+    // Transactions that reached the pool by other means are mined by hash, with the same checks.
+    assert_eq!(
+        node.mine_pooled([B256::ZERO]).await.unwrap_err().to_string(),
+        format!("transaction {} is not in the pool", B256::ZERO)
+    );
+    let provider = node.rpc_provider_with_wallet(wallet.signer(1));
+    let first = *provider
+        .send_transaction(TransactionRequest::default().to(recipient).value(U256::from(5)))
+        .await?
+        .tx_hash();
+    let second = *provider
+        .send_transaction(TransactionRequest::default().to(recipient).value(U256::from(6)))
+        .await?
+        .tx_hash();
+    assert_eq!(
+        node.mine_pooled([second]).await.unwrap_err().to_string(),
+        format!(
+            "block 5 does not include the expected transactions: missing [], unexpected pool \
+             transactions [{first:?}]"
+        )
+    );
+    let mined = node.mine_pooled([second, first]).await?.ensure_success()?;
+    assert_eq!(mined.block().number, 5);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [second, first]
+    );
+
     Ok(())
 }
