@@ -9,6 +9,8 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -380,4 +382,74 @@ pub trait DebugApi<TxReq: RpcObject> {
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>>;
+}
+
+/// Result of `debug_storageRangeAt`: a page of one account's storage.
+///
+/// This mirrors geth's `StorageRangeResult`, which is keyed by hashed storage key. The plain key
+/// is only known for slots the replayed transactions touched and is `None` otherwise, just like
+/// geth reports slots whose preimage it is missing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageRangeResult {
+    /// The storage slots, keyed by `keccak256(slot)`.
+    pub storage: BTreeMap<B256, HashedStorageEntry>,
+    /// The hashed storage key to resume from, if this page is only partial.
+    pub next_key: Option<B256>,
+}
+
+/// A single entry of a [`HashedStorageRangeResult`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashedStorageEntry {
+    /// The plain storage key, if known.
+    pub key: Option<B256>,
+    /// The value stored at the slot.
+    pub value: B256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_range_result_matches_geth_encoding() {
+        let result = HashedStorageRangeResult {
+            storage: BTreeMap::from([
+                (
+                    B256::with_last_byte(1),
+                    HashedStorageEntry { key: None, value: B256::with_last_byte(0x11) },
+                ),
+                (
+                    B256::with_last_byte(2),
+                    HashedStorageEntry {
+                        key: Some(B256::with_last_byte(0xaa)),
+                        value: B256::with_last_byte(0x22),
+                    },
+                ),
+            ]),
+            next_key: Some(B256::with_last_byte(3)),
+        };
+
+        let json = serde_json::json!({
+            "storage": {
+                "0x0000000000000000000000000000000000000000000000000000000000000001": {
+                    "key": null,
+                    "value": "0x0000000000000000000000000000000000000000000000000000000000000011"
+                },
+                "0x0000000000000000000000000000000000000000000000000000000000000002": {
+                    "key": "0x00000000000000000000000000000000000000000000000000000000000000aa",
+                    "value": "0x0000000000000000000000000000000000000000000000000000000000000022"
+                }
+            },
+            "nextKey": "0x0000000000000000000000000000000000000000000000000000000000000003"
+        });
+
+        assert_eq!(serde_json::to_value(&result).unwrap(), json);
+        assert_eq!(serde_json::from_value::<HashedStorageRangeResult>(json).unwrap(), result);
+
+        // geth emits `null` rather than omitting the field on the last page.
+        let last_page = serde_json::to_value(HashedStorageRangeResult::default()).unwrap();
+        assert_eq!(last_page, serde_json::json!({ "storage": {}, "nextKey": null }));
+    }
 }
