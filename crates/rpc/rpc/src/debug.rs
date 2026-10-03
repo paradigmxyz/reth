@@ -917,26 +917,7 @@ where
                 // state is positioned by execution rather than by attaching the block's BAL.
                 eth_api.replay_block_until(&mut db, &block, tx_index, None)?;
 
-                // Slots the replay touched, with their preimages. Values shadow the persisted
-                // state, and are the account's entire storage if it was destroyed.
-                let (touched, wiped) = db
-                    .cache
-                    .accounts
-                    .get(&address)
-                    .and_then(|account| {
-                        account.account.as_ref().map(|plain_account| {
-                            let touched = plain_account
-                                .storage
-                                .iter()
-                                .map(|(slot, value)| {
-                                    let slot = B256::from(*slot);
-                                    (keccak256(slot), (slot, *value))
-                                })
-                                .collect::<BTreeMap<_, _>>();
-                            (touched, account.status.was_destroyed())
-                        })
-                    })
-                    .unwrap_or_default();
+                let (touched, wiped) = Self::replayed_storage(&db, address);
 
                 let persisted = if wiped {
                     Vec::new()
@@ -975,6 +956,30 @@ where
                 Ok(merge_storage_range(persisted, touched, start_key, max_result))
             })
             .await
+    }
+
+    /// Returns the storage slots of `address` held in the replay cache, keyed by hashed slot and
+    /// paired with their preimage and value, and whether they are the account's entire storage.
+    ///
+    /// They are the entire storage once the replay destroyed the account or found it missing,
+    /// since none of the account's persisted slots is visible past that point.
+    fn replayed_storage(
+        db: &StateCacheDb,
+        address: Address,
+    ) -> (BTreeMap<B256, (B256, U256)>, bool) {
+        let Some(account) = db.cache.accounts.get(&address) else { return Default::default() };
+        let Some(plain_account) = &account.account else { return (BTreeMap::new(), true) };
+
+        let touched = plain_account
+            .storage
+            .iter()
+            .map(|(slot, value)| {
+                let slot = B256::from(*slot);
+                (keccak256(slot), (slot, *value))
+            })
+            .collect();
+
+        (touched, account.status.was_destroyed())
     }
 }
 

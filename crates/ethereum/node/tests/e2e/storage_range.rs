@@ -3,10 +3,11 @@
 use alloy_eips::BlockId;
 use alloy_genesis::GenesisAccount;
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{bytes, keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, TxKind, B256, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use eyre::eyre;
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec_builder, test_genesis, E2ETestSetupExt,
 };
@@ -199,6 +200,79 @@ async fn storage_range_at_replays_block_transactions() -> eyre::Result<()> {
     // An account without storage yields an empty page.
     let unknown = Address::repeat_byte(0xee);
     let range = storage_range_at(&provider, next_block_hash, 1, unknown, Bytes::new(), 100).await?;
+    assert_eq!(range, HashedStorageRangeResult::default());
+
+    Ok(())
+}
+
+/// Returns init code for a contract that stores `0x42` at slot 0 when deployed and
+/// selfdestructs on any call.
+fn selfdestruct_contract_init_code() -> Bytes {
+    // PUSH20 <beneficiary>, SELFDESTRUCT.
+    let runtime = bytes!("73dead000000000000000000000000000000000001ff");
+    let runtime_len = runtime.len() as u8;
+    // Length of the init code that precedes the runtime code.
+    let init_len = 17u8;
+
+    let mut init = Vec::new();
+    // PUSH1 0x42, PUSH1 0x00, SSTORE.
+    init.extend_from_slice(&[0x60, 0x42, 0x60, 0x00, 0x55]);
+    // CODECOPY the runtime code to memory.
+    init.extend_from_slice(&[0x60, runtime_len, 0x60, init_len, 0x60, 0x00, 0x39]);
+    // RETURN it.
+    init.extend_from_slice(&[0x60, runtime_len, 0x60, 0x00, 0xf3]);
+    init.extend_from_slice(&runtime);
+
+    Bytes::from(init)
+}
+
+/// Before Cancun, `SELFDESTRUCT` wipes an account's storage. Once a transaction of the block
+/// destroyed the account, its storage in the parent state must not be reported anymore.
+#[tokio::test]
+async fn storage_range_at_hides_storage_of_destroyed_account() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Shanghai).build_single().await?;
+    let signer = wallet.inner.clone();
+    let provider = node.rpc_provider_with_wallet(signer.clone());
+
+    let deploy = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_nonce(0)
+        .with_gas_limit(500_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS)
+        .with_input(selfdestruct_contract_init_code())
+        .with_kind(TxKind::Create);
+    let pending = provider.send_transaction(deploy).await?;
+    node.advance_block().await?;
+    let receipt = pending.successful_receipt().await?;
+    let contract = receipt.contract_address.ok_or_else(|| eyre!("missing contract address"))?;
+
+    let destroy = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_to(contract)
+        .with_nonce(1)
+        .with_gas_limit(100_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
+    let pending = provider.send_transaction(destroy).await?;
+    node.advance_block().await?;
+    pending.successful_receipt().await?;
+    let (block_hash, transaction_count) = latest_block(&provider).await?;
+    assert_eq!(transaction_count, 1);
+
+    // The destroying transaction still runs on the deployed storage.
+    let range = storage_range_at(&provider, block_hash, 0, contract, Bytes::new(), 100).await?;
+    assert_eq!(range.next_key, None);
+    assert_eq!(
+        values(&range),
+        BTreeMap::from([(keccak256(B256::ZERO), B256::from(U256::from(0x42)))])
+    );
+
+    // After it, the account and its storage are gone.
+    let range = storage_range_at(&provider, block_hash, 1, contract, Bytes::new(), 100).await?;
     assert_eq!(range, HashedStorageRangeResult::default());
 
     Ok(())
