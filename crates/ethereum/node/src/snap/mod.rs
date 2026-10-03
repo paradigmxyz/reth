@@ -2,10 +2,35 @@
 //!
 //! Headers and snap state writes alternate in one task while the engine skips forkchoice, so no
 //! other writer touches the database during the run.
+//!
+//! # Lifecycle
+//!
+//! The engine starts a backfill with a target hash, as it does for the staged pipeline. A run
+//! then repeats four steps until the state is downloaded or the run stops:
+//!
+//! 1. Headers sync to the target, and nothing else: no stage below the pivot may execute over state
+//!    the node has not downloaded yet.
+//! 2. A pivot is selected under the head, or the attempt an earlier run recorded resumes, while its
+//!    pivot is still canonical.
+//! 3. Accounts, storage and code download against that pivot's state root and commit as they
+//!    arrive, while block access lists carry what is downloaded to a newer pivot as the chain moves
+//!    past it.
+//! 4. Once every account is covered, the state is handed to the merkle stage.
+//!
+//! A forkchoice update ends the current step at its next boundary, so headers catch up before
+//! the run continues from the progress it committed. Peers that do not serve the pivot's state
+//! wait instead of failing the run.
+//!
+//! [`SnapHandoff`] then publishes the state at its pivot, rebuilds and verifies its trie, and the
+//! staged pipeline runs the remaining stages above the pivot.
 
 mod context;
 mod handoff;
 mod run;
+mod selection;
+
+pub use handoff::{Handoff, SnapHandoff};
+pub use selection::{EthereumBackfill, EthereumBackfillSync};
 
 use alloy_primitives::B256;
 use futures::FutureExt;
@@ -37,6 +62,8 @@ pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
     state: SnapBackfillState<N>,
     // Target queued by the engine, started on the next poll.
     pending_target: Option<PipelineTarget>,
+    // Latest finalized block the engine reported, kept across runs.
+    finalized: watch::Sender<B256>,
 }
 
 impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
@@ -53,6 +80,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
             runtime,
             state: SnapBackfillState::Idle(Some(Box::new(pipeline))),
             pending_target: None,
+            finalized: watch::channel(B256::ZERO).0,
         }
     }
 }
@@ -64,11 +92,15 @@ where
 {
     // Spawns a run if a target is queued and the pipeline is free.
     fn try_spawn(&mut self) -> Option<BackfillEvent> {
-        let SnapBackfillState::Idle(pipeline) = &mut self.state else { return None };
+        if !matches!(self.state, SnapBackfillState::Idle(_)) {
+            return None
+        }
         let target = self.pending_target.take()?;
         // Once snap state is verified, or the node was not synced by snap, the staged pipeline
         // backfills alone, including unwinds.
-        match needs_snap(&self.provider_factory) {
+        let needs_snap = self.needs_snap();
+        let SnapBackfillState::Idle(pipeline) = &mut self.state else { return None };
+        match needs_snap {
             Ok(true) => {}
             Ok(false) => {
                 let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
@@ -87,7 +119,7 @@ where
         }
         let target = match target {
             PipelineTarget::Sync(hash) => hash,
-            // Nothing executes on top of snap state before activation, so there is nothing a
+            // Nothing executes on top of snap state before the handoff, so there is nothing a
             // snap backfill could unwind.
             PipelineTarget::Unwind(block) => {
                 return Some(BackfillEvent::Finished(Err(PipelineError::Internal(RethError::msg(
@@ -106,6 +138,7 @@ where
             runtime: self.runtime.clone(),
             header_refresh: HEADER_REFRESH,
             stop: stop.clone(),
+            finalized: self.finalized.subscribe(),
         };
         // Node shutdown drops this task as it does the pipeline's; every bootstrap step has either
         // committed or left nothing behind.
@@ -115,6 +148,16 @@ where
         self.state = SnapBackfillState::Running { _stop: stop.drop_guard(), targets, result };
 
         Some(BackfillEvent::Started(PipelineTarget::Sync(target)))
+    }
+
+    // Snap bootstraps a node with nothing executed, and finishes any attempt it has not verified
+    // yet, including one interrupted after its state was published.
+    fn needs_snap(&self) -> ProviderResult<bool> {
+        let provider = self.provider_factory.database_provider_ro()?;
+        if let Some(attempt) = provider.snap_attempt()? {
+            return Ok(!attempt.is_verified())
+        }
+        Ok(provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number == 0)
     }
 }
 
@@ -127,7 +170,8 @@ where
         match action {
             // The zero hash is never a usable target.
             BackfillAction::Start(PipelineTarget::Sync(hash)) |
-            BackfillAction::UpdateTarget(hash)
+            BackfillAction::UpdateTarget(hash) |
+            BackfillAction::UpdateFinalized(hash)
                 if hash.is_zero() => {}
             BackfillAction::Start(target) => self.pending_target = Some(target),
             BackfillAction::UpdateTarget(hash) => {
@@ -138,6 +182,14 @@ where
                         changed
                     });
                 }
+            }
+            // Kept while idle too, so the next run anchors its pivot to known finality.
+            BackfillAction::UpdateFinalized(hash) => {
+                self.finalized.send_if_modified(|current| {
+                    let changed = *current != hash;
+                    *current = hash;
+                    changed
+                });
             }
         }
     }
@@ -177,16 +229,6 @@ enum SnapBackfillState<N: ProviderNodeTypes> {
     },
     // The staged pipeline runs alone, over state that is verified or was never snap synced.
     Staged(oneshot::Receiver<PipelineWithResult<N>>),
-}
-
-// Snap bootstraps a node with nothing executed, and finishes any attempt it has not verified yet,
-// including one interrupted after its state was published.
-fn needs_snap<N: ProviderNodeTypes>(factory: &ProviderFactory<N>) -> ProviderResult<bool> {
-    let provider = factory.database_provider_ro()?;
-    if let Some(attempt) = provider.snap_attempt()? {
-        return Ok(!attempt.is_verified())
-    }
-    Ok(provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number == 0)
 }
 
 #[cfg(test)]
@@ -299,6 +341,28 @@ mod tests {
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::ZERO)));
 
         assert!(poll_once(&mut backfill).is_pending());
+    }
+
+    #[test]
+    fn the_finalized_block_is_kept_while_idle() {
+        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let finalized = backfill.finalized.subscribe();
+
+        backfill.on_action(BackfillAction::UpdateFinalized(TARGET));
+        backfill.on_action(BackfillAction::UpdateFinalized(B256::ZERO));
+
+        assert_eq!(*finalized.borrow(), TARGET);
+        assert!(poll_once(&mut backfill).is_pending());
+    }
+
+    #[test]
+    fn a_target_update_while_idle_starts_nothing() {
+        let mut backfill = backfill(TestStage::new(StageId::Headers));
+
+        backfill.on_action(BackfillAction::UpdateTarget(TARGET));
+
+        assert!(poll_once(&mut backfill).is_pending());
+        assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 
     #[tokio::test]

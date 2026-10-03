@@ -1,6 +1,9 @@
 //! Alternates header catch-up and snap bootstrap until the state is downloaded.
 
-use super::{context::NodeSnapContext, handoff::activate};
+use super::{
+    context::NodeSnapContext,
+    handoff::{Handoff, SnapHandoff},
+};
 use alloy_primitives::B256;
 use reth_errors::RethError;
 use reth_network_p2p::snap::client::SnapClient;
@@ -10,10 +13,10 @@ use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
 };
 use reth_tasks::Runtime;
+use reth_tracing::tracing::{debug, info};
 use std::{pin::pin, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
 
 /// Minimum time between header refreshes while forkchoice moves.
 pub(super) const HEADER_REFRESH: Duration = Duration::from_secs(120);
@@ -26,6 +29,8 @@ pub(super) struct SnapRun<N: ProviderNodeTypes, C> {
     pub(super) header_refresh: Duration,
     // Cancelled when the backfill is dropped.
     pub(super) stop: CancellationToken,
+    // Latest finalized block the engine reported.
+    pub(super) finalized: watch::Receiver<B256>,
 }
 
 impl<N, C> SnapRun<N, C>
@@ -63,21 +68,26 @@ where
             }
 
             let run_stop = self.stop.child_token();
-            let context =
-                NodeSnapContext::new(self.factory.clone(), self.client.clone(), targets.clone());
+            let context = NodeSnapContext::new(
+                self.factory.clone(),
+                self.client.clone(),
+                targets.clone(),
+                self.finalized.clone(),
+            );
             let mut session = SnapBootstrap::new(
                 self.client.clone(),
                 self.factory.clone(),
                 self.runtime.clone(),
                 context,
             )
-            .with_cancellation(run_stop.clone());
+            .with_cancellation(run_stop.clone())
+            .with_shutdown(self.stop.clone());
             let outcome = {
                 let mut run = pin!(session.run());
                 tokio::select! {
                     biased;
                     outcome = &mut run => outcome,
-                    () = refresh_due(&targets, self.header_refresh) => {
+                    () = refresh_due(&mut targets, self.header_refresh) => {
                         // Stops at the next step boundary, keeping committed progress.
                         run_stop.cancel();
                         run.await
@@ -85,26 +95,30 @@ where
                 }
             };
 
-            let outcome =
-                outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))?;
-            // A completed download can beat the refresh timer. Refresh headers before publishing
-            // its state so an orphaned pivot is recovered while the attempt is still unfinished.
-            if targets.has_changed().unwrap_or(false) {
-                continue
-            }
-            match outcome {
+            match outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))? {
                 SnapBootstrapOutcome::Stopped if self.stop.is_cancelled() => return stopped,
                 SnapBootstrapOutcome::Stopped => {
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
                 }
                 SnapBootstrapOutcome::TrieRebuild { write, pivot } => {
-                    let factory = self.factory.clone();
+                    // Forkchoice may have moved during the download, so headers catch up before
+                    // the handoff checks the pivot is still canonical.
+                    let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
+                        return stopped
+                    };
+                    headers?;
+                    let handoff = SnapHandoff::new(self.factory.clone());
                     // Publishing and the trie rebuild read every account, so they run on the
                     // blocking pool.
-                    self.runtime
-                        .spawn_blocking(move || activate(&factory, write, pivot))
+                    let handoff = self
+                        .runtime
+                        .spawn_blocking(move || handoff.hand_off(write, pivot))
                         .await
                         .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
+                    if handoff == Handoff::PivotReorged {
+                        info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before the handoff, restarting");
+                        continue
+                    }
                     info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
                     return self.finish(pipeline, &mut targets).await
                 }
@@ -147,9 +161,7 @@ where
 }
 
 // Resolves once `interval` has passed and forkchoice has moved, or once the backfill is gone.
-async fn refresh_due(targets: &watch::Receiver<B256>, interval: Duration) {
-    // Only syncing headers acknowledges a target on the run's receiver.
-    let mut targets = targets.clone();
+async fn refresh_due(targets: &mut watch::Receiver<B256>, interval: Duration) {
     tokio::time::sleep(interval).await;
     let _ = targets.changed().await;
 }
@@ -273,6 +285,22 @@ mod tests {
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
     }
 
+    #[tokio::test]
+    async fn the_pipeline_finishes_to_the_latest_target() {
+        let (tip, _) = watch::channel(B256::ZERO);
+        let pipeline_tip = tip.subscribe();
+        let (mut pipeline, factory) =
+            pipeline_with(TestStage::new(StageId::Finish).add_exec(headers_done(1)), tip);
+        let (targets, mut receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        // Forkchoice moved while the state was downloading.
+        targets.send(NEXT_TARGET).unwrap();
+        run.finish(&mut pipeline, &mut receiver).await.unwrap();
+
+        assert_eq!(*pipeline_tip.borrow(), NEXT_TARGET);
+    }
+
     // A header stage that waits for `gate`, then records whether a snap attempt exists at each
     // pass.
     #[derive(Debug)]
@@ -328,19 +356,8 @@ mod tests {
             runtime: Runtime::test(),
             header_refresh: Duration::ZERO,
             stop: stop.clone(),
+            finalized: watch::channel(B256::ZERO).1,
         };
         (run, stop)
-    }
-
-    #[tokio::test]
-    async fn a_refresh_keeps_the_target_unseen_until_headers_sync() {
-        let (targets, mut receiver) = watch::channel(TARGET);
-        targets.send(NEXT_TARGET).unwrap();
-
-        refresh_due(&receiver, Duration::ZERO).await;
-
-        assert!(receiver.has_changed().unwrap());
-        assert_eq!(*receiver.borrow_and_update(), NEXT_TARGET);
-        assert!(!receiver.has_changed().unwrap());
     }
 }

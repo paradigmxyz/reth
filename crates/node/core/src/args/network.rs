@@ -241,10 +241,12 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    /// Enable experimental snap/2 (EIP-8189) advertisement and state sync.
+    /// Enable experimental snap/2: advertise and serve it, and bootstrap a fresh database from a
+    /// post-Amsterdam pivot.
     ///
-    /// Fresh databases bootstrap from a post-Amsterdam pivot. Databases with existing execution
-    /// progress continue using the staged pipeline.
+    /// Databases with execution progress, and chains that never activate Amsterdam, continue with
+    /// the staged pipeline. While the node's own snap state is unverified, the state it serves
+    /// over snap/2 is incomplete.
     #[arg(long = "snap.v2")]
     pub snap_v2: bool,
 

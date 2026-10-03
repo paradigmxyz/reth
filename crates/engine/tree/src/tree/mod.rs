@@ -1202,12 +1202,18 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
-            // Forward the head, since a long-running backfill such as snap must follow it. A run
-            // awaiting revalidation has not started and reads the latest head when it does.
+            // Forward the head and finalized block, since a long-running backfill such as snap
+            // must follow them. A run awaiting revalidation has not started and reads the latest
+            // forkchoice when it does.
             if self.backfill_sync_state.is_pending() || self.backfill_sync_state.is_active() {
                 self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
                     state.head_block_hash,
                 )));
+                if !state.finalized_block_hash.is_zero() {
+                    self.send_event(EngineApiEvent::BackfillAction(
+                        BackfillAction::UpdateFinalized(state.finalized_block_hash),
+                    ));
+                }
             }
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database

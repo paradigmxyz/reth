@@ -2,9 +2,8 @@
 //!
 //! Provides [`EngineOrchestratorBuilder`] which wires
 //! together all engine components and builds a
-//! [`ChainOrchestrator`] ready to be polled as a `Stream`, with
-//! the staged pipeline or a caller-supplied [`BackfillSync`] as
-//! backfill.
+//! [`ChainOrchestrator`] ready to be polled as a `Stream`, with the staged pipeline or a
+//! caller-supplied [`BackfillSync`] as backfill.
 
 use crate::{
     backfill::{BackfillSync, PipelineSync},
@@ -29,7 +28,7 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc};
 
 /// The [`ChainOrchestrator`] built by [`EngineOrchestratorBuilder`].
 pub type EngineOrchestrator<T, N, Client, S, B> = ChainOrchestrator<
@@ -40,6 +39,10 @@ pub type EngineOrchestrator<T, N, Client, S, B> = ChainOrchestrator<
     >,
     B,
 >;
+
+// An [`EngineOrchestrator`], or the error its backfill failed to build with.
+type EngineOrchestratorResult<T, N, Client, S, B, E> =
+    Result<EngineOrchestrator<T, N, Client, S, B>, E>;
 
 /// Components needed to build the engine [`ChainOrchestrator`] that drives the chain forward.
 ///
@@ -112,18 +115,20 @@ where
     pub fn build(
         self,
     ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, PipelineSync<N>> {
-        self.build_with_backfill(PipelineSync::new)
+        let Ok(orchestrator) = self.build_with_backfill(|pipeline, runtime| {
+            Ok::<_, Infallible>(PipelineSync::new(pipeline, runtime))
+        });
+        orchestrator
     }
 
     /// Like [`Self::build`], backfilling through the [`BackfillSync`] `backfill` makes from the
-    /// staged [`Pipeline`] and its runtime instead of [`PipelineSync`].
+    /// staged [`Pipeline`] and its runtime, instead of [`PipelineSync`].
     ///
-    /// The engine stops writing once a run starts, so the backfill may hold the database until it
-    /// reports the run finished.
-    pub fn build_with_backfill<B: BackfillSync + Unpin>(
+    /// The backfill is built before any engine service is spawned, so its error aborts the build.
+    pub fn build_with_backfill<B: BackfillSync + Unpin, E>(
         self,
-        backfill: impl FnOnce(Pipeline<N>, Runtime) -> B,
-    ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, B> {
+        backfill: impl FnOnce(Pipeline<N>, Runtime) -> Result<B, E>,
+    ) -> EngineOrchestratorResult<N::Payload, N::Primitives, Client, S, B, E> {
         let Self {
             engine_kind,
             consensus,
@@ -143,6 +148,7 @@ where
             runtime,
         } = self;
 
+        let backfill_sync = backfill(pipeline, pipeline_task_spawner)?;
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
@@ -167,8 +173,6 @@ where
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
-        let backfill_sync = backfill(pipeline, pipeline_task_spawner);
-
-        ChainOrchestrator::new(handler, backfill_sync)
+        Ok(ChainOrchestrator::new(handler, backfill_sync))
     }
 }
