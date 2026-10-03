@@ -97,7 +97,7 @@ where
         // If static files are ahead, we are currently unwinding the stage or we didn't reach
         // the database commit in a previous stage run. So, our only solution is to unwind the
         // static files and proceed from the database expected height.
-        Ordering::Greater => {
+        Ordering::Greater | Ordering::Equal => {
             let highest_db_block = provider
                 .tx_ref()
                 .cursor_read::<tables::BlockBodyIndices>()?
@@ -105,13 +105,20 @@ where
                 .map(|(block, _)| block)
                 // Nothing is stored when the bodies up to the checkpoint were never downloaded.
                 .unwrap_or(checkpoint);
-            let mut static_file_producer =
-                static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
-            static_file_producer
-                .prune_transactions(next_static_file_tx_num - next_tx_num, highest_db_block)?;
-            // Since this is a database <-> static file inconsistency, we commit the change
-            // straight away.
-            static_file_producer.commit()?;
+            // Empty blocks advance the file's height without changing its transaction count.
+            if next_static_file_tx_num > next_tx_num ||
+                static_file_provider
+                    .get_highest_static_file_block(StaticFileSegment::Transactions)
+                    .is_some_and(|block| block > highest_db_block)
+            {
+                let mut static_file_producer =
+                    static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+                static_file_producer
+                    .prune_transactions(next_static_file_tx_num - next_tx_num, highest_db_block)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?;
+            }
         }
         // If static files are behind, then there was some corruption or loss of files. This
         // error will trigger an unwind, that will bring the database to the same height as the
@@ -138,20 +145,6 @@ where
                     provider,
                     StaticFileSegment::Transactions,
                 )?)
-            }
-        }
-        Ordering::Equal => {
-            // Empty blocks advance the file's height without changing its transaction count.
-            if let Some((highest_db_block, _)) =
-                provider.tx_ref().cursor_read::<tables::BlockBodyIndices>()?.last()? &&
-                static_file_provider
-                    .get_highest_static_file_block(StaticFileSegment::Transactions)
-                    .is_some_and(|block| block > highest_db_block)
-            {
-                let mut writer =
-                    static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
-                writer.prune_transactions(0, highest_db_block)?;
-                writer.commit()?;
             }
         }
     }
@@ -529,38 +522,44 @@ mod tests {
     #[test]
     fn ensure_consistency_heals_to_the_checkpoint_without_stored_bodies() {
         const CHECKPOINT: u64 = 10;
-        let db = TestStageDB::default();
-        let factory = &db.factory;
-        let static_files = factory.static_file_provider();
-        let body = BlockBody {
-            transactions: vec![TransactionSigned::new_unhashed(
-                Transaction::Legacy(TxLegacy::default()),
-                Signature::test_signature(),
-            )],
-            ..Default::default()
-        };
+        for empty in [false, true] {
+            let db = TestStageDB::default();
+            let factory = &db.factory;
+            let static_files = factory.static_file_provider();
+            let body = BlockBody {
+                transactions: if empty {
+                    Vec::new()
+                } else {
+                    vec![TransactionSigned::new_unhashed(
+                        Transaction::Legacy(TxLegacy::default()),
+                        Signature::test_signature(),
+                    )]
+                },
+                ..Default::default()
+            };
 
-        // The transaction files start after the checkpoint, no body is stored up to it.
-        static_files
-            .latest_writer(StaticFileSegment::Transactions)
-            .unwrap()
-            .ensure_at_block(CHECKPOINT)
-            .unwrap();
-        static_files.commit().unwrap();
+            // The transaction files start after the checkpoint, no body is stored up to it.
+            static_files
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap()
+                .ensure_at_block(CHECKPOINT)
+                .unwrap();
+            static_files.commit().unwrap();
 
-        // The static files commit the next block, the database does not.
-        let provider = factory.database_provider_rw().unwrap();
-        provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
-        static_files.commit().unwrap();
-        drop(provider);
+            // The static files commit the next block, the database does not.
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
+            static_files.commit().unwrap();
+            drop(provider);
 
-        let provider = factory.database_provider_rw().unwrap();
-        ensure_consistency(&provider, CHECKPOINT, None).unwrap();
-        assert_eq!(
-            static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
-            Some(CHECKPOINT)
-        );
-        provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
+            let provider = factory.database_provider_rw().unwrap();
+            ensure_consistency(&provider, CHECKPOINT, None).unwrap();
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(CHECKPOINT)
+            );
+            provider.append_block_bodies(vec![(CHECKPOINT + 1, Some(&body))]).unwrap();
+        }
     }
 
     mod test_utils {
