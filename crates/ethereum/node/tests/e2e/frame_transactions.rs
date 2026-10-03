@@ -58,6 +58,7 @@ fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes 
     let mut tx = TxEip8141 {
         chain_id: 1,
         nonce,
+        nonce_keys: Some(vec![U256::ZERO]),
         sender: signer.address(),
         frames,
         signatures: vec![FrameSignature {
@@ -211,7 +212,7 @@ async fn atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
+async fn sequential_frames_wait_for_the_current_sequence() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
@@ -227,10 +228,238 @@ async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
         .rpc
         .inject_tx(frame_tx(&signer, 0, vec![self_verify_frame(), sender_frame(recipient())]))
         .await?;
-    let second = node
-        .rpc
-        .inject_tx(frame_tx(&signer, 1, vec![self_verify_frame(), sender_frame(recipient())]))
-        .await?;
+    let second_raw = frame_tx(&signer, 1, vec![self_verify_frame(), sender_frame(recipient())]);
+    assert!(node.rpc.inject_tx(second_raw.clone()).await.is_err());
+    assert_mined_from_pool(&mut node, &[first]).await?;
+    let second = node.rpc.inject_tx(second_raw).await?;
+    assert_mined_from_pool(&mut node, &[second]).await
+}
 
-    assert_mined_from_pool(&mut node, &[first, second]).await
+#[tokio::test]
+async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
+    use alloy_eips::{
+        eip8141::{nonce_slot, NONCE_MANAGER},
+        Decodable2718,
+    };
+    use serde_json::json;
+    let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
+    let spec = chain_spec();
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+    let client = reqwest::Client::new();
+    let url = node.rpc_url();
+    let rpc = |method: &'static str, params: serde_json::Value| {
+        let client = &client;
+        let url = &url;
+        async move {
+            let value: serde_json::Value = client
+                .post(url.clone())
+                .json(&json!({
+                    "jsonrpc":"2.0", "id":1, "method":method, "params":params
+                }))
+                .send()
+                .await?
+                .json()
+                .await?;
+            eyre::ensure!(value.get("error").is_none(), "RPC {method}: {value}");
+            Ok::<_, eyre::Report>(value["result"].clone())
+        }
+    };
+    for block in ["latest", "pending", "0x0"] {
+        assert_eq!(
+            rpc("eth_getTransactionCount", json!([signer.address(), block, ["0x1", "0x2"]]))
+                .await?,
+            "0x0"
+        );
+        assert_eq!(
+            rpc("eth_getTransactionCount", json!([signer.address(), block, ["0x0"]])).await?,
+            rpc("eth_getTransactionCount", json!([signer.address(), block])).await?
+        );
+    }
+    assert_eq!(rpc("eth_getTransactionCount", json!([signer.address()])).await?, "0x0");
+    assert_eq!(
+        rpc(
+            "eth_getTransactionCount",
+            json!([signer.address(), "latest", [format!("{:#x}", U256::MAX)]])
+        )
+        .await?,
+        "0x0"
+    );
+    let keys = (1..=16).map(|key| format!("0x{key:x}")).collect::<Vec<_>>();
+    assert_eq!(
+        rpc("eth_getTransactionCount", json!([signer.address(), "latest", keys])).await?,
+        "0x0"
+    );
+    for keys in [
+        json!([]),
+        json!(["0x1", "0x1"]),
+        json!(["0x2", "0x1"]),
+        json!(["0x0", "0x1"]),
+        json!((1..=17).map(|key| format!("0x{key:x}")).collect::<Vec<_>>()),
+        json!([format!("0x1{}", "0".repeat(64))]),
+        json!(["bad"]),
+    ] {
+        let response: serde_json::Value = client
+            .post(url.clone())
+            .json(&json!({
+                "jsonrpc":"2.0", "id":1, "method":"eth_getTransactionCount",
+                "params":[signer.address(), "latest", keys]
+            }))
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert_eq!(response["error"]["code"], -32602, "{response}");
+    }
+    let request = json!({"type":"0x6", "from":signer.address(), "nonceKeys":["0x1", "0x2"],
+        "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0x2710", "stateGas":"0x2fd00"}],
+        "signatures":[]});
+    let filled = rpc("eth_fillTransaction", json!([request.clone()])).await?;
+    assert_eq!(filled["tx"]["nonceKeys"], json!(["0x1", "0x2"]));
+    assert_eq!(filled["tx"]["nonce"], "0x0");
+    assert!(filled["tx"].get("nonceSeq").is_none());
+    let mut verify = self_verify_frame();
+    verify.limits.state = 195_840;
+    let mut tx = TxEip8141::decode_2718_exact(&frame_tx(
+        &signer,
+        0,
+        vec![verify, sender_frame(recipient())],
+    ))?;
+    tx.nonce_keys = Some(vec![U256::from(1), U256::from(2)]);
+    tx.signatures[0] = FrameSignature::from_secp256k1(
+        Default::default(),
+        Default::default(),
+        signer.sign_hash_sync(&tx.signature_hash())?,
+    )?;
+    let mut raw = Vec::new();
+    tx.eip2718_encode(&mut raw);
+    let hash = node.rpc.inject_tx(raw.into()).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let pending = rpc(
+                "eth_getTransactionCount",
+                json!([signer.address(), "pending", ["0x1", "0x2"]]),
+            )
+            .await?;
+            if pending == "0x1" {
+                break Ok::<_, eyre::Report>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+    assert_eq!(
+        rpc("eth_getTransactionCount", json!([signer.address(), "latest", ["0x1", "0x2"]])).await?,
+        "0x0"
+    );
+
+    assert_eq!(rpc("eth_getTransactionCount", json!([signer.address(), "pending"])).await?, "0x0");
+    assert_eq!(
+        rpc("eth_getTransactionCount", json!([signer.address(), "pending", ["0x0"]])).await?,
+        "0x0"
+    );
+    let mut disjoint = tx.clone();
+    disjoint.nonce_keys = Some(vec![U256::from(3)]);
+    disjoint.signatures[0] = FrameSignature::from_secp256k1(
+        Default::default(),
+        Default::default(),
+        signer.sign_hash_sync(&disjoint.signature_hash())?,
+    )?;
+    let mut other_raw = Vec::new();
+    disjoint.eip2718_encode(&mut other_raw);
+    assert!(node.rpc.inject_tx(other_raw.into()).await.is_err());
+    assert_mined_from_pool(&mut node, &[hash]).await?;
+    let next = rpc("eth_fillTransaction", json!([request])).await?;
+    assert_eq!(next["tx"]["nonce"], "0x1");
+    let read = rpc("eth_getTransactionByHash", json!([hash])).await?;
+    assert_eq!(read["nonceKeys"], json!(["0x1", "0x2"]));
+    assert_eq!(read["nonce"], "0x0");
+    let block = rpc("eth_getBlockByNumber", json!(["latest", true])).await?;
+    assert_eq!(block["transactions"][0]["nonceKeys"], json!(["0x1", "0x2"]));
+    assert_eq!(rpc("eth_getTransactionCount", json!([signer.address(), "latest"])).await?, "0x0");
+    for at in [
+        json!("latest"),
+        json!("safe"),
+        json!("finalized"),
+        block["number"].clone(),
+        json!({"blockHash":block["hash"], "requireCanonical":true}),
+    ] {
+        assert_eq!(
+            rpc("eth_getTransactionCount", json!([signer.address(), at, ["0x1", "0x2"]])).await?,
+            "0x1"
+        );
+    }
+    assert_eq!(
+        rpc("eth_getTransactionCount", json!([signer.address(), "0x0", ["0x1", "0x2"]])).await?,
+        "0x0"
+    );
+    assert_eq!(
+        rpc("eth_getTransactionCount", json!([recipient(), "latest", ["0x1"]])).await?,
+        "0x0"
+    );
+    let response: serde_json::Value = client
+        .post(url.clone())
+        .json(&json!({
+            "jsonrpc":"2.0", "id":1, "method":"eth_getTransactionCount",
+            "params":[signer.address(), "latest", ["0x1", "0x3"]]
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(response["error"]["code"], -32000, "{response}");
+    for key in [U256::from(1), U256::from(2)] {
+        let stored = rpc(
+            "eth_getStorageAt",
+            json!([NONCE_MANAGER, nonce_slot(signer.address(), key), "latest"]),
+        )
+        .await?;
+        assert_eq!(stored, json!(format!("0x{:064x}", 1)));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn keyed_nonce_query_requires_activation() -> eyre::Result<()> {
+    use serde_json::json;
+    let spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
+            .bogota_activated()
+            .with_bogota_at(u64::MAX)
+            .build(),
+    );
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        spec,
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let node = nodes.pop().unwrap();
+    let client = reqwest::Client::new();
+    for block in ["latest", "0x0", "pending"] {
+        for (keys, expected_error) in
+            [(json!(["0x1"]), Some(-32000)), (json!(["0x0"]), None), (json!([]), Some(-32602))]
+        {
+            let response: serde_json::Value = client.post(node.rpc_url()).json(&json!({
+                "jsonrpc":"2.0", "id":1, "method":"eth_getTransactionCount", "params":[recipient(), block, keys]
+            })).send().await?.json().await?;
+            if let Some(code) = expected_error {
+                assert_eq!(response["error"]["code"], code, "{response}");
+            } else {
+                assert_eq!(response["result"], "0x0", "{response}");
+            }
+        }
+    }
+    Ok(())
 }

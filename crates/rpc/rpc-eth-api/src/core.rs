@@ -222,12 +222,13 @@ pub trait EthApi<
         block_number: Option<BlockId>,
     ) -> RpcResult<HashMap<Address, Vec<B256>>>;
 
-    /// Returns the number of transactions sent from an address at given block number.
+    /// Returns the account nonce or the shared sequence of the selected EIP-8250 nonce keys.
     #[method(name = "getTransactionCount")]
     async fn transaction_count(
         &self,
         address: Address,
         block_number: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> RpcResult<U256>;
 
     /// Returns code at a given address at given block number.
@@ -737,9 +738,10 @@ where
         &self,
         address: Address,
         block_number: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(EthState::transaction_count(self, address, block_number).await?)
+        Ok(EthState::transaction_count(self, address, block_number, nonce_keys).await?)
     }
 
     /// Handler for: `eth_getCode`

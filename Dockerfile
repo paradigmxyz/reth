@@ -1,4 +1,4 @@
-# syntax=docker.io/docker/dockerfile:1.7-labs
+# syntax=docker/dockerfile:1
 
 FROM lukemathwalker/cargo-chef:latest-rust-1.96-trixie AS chef
 WORKDIR /app
@@ -31,14 +31,27 @@ ENV RUSTFLAGS="$RUSTFLAGS"
 ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
-# Builds dependencies
-RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
+# Use the same CPU flags for dependencies and the application to preserve the build cache.
+ARG TARGETPLATFORM
+RUN if [ -n "$RUSTFLAGS" ]; then \
+        export RUSTFLAGS="$RUSTFLAGS"; \
+    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        export RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+pclmulqdq"; \
+    fi && \
+    cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
+
+# Git metadata is supplied by Bake because .git is excluded from the build context.
+ARG VERGEN_GIT_SHA=""
+ARG VERGEN_GIT_DESCRIBE=""
+ARG VERGEN_GIT_DIRTY="false"
+ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
+ENV VERGEN_GIT_DESCRIBE=$VERGEN_GIT_DESCRIBE
+ENV VERGEN_GIT_DIRTY=$VERGEN_GIT_DIRTY
 
 # Build application
 # Platform-specific RUSTFLAGS: amd64 uses x86-64-v3 (Haswell+) with pclmulqdq for rocksdb
 #
 # TARGETPLATFORM is set by BuildKit: https://docs.docker.com/reference/dockerfile#automatic-platform-args-in-the-global-scope
-ARG TARGETPLATFORM
 COPY --exclude=dist . .
 RUN if [ -n "$RUSTFLAGS" ]; then \
         export RUSTFLAGS="$RUSTFLAGS"; \

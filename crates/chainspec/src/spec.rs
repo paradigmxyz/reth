@@ -820,7 +820,7 @@ impl<H: BlockHeader> ChainSpec<H> {
 }
 
 impl From<Genesis> for ChainSpec {
-    fn from(genesis: Genesis) -> Self {
+    fn from(mut genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
             (EthereumHardfork::Frontier.boxed(), Some(0)),
@@ -940,6 +940,7 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        configure_nonce_manager(&mut genesis, &hardforks);
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -1239,8 +1240,8 @@ impl ChainSpecBuilder {
     ///
     /// # Panics
     ///
-    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
-    /// [`Self::genesis`])
+    /// Panics if the chain or genesis is missing, or the nonce-manager address contains
+    /// incompatible genesis code or storage.
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
@@ -1251,7 +1252,8 @@ impl ChainSpecBuilder {
                 }
             })
         };
-        let genesis = self.genesis.expect("The genesis is required");
+        let mut genesis = self.genesis.expect("The genesis is required");
+        configure_nonce_manager(&mut genesis, &self.hardforks);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
@@ -1274,6 +1276,29 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
         }
+    }
+}
+
+fn configure_nonce_manager(genesis: &mut Genesis, hardforks: &ChainHardforks) {
+    use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+    let ForkCondition::Timestamp(timestamp) = hardforks.fork(EthereumHardfork::Bogota) else {
+        return;
+    };
+    if let Some(account) = genesis.alloc.get(&NONCE_MANAGER) {
+        assert!(
+            account.storage.as_ref().is_none_or(|storage| storage.values().all(B256::is_zero)),
+            "EIP-8250 nonce manager address contains storage"
+        );
+        assert!(
+            account.code.as_ref().is_none_or(|code| code.is_empty() ||
+                (genesis.timestamp >= timestamp && code.as_ref() == NONCE_MANAGER_CODE)),
+            "EIP-8250 nonce manager address contains code"
+        );
+    }
+    if genesis.timestamp >= timestamp {
+        let account = genesis.alloc.entry(NONCE_MANAGER).or_default();
+        account.code = Some(NONCE_MANAGER_CODE.into());
+        account.nonce = Some(account.nonce.unwrap_or_default().max(1));
     }
 }
 
@@ -1347,6 +1372,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn keyed_nonce_activation_follows_frames_and_preserves_genesis_balance() {
+        use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+        let mut genesis = Genesis::default();
+        genesis.alloc.insert(
+            NONCE_MANAGER,
+            alloy_genesis::GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                ..Default::default()
+            },
+        );
+        let builder = ChainSpecBuilder::default().chain(1.into()).genesis(genesis);
+        let disabled = builder.clone().build();
+        assert!(disabled.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let future = builder.clone().with_bogota_at(10).build();
+        assert!(future.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let active = builder.bogota_activated().build();
+        let account = &active.genesis.alloc[&NONCE_MANAGER];
+        assert_eq!(
+            account.code.as_ref().map(|code| code.as_ref()),
+            Some(NONCE_MANAGER_CODE.as_slice())
+        );
+        assert_eq!(account.balance, U256::from(19));
+        assert_eq!(account.nonce, Some(7));
+        assert!(account.storage.is_none());
+        assert_ne!(active.genesis_header.state_root, disabled.genesis_header.state_root);
     }
 
     #[test]

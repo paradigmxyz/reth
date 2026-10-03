@@ -12,7 +12,9 @@ pub struct FrameValidation {
     pub sender: Address,
     /// Transaction nonce.
     pub sender_nonce: u64,
-    /// Sender nonce in the canonical state used for validation.
+    /// Selected nonce domains, absent for a pre-fork frame transaction.
+    pub nonce_keys: Option<Vec<U256>>,
+    /// Selected sequence in the canonical state used for validation.
     pub state_nonce: u64,
     /// Sender balance at validation time.
     pub sender_balance: U256,
@@ -102,11 +104,20 @@ impl FrameReservations {
             return Err("replacement not found");
         }
         if let Some(old) = &old {
-            if old.sender != metadata.sender || old.sender_nonce != metadata.sender_nonce {
+            if old.sender != metadata.sender ||
+                old.sender_nonce != metadata.sender_nonce ||
+                old.nonce_keys != metadata.nonce_keys
+            {
                 return Err("replacement sender nonce mismatch");
             }
         } else if self.sender_nonce.contains_key(&(metadata.sender, metadata.sender_nonce)) {
             return Err("sender nonce already reserved");
+        }
+        if metadata.nonce_keys.is_some() &&
+            old.is_none() &&
+            self.frames.values().any(|frame| frame.sender == metadata.sender)
+        {
+            return Err("sender already has a pending frame transaction");
         }
         let usage = self.payer.get(&metadata.payer).copied().unwrap_or_default();
         let old_cost =
@@ -275,6 +286,7 @@ mod tests {
         FrameValidation {
             sender: Address::repeat_byte(sender),
             sender_nonce: nonce,
+            nonce_keys: None,
             state_nonce: nonce,
             sender_balance: U256::MAX,
             sender_code_hash: None,
@@ -293,6 +305,48 @@ mod tests {
     }
     fn put(r: &mut FrameReservations, n: u8, m: FrameValidation) -> Result<(), &'static str> {
         r.replace(B256::repeat_byte(n), Arc::new(m), None, U256::ZERO, B256::ZERO)
+    }
+
+    #[test]
+    fn keyed_replacement_requires_exact_keys_and_sequence() {
+        let mut r = FrameReservations::default();
+        let mut original = m(1, 0, 1, 3);
+        original.nonce_keys = Some(vec![U256::from(1)]);
+        put(&mut r, 1, original.clone()).unwrap();
+        let mut disjoint = original.clone();
+        disjoint.nonce_keys = Some(vec![U256::from(2)]);
+        assert!(put(&mut r, 2, disjoint.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(2),
+                Arc::new(disjoint),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        let mut future = original.clone();
+        future.sender_nonce = 1;
+        assert!(put(&mut r, 3, future.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(3),
+                Arc::new(future),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        r.replace(
+            B256::repeat_byte(4),
+            Arc::new(original),
+            Some(B256::repeat_byte(1)),
+            U256::ZERO,
+            B256::ZERO,
+        )
+        .unwrap();
+        assert_eq!(r.hashes().collect::<Vec<_>>(), vec![B256::repeat_byte(4)]);
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
     }
 
     #[test]

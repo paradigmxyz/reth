@@ -243,7 +243,7 @@ where
     .await
     .unwrap();
     EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_count(
-        client, address, None,
+        client, address, None, None,
     )
     .await
     .unwrap();
@@ -1735,8 +1735,16 @@ async fn test_eth_get_transaction_count_rpc_call() {
         rpc_params![
             "0x407d73d8a49eeb85d32cf465507dd71d507100c1", // Address
             "latest",                                     // Block number or tag
+            ["0x0"],                                      // Legacy nonce key
             true                                          // Additional field
         ],
+    )
+    .await;
+
+    test_rpc_call_err::<U256>(
+        &client,
+        "eth_getTransactionCount",
+        rpc_params!["0x407d73d8a49eeb85d32cf465507dd71d507100c1", "latest", true],
     )
     .await;
 

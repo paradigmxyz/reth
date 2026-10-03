@@ -90,6 +90,10 @@ unknown-git = "deny"
 unused-allowed-source = "allow"
 # Frequently patched dependencies
 allow-git = [
+    "https://github.com/jxom/alloy-eips",
+    "https://github.com/jxom/evm",
+    "https://github.com/wevm/alloy",
+    "https://github.com/wevm/revm",
     "https://github.com/Rimeeeeee/alloy",
     "https://github.com/Soubhik-10/eips",
     "https://github.com/Soubhik-10/evm",

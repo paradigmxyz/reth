@@ -426,6 +426,12 @@ mod tests {
                 FrameValidationPolicy::new(&frame_tx, frame_tx.signature_verification_gas())
                     .unwrap();
             let payload = FrameTransaction {
+                nonce_keys: frame_tx.nonce_keys.clone(),
+                nonce_calldata: frame_tx
+                    .nonce_keys
+                    .as_deref()
+                    .map(|keys| alloy_eips::eip8141::nonce_calldata(keys, frame_tx.nonce))
+                    .unwrap_or_default(),
                 frames: frame_tx.frames.clone(),
                 signatures: frame_tx.signatures.clone(),
                 signature_hash: frame_tx.signature_hash(),

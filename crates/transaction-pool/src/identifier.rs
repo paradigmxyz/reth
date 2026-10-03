@@ -1,5 +1,5 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::{map::AddressMap, Address};
+use alloy_primitives::{map::AddressMap, Address, B256};
 use rustc_hash::FxHashMap;
 
 /// An internal mapping of addresses.
@@ -14,6 +14,7 @@ pub struct SenderIdentifiers {
     address_to_id: AddressMap<SenderId>,
     /// Reverse mapping of [`SenderId`] to [`Address`].
     sender_to_address: FxHashMap<SenderId, Address>,
+    keyed_senders: AddressMap<FxHashMap<B256, SenderId>>,
 }
 
 impl SenderIdentifiers {
@@ -43,6 +44,32 @@ impl SenderIdentifiers {
         addrs: impl IntoIterator<Item = Address>,
     ) -> Vec<SenderId> {
         addrs.into_iter().map(|addr| self.sender_id_or_create(addr)).collect()
+    }
+
+    /// Returns the internal lane for one sender and canonical nonce-key hash.
+    pub fn keyed_sender_id_or_create(&mut self, address: Address, keys: B256) -> SenderId {
+        if let Some(id) =
+            self.keyed_senders.get(&address).and_then(|keys_to_id| keys_to_id.get(&keys))
+        {
+            return *id;
+        }
+        let id = self.next_id();
+        self.keyed_senders.entry(address).or_default().insert(keys, id);
+        self.sender_to_address.insert(id, address);
+        id
+    }
+
+    /// Returns every tracked nonce-domain lane for an address.
+    pub fn sender_lanes(&self, address: Address) -> Vec<SenderId> {
+        self.sender_id(&address)
+            .into_iter()
+            .chain(
+                self.keyed_senders
+                    .get(&address)
+                    .into_iter()
+                    .flat_map(|keys_to_id| keys_to_id.values().copied()),
+            )
+            .collect()
     }
 
     /// Returns the current identifier and increments the counter.

@@ -443,7 +443,7 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             transaction_type: Some(0x06),
-            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
+            frames: Some(vec![Frame { limits, ..Default::default() }.into()]),
             ..Default::default()
         };
 
@@ -452,6 +452,7 @@ mod tests {
 
         assert_eq!(frame_tx.sender, address);
         assert_eq!(frame_tx.nonce, nonce);
+        assert_eq!(frame_tx.nonce_keys, Some(vec![U256::ZERO]));
         assert_eq!(frame_tx.chain_id, 1);
         assert_eq!(frame_tx.frames[0].limits, limits);
         assert!(frame_tx.signatures.is_empty());
@@ -476,7 +477,7 @@ mod tests {
                 scheme: alloy_eips::eip8141::SignatureScheme::Secp256k1,
                 ..Default::default()
             }]),
-            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
+            frames: Some(vec![Frame { limits, ..Default::default() }.into()]),
             ..Default::default()
         };
 
@@ -485,6 +486,7 @@ mod tests {
 
         assert_eq!(frame_tx.sender, address);
         assert_eq!(frame_tx.nonce, nonce);
+        assert_eq!(frame_tx.nonce_keys, Some(vec![U256::ZERO]));
         assert_eq!(frame_tx.chain_id, 1);
         assert_eq!(frame_tx.frames[0].limits, limits);
         assert_eq!(frame_tx.signatures.len(), 1);
@@ -579,6 +581,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fill_frame_transaction_preserves_signed_nonce_keys() {
+        let address = Address::random();
+        let api =
+            mock_eth_api(AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::MAX))]));
+        let request: TransactionRequest = serde_json::from_value(serde_json::json!({
+            "type":"0x6", "from":address, "chainId":"0x1", "nonce":"0x0",
+            "maxFeePerGas":"0x0", "maxPriorityFeePerGas":"0x0", "maxFeePerBlobGas":"0x0",
+            "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0xafc8", "stateGas":"0x0"}],
+            "signatures":[{"scheme":"0x1", "signature": Bytes::from(vec![1; 65])}]
+        }))
+        .unwrap();
+        let error = api.fill_transaction(request.clone()).await.unwrap_err();
+        assert!(error.to_string().contains("signed frame transactions must include nonceKeys"));
+        for keys in [vec![U256::ZERO], vec![U256::from(1), U256::from(2)]] {
+            let mut request = request.clone();
+            request.nonce_keys = Some(keys.clone());
+            let filled = api.fill_transaction(request).await.unwrap();
+            assert_eq!(filled.tx.frame_transaction().unwrap().nonce_keys, Some(keys));
+        }
+    }
+
+    #[tokio::test]
     async fn fill_frame_transaction_does_not_replace_explicit_zero_execution() {
         let address = Address::random();
         let api =
@@ -620,6 +644,7 @@ mod tests {
             .converter()
             .build_simulate_v1_transaction(TransactionRequest {
                 nonce: Some(0),
+                nonce_keys: Some(vec![U256::ZERO]),
                 gas: None,
                 max_fee_per_gas: Some(0),
                 max_priority_fee_per_gas: Some(0),

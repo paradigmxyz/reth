@@ -129,17 +129,17 @@ mod tests {
     fn recognizes_all_four_shapes() {
         let s = sender();
         let cases = [
-            (vec![frame(FrameMode::Verify, 3, s.clone())], 1),
+            (vec![frame(FrameMode::Verify, 3, s)], 1),
             (
                 vec![
                     frame(FrameMode::Default, 0, FrameAddress::default()),
-                    frame(FrameMode::Verify, 3, s.clone()),
+                    frame(FrameMode::Verify, 3, s),
                 ],
                 2,
             ),
             (
                 vec![
-                    frame(FrameMode::Verify, 2, s.clone()),
+                    frame(FrameMode::Verify, 2, s),
                     frame(FrameMode::Verify, 1, FrameAddress::default()),
                 ],
                 2,
@@ -177,15 +177,15 @@ mod tests {
     fn rejects_invalid_shape_and_budgets_without_overflow() {
         let s = sender();
         for bad in [
-            vec![frame(FrameMode::Verify, 7, s.clone())],
+            vec![frame(FrameMode::Verify, 7, s)],
             vec![frame(FrameMode::Verify, 3, Address::repeat_byte(0x22).into())],
-            vec![frame(FrameMode::Verify, 2, s.clone())],
+            vec![frame(FrameMode::Verify, 2, s)],
         ] {
             assert!(FrameValidationPolicy::new(&tx(bad), 1).is_err());
         }
         assert!(FrameValidationPolicy::new(
             &tx(vec![
-                frame(FrameMode::Verify, 3, s.clone()),
+                frame(FrameMode::Verify, 3, s),
                 frame(FrameMode::Default, 0, FrameAddress::default()),
             ]),
             1
