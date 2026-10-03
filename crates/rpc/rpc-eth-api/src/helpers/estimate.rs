@@ -92,7 +92,8 @@ pub trait EstimateCall: Call {
 
         // Apply any state overrides if specified.
         if let Some(state_override) = overrides.state {
-            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
+            db.with_empty_accounts_kept(|db| apply_state_overrides(state_override, db))
+                .map_err(Self::Error::from_eth_err)?;
         }
 
         // the gas limit of the corresponding block
