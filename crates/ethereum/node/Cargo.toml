@@ -41,6 +41,9 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
+reth-errors.workspace = true
+reth-snap-sync.workspace = true
+reth-stages.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -63,6 +66,7 @@ eyre.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 futures.workspace = true
+tokio-util.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -141,4 +145,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
+    "reth-stages/test-utils",
 ]

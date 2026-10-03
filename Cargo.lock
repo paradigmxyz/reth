@@ -9687,6 +9687,7 @@ dependencies = [
  "reth-e2e-test-utils",
  "reth-engine-local",
  "reth-engine-primitives",
+ "reth-errors",
  "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
@@ -9710,6 +9711,8 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-rpc-server-types",
+ "reth-snap-sync",
+ "reth-stages",
  "reth-stages-types",
  "reth-tasks",
  "reth-testing-utils",
@@ -9722,6 +9725,7 @@ dependencies = [
  "similar-asserts",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tower",
 ]
 
