@@ -4,13 +4,19 @@
 //! configurations through closures that modify `NodeConfig` and `TreeConfig`.
 
 use crate::{
-    eth_payload_attributes, node::NodeTestContext, test_chain_spec, wallet::Wallet, Adapter,
-    NodeBuilderHelper, NodeHelperType, TmpNodeAdapter,
+    eth_payload_attributes,
+    node::{NodeRestart, NodeTestContext, Relaunch},
+    test_chain_spec,
+    wallet::Wallet,
+    Adapter, NodeBuilderHelper, NodeHelperType, TmpDB, TmpNodeAdapter,
 };
-use alloy_rpc_types_engine::PayloadAttributes;
-use eyre::ensure;
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_eth::BlockNumberOrTag;
+use eyre::{ensure, eyre, WrapErr};
 use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
+use reth_db::{init_db, mdbx::DatabaseArguments, test_utils::TempDatabase};
 use reth_node_api::{PayloadAttrTy, TreeConfig};
 use reth_node_builder::{
     DebugNode, DebugNodeLauncher, EngineNodeLauncher, Node, NodeBuilder, NodeBuilderWithComponents,
@@ -21,22 +27,29 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
 };
 use reth_primitives_traits::AlloyBlockHeader;
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::{providers::BlockchainProvider, BlockReaderIdExt};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tracing::{span, Instrument, Level};
 
 /// Builder for configuring and launching test node setups.
 ///
 /// By default, the nodes:
 /// - are [`Default`] instances of `N`, see [`Self::with_node`],
-/// - run on a shared [`Runtime::test`] runtime,
+/// - run on a shared [`Runtime::test`] runtime, unless they are
+///   [restartable](Self::with_restartable_nodes),
 /// - build payloads with [`eth_payload_attributes`] for the hardforks active in the chain spec,
 ///   unless created with [`Self::new_with_attributes_generator`],
 /// - have discovery disabled, use unused ports and serve all RPC modules except `testing` over
 ///   HTTP,
 /// - report an idle sync state from startup, so they gossip transactions before their first block,
+/// - do not persist their peers, so a restarted node only connects to the peers a test connects it
+///   to,
 /// - are connected to each other.
 ///
 /// Once launched, each node receives a forkchoice update that makes genesis the head, safe and
@@ -70,6 +83,7 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
     node_factory: NodeFactory<N>,
     node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
+    restartable: bool,
 }
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
@@ -115,6 +129,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             dev_payload_attributes: None,
             node_factory: Arc::new(|_| N::default()),
             node_builder_modifiers: Vec::new(),
+            restartable: false,
         }
     }
 
@@ -128,7 +143,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     ///
     /// This lets multiple setups, or other components of a test, share the same tokio handle and
     /// rayon pools. Note that the tasks of the nodes are only shut down once all handles to the
-    /// runtime are dropped, not when the nodes are dropped.
+    /// runtime are dropped, not when the nodes are dropped. Restartable nodes, see
+    /// [`Self::with_restartable_nodes`], can not share a runtime.
     pub fn with_runtime(mut self, runtime: Runtime) -> Self {
         self.runtime = Some(runtime);
         self
@@ -230,7 +246,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     where
         N: DebugNode<Adapter<N>>,
     {
-        self.dev_launcher = Some(|args| Box::pin(launch_dev_node::<N>(args)));
+        self.dev_launcher = Some(|args, database| Box::pin(launch_dev_node::<N>(args, database)));
         self.with_node_config_modifier(move |mut config| {
             config.dev.dev = true;
             config.dev.block_time = block_time;
@@ -289,6 +305,17 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         self
     }
 
+    /// Makes the nodes restartable, so they can be stopped and launched again on the same datadir
+    /// with [`NodeTestContext::stop`] and [`NodeTestContext::restart`].
+    ///
+    /// Each restartable node runs on a [`Runtime::test`] runtime of its own instead of the shared
+    /// one, so stopping it shuts down only its tasks. This costs a few threads per node, which is
+    /// why nodes are not restartable by default. Conflicts with [`Self::with_runtime`].
+    pub const fn with_restartable_nodes(mut self) -> Self {
+        self.restartable = true;
+        self
+    }
+
     /// Builds and launches the test nodes.
     pub async fn build(self) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
         ensure!(
@@ -296,9 +323,18 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             "dev mining requires a single node setup, got {} nodes",
             self.num_nodes
         );
+        ensure!(
+            !self.restartable || self.runtime.is_none(),
+            "restartable nodes run on a runtime of their own and can not use the runtime set with \
+             `with_runtime`"
+        );
         let dev_mining = self.dev_launcher.is_some();
-        let launch = self.dev_launcher.unwrap_or(|args| Box::pin(launch_test_node::<N>(args)));
-        let runtime = self.runtime.clone().unwrap_or_else(Runtime::test);
+        let launch = self
+            .dev_launcher
+            .unwrap_or(|args, database| Box::pin(launch_test_node(args, database)));
+        // Restartable nodes create their own runtime when they are launched.
+        let runtime =
+            (!self.restartable).then(|| self.runtime.clone().unwrap_or_else(Runtime::test));
 
         let mut nodes = (0..self.num_nodes)
             .map(async |idx| {
@@ -306,7 +342,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                 // The local miner of dev nodes drives forkchoice, unless a modifier disabled dev
                 // mode.
                 let mines = dev_mining && node_config.dev.dev;
-                let node = launch(LaunchArgs {
+                let args = LaunchArgs {
                     idx,
                     node_factory: self.node_factory.clone(),
                     node_builder_modifiers: self.node_builder_modifiers.clone(),
@@ -316,9 +352,10 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                     datadir: reth_db::test_utils::tempdir_path(),
                     attributes_generator: self.attributes_generator.clone(),
                     dev_payload_attributes: self.dev_payload_attributes.clone(),
-                })
-                .instrument(span!(Level::INFO, "node", idx))
-                .await?;
+                };
+                let node = launch_node(launch, args, self.restartable, mines)
+                    .instrument(span!(Level::INFO, "node", idx))
+                    .await?;
 
                 if !mines {
                     let genesis = node.block_hash(self.chain_spec.genesis_header().number());
@@ -384,6 +421,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("storage_v2", &self.storage_v2)
             .field("dev_mining", &self.dev_launcher.is_some())
             .field("node_builder_modifiers", &self.node_builder_modifiers.len())
+            .field("restartable", &self.restartable)
             .finish_non_exhaustive()
     }
 }
@@ -444,8 +482,9 @@ type NodeFactory<N> = Arc<dyn Fn(usize) -> N + Send + Sync>;
 /// Closure that modifies the node builder of each test node.
 type NodeBuilderModifier<N> = Arc<dyn Fn(TestNodeBuilder<N>) -> TestNodeBuilder<N> + Send + Sync>;
 
-/// Function that launches a single test node.
-type NodeLauncher<N> = fn(LaunchArgs<N>) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>;
+/// Function that launches a single test node on the given database in its datadir.
+type NodeLauncher<N> =
+    fn(LaunchArgs<N>, TmpDB) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>;
 
 /// Arguments for launching a single test node.
 pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
@@ -457,8 +496,9 @@ pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
     pub(crate) node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
     /// The node configuration.
     pub(crate) node_config: NodeConfig<N::ChainSpec>,
-    /// The runtime to launch the node on.
-    pub(crate) runtime: Runtime,
+    /// The runtime to launch the node on, or `None` to launch it on a new [`Runtime::test`]
+    /// runtime of its own.
+    pub(crate) runtime: Option<Runtime>,
     /// The engine tree configuration.
     pub(crate) tree_config: TreeConfig,
     /// The datadir of the node.
@@ -469,11 +509,28 @@ pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
     pub(crate) dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
 }
 
+// Derived `Clone` would require the chain spec to be `Clone`.
+impl<N: NodeBuilderHelper> Clone for LaunchArgs<N> {
+    fn clone(&self) -> Self {
+        Self {
+            idx: self.idx,
+            node_factory: self.node_factory.clone(),
+            node_builder_modifiers: self.node_builder_modifiers.clone(),
+            node_config: self.node_config.clone(),
+            runtime: self.runtime.clone(),
+            tree_config: self.tree_config.clone(),
+            datadir: self.datadir.clone(),
+            attributes_generator: self.attributes_generator.clone(),
+            dev_payload_attributes: self.dev_payload_attributes.clone(),
+        }
+    }
+}
+
 /// Returns the base configuration of a test node.
 ///
 /// Discovery is disabled, all ports are unused, all RPC modules except `testing` are served over
-/// HTTP, the node reports an idle sync state from startup and the engine uses a cross block cache
-/// of 1 MiB.
+/// HTTP, the node reports an idle sync state from startup, does not persist its peers and the
+/// engine uses a cross block cache of 1 MiB.
 pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     let mut config = NodeConfig::new(chain_spec)
         .with_network(NetworkArgs {
@@ -490,6 +547,9 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     // Nodes otherwise report that they are syncing until their first canonical block, which
     // e.g. stops transaction gossip.
     config.debug.startup_sync_state_idle = true;
+    // A stopped node would otherwise save its peers and dial them on its own once it is started
+    // again, racing the test that connects it.
+    config.network.no_persist_peers = true;
     // The cross block cache is allocated up front, and the default of 4 GiB is far more than tests
     // need. The size is in MiB.
     config.engine.cross_block_cache_size = 1;
@@ -499,6 +559,7 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
 /// Launches a test node with the engine launcher.
 pub(crate) async fn launch_test_node<N: NodeBuilderHelper>(
     args: LaunchArgs<N>,
+    database: TmpDB,
 ) -> eyre::Result<NodeHelperType<N>> {
     let LaunchArgs {
         idx,
@@ -511,16 +572,25 @@ pub(crate) async fn launch_test_node<N: NodeBuilderHelper>(
         attributes_generator,
         ..
     } = args;
-    let (builder, datadir) =
-        test_node_builder(node_factory(idx), node_config, datadir, &node_builder_modifiers);
-    let NodeHandle { node, node_exit_future: _ } =
+    let (builder, datadir) = test_node_builder(
+        node_factory(idx),
+        node_config,
+        datadir,
+        database,
+        &node_builder_modifiers,
+    );
+    let runtime = runtime.unwrap_or_else(Runtime::test);
+    let NodeHandle { node, node_exit_future } =
         builder.launch_with(EngineNodeLauncher::new(runtime, datadir, tree_config)).await?;
 
-    NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await
+    let mut node =
+        NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await?;
+    node.exit_future = Mutex::new(Some(node_exit_future));
+    Ok(node)
 }
 
 /// Launches a test node with the debug launcher, which runs a local miner in dev mode.
-async fn launch_dev_node<N>(args: LaunchArgs<N>) -> eyre::Result<NodeHelperType<N>>
+async fn launch_dev_node<N>(args: LaunchArgs<N>, database: TmpDB) -> eyre::Result<NodeHelperType<N>>
 where
     N: NodeBuilderHelper + DebugNode<Adapter<N>>,
 {
@@ -535,8 +605,14 @@ where
         attributes_generator,
         dev_payload_attributes,
     } = args;
-    let (builder, datadir) =
-        test_node_builder(node_factory(idx), node_config, datadir, &node_builder_modifiers);
+    let (builder, datadir) = test_node_builder(
+        node_factory(idx),
+        node_config,
+        datadir,
+        database,
+        &node_builder_modifiers,
+    );
+    let runtime = runtime.unwrap_or_else(Runtime::test);
     let launch = builder.launch_with(DebugNodeLauncher::new(EngineNodeLauncher::new(
         runtime,
         datadir,
@@ -546,26 +622,27 @@ where
         Some(map) => launch.map_debug_payload_attributes(move |attributes| map(attributes)),
         None => launch,
     };
-    let NodeHandle { node, node_exit_future: _ } = launch.await?;
+    let NodeHandle { node, node_exit_future } = launch.await?;
 
-    NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await
+    let mut node =
+        NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await?;
+    node.exit_future = Mutex::new(Some(node_exit_future));
+    Ok(node)
 }
 
-/// Returns the builder of the test node `node` with a temporary database in `datadir` and the
-/// node builder modifiers applied, and the resolved datadir of the node.
-///
-/// The datadir is removed when the node is dropped.
+/// Returns the builder of the test node `node` with the database in `datadir` and the node
+/// builder modifiers applied, and the resolved datadir of the node.
 fn test_node_builder<N: NodeBuilderHelper>(
     node: N,
     node_config: NodeConfig<N::ChainSpec>,
     datadir: PathBuf,
+    database: TmpDB,
     node_builder_modifiers: &[NodeBuilderModifier<N>],
 ) -> (TestNodeBuilder<N>, ChainPath<DataDirPath>) {
     let datadir_args =
         DatadirArgs { datadir: MaybePlatformPath::from(datadir), ..node_config.datadir.clone() };
     let node_config = node_config.with_datadir_args(datadir_args);
     let datadir = node_config.datadir();
-    let database = reth_db::test_utils::create_test_rw_db_with_datadir(datadir.data_dir());
     let builder = NodeBuilder::new(node_config)
         .with_database(database)
         .with_types_and_provider::<N, BlockchainProvider<_>>()
@@ -574,6 +651,90 @@ fn test_node_builder<N: NodeBuilderHelper>(
     let builder =
         node_builder_modifiers.iter().fold(builder, |builder, modifier| modifier(builder));
     (builder, datadir)
+}
+
+/// Launches a test node with `launch` on the database in the datadir of `args`, which is created
+/// if it does not exist yet.
+///
+/// A `restartable` node keeps what [`NodeTestContext::stop`] needs to stop it and launch it again
+/// with the same arguments. Unless the node `mines` in dev mode, the relaunched node receives a
+/// forkchoice update that restates the forkchoice state it loaded from disk.
+fn launch_node<N: NodeBuilderHelper>(
+    launch: NodeLauncher<N>,
+    args: LaunchArgs<N>,
+    restartable: bool,
+    mines: bool,
+) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>> {
+    Box::pin(async move {
+        let database = open_test_database(&args.datadir)?;
+        let relaunch_args = restartable.then(|| args.clone());
+        let mut node = launch(args, database.clone()).await?;
+        if let Some(args) = relaunch_args {
+            let relaunch: Relaunch<_> =
+                Arc::new(move || relaunch_node(launch, args.clone(), mines));
+            node.restart = Some(NodeRestart { database, relaunch });
+        }
+        Ok(node)
+    })
+}
+
+/// Launches a stopped restartable node again, see [`launch_node`].
+fn relaunch_node<N: NodeBuilderHelper>(
+    launch: NodeLauncher<N>,
+    args: LaunchArgs<N>,
+    mines: bool,
+) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>> {
+    let span = span!(Level::INFO, "node", idx = args.idx);
+    Box::pin(
+        async move {
+            let node = launch_node(launch, args, true, mines).await?;
+            if !mines {
+                restate_forkchoice(&node).await?;
+            }
+            Ok(node)
+        }
+        .instrument(span),
+    )
+}
+
+/// Sends a forkchoice update to a restarted node that restates the head, safe and finalized block
+/// it loaded from disk.
+///
+/// Returns an error if the engine does not report the update valid.
+async fn restate_forkchoice<N: NodeBuilderHelper>(node: &NodeHelperType<N>) -> eyre::Result<()> {
+    let provider = &node.inner.provider;
+    let hash = |tag| -> eyre::Result<Option<B256>> {
+        Ok(provider.sealed_header_by_number_or_tag(tag)?.map(|header| header.hash()))
+    };
+    let head = hash(BlockNumberOrTag::Latest)?
+        .ok_or_else(|| eyre!("the restarted node has no latest block"))?;
+    // A zero hash leaves the safe or finalized block unset if the node did not persist one.
+    let state = ForkchoiceState {
+        head_block_hash: head,
+        safe_block_hash: hash(BlockNumberOrTag::Safe)?.unwrap_or_default(),
+        finalized_block_hash: hash(BlockNumberOrTag::Finalized)?.unwrap_or_default(),
+    };
+    let updated =
+        node.inner.add_ons_handle.beacon_engine_handle.fork_choice_updated(state, None).await?;
+    ensure!(
+        updated.is_valid(),
+        "forkchoice update to the head {head} the restarted node loaded from disk is not valid: {}",
+        updated.payload_status.status
+    );
+    Ok(())
+}
+
+/// Opens the database in `datadir` like [`create_test_rw_db_with_datadir`], creating it if it does
+/// not exist yet.
+///
+/// The datadir is removed when the returned database is dropped.
+///
+/// [`create_test_rw_db_with_datadir`]: reth_db::test_utils::create_test_rw_db_with_datadir
+pub(crate) fn open_test_database(datadir: &Path) -> eyre::Result<TmpDB> {
+    let path = datadir.join("db");
+    let database = init_db(&path, DatabaseArguments::test())
+        .wrap_err_with(|| format!("failed to open the database at {}", path.display()))?;
+    Ok(Arc::new(TempDatabase::new(database, datadir.to_path_buf())))
 }
 
 #[cfg(test)]
