@@ -5,7 +5,7 @@ use jsonrpsee::{
     proc_macros::rpc,
     types::{ErrorCode, ErrorObjectOwned},
 };
-use reth_pureth_receipt::{HistoricalAcquisitionError, LookupError};
+use reth_pureth_receipt::LookupError;
 
 #[rpc(server, namespace = "pureth")]
 pub trait PurethApi {
@@ -32,14 +32,16 @@ impl<S: QueryHandler + Send + Sync + 'static> PurethApiServer for PurethRpc<S> {
 
 fn rpc_error(error: QueryError) -> ErrorObjectOwned {
     match error {
-        QueryError::Provider(LookupError::UnknownBlock) |
-        QueryError::Acquisition(HistoricalAcquisitionError::ReceiptsUnavailable) => {
-            ErrorObjectOwned::owned(
-                EthRpcErrorCode::ResourceNotFound.code(),
-                "requested data unavailable",
-                None::<()>,
-            )
-        }
+        QueryError::Provider(LookupError::UnknownBlock) => ErrorObjectOwned::owned(
+            EthRpcErrorCode::ResourceNotFound.code(),
+            "requested data unavailable",
+            None::<()>,
+        ),
+        QueryError::Acquisition(error) if error.is_unavailable() => ErrorObjectOwned::owned(
+            EthRpcErrorCode::ResourceNotFound.code(),
+            "requested data unavailable",
+            None::<()>,
+        ),
         QueryError::UnsupportedObject |
         QueryError::UnsupportedSchema |
         QueryError::ProofRequired |
@@ -62,7 +64,7 @@ mod tests {
     use alloy_primitives::B256;
     use jsonrpsee::core::server::Methods;
     use reth_provider::ProviderError;
-    use reth_pureth_receipt::SINGLETON_BLOCK_HASH;
+    use reth_pureth_receipt::{HistoricalAcquisitionError, SINGLETON_BLOCK_HASH};
 
     fn module() -> Methods {
         PurethRpc::new(QueryService::new().unwrap()).into_rpc().into()
@@ -164,16 +166,45 @@ mod tests {
     }
 
     #[test]
-    fn rpc_maps_missing_receipts_to_resource_not_found() {
-        let error = QueryError::Acquisition(HistoricalAcquisitionError::ReceiptsUnavailable);
-        assert_eq!(rpc_error(error).code(), EthRpcErrorCode::ResourceNotFound.code());
+    fn rpc_maps_unavailable_acquisition_data_to_resource_not_found() {
+        for error in [
+            HistoricalAcquisitionError::BlockUnavailable,
+            HistoricalAcquisitionError::ReceiptsUnavailable,
+            HistoricalAcquisitionError::BlockRead(ProviderError::BlockExpired {
+                requested: 1,
+                earliest_available: 2,
+            }),
+            HistoricalAcquisitionError::BlockRead(ProviderError::BlockHashNotFound(B256::ZERO)),
+            HistoricalAcquisitionError::BlockRead(ProviderError::UnknownBlockHash(B256::ZERO)),
+            HistoricalAcquisitionError::BlockRead(ProviderError::HeaderNotFound(B256::ZERO.into())),
+            HistoricalAcquisitionError::ReceiptsRead(ProviderError::BlockExpired {
+                requested: 1,
+                earliest_available: 2,
+            }),
+            HistoricalAcquisitionError::ReceiptsRead(ProviderError::ReceiptNotFound(
+                B256::ZERO.into(),
+            )),
+        ] {
+            assert_eq!(
+                rpc_error(QueryError::Acquisition(error)).code(),
+                EthRpcErrorCode::ResourceNotFound.code()
+            );
+        }
     }
 
     #[test]
     fn rpc_maps_acquisition_failures_to_internal_error() {
-        let error = QueryError::Acquisition(HistoricalAcquisitionError::BlockRead(
-            ProviderError::HeaderNotFound(B256::ZERO.into()),
-        ));
-        assert_eq!(rpc_error(error).code(), -32603);
+        for error in [
+            HistoricalAcquisitionError::BlockRead(ProviderError::InvalidStorageOutput),
+            HistoricalAcquisitionError::ConsistentView(ProviderError::BlockExpired {
+                requested: 1,
+                earliest_available: 2,
+            }),
+            HistoricalAcquisitionError::CanonicalHashRead(ProviderError::HeaderNotFound(
+                B256::ZERO.into(),
+            )),
+        ] {
+            assert_eq!(rpc_error(QueryError::Acquisition(error)).code(), -32603);
+        }
     }
 }
