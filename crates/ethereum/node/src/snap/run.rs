@@ -201,6 +201,66 @@ mod tests {
         task::{Context, Poll},
     };
 
+    // A header stage that waits for `gate`, then records whether a snap attempt exists at each
+    // pass.
+    #[derive(Debug)]
+    struct GatedHeaders {
+        gate: watch::Receiver<bool>,
+        attempts: Arc<Mutex<Vec<bool>>>,
+        stage: TestStage,
+    }
+
+    impl<Provider: MetadataProvider> Stage<Provider> for GatedHeaders {
+        fn id(&self) -> StageId {
+            StageId::Headers
+        }
+
+        fn poll_execute_ready(
+            &mut self,
+            cx: &mut Context<'_>,
+            _input: ExecInput,
+        ) -> Poll<Result<(), StageError>> {
+            if *self.gate.borrow() {
+                return Poll::Ready(Ok(()))
+            }
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+
+        fn execute(
+            &mut self,
+            provider: &Provider,
+            input: ExecInput,
+        ) -> Result<ExecOutput, StageError> {
+            self.attempts.lock().unwrap().push(provider.snap_attempt()?.is_some());
+            self.stage.execute(provider, input)
+        }
+
+        fn unwind(
+            &mut self,
+            _provider: &Provider,
+            _input: UnwindInput,
+        ) -> Result<UnwindOutput, StageError> {
+            unreachable!("nothing unwinds in this test")
+        }
+    }
+
+    // A run over `factory` that refreshes headers as soon as forkchoice moves.
+    fn snap_run(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ) -> (SnapRun<MockNodeTypesWithDB, NoopFullBlockClient>, CancellationToken) {
+        let stop = CancellationToken::new();
+        let run = SnapRun {
+            client: NoopFullBlockClient::default(),
+            factory: factory.clone(),
+            runtime: Runtime::test(),
+            header_refresh: Duration::ZERO,
+            stop: stop.clone(),
+            finalized: watch::channel(B256::ZERO).1,
+        };
+        (run, stop)
+    }
+
     #[tokio::test]
     async fn a_new_target_refreshes_headers_then_resumes_until_stopped() {
         let (pipeline, factory) = pipeline(
@@ -312,65 +372,5 @@ mod tests {
         run.finish(&mut pipeline, &mut receiver).await.unwrap();
 
         assert_eq!(*pipeline_tip.borrow(), NEXT_TARGET);
-    }
-
-    // A header stage that waits for `gate`, then records whether a snap attempt exists at each
-    // pass.
-    #[derive(Debug)]
-    struct GatedHeaders {
-        gate: watch::Receiver<bool>,
-        attempts: Arc<Mutex<Vec<bool>>>,
-        stage: TestStage,
-    }
-
-    impl<Provider: MetadataProvider> Stage<Provider> for GatedHeaders {
-        fn id(&self) -> StageId {
-            StageId::Headers
-        }
-
-        fn poll_execute_ready(
-            &mut self,
-            cx: &mut Context<'_>,
-            _input: ExecInput,
-        ) -> Poll<Result<(), StageError>> {
-            if *self.gate.borrow() {
-                return Poll::Ready(Ok(()))
-            }
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-
-        fn execute(
-            &mut self,
-            provider: &Provider,
-            input: ExecInput,
-        ) -> Result<ExecOutput, StageError> {
-            self.attempts.lock().unwrap().push(provider.snap_attempt()?.is_some());
-            self.stage.execute(provider, input)
-        }
-
-        fn unwind(
-            &mut self,
-            _provider: &Provider,
-            _input: UnwindInput,
-        ) -> Result<UnwindOutput, StageError> {
-            unreachable!("nothing unwinds in this test")
-        }
-    }
-
-    // A run over `factory` that refreshes headers as soon as forkchoice moves.
-    fn snap_run(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> (SnapRun<MockNodeTypesWithDB, NoopFullBlockClient>, CancellationToken) {
-        let stop = CancellationToken::new();
-        let run = SnapRun {
-            client: NoopFullBlockClient::default(),
-            factory: factory.clone(),
-            runtime: Runtime::test(),
-            header_refresh: Duration::ZERO,
-            stop: stop.clone(),
-            finalized: watch::channel(B256::ZERO).1,
-        };
-        (run, stop)
     }
 }

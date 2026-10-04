@@ -30,14 +30,16 @@ mod run;
 
 pub use handoff::{HandoffOutcome, RebuildOutcome, SnapHandoff};
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::FutureExt;
+use reth_chainspec::EthChainSpec;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use reth_errors::RethError;
 use reth_network_p2p::snap::client::SnapClient;
 use reth_provider::{
-    providers::ProviderNodeTypes, DatabaseProviderFactory, MetadataProvider, ProviderFactory,
-    ProviderResult, StageCheckpointReader,
+    providers::ProviderNodeTypes, ChainSpecProvider, DatabaseProviderFactory, MetadataProvider,
+    ProviderFactory, ProviderResult, StageCheckpointReader,
 };
 use reth_stages::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
 use reth_tasks::Runtime;
@@ -155,7 +157,11 @@ where
         if let Some(attempt) = provider.snap_attempt()? {
             return Ok(!attempt.is_verified())
         }
-        Ok(provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number == 0)
+        // Genesis sets every checkpoint to its own block, which isn't always block 0.
+        let genesis = self.provider_factory.chain_spec().genesis_header().number();
+        Ok(provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_none_or(|checkpoint| checkpoint.block_number == genesis))
     }
 }
 
@@ -235,7 +241,10 @@ mod tests {
     use futures::future::poll_fn;
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
+            MockNodeTypesWithDB,
+        },
         DBProvider, DatabaseProviderFactory, MetadataWriter, StageCheckpointReader,
         StageCheckpointWriter, StorageSettings, StorageSettingsCache,
     };
@@ -292,6 +301,22 @@ mod tests {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(block), done: true })
     }
 
+    fn poll_once(backfill: &mut TestBackfill) -> Poll<BackfillEvent> {
+        backfill.poll(&mut Context::from_waker(Waker::noop()))
+    }
+
+    fn headers_checkpoint(factory: &ProviderFactory<MockNodeTypesWithDB>) -> Option<u64> {
+        let provider = factory.database_provider_ro().unwrap();
+        provider.get_stage_checkpoint(StageId::Headers).unwrap().map(|it| it.block_number)
+    }
+
+    // Waits for the running bootstrap's header stage to reach `block`.
+    pub(super) async fn headers_reach(factory: &ProviderFactory<MockNodeTypesWithDB>, block: u64) {
+        while headers_checkpoint(factory) != Some(block) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     #[tokio::test]
     async fn executed_state_backfills_with_the_staged_pipeline() {
         let headers = TestStage::new(StageId::Headers).add_exec(headers_done(5));
@@ -316,20 +341,18 @@ mod tests {
         assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 
-    fn poll_once(backfill: &mut TestBackfill) -> Poll<BackfillEvent> {
-        backfill.poll(&mut Context::from_waker(Waker::noop()))
-    }
+    #[test]
+    fn a_genesis_above_block_zero_still_snap_syncs() {
+        let factory = create_test_provider_factory_with_genesis_block_number(5);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
+        provider.commit().unwrap();
+        // Only the provider factory decides eligibility, so the pipeline's own database is unused.
+        let (pipeline, _) = pipeline(TestStage::new(StageId::Headers));
+        let backfill =
+            TestBackfill::new(pipeline, NoopFullBlockClient::default(), factory, Runtime::test());
 
-    fn headers_checkpoint(factory: &ProviderFactory<MockNodeTypesWithDB>) -> Option<u64> {
-        let provider = factory.database_provider_ro().unwrap();
-        provider.get_stage_checkpoint(StageId::Headers).unwrap().map(|it| it.block_number)
-    }
-
-    // Waits for the running bootstrap's header stage to reach `block`.
-    pub(super) async fn headers_reach(factory: &ProviderFactory<MockNodeTypesWithDB>, block: u64) {
-        while headers_checkpoint(factory) != Some(block) {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+        assert!(backfill.needs_snap().unwrap());
     }
 
     #[test]

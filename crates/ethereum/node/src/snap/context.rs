@@ -128,6 +128,18 @@ mod tests {
         (targets, context)
     }
 
+    // A peer count the test moves between samples.
+    #[derive(Debug, Default)]
+    struct TestPeers(AtomicUsize);
+
+    impl DownloadClient for TestPeers {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            self.0.load(Ordering::Relaxed)
+        }
+    }
+
     #[test]
     fn the_finalized_block_resolves_once_its_header_is_synced() {
         let factory = create_test_provider_factory();
@@ -206,17 +218,5 @@ mod tests {
         let (_targets, mut context) = context(&peers);
 
         assert!(context.wait_for_progress(0).await);
-    }
-
-    // A peer count the test moves between samples.
-    #[derive(Debug, Default)]
-    struct TestPeers(AtomicUsize);
-
-    impl DownloadClient for TestPeers {
-        fn report_bad_message(&self, _peer_id: PeerId) {}
-
-        fn num_connected_peers(&self) -> usize {
-            self.0.load(Ordering::Relaxed)
-        }
     }
 }
