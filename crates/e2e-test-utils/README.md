@@ -69,6 +69,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Change node settings that have a CLI flag | `with_node_config_modifier`, `with_rpc_modifier` (default: all modules except `testing` over HTTP), `with_pruning` |
 | Change engine tree settings | `with_tree_config_modifier`, applied last, on top of the tree config derived from the node config |
 | Choose the storage layout | `with_storage_v2(bool)`, defaults to the node default |
+| Sync with another backfill, e.g. snap with `--snap.v2` | `with_backfill(builder)`, e.g. `with_backfill(EthereumBackfill::Snap)`; the dev mining launcher currently supports only the default pipeline backfill |
 | Let a local miner build the blocks | `with_dev_mining(block_time)`, `map_dev_payload_attributes`; `with_dev_mode` only sets `--dev` |
 | **Accounts and transactions** | |
 | Sign transactions from a funded account that tracks its nonce | `wallet.account(i)` (a `TestAccount`), then `account.transfer(to, value).await`, `account.call(to, input)` or `account.deploy(init_code)` |
