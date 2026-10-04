@@ -11,7 +11,7 @@ use alloy_signer::SignerSync;
 use eyre::{ensure, eyre};
 use rand::{seq::IndexedRandom, Rng};
 use reqwest::{header, RequestBuilder, Response, StatusCode};
-use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType};
+use reth_e2e_test_utils::{node::Finality, wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -19,12 +19,16 @@ use reth_rpc_layer::secret_to_bearer_header;
 use ssz::{Decode, Encode};
 
 /// Advances node by producing blocks with random transactions.
+///
+/// The blocks become the safe and finalized block if `finalize` is set, otherwise the safe and
+/// finalized blocks stay. The node keeps the corresponding [`Finality`] policy afterwards.
 pub(crate) async fn advance_with_random_transactions(
     node: &mut NodeHelperType<EthereumNode>,
     num_blocks: usize,
     rng: &mut impl Rng,
     finalize: bool,
 ) -> eyre::Result<()> {
+    node.set_finality(if finalize { Finality::Head } else { Finality::Keep });
     let provider = node.rpc_provider();
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
@@ -106,14 +110,7 @@ pub(crate) async fn advance_with_random_transactions(
             }
         }
 
-        let payload = node.build_and_submit_payload().await?;
-        if finalize {
-            node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
-        } else {
-            let last_safe =
-                provider.get_block_by_number(BlockNumberOrTag::Safe).await?.unwrap().header.hash;
-            node.update_forkchoice(last_safe, payload.block().hash()).await?;
-        }
+        node.advance_block().await?;
 
         for pending in pending {
             let receipt = pending.get_receipt().await?;

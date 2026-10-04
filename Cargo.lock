@@ -8492,6 +8492,7 @@ dependencies = [
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
+ "reth-fs-util",
  "reth-network-api",
  "reth-network-peers",
  "reth-node-api",
@@ -8515,7 +8516,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
- "revm",
  "serde_json",
  "tempfile",
  "tokio",
@@ -10245,7 +10245,6 @@ name = "reth-rpc-e2e-tests"
 version = "2.7.0"
 dependencies = [
  "alloy-genesis",
- "alloy-rpc-types-engine",
  "eyre",
  "futures-util",
  "jsonrpsee",

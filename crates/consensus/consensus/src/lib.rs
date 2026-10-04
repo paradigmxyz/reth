@@ -358,6 +358,10 @@ pub enum ConsensusError {
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
 
+    /// Error when withdrawals are present in a block body before Shanghai.
+    #[error("unexpected withdrawals")]
+    BodyWithdrawalsUnexpected,
+
     /// Error when requests are missing.
     #[error("missing requests")]
     BodyRequestsMissing,
