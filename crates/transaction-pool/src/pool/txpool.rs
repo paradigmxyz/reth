@@ -412,6 +412,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         // then update tracked values
         self.all_transactions.set_block_info(info);
 
+        // The fee updates above moved transactions between sub-pools without running
+        // `AllTransactions::update`, so derived state such as `NO_PARKED_ANCESTORS` is stale for
+        // the descendants of everything they moved. Drop the recorded pass so the next update
+        // repairs them, even when this call restored the fees the pass was recorded at.
+        self.all_transactions.last_full_update_fees = None;
+
         outcome
     }
 
@@ -1474,8 +1480,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// The all-transactions pass calls [`Self::update_txs`] over every entry in [`Self::txs`].
     /// This field is initialized to the default fees because an empty pool trivially reflects
     /// them. It is not necessarily the immediately preceding fee value: partial sender updates
-    /// and fee changes do not modify it.
-    last_full_update_fees: PendingFees,
+    /// and the canonical path's fee changes do not modify it. `None` means no pass covers the
+    /// current derived state, which is the case after fees moved transactions between sub-pools
+    /// outside of [`Self::update`]; the next update then visits every transaction.
+    last_full_update_fees: Option<PendingFees>,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
     /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
@@ -1602,12 +1610,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut updates = std::mem::take(&mut self.update_buffer);
         let pending_fees = self.pending_fees;
 
-        let update_all = self.last_full_update_fees != self.pending_fees ||
+        let update_all = self.last_full_update_fees != Some(self.pending_fees) ||
             self.should_update_all_senders(changed_accounts.len());
 
         if update_all {
             Self::update_txs(pending_fees, changed_accounts, &mut updates, self.txs.iter_mut());
-            self.last_full_update_fees = self.pending_fees;
+            self.last_full_update_fees = Some(self.pending_fees);
         } else {
             // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
             // sender-local; only transactions from changed accounts can require updates.
@@ -2346,7 +2354,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
             // an empty pool trivially reflects the initial fees
-            last_full_update_fees: Default::default(),
+            last_full_update_fees: Some(PendingFees::default()),
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
             auths: Default::default(),
@@ -3592,7 +3600,10 @@ mod tests {
 
         // a full update applies the current fees to every transaction and records them
         pool.all_transactions.update(&Default::default());
-        assert_eq!(pool.all_transactions.last_full_update_fees, pool.all_transactions.pending_fees);
+        assert_eq!(
+            pool.all_transactions.last_full_update_fees,
+            Some(pool.all_transactions.pending_fees)
+        );
 
         // sender `a` moved past its transaction on chain, the fees did not move. Only `a` should
         // be evaluated, and `b` must be left exactly as it was.
@@ -3610,6 +3621,88 @@ mod tests {
             b_state_before,
             "unchanged sender was modified"
         );
+    }
+
+    #[test]
+    fn base_fee_round_trip_via_set_block_info_repairs_parked_descendants() {
+        fn set_base_fee(pool: &mut TxPool<MockOrdering>, base_fee: u64) {
+            let mut info = pool.block_info();
+            info.pending_basefee = base_fee;
+            pool.set_block_info(info);
+        }
+
+        fn tx(sender: Address, nonce: u64, max_fee: u128) -> MockTransaction {
+            MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_gas_limit(21_000)
+                .with_max_fee(max_fee)
+                .with_priority_fee(1)
+                .rng_hash()
+        }
+
+        const LOW_BASE_FEE: u64 = 100;
+        const HIGH_BASE_FEE: u64 = 500;
+
+        let sender = address!("0x0000000000000000000000000000000000000011");
+        let other = address!("0x0000000000000000000000000000000000000012");
+
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        set_base_fee(&mut pool, LOW_BASE_FEE);
+
+        // Nonce 0 only covers the low base fee, every other transaction covers both.
+        let nonce0 = f.validated(tx(sender, 0, 200));
+        let nonce1 = f.validated(tx(sender, 1, 1_000));
+        let unrelated = f.validated(tx(other, 0, 1_000));
+        let (nonce0_id, nonce1_id, unrelated_id) = (*nonce0.id(), *nonce1.id(), *unrelated.id());
+        pool.add_transaction(nonce0, U256::MAX, 0, None).unwrap();
+        pool.add_transaction(nonce1, U256::MAX, 0, None).unwrap();
+        pool.add_transaction(unrelated, U256::MAX, 0, None).unwrap();
+
+        // An all-transactions pass records the low base fee as the last full update's fees.
+        pool.update_accounts(FxHashMap::default());
+        assert_eq!(
+            pool.all_transactions.last_full_update_fees,
+            Some(pool.all_transactions.pending_fees)
+        );
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Pending);
+
+        // The base fee rises above nonce 0's cap, which parks the sender's transactions.
+        set_base_fee(&mut pool, HIGH_BASE_FEE);
+        assert_eq!(pool.all_transactions.txs.get(&nonce0_id).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::BaseFee);
+
+        // The sender submits another transaction while the base fee is high. The insert walk
+        // correctly records that nonce 1 and nonce 2 sit behind a parked ancestor.
+        let nonce2 = f.validated(tx(sender, 2, 1_000));
+        let nonce2_id = *nonce2.id();
+        pool.add_transaction(nonce2, U256::MAX, 0, None).unwrap();
+        let parked = pool.all_transactions.txs.get(&nonce1_id).unwrap();
+        assert_eq!(parked.subpool, SubPool::Queued);
+        assert!(!parked.state.contains(TxState::NO_PARKED_ANCESTORS));
+
+        // The base fee falls back to where it was. Nonce 0 is promoted out of the base fee pool,
+        // but the queued descendants are not re-derived by the fee update itself.
+        set_base_fee(&mut pool, LOW_BASE_FEE);
+        assert_eq!(pool.all_transactions.txs.get(&nonce0_id).unwrap().subpool, SubPool::Pending);
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Queued);
+        // Fees are back at the recorded value, but the recorded pass no longer covers the state.
+        assert_eq!(pool.all_transactions.last_full_update_fees, None);
+
+        // The next account update is what must repair them.
+        let mut changed = FxHashMap::default();
+        changed.insert(unrelated_id.sender, SenderInfo { state_nonce: 0, balance: U256::MAX });
+        pool.update_accounts(changed);
+
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Pending);
+        assert_eq!(pool.all_transactions.txs.get(&nonce2_id).unwrap().subpool, SubPool::Pending);
+        let nonces = pool
+            .best_transactions()
+            .filter(|tx| tx.sender() == sender)
+            .map(|tx| tx.nonce())
+            .collect::<Vec<_>>();
+        assert_eq!(nonces, vec![0, 1, 2]);
     }
 
     #[test]
@@ -3659,8 +3752,7 @@ mod tests {
 
         let mut changed_sender_updates = changed_senders_only.update(&changed);
         // Force the reference pool through the all-transactions path with the same pending fees.
-        full_update.last_full_update_fees.base_fee =
-            full_update.last_full_update_fees.base_fee.saturating_add(1);
+        full_update.last_full_update_fees = None;
         let mut full_updates = full_update.update(&changed);
 
         let update_key = |update: &PoolUpdate| {
@@ -3729,7 +3821,7 @@ mod tests {
 
         pool.update(&Default::default());
 
-        assert_eq!(pool.last_full_update_fees, pool.pending_fees);
+        assert_eq!(pool.last_full_update_fees, Some(pool.pending_fees));
     }
 
     #[test]
