@@ -632,6 +632,11 @@ impl DefaultStateRootStrategy {
                         }
                         Ok(None) => new_sparse_state_trie(),
                         Err(err) => {
+                            if tracing::enabled!(target: "engine::root::arrival", tracing::Level::TRACE) {
+                                tracing::trace!(target: "engine::root::arrival", schema = 1u64,
+                                    status = "setup_failed", error = ?err,
+                                    "Sparse trie arrival setup failed");
+                            }
                             let _ =
                                 state_root_tx.send(Err(StateRootTaskError::Other(err.to_string())));
                             return;
@@ -662,6 +667,7 @@ impl DefaultStateRootStrategy {
             );
 
             let result = task.run();
+            task.report_arrival_diagnostics(&result);
             // Send the pending handle before the result so acceptance never waits for pruning.
             let trie_completer = if let Ok(outcome) = &result {
                 let preserved_anchor_hash =

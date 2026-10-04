@@ -38,6 +38,12 @@ use reth_trie_sparse::{
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
+use self::arrival_diagnostics::{
+    ArrivalDiagnostics, FinishSnapshot, FlushReason, MessageKind, Selection,
+};
+
+mod arrival_diagnostics;
+
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
 /// account trie stays on this task's thread; storage tries can be moved into independent rayon
@@ -218,6 +224,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// hashing work.
     final_hashed_state: HashedPostState,
 
+    /// Default-off, task-local arrival observations; never retained in the reusable trie.
+    arrival: Option<Box<ArrivalDiagnostics>>,
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -286,6 +294,8 @@ where
             pending_updates: Default::default(),
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
+            arrival: tracing::enabled!(target: "engine::root::arrival", tracing::Level::TRACE)
+                .then(|| Box::new(ArrivalDiagnostics::new())),
             metrics,
         }
     }
@@ -386,10 +396,12 @@ where
         // processed. Only producers hold update senders, so the channel closing before the
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
+            let selection = self.arrival_selection();
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
                     let wake = Instant::now();
+                    self.arrival_select_wait(false, t, wake);
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -398,6 +410,7 @@ where
                     let update = message.map_err(|_| StateRootTaskError::Other(
                         "updates channel disconnected before state root calculation".to_string(),
                     ))?;
+                    self.arrival_message(&update, selection);
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
                     }
@@ -405,6 +418,7 @@ where
                 }
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
+                    self.arrival_select_wait(false, t, wake);
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -414,10 +428,12 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    self.arrival_proof_service(selection, wake);
                     self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
+                    self.arrival_select_wait(false, t, wake);
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -440,10 +456,12 @@ where
         // update channel closing when producers drop their senders is not observed here, and late
         // hints are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
+            let selection = self.arrival_selection();
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
+                    self.arrival_select_wait(true, t, wake);
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -453,10 +471,12 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    self.arrival_proof_service(selection, wake);
                     self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
+                    self.arrival_select_wait(true, t, wake);
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
                         .sparse_trie_channel_wait_duration_histogram
@@ -532,10 +552,22 @@ where
         message: ProofResultMessage,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
+        let receive_started = self.arrival.as_ref().map(|arrival| arrival.offset(*t));
+        if let Some(arrival) = &mut self.arrival {
+            arrival.proof_messages += 1;
+        }
         let mut result = self.on_proof_result_message(message)?;
         while let Ok(next) = self.proof_result_rx.try_recv() {
+            if let Some(arrival) = &mut self.arrival {
+                arrival.proof_messages += 1;
+            }
             let res = self.on_proof_result_message(next)?;
             result.extend(res);
+        }
+        if let Some(arrival) = &mut self.arrival &&
+            let Some(started) = receive_started
+        {
+            arrival.proofs_drained(started);
         }
 
         let phase_end = Instant::now();
@@ -559,13 +591,23 @@ where
         self.drain_returned_storage_tries()?;
 
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
+        if self.initial_updates_applied &&
+            updates_queued &&
+            let Some(arrival) = &mut self.arrival
+        {
+            arrival.defer(arrival.now());
+        }
 
         if !updates_queued && self.proof_result_rx.is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
             // storage roots and promoting account updates.
             self.dispatch_pending_targets()?;
             let t = Instant::now();
-            self.process_new_updates()?;
+            self.process_new_updates(if self.finished_state_updates {
+                FlushReason::Finished
+            } else {
+                FlushReason::InputGap
+            })?;
             self.promote_pending_account_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
@@ -584,7 +626,11 @@ where
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
             let t = Instant::now();
-            self.process_new_updates()?;
+            self.process_new_updates(if self.finished_state_updates {
+                FlushReason::Finished
+            } else {
+                FlushReason::InputGap
+            })?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
         } else if !self.initial_updates_applied && self.pending_updates >= INITIAL_UPDATE_BATCH_SIZE
@@ -592,7 +638,7 @@ where
             // Start proof fetching before a continuously arriving state stream drains. Later
             // batches retain the usual coalescing policy to avoid repeatedly sorting small maps.
             let t = Instant::now();
-            self.process_new_updates()?;
+            self.process_new_updates(FlushReason::InitialThreshold)?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
         } else if self.pending_targets.len() > self.chunk_size {
@@ -758,7 +804,10 @@ where
 
     /// Applies buffered input and runs ready storage work, including work buffered while a job
     /// was in flight even if no new input messages were received.
-    fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+    fn process_new_updates(&mut self, reason: FlushReason) -> SparseTrieResult<()> {
+        if let Some(arrival) = &mut self.arrival {
+            arrival.flush_reason = Some(reason);
+        }
         self.apply_new_updates()?;
         self.run_ready_storage_work()
     }
@@ -772,6 +821,9 @@ where
         let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
         self.initial_updates_applied = true;
+        if let Some(arrival) = &mut self.arrival {
+            arrival.flush(arrival.now());
+        }
 
         // Queue the new storage updates on their entries; the jobs apply them to the tries.
         let Self { storage, trie, new_storage_updates, .. } = self;
@@ -1250,6 +1302,74 @@ where
 
         Ok(())
     }
+
+    fn arrival_selection(&mut self) -> Option<Selection> {
+        let arrival = self.arrival.as_mut()?;
+        let before = arrival.now();
+        let channel_nonempty = !self.proof_result_rx.is_empty();
+        let after = arrival.now();
+        Some(arrival.observe_proofs(before, after, channel_nonempty))
+    }
+
+    fn arrival_select_wait(&mut self, draining: bool, before: Instant, wake: Instant) {
+        if let Some(arrival) = &mut self.arrival {
+            arrival.select_wait(draining, before, wake);
+        }
+    }
+
+    fn arrival_proof_service(&mut self, selection: Option<Selection>, wake: Instant) {
+        if let Some(arrival) = &mut self.arrival &&
+            let Some(selection) = selection
+        {
+            arrival.proof_service(selection, arrival.offset(wake));
+        }
+    }
+
+    fn arrival_message(&mut self, message: &SparseTrieTaskMessage, selection: Option<Selection>) {
+        let Some(arrival) = &mut self.arrival else {
+            return;
+        };
+        let at = arrival.now();
+        let kind = match message {
+            SparseTrieTaskMessage::HashedState(_) => MessageKind::State,
+            SparseTrieTaskMessage::PrefetchProofs(_) => MessageKind::Hint,
+            SparseTrieTaskMessage::FinishedStateUpdates => {
+                arrival.finish(
+                    FinishSnapshot {
+                        accounts: self.new_account_updates.len(),
+                        storage_accounts: self.new_storage_updates.len(),
+                        targets: self.pending_targets.len(),
+                        proofs_in_flight: self.in_flight_proof_batches,
+                        storage_in_flight: self.storage_in_flight,
+                        proof_channel_nonempty: !self.proof_result_rx.is_empty(),
+                        ..Default::default()
+                    },
+                    at,
+                );
+                MessageKind::Finish
+            }
+        };
+        arrival.message(
+            kind,
+            at,
+            selection.is_some_and(|selection| selection.proof_channel_nonempty),
+        );
+    }
+
+    pub(super) fn report_arrival_diagnostics(
+        &self,
+        result: &Result<StateRootComputeOutcome, StateRootTaskError>,
+    ) {
+        if let Some(arrival) = &self.arrival {
+            let status = match result {
+                Ok(_) => "ok",
+                Err(StateRootTaskError::Canceled) => "canceled",
+                Err(_) => "error",
+            };
+            arrival
+                .report(status, result.as_ref().err().map(|error| error as &dyn std::fmt::Debug));
+        }
+    }
 }
 
 /// State of one address' storage trie in the sparse trie task.
@@ -1680,6 +1800,13 @@ mod tests {
     use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
+    use std::{collections::BTreeMap, fmt::Debug, sync::Mutex};
+    use tracing::{
+        field::{Field, Visit},
+        span::Attributes,
+        Event, Id, Subscriber,
+    };
+    use tracing_subscriber::{layer::Context, prelude::*, registry::LookupSpan, EnvFilter, Layer};
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
@@ -1945,7 +2072,7 @@ mod tests {
 
         // Returned work must run even without new input messages.
         assert_eq!(task.pending_updates, 0);
-        task.process_new_updates().unwrap();
+        task.process_new_updates(FlushReason::InputGap).unwrap();
         assert_eq!(storage_slot_value(&task, &address, &revealed_slot), Some(revealed_value));
         assert_eq!(storage_slot_value(&task, &address, &late_slot), Some(late_value));
 
@@ -1970,7 +2097,7 @@ mod tests {
         };
         assert!(work.has_work(), "a buffered update makes the payload ready again");
 
-        task.process_new_updates().unwrap();
+        task.process_new_updates(FlushReason::InputGap).unwrap();
         assert_eq!(storage_slot_value(&task, &address, &late_slot), Some(later_value));
         assert_ne!(storage_root_of(&mut task, address), root_before);
 
@@ -2338,6 +2465,8 @@ mod tests {
             1,
         );
 
+        task.arrival = Some(Box::new(ArrivalDiagnostics::new()));
+
         // Keep an input queued so progress cannot use its normal queue-empty flush.
         updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
         let deadline = std::time::Instant::now();
@@ -2351,7 +2480,9 @@ mod tests {
                 B256::repeat_byte(index as u8),
                 Some(Account { nonce: 1, ..Default::default() }),
             );
-            task.on_hashed_state_update(state);
+            let message = SparseTrieTaskMessage::HashedState(state);
+            task.arrival_message(&message, None);
+            task.on_message(message);
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
             if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
@@ -2361,6 +2492,17 @@ mod tests {
         assert!(task.in_flight_proof_batches > 0, "proof work must start before the queue drains");
         assert_eq!(task.pending_updates, 0);
 
+        // Hint-only buffering must not be recorded as canonical deferral.
+        let hint = SparseTrieTaskMessage::PrefetchProofs(Default::default());
+        task.arrival_message(&hint, None);
+        task.on_message(hint);
+        task.pending_updates += 1;
+        task.make_progress().unwrap();
+        let arrival = task.arrival.as_ref().unwrap();
+        assert_eq!(arrival.deferred_skips, 0);
+        assert_eq!(arrival.pending_state, 0);
+        assert_eq!(arrival.flushes, [1, 0, 0, 0]);
+
         // A second batch remains buffered; the early flush must not become a permanent small
         // batch policy that repeatedly scans and sorts pending leaves.
         for index in INITIAL_UPDATE_BATCH_SIZE..INITIAL_UPDATE_BATCH_SIZE * 2 {
@@ -2369,12 +2511,32 @@ mod tests {
                 B256::repeat_byte(index as u8),
                 Some(Account { nonce: 1, ..Default::default() }),
             );
-            task.on_hashed_state_update(state);
+            let message = SparseTrieTaskMessage::HashedState(state);
+            task.arrival_message(&message, None);
+            task.on_message(message);
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
         }
-        assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE);
+        assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE + 1);
         assert_eq!(task.new_account_updates.len(), INITIAL_UPDATE_BATCH_SIZE);
+        let arrival = task.arrival.as_ref().unwrap();
+        assert_eq!(arrival.pending_state, INITIAL_UPDATE_BATCH_SIZE as u64);
+        assert_eq!(arrival.deferred_skips, INITIAL_UPDATE_BATCH_SIZE as u64);
+        assert_eq!(arrival.deferred_episodes, 1);
+
+        // The finish marker flushes that episode at the same point as pending_updates resets.
+        task.updates.try_recv().expect("the queued placeholder hint remains unread");
+        let finish = SparseTrieTaskMessage::FinishedStateUpdates;
+        task.arrival_message(&finish, None);
+        task.on_message(finish);
+        task.pending_updates += 1;
+        task.make_progress().unwrap();
+        assert_eq!(task.pending_updates, 0);
+        let arrival = task.arrival.as_ref().unwrap();
+        assert_eq!(arrival.pending_state, 0);
+        assert_eq!(arrival.flushed_state, (INITIAL_UPDATE_BATCH_SIZE * 2) as u64);
+        assert_eq!(arrival.flushed_hints, 1);
+        assert_eq!(arrival.flushes, [1, 0, 1, 0]);
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
@@ -2433,6 +2595,66 @@ mod tests {
 
         drop(task);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn arrival_filter_preserves_empty_root_and_reports_explicit_block_context() {
+        let block_hash = B256::repeat_byte(0x42);
+        let block_number = 17u64;
+        for (filter, enabled) in [("debug", false), ("debug,engine::root::arrival=trace", true)] {
+            let captured = ArrivalEvents::default();
+            let subscriber = tracing_subscriber::registry()
+                .with(EnvFilter::try_new(filter).unwrap())
+                .with(captured.clone());
+            // Activation and ancestry are checked on this thread, not on background workers.
+            tracing::subscriber::with_default(subscriber, || {
+                let block_span = debug_span!(target: "engine::tree::payload_validator",
+                    "on_new_payload", ?block_hash, block_num = block_number);
+                let _entered = debug_span!(target: "engine::tree::payload_processor",
+                    parent: &block_span, "sparse_trie_task")
+                .entered();
+                let runtime = Runtime::test();
+                let default_trie =
+                    RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+                let trie = SparseStateTrie::default()
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
+                    .with_updates(true);
+                let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
+                assert_eq!(task.arrival.is_some(), enabled);
+                updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+                drop(updates_tx);
+                let result = task.run();
+                task.report_arrival_diagnostics(&result);
+                let outcome = result.expect("empty state root computation should succeed");
+                assert_eq!(outcome.state_root, EMPTY_ROOT_HASH);
+                assert!(outcome.trie_updates.is_empty());
+                assert!(task.trie.state_trie_ref().is_none());
+                drop(task);
+                drain_sparse_trie_tasks(&runtime);
+            });
+            let events = captured.0.lock().unwrap();
+            assert_eq!(events.len(), usize::from(enabled));
+            if let Some(event) = events.first() {
+                assert_eq!(event.fields.0["message"], "Sparse trie arrival summary");
+                assert_eq!(event.fields.0["status"], "\"ok\"");
+                assert_eq!(event.fields.0["schema"], "1");
+                assert_eq!(event.fields.0["readiness_publication_observed"], "false");
+                assert_eq!(
+                    event.spans,
+                    vec![
+                        (
+                            "on_new_payload",
+                            ArrivalFields(BTreeMap::from([
+                                ("block_hash", format!("{block_hash:?}")),
+                                ("block_num", block_number.to_string()),
+                            ]))
+                        ),
+                        ("sparse_trie_task", ArrivalFields::default()),
+                    ]
+                );
+            }
+        }
     }
 
     #[test]
@@ -2645,5 +2867,49 @@ mod tests {
 
         drop(updates_tx);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[derive(Clone, Default)]
+    struct ArrivalEvents(Arc<Mutex<Vec<ArrivalEvent>>>);
+
+    #[derive(Debug)]
+    struct ArrivalEvent {
+        fields: ArrivalFields,
+        spans: Vec<(&'static str, ArrivalFields)>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    struct ArrivalFields(BTreeMap<&'static str, String>);
+
+    impl Visit for ArrivalFields {
+        fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+            self.0.insert(field.name(), format!("{value:?}"));
+        }
+    }
+
+    impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for ArrivalEvents {
+        fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+            let mut fields = ArrivalFields::default();
+            attrs.record(&mut fields);
+            ctx.span(id).unwrap().extensions_mut().insert(fields);
+        }
+
+        fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+            if event.metadata().target() != "engine::root::arrival" {
+                return;
+            }
+            let mut fields = ArrivalFields::default();
+            event.record(&mut fields);
+            let spans = ctx
+                .event_scope(event)
+                .unwrap()
+                .from_root()
+                .map(|span| {
+                    let fields = span.extensions().get::<ArrivalFields>().unwrap().clone();
+                    (span.metadata().name(), fields)
+                })
+                .collect();
+            self.0.lock().unwrap().push(ArrivalEvent { fields, spans });
+        }
     }
 }
