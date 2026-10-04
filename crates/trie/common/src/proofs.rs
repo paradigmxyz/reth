@@ -876,14 +876,7 @@ impl AccountProof {
             nonce: info.nonce,
             storage_hash,
             account_proof: normalize_eip1186_empty_trie_proof(self.proof),
-            storage_proof: self
-                .storage_proofs
-                .into_iter()
-                .filter_map(|proof| {
-                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
-                    Some(proof.into_eip1186_proof(*input_slot))
-                })
-                .collect(),
+            storage_proof: eip1186_storage_proofs(self.storage_proofs, &slots),
         }
     }
 
@@ -941,6 +934,40 @@ impl AccountProof {
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }
     }
+}
+
+/// Converts storage proofs into EIP-1186 storage proofs, keyed by the caller's requested slots.
+///
+/// Proof producers return one storage proof per requested slot in request order, so the
+/// positional lookup normally hits. Providers that return fewer proofs fall back to a key map
+/// that is built at most once, keeping this linear in the number of slots. Proofs for keys that
+/// were not requested are dropped.
+#[cfg(feature = "eip1186")]
+fn eip1186_storage_proofs(
+    storage_proofs: Vec<StorageProof>,
+    slots: &[alloy_serde::JsonStorageKey],
+) -> Vec<alloy_rpc_types_eth::EIP1186StorageProof> {
+    let mut slots_by_key = None::<B256Map<alloy_serde::JsonStorageKey>>;
+    let mut response = Vec::with_capacity(storage_proofs.len());
+    for (idx, proof) in storage_proofs.into_iter().enumerate() {
+        let input_slot = match slots.get(idx) {
+            Some(slot) if slot.as_b256() == proof.key => *slot,
+            _ => {
+                let slots_by_key = slots_by_key.get_or_insert_with(|| {
+                    let mut map =
+                        B256Map::with_capacity_and_hasher(slots.len(), Default::default());
+                    for slot in slots {
+                        map.entry(slot.as_b256()).or_insert(*slot);
+                    }
+                    map
+                });
+                let Some(slot) = slots_by_key.get(&proof.key) else { continue };
+                *slot
+            }
+        };
+        response.push(proof.into_eip1186_proof(input_slot));
+    }
+    response
 }
 
 #[cfg(feature = "eip1186")]
@@ -1193,6 +1220,9 @@ mod tests {
         nodes::{BranchNode, ExtensionNode, LeafNode, RlpNode},
         TrieMask,
     };
+
+    #[cfg(feature = "eip1186")]
+    use alloy_serde::JsonStorageKey;
 
     #[test]
     fn v2_account_proof_expands_extension_branch() {
@@ -1846,5 +1876,64 @@ mod tests {
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_preserves_request_order_and_key_form() {
+        let slot_a = B256::with_last_byte(1);
+        let slot_b = B256::with_last_byte(2);
+        let slot_c = B256::with_last_byte(3);
+
+        // Requested keys mix hash form and number form and repeat `slot_a`.
+        let slots = vec![
+            JsonStorageKey::Hash(slot_c),
+            JsonStorageKey::Number(U256::from(1)),
+            JsonStorageKey::Hash(slot_b),
+            JsonStorageKey::Hash(slot_a),
+        ];
+
+        let account = AccountProof {
+            address: Address::ZERO,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: slots.iter().map(|slot| StorageProof::new(slot.as_b256())).collect(),
+        };
+
+        let resp = account.into_eip1186_response(slots.clone());
+        let keys = resp.storage_proof.iter().map(|proof| proof.key).collect::<Vec<_>>();
+        assert_eq!(keys, slots);
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_maps_missing_proofs_by_key() {
+        let slot_a = B256::with_last_byte(1);
+        let slot_b = B256::with_last_byte(2);
+        let slot_c = B256::with_last_byte(3);
+
+        // A provider that omits a proof must not shift the remaining proofs onto the wrong
+        // request key, and proofs for unrequested keys are dropped.
+        let slots = vec![
+            JsonStorageKey::Hash(slot_a),
+            JsonStorageKey::Number(U256::from(2)),
+            JsonStorageKey::Hash(slot_c),
+        ];
+        let account = AccountProof {
+            address: Address::ZERO,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: vec![
+                StorageProof::new(slot_b),
+                StorageProof::new(B256::with_last_byte(9)),
+                StorageProof::new(slot_c),
+            ],
+        };
+
+        let resp = account.into_eip1186_response(slots.clone());
+        let keys = resp.storage_proof.iter().map(|proof| proof.key).collect::<Vec<_>>();
+        assert_eq!(keys, vec![slots[1], slots[2]]);
     }
 }
