@@ -7,9 +7,10 @@ use crate::{
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::Encodable;
+use alloy_rlp::{length_of_length, Encodable};
 use futures::StreamExt;
 use reth_eth_wire::{
+    message::MAX_MESSAGE_SIZE,
     snap::{
         AccountData, AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage,
         GetAccountRangeMessage, GetStorageRangesMessage, SnapProtocolMessage, StorageData,
@@ -304,7 +305,8 @@ where
     /// This will adhere to the soft limit but allow filling the last vec partially. A response
     /// never ends with an empty incomplete block: if not even the next receipt fits, the response
     /// ends after the last complete block, except when it would otherwise be empty, in which case
-    /// the first receipt is served regardless of the soft limit.
+    /// the first receipt is served even if it exceeds the soft limit. If it cannot fit within
+    /// [`MAX_MESSAGE_SIZE`], including the response framing, the response is empty and complete.
     fn on_receipts70_request(
         &self,
         _peer_id: PeerId,
@@ -319,6 +321,11 @@ where
         let mut receipts = Vec::new();
         let mut total_bytes = 0usize;
         let mut last_block_incomplete = false;
+
+        // The request ID is unavailable here. Reserve the message code, the largest request ID,
+        // the incomplete flag, and the three RLP list headers to bound the full encoded response.
+        let max_first_receipt_size = MAX_MESSAGE_SIZE -
+            (1 + u64::MAX.length() + false.length() + 3 * length_of_length(MAX_MESSAGE_SIZE));
 
         for (idx, hash) in block_hashes.into_iter().enumerate() {
             if idx >= MAX_RECEIPTS_SERVE {
@@ -351,17 +358,17 @@ where
                 continue;
             }
 
-            // If nothing has been added to the response yet, the first receipt is always served,
-            // even if it exceeds the soft limit, so that every request makes progress. A single
-            // receipt's size is bounded by its transaction's gas limit (log data costs 8 gas per
-            // byte), which keeps it within `MAX_MESSAGE_SIZE` in practice.
+            // If nothing has been added to the response yet, serve the first receipt even if it
+            // exceeds the soft limit, provided the framed response fits within the hard limit.
             let always_serve_first = receipts.is_empty();
             let remaining = block_receipts.len();
             let mut partial_block = Vec::new();
             for receipt in block_receipts {
                 let receipt_size = receipt.length();
                 if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT &&
-                    !(always_serve_first && partial_block.is_empty())
+                    !(always_serve_first &&
+                        partial_block.is_empty() &&
+                        receipt_size <= max_first_receipt_size)
                 {
                     break;
                 }
@@ -876,6 +883,7 @@ mod tests {
         eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
     use alloy_primitives::{keccak256, Address, Log, LogData, TxHash, B128, U256};
+    use reth_eth_wire::{message::RequestPair, EthMessage, EthStreamInner, EthVersion};
     use reth_ethereum_primitives::Receipt;
     use reth_network_api::test_utils::PeersHandle;
     use reth_primitives_traits::Account;
@@ -1693,5 +1701,65 @@ mod tests {
         assert!(!partial.is_empty() && partial.len() < receipts.len());
         assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
         assert!(partial.iter().map(Encodable::length).sum::<usize>() <= SOFT_RESPONSE_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn receipts70_omits_receipt_above_hard_limit() {
+        let provider = MockEthProvider::default();
+        let hash =
+            insert_receipts_block(&provider, 1, vec![receipt_with_data(MAX_MESSAGE_SIZE + 1024)]);
+
+        let resp = get_receipts70(provider, 0, vec![hash]).await;
+
+        assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: Vec::new() });
+    }
+
+    #[test_case(0, 0; "first receipt at hard limit")]
+    #[test_case(1, 0; "continuation receipt at hard limit")]
+    #[test_case(0, 1; "first receipt framing exceeds hard limit")]
+    #[test_case(1, 1; "continuation receipt framing exceeds hard limit")]
+    #[tokio::test]
+    async fn receipts70_enforces_framed_response_limit(first_receipt_index: u64, excess: usize) {
+        // Measure the actual wire encoding with the largest request ID. At these sizes, changing
+        // the log data length does not change the width of any RLP length prefix.
+        let data_len = MAX_MESSAGE_SIZE - 1024;
+        let encoded = encode_receipts70_response(Receipts70 {
+            last_block_incomplete: false,
+            receipts: vec![vec![receipt_with_data(data_len)]],
+        });
+        let receipt = receipt_with_data(data_len + MAX_MESSAGE_SIZE - encoded.len() + excess);
+        assert!(receipt.length() < MAX_MESSAGE_SIZE);
+        let expected =
+            Receipts70 { last_block_incomplete: false, receipts: vec![vec![receipt.clone()]] };
+        assert_eq!(encode_receipts70_response(expected.clone()).len(), MAX_MESSAGE_SIZE + excess);
+
+        let provider = MockEthProvider::default();
+        let mut receipts = vec![receipt_with_data(16); first_receipt_index as usize];
+        receipts.push(receipt);
+        let hash = insert_receipts_block(&provider, 1, receipts);
+
+        let resp = get_receipts70(provider, first_receipt_index, vec![hash]).await;
+
+        if excess == 0 {
+            assert_eq!(resp, expected);
+        } else {
+            assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: Vec::new() });
+        }
+        let encoded = encode_receipts70_response(resp);
+        assert!(encoded.len() <= MAX_MESSAGE_SIZE);
+        EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70)
+            .decode_message(encoded.as_ref().into())
+            .unwrap();
+    }
+
+    /// Encodes a receipts response with the largest possible request ID.
+    fn encode_receipts70_response(response: Receipts70) -> Bytes {
+        EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70)
+            .encode_message(EthMessage::Receipts70(RequestPair {
+                request_id: u64::MAX,
+                message: response,
+            }))
+            .unwrap()
+            .into()
     }
 }
