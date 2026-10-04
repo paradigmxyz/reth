@@ -45,6 +45,32 @@ impl SenderIdentifiers {
         addrs.into_iter().map(|addr| self.sender_id_or_create(addr)).collect()
     }
 
+    /// Returns the number of addresses that currently have an assigned [`SenderId`].
+    pub fn len(&self) -> usize {
+        self.sender_to_address.len()
+    }
+
+    /// Returns `true` if no address currently has an assigned [`SenderId`].
+    pub fn is_empty(&self) -> bool {
+        self.sender_to_address.is_empty()
+    }
+
+    /// Retains mappings for which `keep` returns `true` and returns the number removed.
+    ///
+    /// Removing mappings does not reset the identifier counter. Callers must ensure removed
+    /// identifiers are no longer in use.
+    pub fn retain(&mut self, mut keep: impl FnMut(&SenderId) -> bool) -> usize {
+        let before = self.sender_to_address.len();
+        self.sender_to_address.retain(|id, addr| {
+            let retain = keep(id);
+            if !retain {
+                self.address_to_id.remove(addr);
+            }
+            retain
+        });
+        before - self.sender_to_address.len()
+    }
+
     /// Returns the current identifier and increments the counter.
     fn next_id(&mut self) -> SenderId {
         let id = self.id;
@@ -132,6 +158,7 @@ impl TransactionId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::collections::BTreeSet;
 
     #[test]
@@ -273,6 +300,37 @@ mod tests {
             assert_eq!(tx_id, TransactionId::new(sender, 0));
         } else {
             panic!("Expected included bound");
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn retain_preserves_bijection_and_counter(
+            entries in proptest::collection::btree_map(any::<u8>(), any::<bool>(), 0..64)
+        ) {
+            let mut identifiers = SenderIdentifiers::default();
+            let mappings = entries.iter().map(|(&byte, &keep)| {
+                let address = Address::with_last_byte(byte);
+                (address, identifiers.sender_id_or_create(address), keep)
+            }).collect::<Vec<_>>();
+            let kept = mappings.iter().filter_map(|(_, id, keep)| keep.then_some(*id))
+                .collect::<BTreeSet<_>>();
+            let next_id = identifiers.id;
+
+            let removed = identifiers.retain(|id| kept.contains(id));
+            prop_assert_eq!(removed, mappings.len() - kept.len());
+            prop_assert_eq!(identifiers.len(), kept.len());
+            prop_assert_eq!(identifiers.is_empty(), kept.is_empty());
+            for &(address, id, keep) in &mappings {
+                prop_assert_eq!(identifiers.sender_id(&address), keep.then_some(id));
+                prop_assert_eq!(identifiers.address(&id).copied(), keep.then_some(address));
+            }
+            prop_assert_eq!(identifiers.retain(|_| true), 0);
+            for (address, _, keep) in mappings {
+                if !keep {
+                    prop_assert!(identifiers.sender_id_or_create(address) >= SenderId::from(next_id));
+                }
+            }
         }
     }
 }
