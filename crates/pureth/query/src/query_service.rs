@@ -373,6 +373,17 @@ mod tests {
     }
 
     #[test]
+    fn reth_query_rejects_long_path_before_acquisition() {
+        let (provider, block_hash) = historical_provider(None);
+        let service = QueryService::from_reth(RethRootProvider::new(provider));
+
+        assert!(matches!(
+            service.query(request(block_hash, &"a".repeat(257))),
+            Err(QueryError::InvalidPath(ParseError::PathTooLong))
+        ));
+    }
+
+    #[test]
     fn supplied_snapshot_checks_request_validation_and_block_hash() {
         let service = QueryService::new().unwrap();
         let snapshot =
