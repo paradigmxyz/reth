@@ -20,6 +20,9 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 /// Minimum time between header refreshes while forkchoice moves.
+///
+/// Ten slots keeps the head well inside the ~128 recent blocks peers serve state for, without
+/// stopping the download every slot.
 const HEADER_REFRESH: Duration = Duration::from_secs(120);
 
 // Returning without progress hands control back to the engine without a fatal error.
@@ -148,7 +151,8 @@ where
         // and stops with the backfill.
         let rebuild = SnapHandoff::new(self.factory.clone());
         let stop = self.stop.clone();
-        let rebuilt = self.runtime
+        let rebuilt = self
+            .runtime
             .spawn_blocking(move || rebuild.rebuild(write, &stop))
             .await
             .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
@@ -243,8 +247,11 @@ enum Pass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snap::tests::{
-        headers_done, headers_reach, pipeline, pipeline_with, NEXT_TARGET, TARGET,
+    use crate::snap::{
+        handoff::tests::{downloaded_attempt, PIVOT},
+        tests::{
+            headers_done, headers_reach, pipeline, pipeline_on, pipeline_with, NEXT_TARGET, TARGET,
+        },
     };
     use alloy_consensus::Header;
     use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
@@ -253,8 +260,9 @@ mod tests {
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
-        MetadataProvider,
+        DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     };
+    use reth_snap_sync::{SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
     use reth_stages_api::test_utils::TestStage;
     use std::{
@@ -320,6 +328,25 @@ mod tests {
         )
         .with_header_refresh(Duration::ZERO);
         (run, stop)
+    }
+
+    // A downloaded attempt with its trie rebuild started, and a pipeline over the same database
+    // running `headers`.
+    fn handoff_ready(
+        headers: TestStage,
+    ) -> (
+        Pipeline<MockNodeTypesWithDB>,
+        ProviderFactory<MockNodeTypesWithDB>,
+        SnapWrite,
+        BlockNumHash,
+    ) {
+        let (factory, write) = downloaded_attempt();
+        let pivot = factory.sealed_header(PIVOT).unwrap().unwrap().num_hash();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &CancellationToken::new()).unwrap();
+        provider.commit().unwrap();
+        let pipeline = pipeline_on(&factory, headers, watch::channel(B256::ZERO).0);
+        (pipeline, factory, write, pivot)
     }
 
     #[tokio::test]
@@ -433,5 +460,44 @@ mod tests {
         run.finish(&mut pipeline, &mut receiver).await.unwrap();
 
         assert_eq!(*pipeline_tip.borrow(), NEXT_TARGET);
+    }
+
+    #[tokio::test]
+    async fn a_moved_target_syncs_headers_before_the_handoff() {
+        let (mut pipeline, factory, write, pivot) =
+            handoff_ready(TestStage::new(StageId::Headers).add_exec(headers_done(PIVOT)));
+        let (targets, mut receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        // Forkchoice moved while the trie was rebuilding.
+        targets.send(NEXT_TARGET).unwrap();
+        let pass =
+            run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
+
+        assert_eq!(pass, Pass::Done);
+        assert!(factory.provider().unwrap().snap_attempt().unwrap().unwrap().is_verified());
+    }
+
+    #[tokio::test]
+    async fn a_reorg_during_the_rebuild_syncs_headers_again_without_a_handoff() {
+        let block = |number| BlockWithParent {
+            parent: B256::ZERO,
+            block: BlockNumHash::new(number, B256::repeat_byte(number as u8)),
+        };
+        let (mut pipeline, factory, write, pivot) = handoff_ready(
+            TestStage::new(StageId::Headers).add_exec(Err(StageError::DetachedHead {
+                local_head: Box::new(block(1)),
+                header: Box::new(block(2)),
+                error: Box::new(ConsensusError::BaseFeeMissing),
+            })),
+        );
+        let (_targets, mut receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        let pass =
+            run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
+
+        assert_eq!(pass, Pass::Again);
+        assert!(!factory.provider().unwrap().snap_attempt().unwrap().unwrap().is_verified());
     }
 }

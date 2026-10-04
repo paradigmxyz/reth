@@ -282,14 +282,23 @@ mod tests {
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
         provider.commit().unwrap();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        (pipeline_on(&factory, headers, tip), factory)
+    }
+
+    // A pipeline over `factory` holding only `headers`.
+    pub(super) fn pipeline_on<S>(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        headers: S,
+        tip: watch::Sender<B256>,
+    ) -> Pipeline<MockNodeTypesWithDB>
+    where
+        S: Stage<<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW>
+            + 'static,
+    {
+        Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(headers)
             .with_tip_sender(tip)
-            .build(
-                factory.clone(),
-                StaticFileProducer::new(factory.clone(), PruneModes::default()),
-            );
-        (pipeline, factory)
+            .build(factory.clone(), StaticFileProducer::new(factory.clone(), PruneModes::default()))
     }
 
     pub(super) fn headers_done(block: u64) -> Result<ExecOutput, StageError> {

@@ -194,7 +194,7 @@ pub enum RebuildOutcome {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -225,7 +225,7 @@ mod tests {
     use reth_tasks::Runtime;
     use reth_trie_common::{root::state_root_unsorted, TrieAccount};
 
-    const PIVOT: u64 = 1;
+    pub(crate) const PIVOT: u64 = 1;
 
     // Serves every account range from one trie, as a peer holding all of it would. A complete
     // trie needs no proof.
@@ -330,7 +330,7 @@ mod tests {
     }
 
     // Headers committing to two plain accounts, with an attempt at the pivot that downloaded both.
-    fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
+    pub(crate) fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let accounts: Vec<_> = (1..=2)
             .map(|nonce| {
                 (
