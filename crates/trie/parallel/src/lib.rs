@@ -14,6 +14,9 @@ pub mod error;
 /// Implementation of parallel proof computation.
 pub mod proof_task;
 
+/// Partitioned state root computation for full trie rebuilds.
+pub mod partitioned_root;
+
 /// State root task interface types shared between the engine tree and the payload builder.
 pub mod state_root_task;
 
