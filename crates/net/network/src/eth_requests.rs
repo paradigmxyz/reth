@@ -301,7 +301,10 @@ where
 
     /// Handles partial responses for [`GetReceipts70`] queries.
     ///
-    /// This will adhere to the soft limit but allow filling the last vec partially.
+    /// This will adhere to the soft limit but allow filling the last vec partially. A response
+    /// never ends with an empty incomplete block: if not even the next receipt fits, the response
+    /// ends after the last complete block, except when it would otherwise be empty, in which case
+    /// the first receipt is served regardless of the soft limit.
     fn on_receipts70_request(
         &self,
         _peer_id: PeerId,
@@ -348,18 +351,30 @@ where
                 continue;
             }
 
+            // If nothing has been added to the response yet, the first receipt is always served,
+            // even if it exceeds the soft limit, so that every request makes progress. A single
+            // receipt's size is bounded by its transaction's gas limit (log data costs 8 gas per
+            // byte), which keeps it within `MAX_MESSAGE_SIZE` in practice.
+            let always_serve_first = receipts.is_empty();
+            let remaining = block_receipts.len();
             let mut partial_block = Vec::new();
             for receipt in block_receipts {
                 let receipt_size = receipt.length();
-                if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
+                if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT &&
+                    !(always_serve_first && partial_block.is_empty())
+                {
                     break;
                 }
                 total_bytes += receipt_size;
                 partial_block.push(receipt);
             }
 
-            receipts.push(partial_block);
-            last_block_incomplete = true;
+            // An empty partial block delivers nothing, so it is never sent. The requester can
+            // simply continue with this block in its next request.
+            if !partial_block.is_empty() {
+                last_block_incomplete = partial_block.len() < remaining;
+                receipts.push(partial_block);
+            }
             break;
         }
 
@@ -855,12 +870,13 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::EMPTY_ROOT_HASH;
+    use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header, TxType};
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
         eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
-    use alloy_primitives::{keccak256, Address, TxHash, B128, U256};
+    use alloy_primitives::{keccak256, Address, Log, LogData, TxHash, B128, U256};
+    use reth_ethereum_primitives::Receipt;
     use reth_network_api::test_utils::PeersHandle;
     use reth_primitives_traits::Account;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -1558,5 +1574,124 @@ mod tests {
         // The valid account's queued range is never consumed: the response bails out at the
         // first missing account instead of skipping it and shifting later positions.
         assert_eq!(provider.snap_storage_ranges_remaining(), 1);
+    }
+
+    /// Creates a receipt whose single log carries `data_len` bytes of data.
+    fn receipt_with_data(data_len: usize) -> Receipt {
+        Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: vec![Log {
+                address: Address::ZERO,
+                data: LogData::new_unchecked(Vec::new(), vec![0u8; data_len].into()),
+            }],
+        }
+    }
+
+    /// Stores the receipts as block `number` and returns the block hash.
+    fn insert_receipts_block(
+        provider: &MockEthProvider,
+        number: u64,
+        receipts: Vec<Receipt>,
+    ) -> B256 {
+        let hash = B256::with_last_byte(number as u8);
+        provider.add_header(hash, Header { number, ..Default::default() });
+        provider.add_receipts(number, receipts);
+        hash
+    }
+
+    /// Sends a [`GetReceipts70`] request to the handler and returns the response.
+    async fn get_receipts70(
+        provider: MockEthProvider,
+        first_block_receipt_index: u64,
+        block_hashes: Vec<B256>,
+    ) -> Receipts70 {
+        let handler = snap_handler(provider);
+        let (response, rx) = oneshot::channel();
+        handler.on_receipts70_request(
+            PeerId::default(),
+            GetReceipts70 { first_block_receipt_index, block_hashes },
+            response,
+        );
+        rx.await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn receipts70_serves_oversized_first_receipt() {
+        let provider = MockEthProvider::default();
+        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
+        let hash = insert_receipts_block(&provider, 1, vec![oversized.clone()]);
+
+        let resp = get_receipts70(provider, 0, vec![hash]).await;
+
+        // The block holds exactly one receipt, so it is complete.
+        assert_eq!(
+            resp,
+            Receipts70 { last_block_incomplete: false, receipts: vec![vec![oversized]] }
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts70_serves_only_oversized_first_receipt_of_partial_block() {
+        let provider = MockEthProvider::default();
+        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
+        let hash =
+            insert_receipts_block(&provider, 1, vec![oversized.clone(), receipt_with_data(16)]);
+
+        let resp = get_receipts70(provider, 0, vec![hash]).await;
+
+        // The oversized receipt exhausts the budget, so the rest of the block is left out.
+        assert_eq!(
+            resp,
+            Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts70_serves_oversized_receipt_at_first_receipt_index() {
+        let provider = MockEthProvider::default();
+        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
+        let hash = insert_receipts_block(
+            &provider,
+            1,
+            vec![receipt_with_data(16), oversized.clone(), receipt_with_data(16)],
+        );
+
+        let resp = get_receipts70(provider, 1, vec![hash]).await;
+
+        assert_eq!(
+            resp,
+            Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts70_omits_empty_incomplete_block() {
+        let provider = MockEthProvider::default();
+        let first = vec![receipt_with_data(SOFT_RESPONSE_LIMIT - 1024)];
+        let first_hash = insert_receipts_block(&provider, 1, first.clone());
+        // The first receipt of the second block does not fit into the remaining budget.
+        let second_hash = insert_receipts_block(&provider, 2, vec![receipt_with_data(4096)]);
+
+        let resp = get_receipts70(provider, 0, vec![first_hash, second_hash]).await;
+
+        assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: vec![first] });
+    }
+
+    #[tokio::test]
+    async fn receipts70_serves_partial_block() {
+        let provider = MockEthProvider::default();
+        let receipts = vec![receipt_with_data(16 * 1024); 200];
+        let hash = insert_receipts_block(&provider, 1, receipts.clone());
+
+        let resp = get_receipts70(provider, 0, vec![hash]).await;
+
+        assert!(resp.last_block_incomplete);
+        assert_eq!(resp.receipts.len(), 1);
+        let partial = &resp.receipts[0];
+        assert!(!partial.is_empty() && partial.len() < receipts.len());
+        assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
+        assert!(partial.iter().map(Encodable::length).sum::<usize>() <= SOFT_RESPONSE_LIMIT);
     }
 }
