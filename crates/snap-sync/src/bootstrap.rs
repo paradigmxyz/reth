@@ -635,6 +635,21 @@ mod tests {
         (client, bootstrap)
     }
 
+    // An attempt at block 2 that downloaded all of `accounts()`, not handed off yet.
+    fn downloaded(factory: &Factory) -> SnapWrite {
+        let accounts = accounts();
+        insert_chain(factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        write
+    }
+
     fn attempt_id(factory: &Factory) -> SnapAttemptId {
         factory.database_provider_ro().unwrap().snap_attempt().unwrap().unwrap().id()
     }
@@ -1466,5 +1481,36 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.snap_repairs(write).unwrap().is_empty());
         assert_eq!(stored_slots(&provider, key(1)), slots);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_run_still_finishes_the_hand_off_scan() {
+        let factory = hashed_factory();
+        let write = downloaded(&factory);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let (_, bootstrap) = scripted(&factory, [], [3]);
+        let bootstrap = bootstrap.with_cancellation(cancel).with_shutdown(CancellationToken::new());
+
+        // The scan restarts from scratch once stopped, so a header refresh doesn't stop it.
+        assert!(matches!(bootstrap.hand_off(write).await, Ok(Step::HandedOff(_))));
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_the_hand_off_scan_without_committing() {
+        let factory = hashed_factory();
+        let write = downloaded(&factory);
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let (_, bootstrap) = scripted(&factory, [], [3]);
+        let bootstrap = bootstrap.with_shutdown(shutdown);
+
+        assert!(matches!(bootstrap.hand_off(write).await, Err(SnapSyncError::Cancelled)));
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(!provider.is_trie_rebuild_started(write).unwrap());
     }
 }
