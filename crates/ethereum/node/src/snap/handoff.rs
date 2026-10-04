@@ -113,15 +113,17 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         Ok(())
     }
 
-    // Anchors the static files at `pivot`, moves the checkpoints there and accepts the state in
+    // Accepts the state, anchors the static files at `pivot` and moves the checkpoints there in
     // one database commit, so a stop before it leaves the attempt to resume.
     fn publish(&self, write: SnapWrite, pivot: u64) -> Result<(), PipelineError> {
         let provider = self.factory.database_provider_rw()?;
+        // Deleted static files don't roll back with the database, so a rejected state must fail
+        // before them.
+        provider.verify_state_root(write).map_err(RethError::other)?;
         // History below the pivot was never downloaded, so it counts as pruned and the static
         // files start there.
         provider.anchor_pruned_static_files(pivot)?;
         provider.publish_snap_state(pivot).map_err(RethError::other)?;
-        provider.verify_state_root(write).map_err(RethError::other)?;
         provider.commit()?;
         Ok(())
     }
@@ -367,6 +369,18 @@ mod tests {
         SnapHandoff::new(factory.clone()).resume_interrupted_publish().unwrap();
 
         assert_published(&factory);
+    }
+
+    #[test]
+    fn a_rejected_publish_keeps_the_static_files() {
+        let (factory, write, _) = rebuilt();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.abandon_snap_attempt().unwrap();
+        provider.commit().unwrap();
+
+        assert!(SnapHandoff::new(factory.clone()).publish(write, PIVOT).is_err());
+
+        assert_eq!(factory.static_file_provider().earliest_history_height(), 0);
     }
 
     #[test]
