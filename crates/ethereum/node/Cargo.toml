@@ -56,6 +56,7 @@ alloy-rpc-types-engine = { workspace = true, features = ["ssz"] }
 
 # async
 tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true
 
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
@@ -66,7 +67,6 @@ eyre.workspace = true
 ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 futures.workspace = true
-tokio-util.workspace = true
 http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true

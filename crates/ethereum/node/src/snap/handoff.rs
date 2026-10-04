@@ -32,20 +32,21 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         Self { factory }
     }
 
-    /// Rebuilds the trie from the state downloaded at `pivot` and checks its root against the
-    /// pivot's header, committing progress so a restart resumes it. A mismatch abandons the
-    /// attempt, since nothing irreversible has happened yet. Returns early once `stop` fires.
+    /// Rebuilds the trie at `pivot` and checks its root, abandoning the attempt on a mismatch.
+    /// Progress commits as it goes, and `stop` ends it early.
     pub fn rebuild(
         &self,
         pivot: BlockNumHash,
         stop: &CancellationToken,
     ) -> Result<(), PipelineError> {
         let rebuilt = self.rebuild_trie(pivot, stop);
-        if let Err(PipelineError::Stage(StageError::Block {
-            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
-            ..
-        })) = &rebuilt
-        {
+        if matches!(
+            &rebuilt,
+            Err(PipelineError::Stage(StageError::Block {
+                error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
+                ..
+            }))
+        ) {
             self.abandon()?;
         }
         rebuilt
@@ -58,17 +59,10 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         &self,
         write: SnapWrite,
         pivot: BlockNumHash,
-    ) -> Result<Handoff, PipelineError> {
-        // Forkchoice can reorg the pivot out while its state downloads, and publishing anchors
-        // the node to it, so the attempt is dropped instead of published.
-        let canonical = self
-            .factory
-            .provider()?
-            .sealed_header(pivot.number)?
-            .is_some_and(|header| header.hash() == pivot.hash);
-        if !canonical {
+    ) -> Result<HandoffOutcome, PipelineError> {
+        if !self.is_canonical(pivot)? {
             self.abandon()?;
-            return Ok(Handoff::PivotReorged)
+            return Ok(HandoffOutcome::PivotReorged)
         }
 
         // A trie already rebuilt to the pivot returns at once.
@@ -80,7 +74,7 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         let provider = self.factory.database_provider_rw()?;
         provider.verify_state_root(write).map_err(RethError::other)?;
         provider.commit()?;
-        Ok(Handoff::Completed)
+        Ok(HandoffOutcome::Completed)
     }
 
     /// Finishes a publish that anchored the static files but stopped before its checkpoints
@@ -102,15 +96,23 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
             return Ok(None)
         };
         let pivot = attempt.pivot().number;
-        let anchored = self
+        let static_files_start = self
             .factory
             .static_file_provider()
-            .get_lowest_range_start(StaticFileSegment::Transactions) ==
-            Some(pivot);
-        let behind =
-            provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number <
-                pivot;
-        Ok((anchored && behind).then_some(pivot))
+            .get_lowest_range_start(StaticFileSegment::Transactions);
+        let executed =
+            provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
+        Ok((static_files_start == Some(pivot) && executed < pivot).then_some(pivot))
+    }
+
+    // Forkchoice can reorg the pivot out while its state downloads, and publishing anchors the
+    // node to it, so a pivot that is no longer canonical is dropped instead of published.
+    fn is_canonical(&self, pivot: BlockNumHash) -> ProviderResult<bool> {
+        Ok(self
+            .factory
+            .provider()?
+            .sealed_header(pivot.number)?
+            .is_some_and(|header| header.hash() == pivot.hash))
     }
 
     // Drops the attempt, so the next run starts a new one.
@@ -159,7 +161,7 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
 /// What a handoff did with the downloaded state.
 #[must_use]
 #[derive(Debug, Eq, PartialEq)]
-pub enum Handoff {
+pub enum HandoffOutcome {
     /// The state is published, its trie rebuilt and its root verified.
     Completed,
     /// The pivot left the canonical chain, so the attempt was abandoned for a new one.
@@ -183,7 +185,7 @@ mod tests {
     const PIVOT: u64 = 1;
 
     // Headers through the pivot on storage v2.
-    fn headers() -> ProviderFactory<MockNodeTypesWithDB> {
+    fn with_headers() -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
@@ -205,19 +207,19 @@ mod tests {
     }
 
     // Headers through the pivot, with an unverified attempt downloading state at it.
-    fn downloading() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
-        let factory = headers();
+    fn downloading() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, BlockNumHash) {
+        let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
         let pivot = provider.sealed_header(PIVOT).unwrap().unwrap().num_hash();
         let write =
             provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(1))).unwrap();
         provider.commit().unwrap();
-        (factory, write)
+        (factory, write, pivot)
     }
 
     // Headers through the pivot, with the state published at it.
     fn published() -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = headers();
+        let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
         provider.anchor_pruned_static_files(PIVOT).unwrap();
         provider.publish_snap_state(PIVOT).unwrap();
@@ -227,7 +229,7 @@ mod tests {
 
     #[test]
     fn resuming_without_an_interrupted_publish_changes_nothing() {
-        let (factory, _) = downloading();
+        let (factory, ..) = downloading();
 
         SnapHandoff::new(factory.clone()).resume_interrupted_publish().unwrap();
 
@@ -241,13 +243,14 @@ mod tests {
         let factory = published();
         let provider = factory.database_provider_rw().unwrap();
 
+        // Appending fails unless the anchored segments start right after the pivot.
         provider.append_block_bodies(vec![(PIVOT + 1, Some(&Default::default()))]).unwrap();
         provider.commit().unwrap();
     }
 
     #[test]
     fn a_pivot_reorged_out_is_abandoned_instead_of_published() {
-        let factory = published();
+        let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
         let orphan = BlockNumHash::new(PIVOT, B256::repeat_byte(0xaa));
         let write = provider
@@ -258,15 +261,14 @@ mod tests {
         // The canonical header at the pivot's number is a different block now.
         let handoff = SnapHandoff::new(factory.clone()).hand_off(write, orphan).unwrap();
 
-        assert_eq!(handoff, Handoff::PivotReorged);
+        assert_eq!(handoff, HandoffOutcome::PivotReorged);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());
     }
 
     #[test]
     fn a_stopped_rebuild_leaves_the_trie_unbuilt() {
-        let (factory, _) = downloading();
-        let pivot = factory.provider().unwrap().sealed_header(PIVOT).unwrap().unwrap().num_hash();
+        let (factory, _, pivot) = downloading();
         let stop = CancellationToken::new();
         stop.cancel();
 
@@ -278,7 +280,7 @@ mod tests {
 
     #[test]
     fn an_abandoned_attempt_is_not_an_interrupted_publish() {
-        let (factory, _) = downloading();
+        let (factory, ..) = downloading();
         let provider = factory.database_provider_rw().unwrap();
         provider.abandon_snap_attempt().unwrap();
         provider.anchor_pruned_static_files(PIVOT).unwrap();
@@ -292,7 +294,7 @@ mod tests {
 
     #[test]
     fn a_root_mismatch_abandons_the_attempt_before_publishing() {
-        let (factory, write) = downloading();
+        let (factory, write, pivot) = downloading();
         let provider = factory.database_provider_rw().unwrap();
         // State whose root differs from the empty root the pivot header commits to.
         provider
@@ -303,7 +305,6 @@ mod tests {
             )
             .unwrap();
         provider.commit().unwrap();
-        let pivot = factory.provider().unwrap().sealed_header(PIVOT).unwrap().unwrap().num_hash();
 
         assert!(SnapHandoff::new(factory.clone()).hand_off(write, pivot).is_err());
 
@@ -318,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_publish_interrupted_before_its_checkpoints_resumes_at_startup() {
-        let (factory, _) = downloading();
+        let (factory, ..) = downloading();
 
         // The static files finalize, then the node stops before the database commits.
         let provider = factory.database_provider_rw().unwrap();

@@ -2,4 +2,4 @@
 
 mod handoff;
 
-pub use handoff::{Handoff, SnapHandoff};
+pub use handoff::{HandoffOutcome, SnapHandoff};
