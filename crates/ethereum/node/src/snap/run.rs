@@ -100,6 +100,10 @@ where
                     }
                 }
                 SnapBootstrapOutcome::Verified { pivot } => pivot,
+                SnapBootstrapOutcome::BeforeBlockAccessLists => {
+                    info!(target: "sync::snap", "Chain predates block access lists, syncing with the staged pipeline");
+                    return self.finish(pipeline, &mut targets).await
+                }
             };
             info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
             return self.finish(pipeline, &mut targets).await
@@ -183,8 +187,7 @@ where
         Ok(Pass::Done)
     }
 
-    // Runs every stage to the latest target above the verified pivot, which the published
-    // checkpoints skip to.
+    // Runs every stage to the latest target, above the pivot once snap state is published.
     async fn finish(
         &self,
         pipeline: &mut Pipeline<N>,
@@ -262,9 +265,11 @@ mod tests {
         test_utils::{insert_headers, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     };
+    use reth_prune::PruneModes;
     use reth_snap_sync::{SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
     use reth_stages_api::test_utils::TestStage;
+    use reth_static_file::StaticFileProducer;
     use std::{
         sync::{Arc, Mutex},
         task::{Context, Poll},
@@ -499,5 +504,31 @@ mod tests {
 
         assert_eq!(pass, Pass::Again);
         assert!(!factory.provider().unwrap().snap_attempt().unwrap().unwrap().is_verified());
+    }
+
+    #[tokio::test]
+    async fn a_chain_before_block_access_lists_syncs_with_the_staged_pipeline() {
+        let (_, factory) = pipeline(TestStage::new(StageId::Headers));
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Headers)
+                    .add_exec(headers_done(0))
+                    .add_exec(headers_done(0)),
+            )
+            .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(0)))
+            .with_tip_sender(watch::channel(B256::ZERO).0)
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(factory.clone(), PruneModes::default()),
+            );
+        insert_headers(&factory, &[SealedHeader::seal_slow(Header::default())]);
+        let (_targets, receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        // The second header run is the staged pipeline finishing to the target.
+        let result = run.bootstrap(&mut pipeline, receiver).await.unwrap();
+
+        assert_ne!(result, STOPPED);
+        assert!(factory.provider().unwrap().snap_attempt().unwrap().is_none());
     }
 }

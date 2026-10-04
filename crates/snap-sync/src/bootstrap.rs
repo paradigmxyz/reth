@@ -131,8 +131,11 @@ where
             let head = self.context.head()?;
             let step = match self.resolve(head)? {
                 Resolved::Verified(pivot) => return Ok(SnapBootstrapOutcome::Verified { pivot }),
+                Resolved::BeforeBlockAccessLists => {
+                    return Ok(SnapBootstrapOutcome::BeforeBlockAccessLists)
+                }
                 Resolved::Waiting => {
-                    debug!(target: "sync::snap", head, "No eligible snap pivot");
+                    info!(target: "sync::snap", head, "Waiting for a block access list to anchor snap sync");
                     Step::Wait
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
@@ -196,7 +199,15 @@ where
         }
 
         session.select(&provider, head, self.context.finalized())?;
-        let Some((generation, _)) = session.start() else { return Ok(Resolved::Waiting) };
+        let Some((generation, _)) = session.start() else {
+            // A head without a block access list predates them, so no block under it can anchor.
+            return match provider.sealed_header(head)? {
+                Some(header) if header.block_access_list_hash().is_none() => {
+                    Ok(Resolved::BeforeBlockAccessLists)
+                }
+                _ => Ok(Resolved::Waiting),
+            }
+        };
         let write = provider.start_snap_attempt(generation)?;
         provider.start_account_coverage(write)?;
         provider.commit()?;
@@ -516,6 +527,8 @@ pub enum SnapBootstrapOutcome {
     /// The run was cancelled or the context reported no further progress. Committed progress is
     /// kept for the next run.
     Stopped,
+    /// The head predates block access lists, so snap/2 can't sync this chain yet.
+    BeforeBlockAccessLists,
 }
 
 /// What a [`SnapBootstrap`] needs to know about the chain and peers it synchronizes from.
@@ -541,6 +554,8 @@ enum Resolved {
     Verified(BlockNumHash),
     // No block is eligible as a pivot yet.
     Waiting,
+    // The head predates block access lists, so no block can be a pivot.
+    BeforeBlockAccessLists,
 }
 
 // What one pass over the attempt left to do.
@@ -1021,6 +1036,20 @@ mod tests {
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
 
         assert_eq!(bootstrap.context.waits, 1);
+        assert!(client.origins().is_empty());
+        assert!(factory.database_provider_ro().unwrap().snap_attempt().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_head_before_block_access_lists_falls_back_without_waiting() {
+        let factory = hashed_factory();
+        let genesis = header(0, B256::ZERO, None);
+        insert_headers(&factory, &[SealedHeader::seal_slow(genesis)]);
+        let (client, mut bootstrap) = scripted(&factory, [], [0]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::BeforeBlockAccessLists);
+
+        assert_eq!(bootstrap.context.waits, 0);
         assert!(client.origins().is_empty());
         assert!(factory.database_provider_ro().unwrap().snap_attempt().unwrap().is_none());
     }
