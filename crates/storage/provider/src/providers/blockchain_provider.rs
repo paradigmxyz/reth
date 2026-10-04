@@ -1203,7 +1203,7 @@ mod tests {
         }
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         let writer = factory.provider_rw()?;
         writer.insert_block(blocks[0].recovered_block())?;
         writer.write_hashed_state(blocks[0].hashed_state_ref())?;
@@ -1363,10 +1363,7 @@ mod tests {
                     };
 
                     ExecutedBlock {
-                        recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                            block.clone(),
-                            senders,
-                        )),
+                        recovered_block: Arc::new(block.clone().with_senders(senders)),
                         execution_output: execution_outcome.into(),
                         ..Default::default()
                     }
@@ -1536,10 +1533,7 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                last_in_mem_block.clone(),
-                Default::default(),
-            )),
+            recovered_block: Arc::new(last_in_mem_block.clone().with_senders(Default::default())),
             ..Default::default()
         });
 
@@ -1644,20 +1638,14 @@ mod tests {
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                block.clone(),
-                block.senders().unwrap(),
-            )),
+            recovered_block: Arc::new(block.clone().with_senders(block.senders().unwrap())),
             ..Default::default()
         });
 
         // Assertions related to the pending block
 
         let pending_block = provider.pending_block()?.unwrap();
-        assert_eq!(
-            *pending_block,
-            RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap())
-        );
+        assert_eq!(*pending_block, block.clone().with_senders(block.senders().unwrap()));
 
         let pending = provider.pending_block_and_receipts()?.unwrap();
         assert!(Arc::ptr_eq(&pending_block, pending.block()));
@@ -2292,10 +2280,7 @@ mod tests {
         // adding a pending block to state can test pending() and  pending_state_by_hash() function
         let pending_block = database_blocks[database_blocks.len() - 1].clone();
         only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                pending_block.clone(),
-                Default::default(),
-            )),
+            recovered_block: Arc::new(pending_block.clone().with_senders(Default::default())),
             ..Default::default()
         });
 
@@ -2384,10 +2369,7 @@ mod tests {
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                pending_block.clone(),
-                Default::default(),
-            )),
+            recovered_block: Arc::new(pending_block.clone().with_senders(Default::default())),
             ..Default::default()
         });
 
@@ -3207,7 +3189,7 @@ mod tests {
                 number,
                 BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
             )
-            .unseal();
+            .into_block();
             block.header.state_root = match number {
                 0 => expired_root,
                 64 => recent_root,
@@ -3355,7 +3337,7 @@ mod tests {
             parent.number + 1,
             BlockParams { parent: Some(parent.hash()), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
 
@@ -3405,7 +3387,7 @@ mod tests {
             genesis.number + 1,
             BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
         let trie_data = ComputedTrieData::new(
@@ -3525,7 +3507,7 @@ mod tests {
             2,
             BlockParams { parent: Some(anchor_hash), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         later_block.header.state_root = state_b_root;
         let later_block =
             later_block.seal_slow().try_recover().expect("failed to seal block with senders");

@@ -74,7 +74,7 @@ where
             receipts_log_filter,
         } = prune_modes;
 
-        Self::default()
+        Self::new()
             // Transaction lookup must run before bodies because it needs to read transaction
             // data from static files before bodies deletes them.
             .segment_opt(transaction_lookup.map(TransactionLookup::new))

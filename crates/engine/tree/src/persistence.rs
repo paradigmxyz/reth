@@ -422,7 +422,7 @@ mod tests {
         test_utils::{create_test_provider_factory, MockNodeTypes},
         AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
         InMemoryBalStore, ProviderError, ProviderResult, RawBal, StateProviderFactory,
-        StorageSettingsCache,
+        StorageSettings, StorageSettingsCache,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -689,7 +689,7 @@ mod tests {
         reth_db::test_utils::enable_legacy_multiopen();
 
         let provider_factory = create_test_provider_factory();
-        provider_factory.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+        provider_factory.set_storage_settings_cache(StorageSettings::base());
 
         // Open the secondary provider concurrently with the primary.
         let secondary = ProviderFactoryBuilder::<MockNodeTypes>::default()
@@ -699,7 +699,7 @@ mod tests {
                 reth_tasks::Runtime::test(),
             )
             .expect("failed to open read-only provider factory");
-        secondary.set_storage_settings_cache(reth_provider::StorageSettings::v2());
+        secondary.set_storage_settings_cache(StorageSettings::base());
 
         // --- Phase 1: Write blocks 1 and 2 via the primary ---
         let genesis_hash = init_genesis(&provider_factory).unwrap();

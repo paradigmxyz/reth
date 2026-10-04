@@ -7,7 +7,7 @@ use alloy_rpc_types_trace::geth::{
     AccountState, GethDebugTracingOptions, PreStateConfig, PreStateFrame,
 };
 use eyre::{eyre, Result};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_node_ethereum::EthereumNode;
 use serde::Deserialize;
@@ -41,7 +41,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     );
 
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
+        ChainSpec::builder()
             .chain(MAINNET.chain)
             .genesis(genesis)
             .cancun_activated()

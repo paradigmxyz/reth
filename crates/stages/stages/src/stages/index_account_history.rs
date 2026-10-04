@@ -679,7 +679,7 @@ mod tests {
         /// Sets up v2 account test data: writes block body indices to MDBX and
         /// account changesets to static files (matching realistic v2 layout).
         fn setup_v2_account_data(db: &TestStageDB, block_range: std::ops::RangeInclusive<u64>) {
-            db.factory.set_storage_settings_cache(StorageSettings::v2());
+            db.factory.set_storage_settings_cache(StorageSettings::base());
 
             db.commit(|tx| {
                 for block in block_range.clone() {

@@ -775,17 +775,17 @@ impl<P: BlockBodyIndicesProvider> BlockReceiptsWriterExt for P {
             .block_body_indices(number)?
             .ok_or_else(|| eyre::eyre!("missing block body indices for block {number}"))?;
 
-        if block_receipts.len() as u64 != indices.tx_count {
+        if block_receipts.len() as u64 != indices.tx_count() {
             eyre::bail!(
                 "receipt count mismatch for block {number}: {} receipt(s) for {} transaction(s)",
                 block_receipts.len(),
-                indices.tx_count,
+                indices.tx_count(),
             );
         }
 
         receipts_writer.increment_block(number)?;
         receipts_writer.append_receipts(
-            (indices.first_tx_num..).zip(block_receipts.iter()).map(Ok::<_, ProviderError>),
+            (indices.first_tx_num()..).zip(block_receipts.iter()).map(Ok::<_, ProviderError>),
         )?;
 
         Ok(())

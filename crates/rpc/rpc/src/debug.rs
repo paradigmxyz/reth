@@ -81,7 +81,7 @@ where
         executor.spawn_task(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock { block, error } = event &&
-                    let Ok(recovered) = RecoveredBlock::try_recover_sealed(*block)
+                    let Ok(recovered) = block.try_recover()
                 {
                     bad_block_store.insert(recovered, error);
                 }
@@ -355,7 +355,7 @@ where
                             tx_hash: Some(*tx.tx_hash()),
                         }),
                         &tx_env,
-                        &evm_env.block_env,
+                        evm_env.block_env(),
                         &res,
                         &mut db,
                     )
@@ -409,7 +409,7 @@ where
                     &mut inspector,
                 )?;
                 let trace = inspector
-                    .get_result(None, &tx_env, &evm_env.block_env, &res, db)
+                    .get_result(None, &tx_env, evm_env.block_env(), &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             })
@@ -471,7 +471,7 @@ where
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
                 let trace = inspector
-                    .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                    .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -566,7 +566,7 @@ where
                             &mut inspector,
                         )?;
                         let trace = inspector
-                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                            .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
                             .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
@@ -771,7 +771,7 @@ where
         } else if let Some(code) = account.code {
             code.original_bytes()
         } else {
-            db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
+            db.code_by_hash(account.code_hash()).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
         Ok(AccountInfo {

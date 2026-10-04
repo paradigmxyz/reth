@@ -619,8 +619,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             })
             .transpose()?;
         let rocksdb_ctx = first_number.map(|first_number| self.rocksdb_write_ctx(first_number));
-        let rocksdb_enabled =
-            rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.storage_v2);
+        let rocksdb_enabled = rocksdb_ctx.as_ref().is_some_and(|ctx| ctx.storage_settings.is_v2());
 
         let mut sf_result = None;
         let mut rocksdb_result = None;
@@ -2217,7 +2216,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             } else {
                 let receipts = self.receipts_by_tx_range(tx_range)?;
 
-                if receipts.len() != body.tx_count as usize {
+                if receipts.len() != body.tx_count() as usize {
                     return Ok(None)
                 }
 
@@ -2266,7 +2265,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // find blocks with transactions to determine transaction range
         let non_empty_blocks: Vec<_> =
-            block_body_indices.iter().filter(|indices| indices.tx_count > 0).collect();
+            block_body_indices.iter().filter(|indices| indices.tx_count() > 0).collect();
 
         if non_empty_blocks.is_empty() {
             // all blocks are empty
@@ -2288,7 +2287,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
                 result.push(Vec::new());
             } else {
                 let block_receipts =
-                    receipts_iter.by_ref().take(indices.tx_count as usize).collect();
+                    receipts_iter.by_ref().take(indices.tx_count() as usize).collect();
                 result.push(block_receipts);
             }
         }
@@ -2584,7 +2583,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let block_indices: Vec<_> = self
             .block_body_indices_range(block_range)?
             .into_iter()
-            .map(|b| b.first_tx_num)
+            .map(|b| b.first_tx_num())
             .collect();
 
         // Ensure all expected blocks are present.
@@ -3164,7 +3163,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut receipts = Vec::with_capacity(block_bodies.len());
         // loop break if we are at the end of the blocks.
         for block_body in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count() as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
                     block_receipts.push(receipts_iter.next().unwrap().1);
@@ -3546,12 +3545,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
-        if !storage_settings.storage_v2 {
+        if !storage_settings.is_v2() {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        if !storage_settings.storage_v2 {
+        if !storage_settings.is_v2() {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
@@ -3849,7 +3848,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Note: For MDBX we use insert_*_history_index. For RocksDB we use
         // append_*_history_shard which handles read-merge-write internally.
         let storage_settings = self.cached_storage_settings();
-        if storage_settings.storage_v2 {
+        if storage_settings.is_v2() {
             self.with_rocksdb_batch(|mut batch| {
                 for (address, blocks) in account_transitions {
                     batch.append_account_history_shard(address, blocks)?;
@@ -3859,7 +3858,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         } else {
             self.insert_account_history_index(account_transitions)?;
         }
-        if storage_settings.storage_v2 {
+        if storage_settings.is_v2() {
             self.with_rocksdb_batch(|mut batch| {
                 for ((address, key), blocks) in storage_transitions {
                     batch.append_storage_history_shard(address, key, blocks)?;
@@ -5078,7 +5077,7 @@ mod tests {
         // Static files mode
         {
             let factory = create_test_provider_factory();
-            let storage_settings = StorageSettings::v2();
+            let storage_settings = StorageSettings::base();
             factory.set_storage_settings_cache(storage_settings);
             let factory = factory.with_prune_modes(PruneModes {
                 receipts: Some(PruneMode::Before(2)),
@@ -5151,7 +5150,7 @@ mod tests {
     #[test]
     fn test_unwind_storage_hashing_with_hashed_state() {
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v2();
+        let storage_settings = StorageSettings::base();
         factory.set_storage_settings_cache(storage_settings);
 
         let address = Address::random();
@@ -5409,7 +5408,7 @@ mod tests {
         use revm::{database::BundleState, state::AccountInfo};
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let address = Address::with_last_byte(1);
         let slot = U256::from(5);
@@ -5518,7 +5517,7 @@ mod tests {
 
         match mode {
             StorageMode::V1 => factory.set_storage_settings_cache(StorageSettings::v1()),
-            StorageMode::V2 => factory.set_storage_settings_cache(StorageSettings::v2()),
+            StorageMode::V2 => factory.set_storage_settings_cache(StorageSettings::base()),
         }
 
         let num_blocks = 3u64;
@@ -5787,7 +5786,7 @@ mod tests {
     #[test]
     fn test_write_and_remove_state_roundtrip_v2() {
         let factory = create_test_provider_factory();
-        let storage_settings = StorageSettings::v2();
+        let storage_settings = StorageSettings::base();
         assert!(storage_settings.use_hashed_state());
         factory.set_storage_settings_cache(storage_settings);
 
@@ -5937,7 +5936,7 @@ mod tests {
     #[test]
     fn test_unwind_storage_history_indices_v2() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let address = Address::with_last_byte(1);
         let slot_key = B256::with_last_byte(42);

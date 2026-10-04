@@ -153,7 +153,7 @@ impl ExecutionOverlay {
                 }
                 let account_storage = storage.entry(*address).or_default();
                 for (slot, value) in &account.storage {
-                    account_storage.insert(*slot, value.present_value);
+                    account_storage.insert(*slot, value.present_value());
                 }
             }
         };

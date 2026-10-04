@@ -94,7 +94,7 @@ impl Command {
         info!(target: "reth::cli", "Writing StorageSettings v2 metadata");
         {
             let provider_rw = provider_factory.database_provider_rw()?;
-            provider_rw.write_storage_settings(StorageSettings::v2())?;
+            provider_rw.write_storage_settings(StorageSettings::base())?;
             provider_rw.commit()?;
         }
         info!(target: "reth::cli", "Storage settings updated to v2");

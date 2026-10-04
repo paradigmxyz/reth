@@ -237,7 +237,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 
-    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
+    let executor_provider = EthEvmConfig::new(chain_spec.clone());
     let mut parent = genesis_block;
     let mut bal_buf = Vec::new();
 

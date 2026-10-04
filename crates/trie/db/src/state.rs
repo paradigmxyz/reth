@@ -419,7 +419,8 @@ mod tests {
             .build();
         assert_eq!(bundle_state.reverts.len(), 1);
 
-        let post_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+        let post_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         assert_eq!(post_state.accounts.len(), 2);
         assert_eq!(post_state.storages.len(), 2);
 
@@ -540,7 +541,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = factory.provider_rw().unwrap();
 

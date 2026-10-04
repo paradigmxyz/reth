@@ -1876,7 +1876,7 @@ mod tests {
     #[test]
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
         let runtime = Runtime::test();
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
             .with_default_storage_trie(RevealableSparseTrie::blind_from(
                 ArenaParallelSparseTrie::default(),
@@ -1983,7 +1983,7 @@ mod tests {
     #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
         let runtime = Runtime::test();
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(RevealableSparseTrie::revealed_empty())
             .with_updates(true);
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
@@ -2095,7 +2095,7 @@ mod tests {
     #[test]
     fn unrelated_storage_proofs_do_not_retry_blocked_leaves() {
         let runtime = Runtime::test();
-        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::new());
         let address = B256::repeat_byte(0x11);
         let slot = B256::repeat_byte(0x22);
         let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
@@ -2133,7 +2133,7 @@ mod tests {
     #[test]
     fn canceled_task_disconnects_checked_out_storage_jobs() {
         let runtime = Runtime::test();
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_default_storage_trie(RevealableSparseTrie::revealed_empty());
         let (mut task, updates_tx, cancel_guard) = test_task(&runtime, trie);
         let idle_address = B256::repeat_byte(0x11);
@@ -2159,7 +2159,7 @@ mod tests {
     #[test]
     fn storage_job_panics_are_resumed_on_the_task() {
         let runtime = Runtime::test();
-        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::new());
         let address = B256::repeat_byte(0x11);
         let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
             unreachable!()
@@ -2193,7 +2193,7 @@ mod tests {
     #[test]
     fn large_storage_batches_run_off_thread() {
         let runtime = Runtime::test();
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
             .with_default_storage_trie(RevealableSparseTrie::blind_from(
                 ArenaParallelSparseTrie::default(),
@@ -2246,7 +2246,7 @@ mod tests {
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
         let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);
@@ -2312,7 +2312,7 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);
@@ -2396,7 +2396,7 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);
@@ -2451,7 +2451,7 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);
@@ -2542,7 +2542,7 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);
@@ -2595,7 +2595,7 @@ mod tests {
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
+        let trie = SparseStateTrie::new()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
             .with_updates(true);

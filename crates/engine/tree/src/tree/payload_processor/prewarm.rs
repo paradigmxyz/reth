@@ -444,7 +444,7 @@ where
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address, account.storage_slots().map(Into::into));
+                pool.warm_account(account.address(), account.storage_slots().map(Into::into));
             }
             ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
@@ -683,7 +683,7 @@ where
         if self.disable_bal_parallel_state_root {
             return;
         }
-        let address = account_changes.address;
+        let address = account_changes.address();
         let mut hashed_address = None;
         let account_info = account_changes.account_info();
 

@@ -543,7 +543,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 .storage
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value()))
                 .peekable();
 
             if !destroyed && changed_storage_iter.peek().is_some() {

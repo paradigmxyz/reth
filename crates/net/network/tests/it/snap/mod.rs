@@ -591,7 +591,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
             number,
             BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         block.header.state_root = match number {
             0 => expired_root,
             64 => retained_root,

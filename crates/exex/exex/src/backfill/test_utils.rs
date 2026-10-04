@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
+use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{
     execute::{BlockExecutionOutput, Executor},
@@ -37,7 +37,7 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     // Create a chain spec with a genesis state that contains the
     // provided sender
     Arc::new(
-        ChainSpecBuilder::default()
+        ChainSpec::builder()
             .chain(MAINNET.chain)
             .genesis(Genesis {
                 alloc: [(
@@ -69,7 +69,7 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output
-    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
+    let mut block_execution_output = EthEvmConfig::new(chain_spec)
         .batch_executor(StateProviderDatabase::new(
             LatestStateProvider::new(provider).into_evm_state_provider(),
         ))

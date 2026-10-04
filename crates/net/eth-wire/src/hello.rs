@@ -148,7 +148,7 @@ impl HelloMessage {
     /// let status = HelloMessage::builder(id).build();
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
-        HelloMessageBuilder::new(id)
+        HelloMessageWithProtocols::builder(id)
     }
 }
 

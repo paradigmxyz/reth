@@ -202,7 +202,7 @@ mod tests {
 
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = factory.provider_rw().unwrap();
         assert!(provider.cached_storage_settings().use_hashed_state());

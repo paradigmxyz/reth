@@ -149,7 +149,7 @@ impl Command {
 
         // Check storage settings to determine where history is stored
         let storage_settings = tool.provider_factory.cached_storage_settings();
-        let history_in_rocksdb = storage_settings.storage_v2;
+        let history_in_rocksdb = storage_settings.is_v2();
 
         // For historical queries, enumerate keys from history indices only
         // (not PlainStorageState, which reflects current state)

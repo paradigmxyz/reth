@@ -309,7 +309,7 @@ mod tests {
         assert!(collector.files.is_empty());
         assert_eq!(collector.buffer_size_bytes, 0);
         assert!(collector.buffer.is_empty());
-        assert_eq!(collector.len, 0);
+        assert_eq!(collector.len(), 0);
         assert!(collector.is_empty());
         assert!(!temp_dir_path.exists());
     }

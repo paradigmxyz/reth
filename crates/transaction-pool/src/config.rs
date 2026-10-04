@@ -435,7 +435,7 @@ mod tests {
     fn test_default_config() {
         let config = LocalTransactionConfig::default();
 
-        assert!(!config.no_exemptions);
+        assert!(!config.no_local_exemptions());
         assert!(config.local_addresses.is_empty());
         assert!(config.propagate_local_transactions);
     }

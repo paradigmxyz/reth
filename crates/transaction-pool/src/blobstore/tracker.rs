@@ -90,9 +90,9 @@ mod tests {
     use super::*;
     use alloy_consensus::{Header, Signed};
     use alloy_primitives::Signature;
-    use reth_ethereum_primitives::Transaction;
+    use reth_ethereum_primitives::{Block, Transaction};
     use reth_execution_types::Chain;
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_primitives_traits::{SealedBlock, SealedHeader};
 
     #[test]
     fn test_finalized_tracker() {
@@ -129,49 +129,45 @@ mod tests {
         let tx1_hash = *tx1_signed.hash();
         let tx2_hash = *tx2_signed.hash();
         // Creating a first block with EIP-4844 transactions
-        let block1 = RecoveredBlock::new_sealed(
-            SealedBlock::from_sealed_parts(
-                SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
-                alloy_consensus::BlockBody {
-                    transactions: vec![
-                        tx1_signed.into(),
-                        tx2_signed.into(),
-                        // Another transaction that is not EIP-4844
-                        Signed::new_unhashed(
-                            Transaction::Eip7702(Default::default()),
-                            Signature::test_signature(),
-                        )
-                        .into(),
-                    ],
-                    ..Default::default()
-                },
-            ),
-            Default::default(),
-        );
+        let block1 = SealedBlock::<Block>::from_sealed_parts(
+            SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
+            alloy_consensus::BlockBody {
+                transactions: vec![
+                    tx1_signed.into(),
+                    tx2_signed.into(),
+                    // Another transaction that is not EIP-4844
+                    Signed::new_unhashed(
+                        Transaction::Eip7702(Default::default()),
+                        Signature::test_signature(),
+                    )
+                    .into(),
+                ],
+                ..Default::default()
+            },
+        )
+        .with_senders(Default::default());
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2 = RecoveredBlock::new_sealed(
-            SealedBlock::from_sealed_parts(
-                SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
-                alloy_consensus::BlockBody {
-                    transactions: vec![
-                        Signed::new_unhashed(
-                            Transaction::Eip1559(Default::default()),
-                            Signature::test_signature(),
-                        )
-                        .into(),
-                        Signed::new_unhashed(
-                            Transaction::Eip2930(Default::default()),
-                            Signature::test_signature(),
-                        )
-                        .into(),
-                    ],
-                    ..Default::default()
-                },
-            ),
-            Default::default(),
-        );
+        let block2 = SealedBlock::<Block>::from_sealed_parts(
+            SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
+            alloy_consensus::BlockBody {
+                transactions: vec![
+                    Signed::new_unhashed(
+                        Transaction::Eip1559(Default::default()),
+                        Signature::test_signature(),
+                    )
+                    .into(),
+                    Signed::new_unhashed(
+                        Transaction::Eip2930(Default::default()),
+                        Signature::test_signature(),
+                    )
+                    .into(),
+                ],
+                ..Default::default()
+            },
+        )
+        .with_senders(Default::default());
 
         // Extract blocks from the chain
         let chain: Chain = Chain::new(vec![block1, block2], Default::default(), BTreeMap::new());

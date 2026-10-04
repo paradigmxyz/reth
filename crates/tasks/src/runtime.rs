@@ -959,13 +959,13 @@ impl RuntimeBuilder {
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
 
             let cpu_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                BlockingTaskPool::builder()
                     .num_threads(default_threads)
                     .thread_name(|i| format!("cpu-{i:02}")),
             )?;
 
             let rpc_raw = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                BlockingTaskPool::builder()
                     .num_threads(rpc_threads)
                     .thread_name(|i| format!("rpc-{i:02}")),
             )?;
@@ -974,7 +974,7 @@ impl RuntimeBuilder {
             let storage_threads =
                 config.rayon.storage_threads.unwrap_or(DEFAULT_STORAGE_POOL_THREADS);
             let storage_pool = build_pool_with_panic_handler(
-                rayon::ThreadPoolBuilder::new()
+                BlockingTaskPool::builder()
                     .num_threads(storage_threads)
                     .thread_name(|i| format!("storage-{i:02}")),
             )?;

@@ -136,7 +136,7 @@ mod tests {
 
         assert_eq!(preserved.block_hash(), block_hash);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
-        tx.send(SparseTrie::default()).unwrap();
+        tx.send(SparseStateTrie::new()).unwrap();
         assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
     }
 

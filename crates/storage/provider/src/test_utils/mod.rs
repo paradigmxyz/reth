@@ -1,6 +1,6 @@
 use crate::{
     providers::{
-        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
     HashingWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
@@ -101,7 +101,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_genesis_block_number(genesis_block_number)
             .build()
             .expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_path)
+        RocksDBProvider::builder(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
@@ -133,7 +133,7 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_files_path).expect("static file provider"),
-        RocksDBBuilder::new(&rocksdb_path)
+        RocksDBProvider::builder(&rocksdb_path)
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),

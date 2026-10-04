@@ -113,7 +113,7 @@ impl RpcModuleSelection {
     /// Clones the set of configured [`RethRpcModule`].
     pub fn to_selection(&self) -> HashSet<RethRpcModule> {
         match self {
-            Self::All => Self::all_modules(),
+            Self::All => Self::default_ipc_modules(),
             Self::Standard => Self::standard_modules(),
             Self::Selection(s) => s.clone(),
         }
@@ -122,7 +122,7 @@ impl RpcModuleSelection {
     /// Converts the selection into a [`HashSet`].
     pub fn into_selection(self) -> HashSet<RethRpcModule> {
         match self {
-            Self::All => Self::all_modules(),
+            Self::All => Self::default_ipc_modules(),
             Self::Standard => Self::standard_modules(),
             Self::Selection(s) => s,
         }
@@ -538,7 +538,7 @@ mod test {
 
     #[test]
     fn test_all_modules() {
-        let all_modules = RpcModuleSelection::all_modules();
+        let all_modules = RpcModuleSelection::default_ipc_modules();
         assert_eq!(all_modules.len(), RethRpcModule::variant_count() - 1);
         assert!(!all_modules.contains(&RethRpcModule::Testing));
     }
@@ -680,11 +680,11 @@ mod test {
         // Test scenario: full selection vs `All`
         //
         // An explicit selection of the same modules is identical to `All`.
-        let full_selection = RpcModuleSelection::from(RpcModuleSelection::all_modules());
+        let full_selection = RpcModuleSelection::from(RpcModuleSelection::default_ipc_modules());
         assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&full_selection)));
 
         // Explicitly including `testing` makes the selections different.
-        let mut testing_selection = RpcModuleSelection::all_modules();
+        let mut testing_selection = RpcModuleSelection::default_ipc_modules();
         testing_selection.insert(RethRpcModule::Testing);
         let testing_selection = RpcModuleSelection::from(testing_selection);
         assert!(!RpcModuleSelection::are_identical(Some(&all_modules), Some(&testing_selection),));

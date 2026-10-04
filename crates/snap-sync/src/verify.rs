@@ -766,7 +766,7 @@ mod tests {
 
     #[test]
     fn publishing_clears_transaction_lookups_in_the_active_backend() {
-        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+        for settings in [StorageSettings::v1(), StorageSettings::base()] {
             let factory = hashed_factory();
             factory.set_storage_settings_cache(settings);
             let old_hash = B256::repeat_byte(0xaa);

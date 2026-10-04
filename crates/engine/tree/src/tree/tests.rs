@@ -34,7 +34,7 @@ use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };

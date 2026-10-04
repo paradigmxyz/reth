@@ -431,7 +431,7 @@ where
 
         let block = self.payload_validator.convert_payload_to_block(payload)?;
         let recovered = match cache.recover_signers(block.body().transactions()) {
-            Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
+            Ok(senders) => Ok(block.with_senders(senders)),
             Err(_) => Err(SealedBlockRecoveryError::new(block)),
         };
         recovered.map_err(|err| NewPayloadError::Other(err.into()).into())

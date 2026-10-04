@@ -2340,6 +2340,7 @@ impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {
 mod tests {
     use super::*;
     use crate::{
+        config::NetworkConfig,
         test_utils::{
             transactions::{buffer_hash_to_tx_fetcher, new_mock_session, new_tx_manager},
             Testnet,
@@ -2450,7 +2451,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let config = NetworkConfig::builder(secret_key, Runtime::test())
             .listener_port(0)
             .disable_discovery()
             .build(client);
@@ -2575,7 +2576,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let config = NetworkConfig::builder(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2640,7 +2641,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let config = NetworkConfig::builder(secret_key, Runtime::test())
             // let OS choose port
             .listener_port(0)
             .disable_discovery()
@@ -2749,7 +2750,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let config = NetworkConfig::builder(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2919,7 +2920,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let config = NetworkConfig::builder(secret_key, Runtime::test())
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -3444,7 +3445,7 @@ mod tests {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
-        let network_config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let network_config = NetworkConfig::builder(secret_key, Runtime::test())
             .listener_port(0)
             .disable_discovery()
             .build(client.clone());

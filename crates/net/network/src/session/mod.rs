@@ -425,14 +425,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// Removes the [`PendingSessionHandle`] if it exists.
     fn remove_pending_session(&mut self, id: &SessionId) -> Option<PendingSessionHandle> {
         let session = self.pending_sessions.remove(id)?;
-        self.counter.dec_pending(&session.direction);
+        self.counter.dec_pending(&session.direction());
         Some(session)
     }
 
     /// Removes the [`PendingSessionHandle`] if it exists.
     fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle<N>> {
         let session = self.active_sessions.remove(id)?;
-        self.counter.dec_active(&session.direction);
+        self.counter.dec_active(&session.direction());
         Some(session)
     }
 

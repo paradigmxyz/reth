@@ -128,8 +128,8 @@ where
                                         .ok_or(ProviderError::BlockBodyIndicesNotFound(
                                             block_num_hash.number,
                                         ))?;
-                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num);
-                                    block_body_indices.first_tx_num
+                                    loaded_first_tx_num = Some(block_body_indices.first_tx_num());
+                                    block_body_indices.first_tx_num()
                                 }
                             };
 

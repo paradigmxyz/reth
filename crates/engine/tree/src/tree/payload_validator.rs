@@ -1608,9 +1608,7 @@ where
             .state
             .values()
             .flat_map(|account| account.storage.values())
-            .filter(|slot| {
-                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
-            })
+            .filter(|slot| slot.present_value().is_zero() && !slot.original_value().is_zero())
             .count();
 
         // Helper: check if account represents a new contract deployment
@@ -1630,7 +1628,7 @@ where
             .state
             .values()
             .filter(|acc| is_new_deployment(acc))
-            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash()))
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()

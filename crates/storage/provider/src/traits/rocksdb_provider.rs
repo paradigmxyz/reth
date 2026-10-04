@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_rocksdb_settings_create_snapshot() {
-        let settings = StorageSettings::v2();
+        let settings = StorageSettings::base();
         let provider = TestProvider::new(settings);
 
         let result = provider.with_rocksdb_snapshot(|rocksdb| {

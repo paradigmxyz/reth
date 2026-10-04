@@ -27,9 +27,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
-use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
@@ -2423,11 +2421,7 @@ where
             },
         });
 
-        Ok(ExecutedBlock::new(
-            Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            execution_output,
-            trie_data,
-        ))
+        Ok(ExecutedBlock::new(Arc::new(block.with_senders(senders)), execution_output, trie_data))
     }
 
     /// Returns `true` if a block with the given hash is known, either in memory or in the

@@ -374,7 +374,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         .by_id
                         .range((
                             id.sender.start_bound(),
-                            std::ops::Bound::Included(TransactionId::new(id.sender, u64::MAX)),
+                            std::ops::Bound::Included(id.sender.into_transaction_id(u64::MAX)),
                         ))
                         .next_back()
                     {
@@ -1232,7 +1232,7 @@ mod tests {
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let mid_id = TransactionId::new(sender_id, 1);
+        let mid_id = sender_id.into_transaction_id(1);
         let _ = pool.remove_transaction(&mid_id);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 2);
@@ -1250,11 +1250,11 @@ mod tests {
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let id3 = TransactionId::new(sender_id, 3);
+        let id3 = sender_id.into_transaction_id(3);
         let _ = pool.remove_transaction(&id3);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 2);
-        let id2 = TransactionId::new(sender_id, 2);
+        let id2 = sender_id.into_transaction_id(2);
         let _ = pool.remove_transaction(&id2);
         let highest = pool.highest_nonces.get(&sender_id).unwrap();
         assert_eq!(highest.transaction.nonce(), 1);
@@ -1272,7 +1272,7 @@ mod tests {
         }
         pool.assert_invariants();
         let sender_id = f.ids.sender_id(&sender).unwrap();
-        let id0 = TransactionId::new(sender_id, 0);
+        let id0 = sender_id.into_transaction_id(0);
         let _ = pool.remove_transaction(&id0);
         assert!(!pool.highest_nonces.contains_key(&sender_id));
         pool.assert_invariants();

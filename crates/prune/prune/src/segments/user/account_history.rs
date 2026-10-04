@@ -581,7 +581,7 @@ mod tests {
             PruneInput { previous_checkpoint: None, to_block, limiter: PruneLimiter::default() };
         let segment = AccountHistory::new(prune_mode);
 
-        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db.factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = db.factory.database_provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
@@ -834,7 +834,7 @@ mod tests {
         }
         batch.commit().unwrap();
 
-        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db.factory.set_storage_settings_cache(StorageSettings::base());
 
         let to_block: BlockNumber = 15;
         let prune_mode = PruneMode::Before(to_block);
@@ -851,7 +851,7 @@ mod tests {
             };
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(StorageSettings::v2());
+            provider.set_storage_settings_cache(StorageSettings::base());
             let result = segment.prune(&provider, input).unwrap();
             segment
                 .save_checkpoint(
@@ -925,7 +925,7 @@ mod tests {
         // needs v2 settings even though v2 routes `prune()` to the RocksDB path.
         db.insert_changesets_to_static_files(changesets, None)
             .expect("insert changesets to static files");
-        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db.factory.set_storage_settings_cache(StorageSettings::base());
         assert!(db.table::<tables::AccountChangeSets>().unwrap().is_empty());
 
         let to_block: BlockNumber = 15;
@@ -947,7 +947,7 @@ mod tests {
             let range_end = *range.end();
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(StorageSettings::v2());
+            provider.set_storage_settings_cache(StorageSettings::base());
             let result = segment.prune_static_files(&provider, input, range, range_end).unwrap();
             segment
                 .save_checkpoint(

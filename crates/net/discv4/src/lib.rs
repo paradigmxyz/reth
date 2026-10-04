@@ -2952,7 +2952,7 @@ mod tests {
 
         let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() +
             10000000000000;
-        let msg = Neighbours { nodes: vec![service2.local_node_record], expire: expiry };
+        let msg = Neighbours { nodes: vec![service2.local_enr()], expire: expiry };
         service.on_neighbours(msg, record.tcp_addr(), id);
         // wait for the processed ping
         let event = poll_fn(|cx| service2.poll(cx)).await;
@@ -3130,7 +3130,7 @@ mod tests {
         assert_eq!(service.pending_lookup.len(), 1);
 
         let ping = Ping {
-            from: service.local_node_record.into(),
+            from: service.local_enr().into(),
             to: record.into(),
             expire: service.ping_expiration(),
             enr_sq: service.enr_seq(),
@@ -3171,8 +3171,8 @@ mod tests {
 
         // ping node 2 with wrong to field
         let mut ping = Ping {
-            from: service_1.local_node_record.into(),
-            to: service_2.local_node_record.into(),
+            from: service_1.local_enr().into(),
+            to: service_2.local_enr().into(),
             expire: service_1.ping_expiration(),
             enr_sq: service_1.enr_seq(),
         };
@@ -3181,7 +3181,7 @@ mod tests {
         let echo_hash = service_1.send_packet(Message::Ping(ping), service_2.local_addr());
         let ping_request = PingRequest {
             sent_at: Instant::now(),
-            node: service_2.local_node_record,
+            node: service_2.local_enr(),
             echo_hash,
             reason: PingReason::InitialInsert,
         };
@@ -3208,7 +3208,7 @@ mod tests {
         let (_discv4, mut service_2) = create_discv4_with_config(config).await;
 
         // send ping from 1 -> 2
-        service_1.add_node(service_2.local_node_record);
+        service_1.add_node(service_2.local_enr());
 
         // wait for the processed ping
         let event = poll_fn(|cx| service_2.poll(cx)).await;
@@ -3307,7 +3307,7 @@ mod tests {
         let (_, service_1) = create_discv4().await;
         let peerid_1 = *service_1.local_peer_id();
 
-        let config = Discv4Config::builder().add_boot_node(service_1.local_node_record).build();
+        let config = Discv4Config::builder().add_boot_node(service_1.local_enr()).build();
         service_1.spawn();
 
         let (_, mut service_2) = create_discv4_with_config(config).await;
@@ -3450,7 +3450,7 @@ mod tests {
         config.add_eip868_pair("eth", EnrForkIdEntry::from(fork_id));
         let (_remote, mut remote) = create_discv4_with_config(config).await;
         let (_discv4, mut service) = create_discv4().await;
-        let record = remote.local_node_record;
+        let record = remote.local_enr();
         let id = record.id;
         let addr = record.udp_addr();
         insert_proven_node(&mut service, record);
@@ -3468,7 +3468,7 @@ mod tests {
         service.on_ping(
             Ping {
                 from: record.into(),
-                to: service.local_node_record.into(),
+                to: service.local_enr().into(),
                 expire: service.ping_expiration(),
                 enr_sq: remote.enr_seq(),
             },

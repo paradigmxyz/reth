@@ -185,7 +185,7 @@ where
         let cacheable_input = input.data.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
         if cacheable_input &&
             let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) &&
-            input.gas >= entry.gas_used()
+            input.gas() >= entry.gas_used()
         {
             self.increment_by_one_precompile_cache_hits();
             return entry.to_precompile_result(input.reservoir);

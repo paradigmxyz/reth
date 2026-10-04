@@ -1148,7 +1148,7 @@ impl ExecutionCache {
                 state_updates.state.values().map(|account| account.storage.len()).sum::<usize>()
         )
         .entered();
-        for (addr, account) in &state_updates.state {
+        for (addr, account) in state_updates.state() {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
@@ -1192,7 +1192,7 @@ impl ExecutionCache {
 
             // Now we iterate over all storage and make updates to the cached storage values
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                self.insert_storage(*addr, (*key).into(), Some(slot.present_value()));
             }
 
             // Insert will update if present, so we just use the new account info as the new value
