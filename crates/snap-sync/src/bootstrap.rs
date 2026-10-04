@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
@@ -140,6 +140,11 @@ where
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
                     Ok(step) => step,
+                    // The network fails snap requests at once while no connected peer serves them.
+                    Err(SnapSyncError::Request(RequestError::UnsupportedCapability)) => {
+                        info!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        Step::Wait
+                    }
                     Err(error) if error.is_transient() => {
                         debug!(target: "sync::snap", %error, "Waiting for peers or headers");
                         Step::Wait
@@ -591,10 +596,7 @@ mod tests {
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
-    use reth_network_p2p::{
-        error::{PeerRequestResult, RequestError},
-        snap::client::SnapResponse,
-    };
+    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::{Account, AlloyBlockHeader, SealedHeader};
     use reth_provider::{
