@@ -43,7 +43,7 @@ use reth_provider::{
 };
 use reth_stages::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
 use reth_tasks::Runtime;
-use run::{SnapRun, HEADER_REFRESH};
+use run::SnapRun;
 use std::task::{ready, Context, Poll};
 use tokio::sync::{oneshot, watch};
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -98,56 +98,59 @@ where
         let target = self.pending_target.take()?;
         // Once snap state is verified, or the node was not synced by snap, the staged pipeline
         // backfills alone, including unwinds.
-        let needs_snap = self.needs_snap();
-        let SnapBackfillState::Idle(pipeline) = &mut self.state else { return None };
-        match needs_snap {
-            Ok(true) => {}
-            Ok(false) => {
-                let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
-                let (result_tx, result) = oneshot::channel();
-                self.runtime.spawn_critical_blocking_task("pipeline task", async move {
-                    let _ = result_tx.send(pipeline.run_as_fut(Some(target)).await);
-                });
-                self.state = SnapBackfillState::Staged(result);
-                return Some(BackfillEvent::Started(target))
+        let event = match (self.needs_snap(), target) {
+            (Err(error), _) => {
+                BackfillEvent::Finished(Err(PipelineError::Internal(RethError::other(error))))
             }
-            Err(error) => {
-                return Some(BackfillEvent::Finished(Err(PipelineError::Internal(
-                    RethError::other(error),
-                ))))
-            }
-        }
-        let target = match target {
-            PipelineTarget::Sync(hash) => hash,
+            (Ok(false), target) => self.spawn_staged(target),
             // Nothing executes on top of snap state before the handoff, so there is nothing a
             // snap backfill could unwind.
-            PipelineTarget::Unwind(block) => {
-                return Some(BackfillEvent::Finished(Err(PipelineError::Internal(RethError::msg(
-                    format!("snap backfill cannot unwind to block {block}"),
+            (Ok(true), PipelineTarget::Unwind(block)) => {
+                BackfillEvent::Finished(Err(PipelineError::Internal(RethError::msg(format!(
+                    "snap backfill cannot unwind to block {block}"
                 )))))
             }
+            (Ok(true), PipelineTarget::Sync(target)) => self.spawn_snap(target),
         };
-        let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
+        Some(event)
+    }
 
+    fn spawn_staged(&mut self, target: PipelineTarget) -> BackfillEvent {
+        let pipeline = self.take_pipeline();
+        let (result_tx, result) = oneshot::channel();
+        self.runtime.spawn_critical_blocking_task("pipeline task", async move {
+            let _ = result_tx.send(pipeline.run_as_fut(Some(target)).await);
+        });
+        self.state = SnapBackfillState::Staged(result);
+        BackfillEvent::Started(target)
+    }
+
+    fn spawn_snap(&mut self, target: B256) -> BackfillEvent {
+        let pipeline = self.take_pipeline();
         let (result_tx, result) = oneshot::channel();
         let (targets, target_rx) = watch::channel(target);
         let stop = CancellationToken::new();
-        let run = SnapRun {
-            client: self.client.clone(),
-            factory: self.provider_factory.clone(),
-            runtime: self.runtime.clone(),
-            header_refresh: HEADER_REFRESH,
-            stop: stop.clone(),
-            finalized: self.finalized.subscribe(),
-        };
+        let run = SnapRun::new(
+            self.client.clone(),
+            self.provider_factory.clone(),
+            self.runtime.clone(),
+            stop.clone(),
+            self.finalized.subscribe(),
+        );
         // Node shutdown drops this task as it does the pipeline's; every bootstrap step has either
         // committed or left nothing behind.
         self.runtime.spawn_critical_blocking_task("snap backfill task", async move {
             let _ = result_tx.send(run.run(*pipeline, target_rx).await);
         });
         self.state = SnapBackfillState::Running { _stop: stop.drop_guard(), targets, result };
+        BackfillEvent::Started(PipelineTarget::Sync(target))
+    }
 
-        Some(BackfillEvent::Started(PipelineTarget::Sync(target)))
+    fn take_pipeline(&mut self) -> Box<Pipeline<N>> {
+        let SnapBackfillState::Idle(pipeline) = &mut self.state else {
+            unreachable!("only an idle backfill spawns a run")
+        };
+        pipeline.take().expect("idle backfill owns its pipeline")
     }
 
     // Snap bootstraps a node with nothing executed, and finishes any attempt it has not verified
@@ -180,20 +183,12 @@ where
             BackfillAction::Start(target) => self.pending_target = Some(target),
             BackfillAction::UpdateTarget(hash) => {
                 if let SnapBackfillState::Running { targets, .. } = &self.state {
-                    targets.send_if_modified(|current| {
-                        let changed = *current != hash;
-                        *current = hash;
-                        changed
-                    });
+                    targets.send_if_modified(|current| std::mem::replace(current, hash) != hash);
                 }
             }
             // Kept while idle too, so the next run anchors its pivot to known finality.
             BackfillAction::UpdateFinalized(hash) => {
-                self.finalized.send_if_modified(|current| {
-                    let changed = *current != hash;
-                    *current = hash;
-                    changed
-                });
+                self.finalized.send_if_modified(|current| std::mem::replace(current, hash) != hash);
             }
         }
     }
