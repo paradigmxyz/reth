@@ -264,10 +264,17 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let result = executor
             .execute_one(&(*block).clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
-        // Compute the block access list hash for post-Amsterdam blocks so the
-        // consensus check below validates it.
-        let block_access_list_hash =
-            executor.take_bal().map(|bal| Bal::from(bal).compute_hash_with_buf(&mut bal_buf));
+        // Check the block access list size cap and compute its hash for post-Amsterdam blocks so
+        // the consensus check below validates it.
+        let block_access_list_hash = executor
+            .take_bal()
+            .map(|bal| {
+                let bal = Bal::from(bal);
+                bal.validate_gas_limit(block.gas_limit)
+                    .map(|()| bal.compute_hash_with_buf(&mut bal_buf))
+            })
+            .transpose()
+            .map_err(|err| Error::block_failed(block_number, err))?;
         let output = BlockExecutionOutput { state: executor.into_state().take_bundle(), result };
 
         // Consensus checks after block execution
