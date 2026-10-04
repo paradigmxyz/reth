@@ -1,7 +1,8 @@
 use alloy_eips::{merge::SLOT_DURATION_SECS, Decodable2718};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, E2ETestSetupExt,
+    node::Finality, test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext,
+    E2ETestSetupExt,
 };
 use reth_ethereum_engine_primitives::BlobSidecars;
 use reth_ethereum_primitives::PooledTransactionVariant;
@@ -16,15 +17,8 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
-
-    // inject normal tx
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(1)).await;
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-    // build payload with normal tx
-    let payload = node.new_payload().await?;
-
-    // clean the pool
-    node.inner.pool.remove_transactions(vec![tx_hash]);
+    // keep genesis finalized, so the blob block can be reorged
+    node.set_finality(Finality::Keep);
 
     // build blob tx
     let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(0)).await?;
@@ -36,21 +30,16 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
 
-    // build a payload
-    let blob_payload = node.new_payload().await?;
+    // mine the blob tx and wait for the pool to remove it
+    let blob_payload = node.advance_block_synced().await?;
+    assert!(blob_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
 
-    // submit the blob payload
-    let blob_block_hash = node.submit_payload(blob_payload).await?;
-
-    node.update_forkchoice(genesis_hash, blob_block_hash).await?;
-
-    // submit normal payload (reorg)
-    let block_hash = node.submit_payload(payload).await?;
-    node.update_forkchoice(genesis_hash, block_hash).await?;
+    // reorg the blob block out with a block on genesis, which can't include the blob tx anymore
+    let block_hash = node.advance_block_on(genesis_hash).await?.block().hash();
 
     // wait for the pool to process the reorg, and then re-inject the blob tx
     node.wait_for_pool_head(block_hash).await?;
-    node.wait_for_pool(|pool| pool.contains(&blob_tx_hash)).await?;
+    node.wait_for_pooled([blob_tx_hash]).await?;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

@@ -7,7 +7,7 @@ use crate::{
 use alloy_primitives::{Bytes, B256};
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
@@ -359,7 +359,7 @@ where
         self
     }
 
-    /// Set the test setup with chain import from RLP file
+    /// Set the test setup with chain import from RLP file, see [`Setup::apply_with_import`].
     pub fn with_setup_and_import(
         mut self,
         mut setup: Setup<I>,
@@ -393,6 +393,7 @@ where
     pub async fn run<N>(mut self) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         let mut setup = self.setup.take();
 

@@ -105,8 +105,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
+            // Load the state of the block resolved above: resolving a tag such as `latest` again
+            // could return a newer block than `parent`.
+            let state_at = if block.is_pending() { block } else { parent.hash().into() };
 
-            self.spawn_with_state_at_block(block, move |this, db| {
+            self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _permit = permit;
                 let state_provider = db.database.into_inner();
                 let mut db = State::builder()

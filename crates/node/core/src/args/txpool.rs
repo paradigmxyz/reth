@@ -342,7 +342,8 @@ pub struct TxPoolArgs {
     pub minimal_protocol_basefee: u64,
 
     /// Minimum priority fee required for transaction acceptance into the pool.
-    /// Transactions with priority fee below this value will be rejected.
+    /// Transactions with priority fee below this value will be rejected. For legacy and EIP-2930
+    /// transactions the gas price is used as the priority fee.
     #[arg(long = "txpool.minimum-priority-fee", default_value = Resettable::from(DefaultTxPoolValues::get_global().minimum_priority_fee.map(|v| v.to_string().into())))]
     pub minimum_priority_fee: Option<u128>,
 
