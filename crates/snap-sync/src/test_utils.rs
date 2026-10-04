@@ -2,7 +2,7 @@
 
 use crate::{
     common::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
-    SnapAccountStore, SnapAttemptStore, SnapGeneration, SnapPivotPolicy, SnapWrite,
+    SnapGeneration, SnapPivotPolicy,
 };
 use alloy_consensus::Header;
 use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
@@ -53,7 +53,7 @@ use std::{
 };
 
 /// Small bounds keep header fixtures short without changing the policy's decisions.
-pub fn policy() -> SnapPivotPolicy {
+pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
@@ -61,7 +61,11 @@ pub fn policy() -> SnapPivotPolicy {
 ///
 /// A commitment comes with the fields of the forks before it, as real headers carry them, so the
 /// header encodes and decodes the same.
-pub fn header(number: u64, parent_hash: B256, block_access_list_hash: Option<B256>) -> Header {
+pub(crate) fn header(
+    number: u64,
+    parent_hash: B256,
+    block_access_list_hash: Option<B256>,
+) -> Header {
     let forked = block_access_list_hash.is_some();
     Header {
         number,
@@ -79,7 +83,7 @@ pub fn header(number: u64, parent_hash: B256, block_access_list_hash: Option<B25
 }
 
 /// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
-pub fn chain(bal_from: Option<u64>) -> Vec<Header> {
+pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
     for number in 0..=3 {
@@ -92,21 +96,20 @@ pub fn chain(bal_from: Option<u64>) -> Vec<Header> {
     headers
 }
 
-/// A mock provider holding `headers`.
-pub fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEthProvider {
+pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEthProvider {
     let provider = MockEthProvider::default();
     provider.extend_headers(headers.into_iter().map(|header| (header.hash_slow(), header)));
     provider
 }
 
 /// A generation anchored to `block`, downloading against `state_root`.
-pub const fn generation(block: u64, state_root: B256) -> SnapGeneration {
+pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
 }
 
 /// Writes blocks `0..=3` hashed the way [`generation`] anchors them, so an attempt started from
 /// one finds its pivot on the canonical chain.
-pub fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
     let headers: Vec<_> = (0..=3u64)
         .map(|number| {
             let parent = number.checked_sub(1).map_or(B256::ZERO, |n| B256::repeat_byte(n as u8));
@@ -117,7 +120,7 @@ pub fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>)
 }
 
 /// A database using the hashed state layout snap writes into.
-pub fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
+pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let factory = create_test_provider_factory();
     let provider = factory.database_provider_rw().unwrap();
     provider.write_storage_settings(StorageSettings::v2()).unwrap();
@@ -128,18 +131,18 @@ pub fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
 }
 
 /// A hashed account key in the lowest part of the key space.
-pub fn key(value: u64) -> B256 {
+pub(crate) fn key(value: u64) -> B256 {
     B256::left_padding_from(&value.to_be_bytes())
 }
 
 /// An account without storage or code, distinguished by its nonce.
-pub fn account(nonce: u64) -> TrieAccount {
+pub(crate) fn account(nonce: u64) -> TrieAccount {
     TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.
 #[allow(clippy::cloned_instead_of_copied)]
-pub fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
+pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
     state_root_unsorted(accounts.iter().cloned())
 }
 
@@ -149,7 +152,7 @@ fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, 
 }
 
 /// Root of the storage trie holding `slots`.
-pub fn storage_root_of(slots: &[(B256, U256)]) -> B256 {
+pub(crate) fn storage_root_of(slots: &[(B256, U256)]) -> B256 {
     storage_root_unsorted(slots.iter().copied())
 }
 
@@ -173,7 +176,7 @@ fn trie(leaves: impl IntoIterator<Item = (B256, Vec<u8>)>, targets: &[B256]) -> 
 
 /// A peer's answer serving `accounts[served]` out of the trie holding `accounts`, proven along
 /// the paths to `proof_targets`. No targets means the whole trie is served without a proof.
-pub fn account_range(
+pub(crate) fn account_range(
     request_id: u64,
     accounts: &[(B256, TrieAccount)],
     served: Range<usize>,
@@ -198,7 +201,7 @@ pub fn account_range(
 
 /// Runs the same verification production uses on [`account_range`]'s answer to a request from
 /// `origin` through the end of the key space.
-pub fn verified_range(
+pub(crate) fn verified_range(
     accounts: &[(B256, TrieAccount)],
     served: Range<usize>,
     origin: B256,
@@ -209,7 +212,7 @@ pub fn verified_range(
 
 /// Like [`verified_range`], but for a repair's request of the account at `origin` alone, so an
 /// account served past it only proves the interval and is dropped.
-pub fn verified_repair(
+pub(crate) fn verified_repair(
     accounts: &[(B256, TrieAccount)],
     served: Range<usize>,
     origin: B256,
@@ -243,7 +246,7 @@ fn verified_accounts(
 
 /// A peer's answer serving `ranges`, the last of which belongs to the storage trie holding `last`
 /// and is proven along the paths to `proof_targets`. No targets means no proof.
-pub fn storage_ranges(
+pub(crate) fn storage_ranges(
     request_id: u64,
     ranges: &[&[(B256, U256)]],
     last: &[(B256, U256)],
@@ -262,17 +265,16 @@ pub fn storage_ranges(
 }
 
 /// A peer's answer serving `codes`, in the order they were requested.
-pub fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<SnapResponse> {
+pub(crate) fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<SnapResponse> {
     let message = ByteCodesMessage { request_id, codes: codes.to_vec() };
     Ok(WithPeerId::new(PeerId::random(), SnapResponse::ByteCodes(message)))
 }
 
 /// A canonical chain from genesis through the blocks a catch-up applies, each of those carrying
 /// the list its header commits to.
-#[derive(Debug)]
-pub struct BalChain {
+pub(crate) struct BalChain {
     /// Headers from genesis through the last block after the pivot.
-    pub headers: Vec<SealedHeader<Header>>,
+    pub(crate) headers: Vec<SealedHeader<Header>>,
     // Block the downloaded state is anchored to.
     pivot: u64,
     // Encoded lists of the blocks after the pivot, as peers serve them.
@@ -281,7 +283,7 @@ pub struct BalChain {
 
 impl BalChain {
     /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
-    pub fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
+    pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
         let (commitments, lists): (Vec<B256>, Vec<Bytes>) = lists
             .into_iter()
             .map(|changes| {
@@ -307,17 +309,17 @@ impl BalChain {
     }
 
     /// Generation anchored to this chain's pivot, downloading against `state_root`.
-    pub fn generation(&self, state_root: B256) -> SnapGeneration {
+    pub(crate) fn generation(&self, state_root: B256) -> SnapGeneration {
         SnapGeneration::new(self.block(0), state_root)
     }
 
     /// The chain's last block.
-    pub fn tip(&self) -> BlockNumHash {
+    pub(crate) fn tip(&self) -> BlockNumHash {
         self.block(self.lists.len())
     }
 
     /// Replaces the canonical tip with this chain's tip, retaining its ancestors.
-    pub fn replace_tip(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
+    pub(crate) fn replace_tip(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
         let static_files = factory.static_file_provider();
         let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
         writer.prune_headers(1).unwrap();
@@ -328,19 +330,23 @@ impl BalChain {
     }
 
     /// Replaces the canonical blocks after `ancestor` with this chain's, as a reorg to it does.
-    pub fn replace_after(&self, factory: &ProviderFactory<MockNodeTypesWithDB>, ancestor: u64) {
+    pub(crate) fn replace_after(
+        &self,
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        ancestor: u64,
+    ) {
         factory.replace_headers_after(ancestor, &self.headers[ancestor as usize + 1..]);
     }
 
     /// The block `nth` after the pivot, which is the pivot itself at zero.
-    pub fn block(&self, nth: usize) -> BlockNumHash {
+    pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
         BlockNumHash::new(header.number(), header.hash())
     }
 
     /// A peer's answer serving the list of each block `served` names, holding none where it names
     /// no block.
-    pub fn response(
+    pub(crate) fn response(
         &self,
         request_id: u64,
         served: impl IntoIterator<Item = Option<usize>>,
@@ -358,7 +364,7 @@ impl BalChain {
 }
 
 /// Reorgs of a test database's canonical headers.
-pub trait ReorgFactoryExt {
+pub(crate) trait ReorgFactoryExt {
     /// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
     fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]);
 }
@@ -379,7 +385,7 @@ impl ReorgFactoryExt for ProviderFactory<MockNodeTypesWithDB> {
 }
 
 /// Slots persisted for `account`, in key order.
-pub fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U256)> {
+pub(crate) fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U256)> {
     let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
     cursor
         .walk_dup(Some(account), None)
@@ -393,7 +399,7 @@ pub fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U25
 
 /// Persisted snap state and all metadata, including attempt, coverage and catch-up progress.
 #[derive(Debug, PartialEq, Eq)]
-pub struct SnapStateSnapshot {
+pub(crate) struct SnapStateSnapshot {
     accounts: Vec<(B256, Account)>,
     storages: Vec<(B256, StorageEntry)>,
     bytecodes: Vec<(B256, Bytecode)>,
@@ -401,8 +407,7 @@ pub struct SnapStateSnapshot {
 }
 
 impl SnapStateSnapshot {
-    /// Reads the snapshot from `provider`.
-    pub fn read(provider: &impl DBProvider) -> Self {
+    pub(crate) fn read(provider: &impl DBProvider) -> Self {
         Self {
             accounts: table_entries::<tables::HashedAccounts>(provider),
             storages: table_entries::<tables::HashedStorages>(provider),
@@ -417,7 +422,7 @@ fn table_entries<T: Table>(provider: &impl DBProvider) -> Vec<(T::Key, T::Value)
 }
 
 /// Serves scripted answers in request order, recording what each request asked for.
-pub struct ScriptedSnapClient {
+pub(crate) struct ScriptedSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
     origins: Mutex<Vec<B256>>,
     storage_requests: Mutex<Vec<(Vec<B256>, B256)>>,
@@ -428,8 +433,9 @@ pub struct ScriptedSnapClient {
 }
 
 impl ScriptedSnapClient {
-    /// A client answering requests with `responses` in order.
-    pub fn new(responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>) -> Self {
+    pub(crate) fn new(
+        responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>,
+    ) -> Self {
         Self {
             responses: Mutex::new(responses.into_iter().collect()),
             origins: Mutex::new(Vec::new()),
@@ -442,34 +448,34 @@ impl ScriptedSnapClient {
     }
 
     /// Runs `hook` after the next BAL request is recorded, before returning its response.
-    pub fn on_block_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
+    pub(crate) fn on_block_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
         *self.on_block_request.lock().unwrap() = Some(Box::new(hook));
         self
     }
 
     /// Runs `hook` after the next storage request is recorded, before returning its response.
-    pub fn on_storage_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
+    pub(crate) fn on_storage_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
         *self.on_storage_request.lock().unwrap() = Some(Box::new(hook));
         self
     }
 
     /// Origins of the account range requests sent so far.
-    pub fn origins(&self) -> MutexGuard<'_, Vec<B256>> {
+    pub(crate) fn origins(&self) -> MutexGuard<'_, Vec<B256>> {
         self.origins.lock().unwrap()
     }
 
     /// Accounts and starting slot of the storage range requests sent so far.
-    pub fn storage_requests(&self) -> MutexGuard<'_, Vec<(Vec<B256>, B256)>> {
+    pub(crate) fn storage_requests(&self) -> MutexGuard<'_, Vec<(Vec<B256>, B256)>> {
         self.storage_requests.lock().unwrap()
     }
 
     /// Hashes of the bytecode requests sent so far.
-    pub fn code_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
+    pub(crate) fn code_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
         self.code_requests.lock().unwrap()
     }
 
     /// Block hashes of the block access list requests sent so far.
-    pub fn block_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
+    pub(crate) fn block_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
         self.block_requests.lock().unwrap()
     }
 
@@ -546,31 +552,4 @@ impl SnapClient for ScriptedSnapClient {
         }
         self.next_response()
     }
-}
-
-/// A storage v2 database with headers `0..=1` and an attempt pivoted at block 1 that downloaded
-/// all of its state, ready for its trie rebuild.
-pub fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, BlockNumHash) {
-    let accounts = vec![(key(1), account(1)), (key(2), account(2))];
-    let root = state_root(&accounts);
-    let factory = hashed_factory();
-    let mut parent = B256::ZERO;
-    let headers: Vec<_> = (0..=1)
-        .map(|number| {
-            let header = Header { state_root: root, ..header(number, parent, None) };
-            let sealed = SealedHeader::seal_slow(header);
-            parent = sealed.hash();
-            sealed
-        })
-        .collect();
-    insert_headers(&factory, &headers);
-    let pivot = headers[1].num_hash();
-
-    let provider = factory.database_provider_rw().unwrap();
-    let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
-    provider.start_account_coverage(write).unwrap();
-    let range = verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]);
-    provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-    provider.commit().unwrap();
-    (factory, write, pivot)
 }

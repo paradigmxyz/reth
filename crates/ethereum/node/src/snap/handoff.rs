@@ -166,20 +166,106 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
+    use futures::future::{ready, Ready};
     use reth_db::{tables, transaction::DbTxMut};
+    use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome};
+    use reth_eth_wire_types::snap::{
+        AccountData, AccountRangeMessage, GetAccountRangeMessage, GetBlockAccessListsMessage,
+        GetByteCodesMessage, GetStorageRangesMessage,
+    };
+    use reth_network_p2p::{
+        download::DownloadClient,
+        error::PeerRequestResult,
+        priority::Priority,
+        snap::client::{SnapClient, SnapResponse},
+    };
+    use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         BlockWriter, MetadataProvider, MetadataWriter, StaticFileProviderFactory,
         StaticFileSegment, StaticFileWriter, StorageSettings, StorageSettingsCache,
     };
-    use reth_snap_sync::{test_utils::downloaded_attempt, SnapGeneration, DEFAULT_SCAN_CHUNK};
+    use reth_snap_sync::{
+        SnapAccountStore, SnapGeneration, DEFAULT_RESPONSE_BYTES, DEFAULT_SCAN_CHUNK, MAX_HASH,
+    };
     use reth_stages::StageCheckpoint;
+    use reth_tasks::Runtime;
+    use reth_trie_common::{root::state_root_unsorted, TrieAccount};
 
     const PIVOT: u64 = 1;
 
+    // Serves every account range from one trie, as a peer holding all of it would. A complete
+    // trie needs no proof.
+    #[derive(Debug)]
+    struct WholeTrieClient(Vec<(B256, TrieAccount)>);
+
+    impl DownloadClient for WholeTrieClient {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl SnapClient for WholeTrieClient {
+        type Output = Ready<PeerRequestResult<SnapResponse>>;
+
+        fn get_account_range_with_priority(
+            &self,
+            request: GetAccountRangeMessage,
+            _priority: Priority,
+        ) -> Self::Output {
+            let accounts = self
+                .0
+                .iter()
+                .map(|(key, account)| AccountData::from_trie_account(*key, account))
+                .collect();
+            let message =
+                AccountRangeMessage { request_id: request.request_id, accounts, proof: Vec::new() };
+            ready(Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message))))
+        }
+
+        fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
+            unreachable!("the accounts have no storage")
+        }
+
+        fn get_storage_ranges_with_priority(
+            &self,
+            _request: GetStorageRangesMessage,
+            _priority: Priority,
+        ) -> Self::Output {
+            unreachable!("the accounts have no storage")
+        }
+
+        fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
+            unreachable!("the accounts have no code")
+        }
+
+        fn get_byte_codes_with_priority(
+            &self,
+            _request: GetByteCodesMessage,
+            _priority: Priority,
+        ) -> Self::Output {
+            unreachable!("the accounts have no code")
+        }
+
+        fn get_block_access_lists_with_priority(
+            &self,
+            _request: GetBlockAccessListsMessage,
+            _priority: Priority,
+        ) -> Self::Output {
+            unreachable!("the attempt stays at its pivot")
+        }
+    }
+
     // Headers through the pivot on storage v2.
     fn with_headers() -> ProviderFactory<MockNodeTypesWithDB> {
+        with_headers_committing_to(Header::default().state_root)
+    }
+
+    // Headers through the pivot on storage v2, each committing to `state_root`.
+    fn with_headers_committing_to(state_root: B256) -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
@@ -190,7 +276,7 @@ mod tests {
         let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
         let mut parent = B256::ZERO;
         for number in 0..=PIVOT {
-            let header = Header { number, parent_hash: parent, ..Default::default() };
+            let header = Header { number, parent_hash: parent, state_root, ..Default::default() };
             let hash = header.hash_slow();
             writer.append_header(&header, &hash).unwrap();
             parent = hash;
@@ -207,6 +293,41 @@ mod tests {
         let pivot = provider.sealed_header(PIVOT).unwrap().unwrap().num_hash();
         let write =
             provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(1))).unwrap();
+        provider.commit().unwrap();
+        (factory, write, pivot)
+    }
+
+    // Headers committing to two plain accounts, with an attempt at the pivot that downloaded both.
+    fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, BlockNumHash) {
+        let accounts: Vec<_> = (1..=2)
+            .map(|nonce| {
+                (
+                    B256::with_last_byte(nonce),
+                    TrieAccount { nonce: nonce.into(), ..Default::default() },
+                )
+            })
+            .collect();
+        let root = state_root_unsorted(accounts.iter().copied());
+        let factory = with_headers_committing_to(root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(PIVOT).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let request = GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: root,
+            starting_hash: B256::ZERO,
+            limit_hash: MAX_HASH,
+            response_bytes: DEFAULT_RESPONSE_BYTES,
+        };
+        let downloader =
+            AccountRangeDownloader::new(WholeTrieClient(accounts), request, Runtime::test())
+                .unwrap();
+        let AccountRangeOutcome::Verified(range) = futures::executor::block_on(downloader).unwrap()
+        else {
+            panic!("the client serves the requested root")
+        };
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
         provider.commit().unwrap();
         (factory, write, pivot)
     }
