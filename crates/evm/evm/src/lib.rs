@@ -40,6 +40,9 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+mod prewarm;
+pub use prewarm::{BoxedPrewarmRunner, EvmPrewarmRunner, PrewarmRunner};
+
 #[cfg(feature = "std")]
 mod engine;
 #[cfg(feature = "std")]
@@ -300,6 +303,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// This will preserve any handler modifications
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
+    }
+
+    /// Creates an owned transaction-prewarming runner on its worker thread.
+    ///
+    /// The runner lives only for the current block. It need not be `Send`: the worker pool
+    /// constructs, uses and drops it on the same thread. Its output supplies proof hints, not
+    /// committed state. Implementations may retain execution resources between transactions,
+    /// but must preserve transaction cleanup and the supplied database/environment.
+    ///
+    /// The default preserves the existing EVM construction and precompile customization path.
+    fn prewarm_runner<DB>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> BoxedPrewarmRunner<Self, DB>
+    where
+        DB: Database + 'static,
+        EvmFor<Self, DB>: 'static,
+    {
+        alloc::boxed::Box::new(EvmPrewarmRunner::new(self.evm_with_env(db, evm_env)))
     }
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`

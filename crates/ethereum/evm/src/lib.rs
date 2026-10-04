@@ -80,6 +80,9 @@ pub use test_utils::*;
 
 pub mod factory;
 
+#[cfg(all(test, feature = "std"))]
+mod prewarm_tests;
+
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
