@@ -18,5 +18,6 @@ mod rpc;
 mod selfdestruct;
 mod simulate;
 mod utils;
+mod witness;
 
 const fn main() {}

@@ -21,6 +21,7 @@ use alloy_rpc_types_eth::{
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Helper trait for the engine api server.
@@ -86,6 +87,40 @@ pub trait EngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
+
+    /// Validates a V4 payload and returns an RLP witness when it is freshly executed.
+    /// Already-known payloads and non-VALID statuses may omit the witness.
+    /// The default leaves this extension unsupported for existing server implementations.
+    #[method(name = "newPayloadWithWitnessV4")]
+    async fn new_payload_with_witness_v4(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatusWithWitness> {
+        let _ = (payload, versioned_hashes, parent_beacon_block_root, execution_requests);
+        Err(jsonrpsee::types::ErrorObjectOwned::from(
+            jsonrpsee::types::error::ErrorCode::MethodNotFound,
+        ))
+    }
+
+    /// Validates a V5 payload and returns an RLP witness when it is freshly executed.
+    /// Already-known payloads and non-VALID statuses may omit the witness.
+    /// The default leaves this extension unsupported for existing server implementations.
+    #[method(name = "newPayloadWithWitnessV5")]
+    async fn new_payload_with_witness_v5(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatusWithWitness> {
+        let _ = (payload, versioned_hashes, parent_beacon_block_root, execution_requests);
+        Err(jsonrpsee::types::ErrorObjectOwned::from(
+            jsonrpsee::types::error::ErrorCode::MethodNotFound,
+        ))
+    }
 
     /// Post Bogota payload handler stub.
     ///
@@ -494,4 +529,16 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
+}
+
+/// Payload status with the optional Geth-compatible hex-encoded RLP execution witness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PayloadStatusWithWitness {
+    /// Ordinary Engine API payload status fields.
+    #[serde(flatten)]
+    pub payload_status: PayloadStatus,
+    /// RLP `[headers, codes, state, keys]`, available for freshly executed valid payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<Bytes>,
 }

@@ -37,6 +37,11 @@ mod message;
 #[cfg(feature = "std")]
 pub use message::*;
 
+#[cfg(feature = "std")]
+mod witness;
+#[cfg(feature = "std")]
+pub use witness::{PayloadWitnessCapture, PayloadWitnessRequest, PayloadWitnessRequests};
+
 mod event;
 pub use event::*;
 

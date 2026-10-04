@@ -47,6 +47,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives.workspace = true
