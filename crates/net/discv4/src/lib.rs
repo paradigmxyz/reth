@@ -880,7 +880,7 @@ impl Discv4Service {
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
             debug!(target: "discv4", %err, "dropped outgoing packet");
         });
-        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
+        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx, to.ip()));
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target but checks
@@ -1482,6 +1482,13 @@ impl Discv4Service {
             Entry::Occupied(mut entry) => {
                 {
                     let request = entry.get_mut();
+                    // `Neighbours` packets carry no request binding, so a validly signed packet
+                    // from the queried node could be replayed from another address. Ignore it and
+                    // keep the request armed for the genuine reply.
+                    if !request.is_from_destination(remote_addr.ip()) {
+                        trace!(target: "discv4", from=?remote_addr, expected=?request.destination, "Ignoring Neighbours from unexpected IP");
+                        return
+                    }
                     // Mark the request as answered
                     request.answered = true;
                     let total = request.response_count + msg.nodes.len();
@@ -2428,13 +2435,29 @@ struct FindNodeRequest {
     answered: bool,
     /// Response buffer
     lookup_context: LookupContext,
+    /// IP address the request was sent to, in canonical form.
+    destination: IpAddr,
 }
 
 // === impl FindNodeRequest ===
 
 impl FindNodeRequest {
-    fn new(resp: LookupContext) -> Self {
-        Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
+    fn new(resp: LookupContext, destination: IpAddr) -> Self {
+        Self {
+            sent_at: Instant::now(),
+            response_count: 0,
+            answered: false,
+            lookup_context: resp,
+            destination: destination.to_canonical(),
+        }
+    }
+
+    /// Returns `true` if `ip` is the address this request was sent to.
+    ///
+    /// Only the IP is compared, not the port, and IPv4-mapped IPv6 addresses are treated as their
+    /// IPv4 counterparts because a dual-stack socket reports IPv4 peers as mapped addresses.
+    fn is_from_destination(&self, ip: IpAddr) -> bool {
+        self.destination == ip.to_canonical()
     }
 }
 
@@ -3507,5 +3530,81 @@ mod tests {
                 assert_eq!(found_fork_id, fork_id);
             }
         );
+    }
+
+    /// Sets up a service with a pending `FindNode` request to a proven node at `node_addr`.
+    async fn pending_find_node_service(node_addr: SocketAddr) -> (Discv4Service, NodeRecord) {
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let record = NodeRecord::new(node_addr, id);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+        (service, record)
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_from_unexpected_ip_ignored() {
+        reth_tracing::init_test_tracing();
+
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+
+        let expire = service.find_node_expiration() + 1000;
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Neighbours { nodes: vec![discovered], expire };
+
+        // A validly signed packet from the queried node's id but from another IP is ignored, even
+        // if only the port or the address family differs.
+        for spoofed in [
+            SocketAddr::from(([10, 0, 0, 2], 30303)),
+            SocketAddr::from(([10, 0, 0, 2], 1)),
+            SocketAddr::from((Ipv4Addr::new(10, 0, 0, 2).to_ipv6_mapped(), 30303)),
+            SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 30303)),
+        ] {
+            service.on_neighbours(msg.clone(), spoofed, record.id);
+
+            let request = &service.pending_find_nodes[&record.id];
+            assert!(!request.answered);
+            assert_eq!(request.response_count, 0);
+            assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+            assert!(service.pending_pings.is_empty());
+        }
+
+        // The genuine reply from the queried IP is still accepted, regardless of the port.
+        service.on_neighbours(msg, SocketAddr::from(([10, 0, 0, 1], 40404)), record.id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_ipv4_mapped_ip_accepted() {
+        reth_tracing::init_test_tracing();
+
+        // A dual-stack socket reports IPv4 peers as IPv4-mapped IPv6 addresses.
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+
+        let expire = service.find_node_expiration() + 1000;
+        let msg = Neighbours { nodes: Vec::new(), expire };
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
+        service.on_neighbours(msg, mapped, record.id);
+
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
     }
 }
