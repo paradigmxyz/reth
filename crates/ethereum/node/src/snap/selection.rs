@@ -113,11 +113,11 @@ mod tests {
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache,
+        DBProvider, MetadataWriter, StageCheckpointWriter, StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
     use reth_snap_sync::{SnapAttemptStore, SnapGeneration};
-    use reth_stages::Pipeline;
+    use reth_stages::{Pipeline, StageCheckpoint, StageId};
     use reth_static_file::StaticFileProducer;
     use reth_tasks::Runtime;
     use std::sync::Arc;
@@ -195,8 +195,10 @@ mod tests {
     #[test]
     fn building_refuses_snap_into_a_legacy_layout_stored_at_genesis() {
         let factory = factory(amsterdam());
+        // Genesis stores the settings and sets every checkpoint to its block.
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v1()).unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0)).unwrap();
         provider.commit().unwrap();
         // Recovery runs before genesis stores the settings, so only the build can refuse it.
         assert!(try_build(true, factory).is_err());
