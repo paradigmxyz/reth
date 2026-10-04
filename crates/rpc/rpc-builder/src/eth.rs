@@ -1,5 +1,5 @@
 use reth_rpc::{EthFilter, EthPubSub};
-use reth_rpc_eth_api::EthApiTypes;
+use reth_rpc_eth_api::{EthApiTypes, FullEthApiTypes};
 use reth_rpc_eth_types::EthConfig;
 use reth_tasks::Runtime;
 
@@ -16,7 +16,7 @@ pub struct EthHandlers<EthApi: EthApiTypes> {
 
 impl<EthApi> EthHandlers<EthApi>
 where
-    EthApi: EthApiTypes + 'static,
+    EthApi: FullEthApiTypes + 'static,
 {
     /// Returns a new instance with the additional handlers for the `eth` namespace.
     ///
