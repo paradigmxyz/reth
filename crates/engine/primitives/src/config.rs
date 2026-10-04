@@ -135,6 +135,8 @@ pub struct TreeConfig {
     /// Largest gap between the local head and a new canonical block that is closed by downloading
     /// the missing blocks. Larger gaps trigger a pipeline (backfill) run instead.
     backfill_run_threshold: u64,
+    /// Whether the backfill follows the finalized block, as snap does to anchor its pivot.
+    backfill_follows_finalized: bool,
     /// Number of invalid headers to keep in cache.
     max_invalid_header_cache_length: u32,
     /// Number of cache hits before an invalid header entry is evicted and reprocessed.
@@ -258,6 +260,7 @@ impl Default for TreeConfig {
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_THRESHOLD * 2,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             backfill_run_threshold: DEFAULT_BACKFILL_RUN_THRESHOLD,
+            backfill_follows_finalized: false,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
@@ -344,6 +347,7 @@ impl TreeConfig {
             persistence_backpressure_threshold,
             block_buffer_limit,
             backfill_run_threshold: clamp_backfill_run_threshold(backfill_run_threshold),
+            backfill_follows_finalized: false,
             max_invalid_header_cache_length,
             invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
@@ -405,6 +409,11 @@ impl TreeConfig {
     /// Return the backfill run threshold.
     pub const fn backfill_run_threshold(&self) -> u64 {
         self.backfill_run_threshold
+    }
+
+    /// Returns whether the backfill follows the finalized block.
+    pub const fn backfill_follows_finalized(&self) -> bool {
+        self.backfill_follows_finalized
     }
 
     /// Return the maximum invalid cache header length.
@@ -577,6 +586,15 @@ impl TreeConfig {
         if buffer_limit > self.block_buffer_limit {
             self.block_buffer_limit = buffer_limit;
         }
+        self
+    }
+
+    /// Setter for whether the backfill follows the finalized block.
+    pub const fn with_backfill_follows_finalized(
+        mut self,
+        backfill_follows_finalized: bool,
+    ) -> Self {
+        self.backfill_follows_finalized = backfill_follows_finalized;
         self
     }
 

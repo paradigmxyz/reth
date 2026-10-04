@@ -1209,7 +1209,8 @@ where
                 self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
                     state.head_block_hash,
                 )));
-                if !state.finalized_block_hash.is_zero() {
+                if self.config.backfill_follows_finalized() && !state.finalized_block_hash.is_zero()
+                {
                     self.send_event(EngineApiEvent::BackfillAction(
                         BackfillAction::UpdateFinalized(state.finalized_block_hash),
                     ));
@@ -2211,6 +2212,20 @@ where
         );
         self.backfill_sync_state = BackfillSyncState::Pending;
         self.metrics.engine.pipeline_runs.increment(1);
+        // Forkchoice updates only forward finality to a running backfill, so the run starting here
+        // gets the latest one up front.
+        if self.config.backfill_follows_finalized() &&
+            let Some(finalized) = self
+                .state
+                .forkchoice_state_tracker
+                .latest_state()
+                .map(|state| state.finalized_block_hash)
+                .filter(|hash| !hash.is_zero())
+        {
+            self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(
+                finalized,
+            )));
+        }
         debug!(target: "engine::tree", "emitting backfill action event");
         self.send_event(EngineApiEvent::BackfillAction(action));
     }
