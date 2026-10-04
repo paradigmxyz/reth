@@ -307,7 +307,7 @@ mod tests {
                 )
             })
             .collect();
-        let root = state_root_unsorted(accounts.iter().copied());
+        let root = state_root_unsorted(accounts.clone());
         let factory = with_headers_committing_to(root);
         let provider = factory.database_provider_rw().unwrap();
         let pivot = provider.sealed_header(PIVOT).unwrap().unwrap().num_hash();
