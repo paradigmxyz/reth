@@ -79,6 +79,7 @@ reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
+reth-snap-sync = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -146,4 +147,5 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
     "reth-stages/test-utils",
+    "reth-snap-sync/test-utils",
 ]

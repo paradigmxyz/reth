@@ -7,8 +7,7 @@ use alloy_eips::BlockNumHash;
 use reth_errors::{ConsensusError, RethError};
 use reth_provider::{
     providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    MetadataProvider, ProviderFactory, ProviderResult, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment,
+    ProviderFactory, ProviderResult, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
 use reth_stages::{
@@ -68,41 +67,32 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         // A trie already rebuilt to the pivot returns at once.
         self.rebuild(pivot, &CancellationToken::new())?;
 
-        self.publish(pivot.number)?;
+        self.publish(write, pivot.number)?;
         info!(target: "sync::snap", pivot = pivot.number, "Snap state published; history below it is unavailable");
-
-        let provider = self.factory.database_provider_rw()?;
-        provider.verify_state_root(write).map_err(RethError::other)?;
-        provider.commit()?;
         Ok(HandoffOutcome::Completed)
     }
 
-    /// Finishes a publish that anchored the static files but stopped before its checkpoints
-    /// committed. Runs before the consistency check, which would otherwise try to unwind the files
-    /// below their anchor. Does nothing otherwise.
+    /// Finishes a publish that stopped before its database commit. Runs before the consistency
+    /// check, which would otherwise unwind the static files below their anchor.
     pub fn resume_interrupted_publish(&self) -> Result<(), PipelineError> {
-        let Some(pivot) = self.interrupted_publish()? else { return Ok(()) };
+        let Some((write, pivot)) = self.interrupted_publish()? else { return Ok(()) };
         info!(target: "sync::snap", pivot, "Resuming an interrupted snap state publish");
-        self.publish(pivot)
+        self.publish(write, pivot)
     }
 
-    // The pivot of a publish that anchored the static files but stopped before its checkpoints
-    // committed: the attempt is unfinished, the files start at its pivot, and execution is below
-    // it.
-    fn interrupted_publish(&self) -> ProviderResult<Option<u64>> {
+    // An unfinished attempt whose trie is rebuilt at a still canonical pivot. Read from the
+    // database alone, since a publish deletes the static files before that commit.
+    fn interrupted_publish(&self) -> Result<Option<(SnapWrite, u64)>, PipelineError> {
         let provider = self.factory.provider()?;
-        let Some(attempt) = provider.snap_attempt()?.filter(|attempt| attempt.is_unfinished())
-        else {
+        let Some(write) = provider.active_snap_write().map_err(RethError::other)? else {
             return Ok(None)
         };
-        let pivot = attempt.pivot().number;
-        let static_files_start = self
-            .factory
-            .static_file_provider()
-            .get_lowest_range_start(StaticFileSegment::Transactions);
-        let executed =
-            provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
-        Ok((static_files_start == Some(pivot) && executed < pivot).then_some(pivot))
+        let pivot = provider.authorize_snap_write(write).map_err(RethError::other)?.pivot();
+        let rebuilt = provider.is_trie_rebuild_started(write).map_err(RethError::other)? &&
+            provider
+                .get_stage_checkpoint(StageId::MerkleExecute)?
+                .is_some_and(|checkpoint| checkpoint.block_number == pivot.number);
+        Ok((rebuilt && self.is_canonical(pivot)?).then_some((write, pivot.number)))
     }
 
     // Forkchoice can reorg the pivot out while its state downloads, and publishing anchors the
@@ -123,14 +113,15 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         Ok(())
     }
 
-    // Anchors the static files at `pivot` and moves the checkpoints there. Repeats safely, since
-    // nothing is appended above the pivot until its checkpoints commit.
-    fn publish(&self, pivot: u64) -> Result<(), PipelineError> {
+    // Anchors the static files at `pivot`, moves the checkpoints there and accepts the state in
+    // one database commit, so a stop before it leaves the attempt to resume.
+    fn publish(&self, write: SnapWrite, pivot: u64) -> Result<(), PipelineError> {
         let provider = self.factory.database_provider_rw()?;
         // History below the pivot was never downloaded, so it counts as pruned and the static
         // files start there.
         provider.anchor_pruned_static_files(pivot)?;
         provider.publish_snap_state(pivot).map_err(RethError::other)?;
+        provider.verify_state_root(write).map_err(RethError::other)?;
         provider.commit()?;
         Ok(())
     }
@@ -177,9 +168,10 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, MetadataWriter, StaticFileWriter, StorageSettings, StorageSettingsCache,
+        BlockWriter, MetadataProvider, MetadataWriter, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter, StorageSettings, StorageSettingsCache,
     };
-    use reth_snap_sync::SnapGeneration;
+    use reth_snap_sync::{test_utils::downloaded_attempt, SnapGeneration, DEFAULT_SCAN_CHUNK};
     use reth_stages::StageCheckpoint;
 
     const PIVOT: u64 = 1;
@@ -215,6 +207,44 @@ mod tests {
             provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(1))).unwrap();
         provider.commit().unwrap();
         (factory, write, pivot)
+    }
+
+    // An attempt that downloaded all of its state, with its trie rebuilt at the pivot.
+    fn rebuilt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite, BlockNumHash) {
+        let (factory, write, pivot) = downloaded_attempt();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &CancellationToken::new()).unwrap();
+        provider.commit().unwrap();
+        SnapHandoff::new(factory.clone()).rebuild(pivot, &CancellationToken::new()).unwrap();
+        (factory, write, pivot)
+    }
+
+    // A publish whose static files committed before the node stopped, ahead of its database
+    // commit.
+    fn interrupt_publish(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(PIVOT).unwrap();
+        provider.publish_snap_state(PIVOT).unwrap();
+        factory.static_file_provider().finalize().unwrap();
+    }
+
+    // Asserts the state is published at the pivot and accepted.
+    fn assert_published(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+        assert_eq!(factory.check_consistency().unwrap(), (None, None));
+        let static_files = factory.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            assert_eq!(
+                static_files.get_highest_static_file_block(segment),
+                Some(PIVOT),
+                "{segment}"
+            );
+        }
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+            Some(StageCheckpoint::new(PIVOT))
+        );
+        assert!(provider.snap_attempt().unwrap().unwrap().is_verified());
     }
 
     // Headers through the pivot, with the state published at it.
@@ -318,33 +348,37 @@ mod tests {
     }
 
     #[test]
-    fn a_publish_interrupted_before_its_checkpoints_resumes_at_startup() {
-        let (factory, ..) = downloading();
+    fn a_handoff_accepts_the_state_with_its_publish() {
+        let (factory, write, pivot) = rebuilt();
 
-        // The static files finalize, then the node stops before the database commits.
-        let provider = factory.database_provider_rw().unwrap();
-        provider.anchor_pruned_static_files(PIVOT).unwrap();
-        provider.publish_snap_state(PIVOT).unwrap();
-        factory.static_file_provider().finalize().unwrap();
-        drop(provider);
+        let handoff = SnapHandoff::new(factory.clone()).hand_off(write, pivot).unwrap();
+
+        assert_eq!(handoff, HandoffOutcome::Completed);
+        assert_published(&factory);
+    }
+
+    #[test]
+    fn a_publish_interrupted_before_its_checkpoints_resumes_at_startup() {
+        let (factory, ..) = rebuilt();
+        interrupt_publish(&factory);
 
         // Startup finishes the publish before checking consistency, which would otherwise unwind
         // the anchored files to the old checkpoints.
         SnapHandoff::new(factory.clone()).resume_interrupted_publish().unwrap();
 
-        assert_eq!(factory.check_consistency().unwrap(), (None, None));
-        let static_files = factory.static_file_provider();
-        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
-            assert_eq!(
-                static_files.get_highest_static_file_block(segment),
-                Some(PIVOT),
-                "{segment}"
-            );
-        }
-        let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(
-            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
-            Some(StageCheckpoint::new(PIVOT))
-        );
+        assert_published(&factory);
+    }
+
+    #[test]
+    fn a_resume_cut_short_resumes_again() {
+        let (factory, ..) = rebuilt();
+        interrupt_publish(&factory);
+
+        // The resume deletes the anchored files at once, then stops before anything commits.
+        factory.database_provider_rw().unwrap().anchor_pruned_static_files(PIVOT).unwrap();
+
+        SnapHandoff::new(factory.clone()).resume_interrupted_publish().unwrap();
+
+        assert_published(&factory);
     }
 }
