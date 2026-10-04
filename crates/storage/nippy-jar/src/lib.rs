@@ -841,6 +841,93 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_prune_partially_uncommitted_rows() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        // Two committed rows.
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+
+        // Two uncommitted rows, of which only one is pruned again.
+        append_row(&mut writer, &col1, &col2, 2);
+        append_row(&mut writer, &col1, &col2, 3);
+        writer.prune_rows(1).unwrap();
+        assert_eq!(writer.rows(), 3);
+
+        // The config on disk must never claim rows whose offsets are not on disk.
+        let expected_offsets_len = 1 + 3 * num_columns as u64 * 8 + 8;
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            expected_offsets_len
+        );
+        let expected_data_len = col1[..3].iter().chain(&col2[..3]).map(Vec::len).sum::<usize>();
+        assert_eq!(
+            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize,
+            expected_data_len
+        );
+        assert_jar_rows(file_path.path(), &col1, &col2, 3);
+
+        // Committing must not change anything, and the writer remains usable.
+        writer.commit().unwrap();
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            expected_offsets_len
+        );
+        assert_jar_rows(file_path.path(), &col1, &col2, 3);
+
+        append_row(&mut writer, &col1, &col2, 3);
+        writer.commit().unwrap();
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            1 + 4 * num_columns as u64 * 8 + 8
+        );
+        assert_jar_rows(file_path.path(), &col1, &col2, 4);
+    }
+
+    #[test]
+    fn test_prune_uncommitted_and_committed_rows() {
+        let (col1, col2) = test_data(None);
+        let num_columns = 2;
+        let file_path = tempfile::NamedTempFile::new().unwrap();
+
+        // Two committed rows.
+        append_two_rows(num_columns, file_path.path(), &col1, &col2);
+
+        let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
+        let mut writer = NippyJarWriter::new(nippy).unwrap();
+
+        // One uncommitted row, which is pruned together with one committed row.
+        append_row(&mut writer, &col1, &col2, 2);
+        writer.prune_rows(2).unwrap();
+        assert_eq!(writer.rows(), 1);
+
+        // Committing must not write the stale in-memory offset of the pruned rows.
+        writer.commit().unwrap();
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            1 + num_columns as u64 * 8 + 8
+        );
+        assert_eq!(
+            File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize,
+            col1[0].len() + col2[0].len()
+        );
+        assert_jar_rows(file_path.path(), &col1, &col2, 1);
+
+        // Rows appended through the same writer afterwards read back correctly.
+        append_row(&mut writer, &col1, &col2, 1);
+        writer.commit().unwrap();
+        assert_eq!(
+            File::open(writer.offsets_path()).unwrap().metadata().unwrap().len(),
+            1 + 2 * num_columns as u64 * 8 + 8
+        );
+        assert_jar_rows(file_path.path(), &col1, &col2, 2);
+    }
+
     fn test_append_consistency_partial_commit(
         file_path: &Path,
         col1: &[Vec<u8>],
@@ -1096,5 +1183,27 @@ mod tests {
 
         // runs the consistency check.
         let _ = NippyJarWriter::new(nippy).unwrap();
+    }
+
+    fn append_row(writer: &mut NippyJarWriter, col1: &[Vec<u8>], col2: &[Vec<u8>], row: usize) {
+        writer.append_column(Some(Ok(&col1[row]))).unwrap();
+        writer.append_column(Some(Ok(&col2[row]))).unwrap();
+    }
+
+    /// Asserts that the jar on disk is consistent, claims exactly `rows` rows, and that every
+    /// one of them reads back as the corresponding entry of `col1` and `col2`.
+    fn assert_jar_rows(file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>], rows: usize) {
+        let nippy = NippyJar::load_without_header(file_path).unwrap();
+        assert_eq!(nippy.rows, rows);
+        NippyJarChecker::new(NippyJar::load_without_header(file_path).unwrap())
+            .check_consistency()
+            .unwrap();
+
+        let mut cursor = NippyJarCursor::new(&nippy).unwrap();
+        for row in 0..rows {
+            let values = cursor.row_by_number(row).unwrap().unwrap();
+            assert_eq!((values[0], values[1]), (col1[row].as_slice(), col2[row].as_slice()));
+        }
+        assert!(cursor.row_by_number(rows).unwrap().is_none());
     }
 }
