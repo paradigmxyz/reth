@@ -1,8 +1,9 @@
 //! Dummy blocks and data for tests
+
 use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
-    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
+    address, b256, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
 };
 
 use alloy_consensus::Header;
@@ -61,24 +62,20 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
         SealedBlock::from_sealed_parts(
             SealedHeader::new(
                 Header {
-                    parent_hash: hex!(
+                    parent_hash: b256!(
                         "c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f"
-                    )
-                    .into(),
+                    ),
                     ommers_hash: EMPTY_OMMER_ROOT_HASH,
-                    beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
-                    state_root: hex!(
+                    beneficiary: address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
+                    state_root: b256!(
                         "50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d"
-                    )
-                    .into(),
-                    transactions_root: hex!(
+                    ),
+                    transactions_root: b256!(
                         "0967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192"
-                    )
-                    .into(),
-                    receipts_root: hex!(
+                    ),
+                    receipts_root: b256!(
                         "e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290d"
-                    )
-                    .into(),
+                    ),
                     difficulty: U256::from(131_072),
                     number: 0,
                     gas_limit: 1_000_000,
@@ -86,14 +83,14 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
                     timestamp: 1_000,
                     ..Default::default()
                 },
-                hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
+                b256!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42"),
             ),
             BlockBody {
                 transactions: vec![TransactionSigned::new_unhashed(
             Transaction::Legacy(TxLegacy {
                 gas_price: 10,
                 gas_limit: 400_000,
-                to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
+                to: TxKind::Call(address!("095e7baea6a6c7c4c2dfeb977efac326af552d87")),
                 ..Default::default()
             }),
             Signature::new(
@@ -158,7 +155,7 @@ impl Default for BlockchainTestData {
 pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
     SealedBlock::from_sealed_parts(
         SealedHeader::new(
-            Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+            Header { number: 0, difficulty: U256::ONE, ..Default::default() },
             B256::ZERO,
         ),
         Default::default(),
@@ -207,7 +204,7 @@ fn block1(
             success: true,
             cumulative_gas_used: 300,
             logs: vec![Log::new_unchecked(
-                Address::new([0x60; 20]),
+                Address::repeat_byte(0x60),
                 vec![B256::with_last_byte(1), B256::with_last_byte(2)],
                 Bytes::default(),
             )],
@@ -229,7 +226,7 @@ fn block1(
     header.parent_hash = B256::ZERO;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x30)]), execution_outcome)
 }
 
 /// Block two that points to block 1
@@ -261,7 +258,7 @@ fn block2(
             success: false,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
+                Address::repeat_byte(0x61),
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
@@ -287,7 +284,7 @@ fn block2(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
 }
 
 /// Block three that points to block 2
@@ -324,7 +321,7 @@ fn block3(
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
+                Address::repeat_byte(0x61),
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
@@ -345,7 +342,7 @@ fn block3(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
 }
 
 /// Block four that points to block 3
@@ -407,7 +404,7 @@ fn block4(
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
+                Address::repeat_byte(0x61),
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
@@ -428,7 +425,7 @@ fn block4(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
 }
 
 /// Block five that points to block 4
@@ -487,7 +484,7 @@ fn block5(
             success: true,
             cumulative_gas_used: 400,
             logs: vec![Log::new_unchecked(
-                Address::new([0x61; 20]),
+                Address::repeat_byte(0x61),
                 vec![B256::with_last_byte(3), B256::with_last_byte(4)],
                 Bytes::default(),
             )],
@@ -508,5 +505,5 @@ fn block5(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
 }

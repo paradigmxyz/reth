@@ -177,12 +177,13 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, Address, BlockNumber, B256};
+    use alloy_primitives::{Address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -200,7 +201,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
+    const ADDRESS: Address = Address::with_last_byte(1);
 
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;

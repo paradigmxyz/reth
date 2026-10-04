@@ -328,14 +328,14 @@ mod tests {
         let (addresses, accounts) = accounts();
         let slot = SlotChanges::new(
             U256::from(7),
-            vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(1))],
+            vec![StorageChange::new(BlockAccessIndex::new(1), U256::ONE)],
         );
         let downloaded = credit(addresses[0], 5).remove(0).with_storage_change(slot);
         let lists = [
             list(vec![downloaded.clone()]),
             list(vec![
                 // Only reads the account, which changes nothing.
-                AccountChanges::new(addresses[1]).with_storage_read(U256::from(1)),
+                AccountChanges::new(addresses[1]).with_storage_read(U256::ONE),
                 // Past the cursor, so downloaded whole later.
                 AccountChanges::new(addresses[2])
                     .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1)),

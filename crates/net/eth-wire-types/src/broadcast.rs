@@ -1057,7 +1057,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{hex, Bytes, Signature, U256};
+    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1231,10 +1231,7 @@ mod tests {
                     types: vec![0x00],
                     sizes: vec![0x00],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
+                        B256::ZERO,
                     ],
                 },
                 &hex!(
@@ -1246,14 +1243,8 @@ mod tests {
                     types: vec![0x00, 0x00],
                     sizes: vec![0x00, 0x00],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
+                        B256::ZERO,
+                        B256::ZERO,
                     ],
                 },
                 &hex!(
@@ -1265,10 +1256,7 @@ mod tests {
                     types: vec![0x02],
                     sizes: vec![0xb6],
                     hashes: vec![
-                        B256::from_str(
-                            "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
-                        )
-                        .unwrap(),
+                        b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
                     ],
                 },
                 &hex!(
@@ -1280,14 +1268,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                        )
-                        .unwrap(),
+                        B256::repeat_byte(0xff),
+                        B256::repeat_byte(0xff),
                     ],
                 },
                 &hex!(
@@ -1299,14 +1281,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                        )
-                        .unwrap(),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
                     ],
                 },
                 &hex!(
@@ -1318,14 +1294,8 @@ mod tests {
                     types: vec![0x10, 0x10],
                     sizes: vec![0xdeadc0de, 0xdeadc0de],
                     hashes: vec![
-                        B256::from_str(
-                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                        )
-                        .unwrap(),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
                     ],
                 },
                 &hex!(
@@ -1337,14 +1307,8 @@ mod tests {
                     types: vec![0x6f, 0x6f],
                     sizes: vec![0x7fffffff, 0x7fffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000002",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000002",
-                        )
-                        .unwrap(),
+                        B256::with_last_byte(2),
+                        B256::with_last_byte(2),
                     ],
                 },
                 &hex!(

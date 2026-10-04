@@ -576,7 +576,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.info.nonce = 1;
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -598,7 +598,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.selfdestruct();
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -619,7 +619,7 @@ mod tests {
         let address = Address::repeat_byte(0x05);
         let mut account = Account::default();
         // Pre-state: the account exists and holds a balance.
-        account.info.balance = U256::from(1);
+        account.info.balance = U256::ONE;
         account.set_current_info_as_original();
         // This block drains it. Not selfdestructed: an ordinary value transfer out.
         account.mark_touch();
@@ -670,7 +670,7 @@ mod tests {
         };
 
         let address = Address::repeat_byte(0x07);
-        let pre = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let pre = AccountInfo { balance: U256::ONE, ..Default::default() };
 
         // The EvmState the state hook observes: a funded account drained to empty.
         let mut account = Account::from(pre.clone());

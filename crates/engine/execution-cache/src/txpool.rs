@@ -73,7 +73,7 @@ mod tests {
 
         let mut reads = CachedReads::default();
         let mut storage = U256Map::default();
-        storage.insert(U256::from(1), U256::from(7));
+        storage.insert(U256::ONE, U256::from(7));
         storage.insert(U256::from(2), U256::ZERO);
         reads.insert_account(owner, AccountInfo { nonce: 3, ..Default::default() }, storage);
         reads.accounts.insert(missing, CachedAccount { info: None, storage: Default::default() });

@@ -4545,8 +4545,8 @@ mod tests {
         }
 
         // Pre-populate storage tries with data
-        let storage_address1 = B256::from([1u8; 32]);
-        let storage_address2 = B256::from([2u8; 32]);
+        let storage_address1 = B256::repeat_byte(1u8);
+        let storage_address2 = B256::repeat_byte(2u8);
         {
             let tx = provider_rw.tx_ref();
             let mut storage_cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
@@ -4760,10 +4760,7 @@ mod tests {
                 (masked_account, Some(Account { nonce: 1, ..Default::default() })),
             ],
             B256Map::from_iter([
-                (
-                    kept_storage,
-                    HashedStorageSorted { storage_slots: vec![(kept_slot, U256::from(1))] },
-                ),
+                (kept_storage, HashedStorageSorted { storage_slots: vec![(kept_slot, U256::ONE)] }),
                 (
                     masked_storage,
                     HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(2))] },
@@ -5530,7 +5527,7 @@ mod tests {
 
         let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
             SealedHeader::new(
-                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                Header { number: 0, difficulty: U256::ONE, ..Default::default() },
                 B256::ZERO,
             ),
             Default::default(),
@@ -5596,7 +5593,7 @@ mod tests {
             let header = Header {
                 number: block_num,
                 parent_hash,
-                difficulty: U256::from(1),
+                difficulty: U256::ONE,
                 ..Default::default()
             };
             let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
@@ -5943,7 +5940,7 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = Address::with_last_byte(1);
-        let slot_key = B256::from(U256::from(42));
+        let slot_key = B256::with_last_byte(42);
 
         {
             let rocksdb = factory.rocksdb_provider();

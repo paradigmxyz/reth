@@ -35,7 +35,7 @@ mod tests {
     fn test_from_genesis_account_with_values() {
         // Create a GenesisAccount with specific values
         let mut storage = BTreeMap::new();
-        storage.insert(B256::from([0x01; 32]), B256::from([0x02; 32]));
+        storage.insert(B256::repeat_byte(0x01), B256::repeat_byte(0x02));
 
         let genesis_account = GenesisAccount {
             nonce: Some(10),
@@ -49,8 +49,8 @@ mod tests {
         let trie_account: TrieAccount = genesis_account.into();
 
         let expected_storage_root = storage_root_unhashed(BTreeMap::from([(
-            B256::from([0x01; 32]),
-            U256::from_be_bytes(*B256::from([0x02; 32])),
+            B256::repeat_byte(0x01),
+            U256::from_be_bytes(*B256::repeat_byte(0x02)),
         )]));
 
         // Check that the fields are properly set.
@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn test_from_genesis_account_with_zeroed_storage_values() {
         // Create a GenesisAccount with storage containing zero values
-        let storage = BTreeMap::from([(B256::from([0x01; 32]), B256::from([0x00; 32]))]);
+        let storage = BTreeMap::from([(B256::repeat_byte(0x01), B256::ZERO)]);
 
         let genesis_account = GenesisAccount {
             nonce: Some(3),

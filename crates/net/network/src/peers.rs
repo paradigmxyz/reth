@@ -3464,7 +3464,7 @@ mod tests {
         let config = PeersConfig::test().with_ip_filter(ip_filter);
         let mut peers = PeersManager::new(config);
 
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
 
         // Try to add a peer with an allowed IP
         let allowed_addr: SocketAddr = "192.168.1.100:30303".parse().unwrap();
@@ -3472,7 +3472,7 @@ mod tests {
         assert!(peers.peers.contains_key(&peer_id));
 
         // Try to add a peer with a disallowed IP
-        let peer_id2 = PeerId::new([2; 64]);
+        let peer_id2 = PeerId::repeat_byte(2);
         let disallowed_addr: SocketAddr = "10.0.0.1:30303".parse().unwrap();
         peers.add_peer(peer_id2, PeerAddr::from_tcp(disallowed_addr), None);
         assert!(!peers.peers.contains_key(&peer_id2));

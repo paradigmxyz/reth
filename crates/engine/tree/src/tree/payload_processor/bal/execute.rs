@@ -371,6 +371,7 @@ impl BlockGasTracker {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
     use alloy_consensus::{BlockHeader, Header, TxLegacy};
@@ -655,7 +656,7 @@ mod tests {
         //    `with_bal_builder`.
         // 4. Feed that BAL into `execute_block` and assert 2 receipts + no rejections.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         // Generate keypairs + derive sender addresses.
@@ -877,7 +878,7 @@ mod tests {
         // Two senders → same recipient. Byte-equal across paths means: worker-produced
         // diffs commit identically to a directly-executed serial path.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -916,7 +917,7 @@ mod tests {
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
         // block gas for tx2's gas limit.
         let evm_config = EthEvmConfig::mainnet();
-        let carol: alloy_primitives::Address = alloy_primitives::Address::from([0xCA; 20]);
+        let carol: alloy_primitives::Address = Address::repeat_byte(0xCA);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
         let block_gas_limit = 1_000_000;
         let tx_gas_limit = 990_000;
@@ -987,7 +988,7 @@ mod tests {
         tx2_gas_limit: u64,
         fund_recipient: bool,
     ) -> (CacheDB<EmptyDB>, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
-        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+        let recipient = Address::repeat_byte(0xCA);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1304,8 +1305,7 @@ mod tests {
         // Deploys `0x60006000fd` (PUSH1 0 PUSH1 0 REVERT) at `revert_contract`. Sender calls
         // it; the call reverts; fees + nonce still apply.
         let evm_config = EthEvmConfig::mainnet();
-        let revert_contract: alloy_primitives::Address =
-            alloy_primitives::Address::from([0xDE; 20]);
+        let revert_contract: alloy_primitives::Address = Address::repeat_byte(0xDE);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1347,8 +1347,7 @@ mod tests {
         //
         // Bytecode: PUSH1 0x42, PUSH1 0x00, SSTORE, STOP → `0x60 0x42 0x60 0x00 0x55 0x00`.
         let evm_config = EthEvmConfig::mainnet();
-        let sstore_contract: alloy_primitives::Address =
-            alloy_primitives::Address::from([0x55; 20]);
+        let sstore_contract: alloy_primitives::Address = Address::repeat_byte(0x55);
         let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
         let alice_kp = generate_key(&mut rng());
@@ -1396,7 +1395,7 @@ mod tests {
         assert!(!real_bal.is_empty(), "reference BAL must be non-empty");
 
         // Tamper: append a phantom address not accessed during execution.
-        let phantom = alloy_primitives::Address::from([0xFF; 20]);
+        let phantom = Address::repeat_byte(0xFF);
         let mut tampered_entries: Vec<AccountChanges> = real_bal;
         tampered_entries.push(AccountChanges::new(phantom));
         let tampered_bal: alloy_eip7928::bal::Bal = alloy_eip7928::bal::Bal::new(tampered_entries);

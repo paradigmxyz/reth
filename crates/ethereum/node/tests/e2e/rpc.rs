@@ -134,7 +134,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             .await?;
         let provider = node.rpc_provider_with_wallet(wallet.signer(0));
         let first = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(1)))
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::ONE))
             .await?;
         let second = provider
             .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
@@ -331,7 +331,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
-    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let pre_amsterdam_hash = *pre_amsterdam.tx_hash();
     node.advance_block().await?;
     pre_amsterdam.successful_receipt().await?;
@@ -363,7 +363,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     assert_eq!(frame.state_gas_used, None);
     assert_eq!(frame.gas_refund, None);
 
-    let amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let amsterdam_hash = *amsterdam.tx_hash();
     node.advance_block().await?;
     amsterdam.successful_receipt().await?;
@@ -774,7 +774,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
 
     let self_send_gas = provider
         .estimate_gas(
-            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::from(1)),
+            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::ONE),
         )
         .await?;
     assert_eq!(self_send_gas, 12_000);
@@ -789,7 +789,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(existing_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert_eq!(value_existing_gas, 21_000);
@@ -807,7 +807,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(fresh_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert!(value_fresh_gas > 21_000);
@@ -818,10 +818,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
     let mut overrides = StateOverride::default();
     overrides.insert(
         gas_gate,
-        AccountOverride {
-            code: Some("0x5a610fa010600957fe5b00".parse::<Bytes>()?),
-            ..Default::default()
-        },
+        AccountOverride { code: Some(bytes!("0x5a610fa010600957fe5b00")), ..Default::default() },
     );
     let gated_tx = TransactionRequest::default().with_from(from).with_to(gas_gate);
     let gated_gas = provider.estimate_gas(gated_tx.clone()).overrides(overrides.clone()).await?;
@@ -886,7 +883,6 @@ async fn test_eth_config() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
     use alloy_consensus::Header;
-    use alloy_primitives::hex;
     use reth_chainspec::{
         sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
         SEPOLIA,
@@ -918,14 +914,14 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
         let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
         if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
             assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("268956b6")));
+            assert_eq!(config.current.fork_id, bytes!("268956b6"));
             let next = config.next.unwrap();
             assert_eq!(next.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(next.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(next.fork_id, bytes!("6c1d9423"));
             assert_eq!(config.last.unwrap(), next);
         } else {
             assert_eq!(config.current.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(config.current.fork_id, bytes!("6c1d9423"));
             assert!(config.next.is_none());
             assert!(config.last.is_none());
         }
@@ -1121,7 +1117,7 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
 
         let ok: Bytes =
             provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
-        assert_eq!(U256::from_be_slice(&ok), U256::from(1), "{fork}");
+        assert_eq!(U256::from_be_slice(&ok), U256::ONE, "{fork}");
 
         // About 26M gas of execution, above the 16,777,216 cap.
         let call_result = provider
@@ -1136,7 +1132,7 @@ async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
             assert_eq!(access_list.gas_used, U256::from(16_777_216));
             assert!(access_list.error.is_some());
         } else {
-            assert_eq!(U256::from_be_slice(&call_result?), U256::from(1));
+            assert_eq!(U256::from_be_slice(&call_result?), U256::ONE);
             assert!(access_list.gas_used > U256::from(26_000_000));
             assert!(access_list.error.is_none());
         }
@@ -1197,7 +1193,7 @@ async fn test_mine() -> eyre::Result<()> {
     node.advance_blocks(2).await?;
 
     // The receipts are in the order of the given transactions, not in block order.
-    let first = account.transfer(recipient, U256::from(1)).await;
+    let first = account.transfer(recipient, U256::ONE).await;
     let second = account.transfer(recipient, U256::from(2)).await;
     let mined = node.mine([second.clone(), first.clone()]).await?.ensure_success()?;
     assert_eq!(mined.block().number, 3);

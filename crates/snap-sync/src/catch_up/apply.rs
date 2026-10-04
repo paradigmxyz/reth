@@ -64,6 +64,7 @@ pub enum DownloadedAccount {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore, StorageProgress};
     use alloy_consensus::{Header, TxLegacy};
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn read_only_entries_write_nothing() {
-        let changes = AccountChanges::new(ACCOUNT).with_storage_read(U256::from(1));
+        let changes = AccountChanges::new(ACCOUNT).with_storage_read(U256::ONE);
 
         let update = apply(&changes, DownloadedAccount::Unknown);
 
@@ -136,8 +137,8 @@ mod tests {
 
     #[test]
     fn empty_slot_entries_write_nothing() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_storage_change(SlotChanges::new(U256::from(1), vec![]));
+        let changes =
+            AccountChanges::new(ACCOUNT).with_storage_change(SlotChanges::new(U256::ONE, vec![]));
 
         let update = apply(&changes, DownloadedAccount::Unknown);
 
@@ -148,7 +149,7 @@ mod tests {
     fn account_changes_with_empty_slots_write_no_storage() {
         let changes = AccountChanges::new(ACCOUNT)
             .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_storage_change(SlotChanges::new(U256::from(1), vec![]));
+            .with_storage_change(SlotChanges::new(U256::ONE, vec![]));
 
         let update = apply(&changes, DownloadedAccount::Absent);
 
@@ -198,12 +199,12 @@ mod tests {
 
     #[test]
     fn zeroed_slots_and_cleared_code_are_written() {
-        let existing = Account::new(1, U256::from(1), Some(B256::repeat_byte(1)));
+        let existing = Account::new(1, U256::ONE, Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_code_change(CodeChange::new(index(1), bytes!("6001")))
             .with_code_change(CodeChange::new(index(2), Bytes::new()))
             .with_storage_change(SlotChanges::new(
-                U256::from(1),
+                U256::ONE,
                 vec![
                     StorageChange::new(index(1), U256::from(5)),
                     StorageChange::new(index(2), U256::ZERO),
@@ -216,7 +217,7 @@ mod tests {
         assert_eq!(update.state.accounts[&hashed_address].as_ref().unwrap().bytecode_hash, None);
         assert_eq!(
             update.state.storages[&hashed_address],
-            HashedStorage::from_iter([(keccak256(B256::from(U256::from(1))), U256::ZERO)])
+            HashedStorage::from_iter([(keccak256(B256::with_last_byte(1)), U256::ZERO)])
         );
         assert!(update.bytecodes.is_empty());
     }
@@ -278,8 +279,8 @@ mod tests {
     fn flat_state_excludes_zero_slots_and_deleted_account_storage() {
         let mut db = CacheDB::<EmptyDB>::default();
         for address in [ACCOUNT, SENDER] {
-            db.insert_account_info(address, AccountInfo::from_balance(U256::from(1)));
-            db.insert_account_storage(address, U256::from(1), U256::from(5)).unwrap();
+            db.insert_account_info(address, AccountInfo::from_balance(U256::ONE));
+            db.insert_account_storage(address, U256::ONE, U256::from(5)).unwrap();
             db.insert_account_storage(address, U256::from(2), U256::ZERO).unwrap();
         }
         let pre = flatten(&db);
@@ -293,13 +294,13 @@ mod tests {
             post.0,
             BTreeMap::from([(
                 keccak256(SENDER),
-                Account { balance: U256::from(1), ..Default::default() },
+                Account { balance: U256::ONE, ..Default::default() },
             )])
         );
         assert_eq!(
             post.1,
             BTreeMap::from([(
-                (keccak256(SENDER), keccak256(B256::from(U256::from(1)))),
+                (keccak256(SENDER), keccak256(B256::with_last_byte(1))),
                 U256::from(5)
             )])
         );
@@ -350,7 +351,7 @@ mod tests {
         db.insert_account_info(SENDER, AccountInfo::from_balance(U256::from(u64::MAX)));
         // Zeroes slot 1, reads slot 3, stores the block number in slot 2 and the call value in 4.
         insert(&mut db, contract, 1, bytes!("6000600155600354504360025534600455"));
-        db.insert_account_storage(contract, U256::from(1), U256::from(5)).unwrap();
+        db.insert_account_storage(contract, U256::ONE, U256::from(5)).unwrap();
         db.insert_account_storage(contract, U256::from(3), U256::from(7)).unwrap();
         let pre = flatten(&db);
 

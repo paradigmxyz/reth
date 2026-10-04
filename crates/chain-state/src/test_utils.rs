@@ -28,7 +28,7 @@ use std::{
 use tokio::sync::broadcast::{self, Sender};
 
 /// Fixed address used for storage slot writes in test blocks.
-const TEST_STORAGE_ADDRESS: Address = Address::new([0xAA; 20]);
+const TEST_STORAGE_ADDRESS: Address = Address::repeat_byte(0xAA);
 
 /// Fixed storage slot key used in test blocks.
 const TEST_STORAGE_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
@@ -268,7 +268,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             Some(None)
         };
 
-        let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
+        let new_slot_value = U256::from(block_number).wrapping_add(U256::ONE);
 
         let bundle = BundleState::builder(block_number..=block_number)
             .state_present_account_info(self.signer, post_info.clone())

@@ -1320,7 +1320,7 @@ mod tests {
     fn execution_overlay_marks_historical_fallback_for_managed_fork() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
-        let slot = U256::from(1);
+        let slot = U256::ONE;
         let provider_rw = factory.provider_rw().unwrap();
         for (block_number, balance, storage_value) in [(2u64, 10u64, 10u64), (3u64, 20u64, 15u64)] {
             provider_rw
@@ -1372,9 +1372,9 @@ mod tests {
 
         assert_eq!(fallback_block_number, Some(2));
 
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(1));
+        assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::ONE);
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
-        assert_eq!(overlay.storage[&address][&slot], U256::from(1));
+        assert_eq!(overlay.storage[&address][&slot], U256::ONE);
         assert_eq!(
             overlay.block_hashes,
             [side_block_two, side_block_three]
