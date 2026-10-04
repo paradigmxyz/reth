@@ -1375,10 +1375,10 @@ mod tests {
 
     #[test]
     fn the_legacy_layout_refuses_snap_until_execution_passes_genesis() {
+        // Databases from before stored settings fall back to the legacy layout.
         let factory = create_test_provider_factory_with_genesis_block_number(5);
         factory.set_storage_settings_cache(StorageSettings::v1());
         let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v1()).unwrap();
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
         provider.commit().unwrap();
 

@@ -1510,12 +1510,10 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             Some(attempt) => {
                 Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
             }
-            // Snap only bootstraps a database with nothing executed past genesis. A database
-            // without stored settings gets its layout at genesis, so it is only checked once
-            // genesis has run.
+            // Snap only bootstraps a database with nothing executed past genesis. Genesis writes
+            // the checkpoint, so a database without one gets its layout there.
             None if snap &&
-                self.storage_settings()?.is_some() &&
-                self.get_stage_checkpoint(StageId::Execution)?.is_none_or(|checkpoint| {
+                self.get_stage_checkpoint(StageId::Execution)?.is_some_and(|checkpoint| {
                     checkpoint.block_number == self.chain_spec().genesis_header().number()
                 }) =>
             {
