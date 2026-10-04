@@ -1660,8 +1660,7 @@ where
                     .original_info
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
-                    .map(|bytecode| bytecode.is_eip7702())
-                    .unwrap_or(false);
+                    .is_some_and(|bytecode| bytecode.is_eip7702());
 
                 // Check if current code is empty (delegation cleared)
                 let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);

@@ -594,7 +594,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
                         StorageBeforeTx {
                             address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
+                            key: B256::from(key),
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
@@ -1640,7 +1640,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let initial_highest_block = self.get_highest_static_file_block(segment);
         debug!(target: "reth::providers::static_file", ?initial_highest_block, "Initial highest block for segment");
 
-        if self.access.is_read_only() {
+        if self.is_read_only() {
             // Read-only mode: cannot modify files, so just validate consistency and error if
             // broken.
             debug!(target: "reth::providers::static_file", "Checking segment consistency (read-only)");
@@ -2424,7 +2424,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        if self.access.is_read_only() {
+        if self.is_read_only() {
             return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 

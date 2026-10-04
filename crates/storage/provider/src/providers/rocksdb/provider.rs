@@ -302,11 +302,7 @@ impl RocksDBBuilder {
     /// - Values are varint-encoded `u64` (a few bytes - too small to benefit from compression)
     /// - Every lookup expects a hit (bloom filters only help when checking non-existent keys)
     fn tx_hash_numbers_column_family_options(cache: &Cache) -> Options {
-        let mut table_options = BlockBasedOptions::default();
-        table_options.set_block_size(DEFAULT_BLOCK_SIZE);
-        table_options.set_cache_index_and_filter_blocks(true);
-        table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
-        table_options.set_block_cache(cache);
+        let table_options = Self::default_table_options(cache);
         // Disable bloom filter: every lookup expects a hit, so bloom filters provide no benefit
         // and waste memory
 
@@ -1567,7 +1563,7 @@ impl RocksDBProvider {
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let plain_key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::from(slot);
                         storage_history
                             .entry((revert.address, plain_key))
                             .or_default()

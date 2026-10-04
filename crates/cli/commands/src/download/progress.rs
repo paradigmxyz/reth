@@ -206,9 +206,8 @@ impl SharedProgress {
 
     /// Records an archive whose outputs were already present locally.
     pub(crate) fn record_reused_archive(&self, download_bytes: u64, output_bytes: u64) {
-        self.completed_download_bytes.fetch_add(download_bytes, Ordering::Relaxed);
-        self.completed_output_bytes.fetch_add(output_bytes, Ordering::Relaxed);
-        self.archives_done.fetch_add(1, Ordering::Relaxed);
+        self.record_archive_download_complete(download_bytes);
+        self.record_archive_output_complete(output_bytes);
     }
 
     /// Records an archive whose compressed download completed successfully.
@@ -784,8 +783,7 @@ mod tests {
 
         progress.record_session_fetched_bytes(10);
         progress.record_session_fetched_bytes(10);
-        progress.record_archive_download_complete(10);
-        progress.record_archive_output_complete(20);
+        progress.record_reused_archive(10, 20);
 
         assert_eq!(progress.session_fetched_bytes.load(Ordering::Relaxed), 20);
         assert_eq!(progress.logical_downloaded_bytes(), 10);

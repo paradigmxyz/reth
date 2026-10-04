@@ -298,7 +298,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                     continue
                 }
                 if parent_header.is_some() {
-                    parent_header = Some(block.sealed_header().clone());
+                    parent_header = Some(block.clone_sealed_header());
                 }
 
                 // add to the internal maps

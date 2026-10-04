@@ -241,7 +241,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
-                    Arc::new(NoopConsensus::default()),
+                    NoopConsensus::arc(),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
                     NoopEvmConfig::<N::Evm>::default(),

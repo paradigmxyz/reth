@@ -2483,7 +2483,7 @@ Post-merge hard forks (timestamp based):
 
         let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
-        assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
+        assert_eq!(chainspec.chain, Chain::optimism_mainnet());
         let expected_state_root: B256 =
             b256!("0x9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360");
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);

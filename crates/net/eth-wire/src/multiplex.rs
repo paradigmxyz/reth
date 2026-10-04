@@ -259,7 +259,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
-        let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
+        let eth_cap = self.inner.shared_capabilities().eth_version()?;
         self.into_satellite_stream_with_tuple_handshake(
             &Capability::eth(eth_cap),
             async move |proxy| {
@@ -848,12 +848,8 @@ where
                     let Some(offset) = msg.first().copied() else {
                         return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage.into())))
                     };
-                    let Some(cap) = this
-                        .inner
-                        .conn
-                        .shared_capabilities()
-                        .find_by_relative_offset(offset)
-                        .cloned()
+                    let Some(cap) =
+                        this.inner.shared_capabilities().find_by_relative_offset(offset).cloned()
                     else {
                         return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
                             offset,

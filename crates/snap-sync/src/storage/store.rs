@@ -286,7 +286,7 @@ impl<T: MetadataProvider> SnapStorageStore for T {
                 .map_or(origin, |account| (U256::from_be_bytes(account.0) + U256::ONE).into());
             self.remove::<tables::HashedStorages>(start..chunk.account)?;
         }
-        if chunk.from == B256::ZERO {
+        if chunk.from.is_zero() {
             self.remove::<tables::HashedStorages>(chunk.account..=chunk.account)?;
         }
         let state = HashedPostState::default()

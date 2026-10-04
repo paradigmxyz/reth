@@ -604,7 +604,7 @@ where
         let RangeResponse { items: accounts, end } =
             state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
 
-        let proof = if req.starting_hash == B256::ZERO && end == RangeEnd::Exhausted {
+        let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
             Vec::new()
         } else {
             let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
@@ -669,7 +669,7 @@ where
 
             remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
             let last = account_slots.last().map(|(hash, _)| *hash);
-            let needs_proof = origin != B256::ZERO || end != RangeEnd::Exhausted;
+            let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
             slots.push(
                 account_slots
                     .into_iter()

@@ -184,7 +184,7 @@ where
     fn update_metrics(&self, block_cache: &BlockCache, size_delta: i64) {
         self.metrics.size_bytes.increment(size_delta as f64);
         self.metrics.notifications_count.set(block_cache.notification_max_blocks.len() as f64);
-        self.metrics.committed_blocks_count.set(block_cache.committed_blocks.len() as f64);
+        self.metrics.committed_blocks_count.set(block_cache.num_blocks() as f64);
 
         if let Some(lowest_committed_block_height) = block_cache.lowest_committed_block_height {
             self.metrics.lowest_committed_block_height.set(lowest_committed_block_height as f64);

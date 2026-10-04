@@ -1094,7 +1094,7 @@ where
 
                 // `take_cached_branch` replaces hashes with zero when their nodes must be
                 // revealed to support a possible branch collapse.
-                if hash != B256::ZERO {
+                if !hash.is_zero() {
                     let mut probed_targets = targets.clone();
                     if !self.should_retain(&mut probed_targets, &child_path, false) {
                         trace!(
@@ -1618,11 +1618,7 @@ where
         // Shortcut: check if storage is empty
         if self.hashed_cursor.is_storage_empty()? {
             return Ok(if targets.iter().any(|target| !target.parent.is_known()) {
-                vec![ProofTrieNodeV2 {
-                    path: Nibbles::default(),
-                    node: TrieNodeV2::EmptyRoot,
-                    masks: None,
-                }]
+                vec![ProofTrieNodeV2::empty()]
             } else {
                 Vec::new()
             })
@@ -1649,11 +1645,7 @@ where
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         if self.hashed_cursor.is_storage_empty()? {
-            return Ok(ProofTrieNodeV2 {
-                path: Nibbles::default(),
-                node: TrieNodeV2::EmptyRoot,
-                masks: None,
-            })
+            return Ok(ProofTrieNodeV2::empty())
         }
 
         // Don't call `set_hashed_address` on the trie cursor until after the previous shortcut has
@@ -2201,7 +2193,7 @@ mod tests {
                 slots
                     .into_iter()
                     .map(|(slot_bytes, value)| (B256::from(slot_bytes), U256::from(value)))
-                    .filter(|(_, v)| *v != U256::ZERO)
+                    .filter(|(_, v)| !v.is_zero())
                     .collect()
             })
         }

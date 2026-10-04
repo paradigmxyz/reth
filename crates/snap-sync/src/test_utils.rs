@@ -31,7 +31,7 @@ use reth_network_p2p::{
     snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives_traits::{Account, AlloyBlockHeader, Bytecode, SealedHeader, StorageEntry};
+use reth_primitives_traits::{Account, Bytecode, SealedHeader, StorageEntry};
 use reth_provider::{
     test_utils::{
         create_test_provider_factory, insert_headers, MockEthProvider, MockNodeTypesWithDB,
@@ -341,7 +341,7 @@ impl BalChain {
     /// The block `nth` after the pivot, which is the pivot itself at zero.
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
-        BlockNumHash::new(header.number(), header.hash())
+        header.num_hash()
     }
 
     /// A peer's answer serving the list of each block `served` names, holding none where it names

@@ -6,7 +6,7 @@ use crate::{
     common::DownloadContext, CatchUpProgress, SnapAttemptStore, SnapCatchUpStore, SnapSyncError,
     SnapWrite,
 };
-use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
+use alloy_eips::eip7928::bal::DecodedBal;
 use alloy_primitives::Sealable;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
@@ -98,7 +98,7 @@ where
             .into_iter()
             .zip(&headers)
             .map_while(|((_, list), header)| {
-                let block = BlockNumHash::new(header.number(), header.hash());
+                let block = header.num_hash();
                 list.map(|list| (block, header.parent_hash(), list))
             })
             .collect::<Vec<_>>();

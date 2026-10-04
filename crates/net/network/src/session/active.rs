@@ -126,7 +126,7 @@ impl BroadcastItemCounter {
     pub(crate) fn try_add(&self, n: usize) -> bool {
         let prev = self.0.fetch_add(n, Ordering::Relaxed);
         if prev >= MAX_QUEUED_BROADCAST_ITEMS {
-            self.0.fetch_sub(n, Ordering::Relaxed);
+            self.sub(n);
             false
         } else {
             true

@@ -660,17 +660,16 @@ mod tests {
     #[test]
     fn merkle_checkpoint_roundtrip() {
         let mut rng = rand::rng();
-        let checkpoint = MerkleCheckpoint {
-            target_block: rng.random(),
-            last_account_key: rng.random(),
-            walker_stack: vec![StoredSubNode {
+        let checkpoint = MerkleCheckpoint::new(
+            rng.random(),
+            rng.random(),
+            vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
                 nibble: Some(rng.random()),
                 node: None,
             }],
-            state: HashBuilderState::default(),
-            storage_root_checkpoint: None,
-        };
+            HashBuilderState::default(),
+        );
 
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);

@@ -1266,15 +1266,7 @@ mod tests {
         let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
 
         overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
-        let state_parent = manager
-            .state_trie_overlays
-            .entries
-            .get(&parent_key)
-            .and_then(|entry| match entry.value() {
-                OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
-                OverlayCacheEntry::Computing(_) => None,
-            })
-            .unwrap();
+        let state_parent = manager.state_trie_overlays.ready(&parent_key).unwrap();
         let execution_parent =
             manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 

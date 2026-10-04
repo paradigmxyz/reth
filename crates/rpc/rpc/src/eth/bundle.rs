@@ -126,7 +126,7 @@ where
         }
 
         if let Some(difficulty) = difficulty {
-            evm_env.block_env.inner_mut().difficulty = U256::from(difficulty);
+            evm_env.block_env.inner_mut().difficulty = difficulty;
         }
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob

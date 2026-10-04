@@ -91,7 +91,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Returns the sealed block header by hash.
     pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
+        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().clone_sealed_header())
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
