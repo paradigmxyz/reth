@@ -4,10 +4,11 @@
 //! committed cursor and stop flag are polled; the canonical loop never waits or takes a new lock.
 
 use std::{
+    collections::VecDeque,
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
         Arc,
     },
     time::Duration,
@@ -167,6 +168,208 @@ impl<T> BoundedPrewarmReceiver<T> {
     fn observe_wait(&self, reason: WaitReason) {
         if let Some(waiting) = &self.waiting {
             let _ = waiting.try_send(reason);
+        }
+    }
+}
+
+/// Opt-in proof-key read-ahead, independent of the unchanged near EVM job policy.
+///
+/// The coordinator retains at most `lookahead` handles and 1 MiB of inline queue storage.
+/// Existing transaction payload/input-channel memory and downstream trie allocations are not
+/// covered by that bound. Each handle keeps its original ordered near execution opportunity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProofKeyPrewarmPolicy {
+    near_lookahead: usize,
+    lookahead: usize,
+}
+
+impl ProofKeyPrewarmPolicy {
+    /// Creates a farther key-only window in `(near, 2 * near]`, capped at 1024 handles.
+    pub const fn new(near: TransactionPrewarmPolicy, lookahead: usize) -> Option<Self> {
+        if lookahead > near.lookahead() &&
+            lookahead <= near.lookahead().saturating_mul(2) &&
+            lookahead <= 1024
+        {
+            Some(Self { near_lookahead: near.lookahead(), lookahead })
+        } else {
+            None
+        }
+    }
+
+    /// Maximum read-ahead distance and number of coordinator-owned handles.
+    pub const fn lookahead(self) -> usize {
+        self.lookahead
+    }
+
+    pub(super) const fn matches(self, near: TransactionPrewarmPolicy) -> bool {
+        self.near_lookahead == near.lookahead()
+    }
+}
+
+pub(super) const PROOF_HINT_BATCH_TRANSACTIONS: usize = 16;
+pub(super) const MAX_PROOF_QUEUE_INLINE_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug)]
+struct BufferedProofTx<T> {
+    index: usize,
+    tx: T,
+    hinted: bool,
+}
+
+/// Coordinator-local observations; no per-key shared counters or locks.
+#[derive(Debug, Default)]
+pub(super) struct ProofReadAheadStats {
+    pub(super) near_jobs: usize,
+    pub(super) far_batches: usize,
+    pub(super) far_transactions: usize,
+    pub(super) stale_handles: usize,
+    pub(super) stopped_handles: usize,
+    pub(super) peak_buffered_handles: usize,
+    pub(super) queue_inline_bytes: usize,
+    pub(super) input_disconnected: bool,
+    pub(super) stopped: bool,
+}
+
+/// Bounded coordinator-owned queue. Only `next` returns EVM jobs; hint callbacks borrow handles.
+#[derive(Debug)]
+pub(super) struct ProofKeyPrewarmReceiver<T, U> {
+    near: BoundedPrewarmReceiver<T>,
+    policy: ProofKeyPrewarmPolicy,
+    buffered: VecDeque<BufferedProofTx<U>>,
+    input_closed: bool,
+    pub(super) stats: ProofReadAheadStats,
+}
+
+impl<T, U> ProofKeyPrewarmReceiver<T, U> {
+    pub(super) fn fits(policy: ProofKeyPrewarmPolicy) -> bool {
+        std::mem::size_of::<BufferedProofTx<U>>()
+            .checked_mul(policy.lookahead)
+            .is_some_and(|bytes| bytes <= MAX_PROOF_QUEUE_INLINE_BYTES)
+    }
+
+    pub(super) fn new(
+        pending: Receiver<(usize, T)>,
+        near: TransactionPrewarmPolicy,
+        policy: ProofKeyPrewarmPolicy,
+        committed: Arc<AtomicUsize>,
+        stopped: Arc<AtomicBool>,
+    ) -> Self {
+        assert!(policy.matches(near) && Self::fits(policy));
+        let buffered = VecDeque::with_capacity(policy.lookahead);
+        let queue_inline_bytes = buffered.capacity() * std::mem::size_of::<BufferedProofTx<U>>();
+        assert!(queue_inline_bytes <= MAX_PROOF_QUEUE_INLINE_BYTES);
+        Self {
+            near: BoundedPrewarmReceiver::new(pending, near, committed, stopped),
+            policy,
+            buffered,
+            input_closed: false,
+            stats: ProofReadAheadStats { queue_inline_bytes, ..Default::default() },
+        }
+    }
+
+    fn push(&mut self, index: usize, tx: T, prepare: &mut impl FnMut(T) -> U) {
+        self.buffered.push_back(BufferedProofTx { index, tx: prepare(tx), hinted: false });
+        self.stats.peak_buffered_handles =
+            self.stats.peak_buffered_handles.max(self.buffered.len());
+        debug_assert!(self.buffered.len() <= self.policy.lookahead);
+    }
+
+    /// Admits ready near work first; at most one bounded far batch runs between near checks.
+    ///
+    /// `prepare` moves the already converted parts without cloning transaction payloads. The
+    /// single out-of-distance item needed to observe a gap remains charged to the handle cap,
+    /// receives no premature hint, and blocks further input reads until the cursor catches up.
+    pub(super) fn next(
+        &mut self,
+        mut prepare: impl FnMut(T) -> U,
+        mut hint: impl FnMut(&[&U]),
+    ) -> Option<(usize, U, PrewarmPermit)> {
+        loop {
+            if self.near.stopped.load(Ordering::Relaxed) {
+                self.stats.stopped = true;
+                self.stats.stopped_handles += self.buffered.len();
+                self.buffered.clear();
+                return None;
+            }
+            let committed = self.near.committed.load(Ordering::Relaxed);
+            while self.buffered.front().is_some_and(|tx| tx.index < committed) {
+                self.buffered.pop_front();
+                self.stats.stale_handles += 1;
+            }
+            if self
+                .buffered
+                .front()
+                .is_some_and(|tx| tx.index - committed < self.near.policy.lookahead()) &&
+                self.near.in_flight.count.load(Ordering::Relaxed) <
+                    self.near.policy.max_in_flight()
+            {
+                let next = self.buffered.pop_front().expect("front was checked");
+                self.near.in_flight.count.fetch_add(1, Ordering::Relaxed);
+                self.stats.near_jobs += 1;
+                return Some((next.index, next.tx, PrewarmPermit(Arc::clone(&self.near.in_flight))));
+            }
+
+            // Read only one handle before rechecking ready near work and termination. In
+            // particular, a continuously producing sender cannot starve canonical progress.
+            let may_read = !self.input_closed &&
+                self.buffered.len() < self.policy.lookahead &&
+                self.buffered.back().is_none_or(|tx| {
+                    tx.index < committed || tx.index - committed < self.policy.lookahead
+                });
+            if may_read {
+                match self.near.pending.try_recv() {
+                    Ok((index, tx)) => {
+                        self.push(index, tx, &mut prepare);
+                        continue;
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        self.input_closed = true;
+                        self.stats.input_disconnected = true;
+                    }
+                    Err(TryRecvError::Empty) => {}
+                }
+            }
+
+            let batch: Vec<_> = self
+                .buffered
+                .iter_mut()
+                .filter(|tx| {
+                    !tx.hinted &&
+                        tx.index >= committed &&
+                        tx.index - committed >= self.near.policy.lookahead() &&
+                        tx.index - committed < self.policy.lookahead
+                })
+                .take(PROOF_HINT_BATCH_TRANSACTIONS)
+                .map(|tx| {
+                    tx.hinted = true;
+                    &tx.tx
+                })
+                .collect();
+            if !batch.is_empty() {
+                self.stats.far_batches += 1;
+                self.stats.far_transactions += batch.len();
+                hint(&batch);
+                continue;
+            }
+            if self.input_closed && self.buffered.is_empty() {
+                return None;
+            }
+            if self.buffered.is_empty() {
+                #[cfg(test)]
+                self.near.observe_wait(WaitReason::Input);
+                match self.near.pending.recv_timeout(self.near.policy.poll_interval()) {
+                    Ok((index, tx)) => self.push(index, tx, &mut prepare),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => {
+                        self.input_closed = true;
+                        self.stats.input_disconnected = true;
+                    }
+                }
+            } else {
+                #[cfg(test)]
+                self.near.observe_wait(WaitReason::Future);
+                let _ = self.near.completed.recv_timeout(self.near.policy.poll_interval());
+            }
         }
     }
 }
@@ -347,3 +550,7 @@ mod tests {
         assert_eq!(index, usize::MAX);
     }
 }
+
+#[cfg(test)]
+#[path = "prewarm_proof_tests.rs"]
+mod proof_tests;

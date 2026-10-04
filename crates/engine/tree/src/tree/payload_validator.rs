@@ -100,7 +100,10 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::{prewarm::TransactionPrewarmPolicy, PayloadProcessor},
+    payload_processor::{
+        prewarm::{ProofKeyPrewarmPolicy, TransactionPrewarmPolicy},
+        PayloadProcessor,
+    },
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
@@ -384,6 +387,17 @@ where
         policy: Option<TransactionPrewarmPolicy>,
     ) -> Self {
         self.payload_processor.set_transaction_prewarm_policy(policy);
+        self
+    }
+
+    /// Enables optional bounded proof-key hints ahead of the unchanged near prewarm window.
+    ///
+    /// This is disabled by default and ignored without a matching near policy or hint stream.
+    pub const fn with_proof_key_prewarm_policy(
+        mut self,
+        policy: Option<ProofKeyPrewarmPolicy>,
+    ) -> Self {
+        self.payload_processor.set_proof_key_prewarm_policy(policy);
         self
     }
 

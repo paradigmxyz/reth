@@ -50,6 +50,8 @@ pub use sender_recovery::SenderRecoveryCache;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
+pub mod proof_keys;
+pub use proof_keys::ProofKeyHint;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
@@ -300,6 +302,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// This will preserve any handler modifications
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
+    }
+
+    /// Emits partial proof keys for a bounded batch of future payload transactions.
+    ///
+    /// The environment is canonical, before worker validation checks are relaxed. Implementations
+    /// must not execute transactions, read providers, or retain borrowed inputs. Stop when `emit`
+    /// returns false. Keys are advisory only; they neither change state nor certify execution.
+    /// The default produces no hints and allocates nothing.
+    fn prewarm_proof_keys<'a>(
+        &self,
+        _txs: impl IntoIterator<Item = &'a TxEnvFor<Self>>,
+        _env: &EvmEnvFor<Self>,
+        _emit: impl FnMut(ProofKeyHint) -> bool,
+    ) where
+        TxEnvFor<Self>: 'a,
+    {
     }
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`

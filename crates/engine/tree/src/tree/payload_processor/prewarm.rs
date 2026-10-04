@@ -12,7 +12,8 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use super::{
-    bal_prewarm_pool::BalPrewarmPool, prewarm_dispatch::BoundedPrewarmReceiver,
+    bal_prewarm_pool::BalPrewarmPool,
+    prewarm_dispatch::{BoundedPrewarmReceiver, ProofKeyPrewarmReceiver},
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -26,9 +27,12 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    block::ExecutableTxParts, execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, ProofKeyHint,
+    RecoveredTx, SpecFor, TxEnvFor,
+};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, TxTy};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
@@ -39,15 +43,102 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
-pub use super::prewarm_dispatch::TransactionPrewarmPolicy;
+pub use super::prewarm_dispatch::{ProofKeyPrewarmPolicy, TransactionPrewarmPolicy};
+
+const MAX_PROOF_KEYS_PER_BATCH: usize = 512;
+const MAX_PROOF_KEYS_PER_BLOCK: usize = 16_384;
+// Conservative estimated hint-payload charge, not downstream proof/trie allocation or RSS.
+const ESTIMATED_PROOF_KEY_BYTES: usize = 512;
+
+#[derive(Debug, Default)]
+struct ProofHintStats {
+    attempted_keys: usize,
+    // Emitted keys; equality with MAX_PROOF_KEYS_PER_BLOCK also records exact saturation,
+    // even when the visitor stops without attempting an additional key.
+    keys: usize,
+    duplicates: usize,
+    // Batches that rejected a callback after reaching either key budget.
+    cap_hits: usize,
+    // Batches that reached the attempted-key budget, whether or not another key was offered.
+    saturated_batches: usize,
+    suppressed_batches: usize,
+    dropped_keys: usize,
+    hint_batches: usize,
+    estimated_hint_payload_bytes: usize,
+}
+
+impl ProofHintStats {
+    fn collect(
+        &mut self,
+        visit: impl FnOnce(&mut dyn FnMut(ProofKeyHint) -> bool),
+        stopped: impl Fn() -> bool,
+    ) -> Option<MultiProofTargetsV2> {
+        if stopped() || self.keys >= MAX_PROOF_KEYS_PER_BLOCK {
+            self.suppressed_batches += 1;
+            return None;
+        }
+        let mut keys = HashSet::new();
+        let mut attempted = 0;
+        let mut capped = false;
+        visit(&mut |key| {
+            if stopped() {
+                return false;
+            }
+            if attempted >= MAX_PROOF_KEYS_PER_BATCH ||
+                self.keys + keys.len() >= MAX_PROOF_KEYS_PER_BLOCK
+            {
+                capped = true;
+                return false;
+            }
+            attempted += 1;
+            if !keys.insert(key) {
+                self.duplicates += 1;
+            }
+            true
+        });
+        self.attempted_keys += attempted;
+        self.cap_hits += usize::from(capped);
+        self.saturated_batches += usize::from(attempted == MAX_PROOF_KEYS_PER_BATCH);
+        if stopped() {
+            self.dropped_keys += keys.len();
+            return None;
+        }
+        if keys.is_empty() {
+            return None;
+        }
+        let mut targets = MultiProofTargetsV2::default();
+        let count = keys.len();
+        for key in keys {
+            match key {
+                ProofKeyHint::Account(address) => {
+                    targets.account_targets.push(keccak256(address).into());
+                }
+                ProofKeyHint::Storage(address, slot) => {
+                    targets
+                        .storage_targets
+                        .entry(keccak256(address))
+                        .or_default()
+                        .push(keccak256(slot.to_be_bytes::<32>()).into());
+                }
+            }
+        }
+        self.keys += count;
+        self.hint_batches += 1;
+        self.estimated_hint_payload_bytes += count * ESTIMATED_PROOF_KEY_BYTES;
+        Some(targets)
+    }
+}
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -143,7 +234,10 @@ where
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         state_root_hint_stream: Option<StateRootHintStream>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxParts<TxEnvFor<Evm>, TxTy<N>, Recovered: Send + 'static>
+            + RecoveredTx<TxTy<N>>
+            + Send
+            + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -167,7 +261,51 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
-                if let Some(policy) = ctx.transaction_prewarm_policy {
+                if let (Some(near), Some(proof), Some(hints)) = (
+                    ctx.transaction_prewarm_policy,
+                    ctx.proof_key_prewarm_policy,
+                    state_root_hint_stream,
+                ) && proof.matches(near) &&
+                    ProofKeyPrewarmReceiver::<Tx, (TxEnvFor<Evm>, Tx::Recovered)>::fits(proof)
+                {
+                    let mut pending = ProofKeyPrewarmReceiver::new(
+                        pending,
+                        near,
+                        proof,
+                        Arc::clone(&ctx.executed_tx_index),
+                        Arc::clone(&ctx.terminate_execution),
+                    );
+                    let mut hint_stats = ProofHintStats::default();
+                    while let Some((index, (tx_env, tx), permit)) = pending.next(
+                        |tx: Tx| tx.into_parts(),
+                        |batch| Self::emit_proof_keys(ctx, batch, hints, &mut hint_stats),
+                    ) {
+                        tx_count += 1;
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            let _permit = permit;
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span, "prewarm_tx", i = index,
+                            )
+                            .entered();
+                            Self::transact_worker_with(
+                                ctx,
+                                index,
+                                move || (tx_env, tx),
+                                state_root_hint_stream,
+                            );
+                        });
+                    }
+                    debug!(target: "engine::tree::payload_processor::prewarm",
+                        block_hash = ?ctx.env.hash,
+                        parent_hash = ?ctx.env.parent_hash,
+                        parent_state_root = ?ctx.env.parent_state_root,
+                        near_window = near.lookahead(), proof_lookahead = proof.lookahead(),
+                        queue_inline_bytes = pending.stats.queue_inline_bytes,
+                        read_ahead = ?pending.stats, hints = ?hint_stats,
+                        "Finished bounded proof-key dispatch");
+                } else if let Some(policy) = ctx.transaction_prewarm_policy {
                     let pending = BoundedPrewarmReceiver::new(
                         pending,
                         policy,
@@ -251,6 +389,15 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
+        Self::transact_worker_with(ctx, index, move || tx.into_parts(), state_root_hint_stream);
+    }
+
+    fn transact_worker_with<Tx: RecoveredTx<TxTy<Evm::Primitives>>>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        index: usize,
+        tx: impl FnOnce() -> (TxEnvFor<Evm>, Tx),
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) {
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
                 worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
@@ -269,7 +416,7 @@ where
 
             let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
+            let (tx_env, tx) = tx();
             let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
@@ -300,6 +447,26 @@ where
 
             ctx.metrics.total_runtime.record(start.elapsed());
         });
+    }
+
+    fn emit_proof_keys<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        batch: &[&(TxEnvFor<Evm>, Tx)],
+        stream: &StateRootHintStream,
+        stats: &mut ProofHintStats,
+    ) {
+        if let Some(targets) = stats.collect(
+            |emit| {
+                ctx.evm_config.prewarm_proof_keys(
+                    batch.iter().map(|tx| &tx.0),
+                    &ctx.env.evm_env,
+                    emit,
+                )
+            },
+            || ctx.should_stop(),
+        ) {
+            stream.on_access_hint(targets.into());
+        }
     }
 
     /// Saves the warmed cache in `self.execution_cache` after prewarming completes.
@@ -504,7 +671,10 @@ where
     )]
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxParts<TxEnvFor<Evm>, TxTy<N>, Recovered: Send + 'static>
+            + RecoveredTx<TxTy<N>>
+            + Send
+            + 'static,
     {
         // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
         // mode and move into the spawned producers, so they die with the producers instead of
@@ -601,6 +771,8 @@ where
     pub executed_tx_index: Arc<AtomicUsize>,
     /// Optional admission bounds, used only for transaction prewarming.
     pub(crate) transaction_prewarm_policy: Option<TransactionPrewarmPolicy>,
+    /// Farther advisory proof-key read-ahead, independent of EVM job admission.
+    pub(crate) proof_key_prewarm_policy: Option<ProofKeyPrewarmPolicy>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
     /// The precompile cache map.
@@ -910,6 +1082,7 @@ mod tests {
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             transaction_prewarm_policy: None,
+            proof_key_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
@@ -934,6 +1107,56 @@ mod tests {
 
     #[test]
     fn bounded_transaction_handle_drop_retires_scope_and_clears_worker_state() {
+        assert_bounded_handle_drop_retires_scope(false);
+    }
+
+    #[test]
+    fn proof_stream_handle_drop_retires_scope_and_clears_worker_state() {
+        assert_bounded_handle_drop_retires_scope(true);
+    }
+
+    fn assert_bounded_handle_drop_retires_scope(proof_keys: bool) {
+        use reth_trie_parallel::state_root_task::StateRootSink;
+
+        struct HintOnlySink;
+        impl StateRootSink for HintOnlySink {
+            fn on_state_update(&self, _: reth_revm::state::EvmState) {
+                panic!("prewarming must not publish authoritative updates");
+            }
+            fn on_hashed_state_update(&self, _: reth_trie::HashedPostState) {
+                panic!("prewarming must not publish authoritative updates");
+            }
+            fn on_updates_finished(&self) {
+                panic!("prewarming must not finish the authoritative stream");
+            }
+        }
+
+        struct WitnessTx {
+            inner: WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>,
+            converted: Sender<()>,
+        }
+        impl RecoveredTx<TransactionSigned> for WitnessTx {
+            fn tx(&self) -> &TransactionSigned {
+                self.inner.tx.tx()
+            }
+            fn signer(&self) -> &alloy_primitives::Address {
+                self.inner.tx.signer()
+            }
+        }
+        impl ExecutableTxParts<TxEnvFor<EthEvmConfig>, TransactionSigned> for WitnessTx {
+            type Recovered = Arc<Recovered<TransactionSigned>>;
+
+            fn into_parts(self) -> (TxEnvFor<EthEvmConfig>, Self::Recovered) {
+                let parts = self.inner.into_parts();
+                self.converted.send(()).unwrap();
+                parts
+            }
+        }
+
+        let sink = Arc::new(HintOnlySink);
+        let retained_sink = Arc::downgrade(&sink);
+        let hints = proof_keys.then(|| StateRootHintStream::new(sink.clone()));
+        drop(sink);
         let runtime = Runtime::test();
         let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
         let mut ctx = test_prewarm_context(saved, Gauge::noop());
@@ -941,6 +1164,11 @@ mod tests {
         ctx.env.transaction_count = 2;
         ctx.transaction_prewarm_policy =
             TransactionPrewarmPolicy::new(1, 1, Duration::from_millis(1));
+        if proof_keys {
+            ctx.proof_key_prewarm_policy =
+                ProofKeyPrewarmPolicy::new(ctx.transaction_prewarm_policy.unwrap(), 2);
+            assert!(ctx.proof_key_prewarm_policy.is_some());
+        }
         let stopped = ctx.terminate_execution.clone();
         let committed = ctx.executed_tx_index.clone();
         let (task, actions_tx) =
@@ -956,7 +1184,7 @@ mod tests {
         let (input, pending) = mpsc::sync_channel(0);
         let (retired, retirement) = mpsc::channel();
         let _task = runtime.spawn_blocking_named("prewarm", move || {
-            task.run(PrewarmMode::Transactions { pending, hints: None }, actions_tx);
+            task.run(PrewarmMode::Transactions { pending, hints }, actions_tx);
             retired.send(()).unwrap();
         });
         let tx = WithTxEnv::<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>> {
@@ -970,6 +1198,9 @@ mod tests {
                 alloy_primitives::Address::ZERO,
             )),
         };
+        let retained_tx = Arc::downgrade(&tx.tx);
+        let (converted, conversion) = mpsc::channel();
+        let tx = WitnessTx { inner: tx, converted };
         let (accepted, acceptance) = mpsc::channel();
         let producer = {
             let input = input.clone();
@@ -979,6 +1210,16 @@ mod tests {
         // committed cursor is zero. No transaction worker can run that index yet.
         assert!(acceptance.recv_timeout(Duration::from_secs(5)).unwrap());
         producer.join().unwrap();
+        assert!(retained_tx.upgrade().is_some());
+        if proof_keys {
+            // Index 1 is still outside near=1 at cursor 0. Only the enabled read-ahead
+            // coordinator can split its parts now; falling back to the old distributor
+            // would time out here instead of passing merely from matching configuration.
+            conversion.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(retained_sink.upgrade().is_some());
+        } else {
+            assert_eq!(conversion.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
 
         let (next_done, next_completion) = mpsc::channel();
         let next_runtime = runtime.clone();
@@ -996,6 +1237,8 @@ mod tests {
         retirement.recv_timeout(Duration::from_secs(5)).unwrap();
         next_completion.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(stopped.load(Ordering::Relaxed));
+        assert!(retained_tx.upgrade().is_none());
+        assert!(retained_sink.upgrade().is_none());
         drop(input);
     }
 
@@ -1021,6 +1264,7 @@ mod tests {
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             transaction_prewarm_policy: None,
+            proof_key_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
@@ -1355,5 +1599,126 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+    }
+}
+
+#[cfg(test)]
+mod proof_hint_tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+    use std::cell::Cell;
+
+    #[test]
+    fn proof_hints_deduplicate_exact_keys_and_preserve_storage_only_targets() {
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let mut stats = ProofHintStats::default();
+        let targets = stats
+            .collect(
+                |emit| {
+                    assert!(emit(ProofKeyHint::Storage(address, slot)));
+                    assert!(emit(ProofKeyHint::Storage(address, slot)));
+                },
+                || false,
+            )
+            .unwrap();
+        assert!(targets.account_targets.is_empty());
+        let slots = &targets.storage_targets[&keccak256(address)];
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].key(), keccak256(slot.to_be_bytes::<32>()));
+        assert_eq!(stats.keys, 1);
+        assert_eq!(stats.duplicates, 1);
+        assert_eq!(stats.estimated_hint_payload_bytes, ESTIMATED_PROOF_KEY_BYTES);
+    }
+
+    #[test]
+    fn proof_hints_cap_batch_and_block_without_calling_suppressed_visitor() {
+        let mut stats = ProofHintStats::default();
+        let targets = stats
+            .collect(
+                |emit| {
+                    for i in 0..MAX_PROOF_KEYS_PER_BATCH {
+                        assert!(emit(ProofKeyHint::Storage(Address::ZERO, U256::from(i))));
+                    }
+                    assert!(!emit(ProofKeyHint::Account(Address::ZERO)));
+                },
+                || false,
+            )
+            .unwrap();
+        assert_eq!(targets.chunking_length(), MAX_PROOF_KEYS_PER_BATCH);
+        assert_eq!(stats.cap_hits, 1);
+        assert_eq!(stats.saturated_batches, 1);
+        stats.keys = MAX_PROOF_KEYS_PER_BLOCK - 1;
+        stats.estimated_hint_payload_bytes = stats.keys * ESTIMATED_PROOF_KEY_BYTES;
+        let targets = stats
+            .collect(
+                |emit| {
+                    assert!(emit(ProofKeyHint::Account(Address::ZERO)));
+                    assert!(!emit(ProofKeyHint::Storage(Address::ZERO, U256::ZERO)));
+                },
+                || false,
+            )
+            .unwrap();
+        assert_eq!(targets.chunking_length(), 1);
+        assert_eq!(stats.keys, MAX_PROOF_KEYS_PER_BLOCK);
+        assert_eq!(stats.cap_hits, 2);
+        assert_eq!(stats.saturated_batches, 1);
+        assert_eq!(stats.estimated_hint_payload_bytes, 8 * 1024 * 1024);
+        assert!(stats.collect(|_| panic!("visitor called after block cap"), || false).is_none());
+        assert_eq!(stats.suppressed_batches, 1);
+    }
+
+    #[test]
+    fn proof_hint_saturation_is_visible_when_visitor_stops_at_the_exact_budget() {
+        let mut stats = ProofHintStats::default();
+        let targets = stats
+            .collect(
+                |emit| {
+                    // Tempo's hook stops at this boundary without offering a 513th key.
+                    for i in 0..MAX_PROOF_KEYS_PER_BATCH {
+                        assert!(emit(ProofKeyHint::Storage(Address::ZERO, U256::from(i))));
+                    }
+                },
+                || false,
+            )
+            .unwrap();
+        assert_eq!(targets.chunking_length(), MAX_PROOF_KEYS_PER_BATCH);
+        assert_eq!(stats.attempted_keys, MAX_PROOF_KEYS_PER_BATCH);
+        assert_eq!(stats.saturated_batches, 1);
+        assert_eq!(stats.cap_hits, 0);
+
+        stats.keys = MAX_PROOF_KEYS_PER_BLOCK - 1;
+        stats.estimated_hint_payload_bytes = stats.keys * ESTIMATED_PROOF_KEY_BYTES;
+        let targets = stats
+            .collect(|emit| assert!(emit(ProofKeyHint::Account(Address::ZERO))), || false)
+            .unwrap();
+        assert_eq!(targets.chunking_length(), 1);
+        assert_eq!(stats.keys, MAX_PROOF_KEYS_PER_BLOCK);
+        assert_eq!(stats.estimated_hint_payload_bytes, 8 * 1024 * 1024);
+        assert_eq!(stats.saturated_batches, 1);
+        assert_eq!(stats.cap_hits, 0);
+        assert!(stats.collect(|_| panic!("visitor called after block cap"), || false).is_none());
+        assert_eq!(stats.suppressed_batches, 1);
+    }
+
+    #[test]
+    fn proof_hint_stop_drops_unsent_targets_and_default_empty_is_empty() {
+        let stopped = Cell::new(false);
+        let mut stats = ProofHintStats::default();
+        assert!(stats.collect(|_| {}, || false).is_none());
+        assert!(stats
+            .collect(
+                |emit| {
+                    assert!(emit(ProofKeyHint::Account(Address::ZERO)));
+                    stopped.set(true);
+                    assert!(!emit(ProofKeyHint::Storage(Address::ZERO, U256::ZERO)));
+                },
+                || stopped.get()
+            )
+            .is_none());
+        assert_eq!(stats.keys, 0);
+        assert_eq!(stats.dropped_keys, 1);
+        assert_eq!(stats.hint_batches, 0);
+        assert!(stats.collect(|_| panic!("visitor called after stop"), || true).is_none());
     }
 }

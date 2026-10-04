@@ -9,7 +9,7 @@ use crate::tree::{
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use prewarm::{PrewarmMetrics, TransactionPrewarmPolicy};
+use prewarm::{PrewarmMetrics, ProofKeyPrewarmPolicy, TransactionPrewarmPolicy};
 use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
@@ -98,6 +98,8 @@ where
     disable_transaction_prewarming: bool,
     /// Optional bounds for transaction-prewarm job admission.
     transaction_prewarm_policy: Option<TransactionPrewarmPolicy>,
+    /// Optional key-only read-ahead; transaction job admission is unchanged.
+    proof_key_prewarm_policy: Option<ProofKeyPrewarmPolicy>,
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
@@ -133,6 +135,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             transaction_prewarm_policy: None,
+            proof_key_prewarm_policy: None,
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
@@ -153,6 +156,14 @@ where
         policy: Option<TransactionPrewarmPolicy>,
     ) {
         self.transaction_prewarm_policy = policy;
+    }
+
+    /// Sets optional farther proof-key hints without changing transaction prewarm admission.
+    pub(super) const fn set_proof_key_prewarm_policy(
+        &mut self,
+        policy: Option<ProofKeyPrewarmPolicy>,
+    ) {
+        self.proof_key_prewarm_policy = policy;
     }
 
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
@@ -418,7 +429,10 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: Option<
-            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+            mpsc::Receiver<(
+                usize,
+                impl ExecutableTxFor<Evm, Recovered: Send + 'static> + Clone + Send + 'static,
+            )>,
         >,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,
@@ -464,6 +478,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
             transaction_prewarm_policy: self.transaction_prewarm_policy,
+            proof_key_prewarm_policy: self.proof_key_prewarm_policy,
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
