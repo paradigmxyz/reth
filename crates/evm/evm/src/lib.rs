@@ -50,6 +50,7 @@ pub use sender_recovery::SenderRecoveryCache;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
+pub mod parent_reads;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
@@ -300,6 +301,26 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// This will preserve any handler modifications
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnvFor<Self>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
+    }
+
+    /// Whether Engine construction should provide certified parent-read cache operations.
+    ///
+    /// Generic, inspected and BAL execution retain their ordinary construction paths.
+    fn supports_parent_read_cache(&self) -> bool {
+        false
+    }
+
+    /// Creates an EVM with optional typed operations from its actual parent provider.
+    ///
+    /// Implementations must retain normal canonical state reads and every dependency check.
+    /// Ignoring the operations preserves ordinary execution.
+    fn evm_with_env_and_parent_reads<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
+        _hooks: parent_reads::ParentReadHooks<DB>,
+    ) -> EvmFor<Self, DB> {
+        self.evm_with_env(db, evm_env)
     }
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`

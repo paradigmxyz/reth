@@ -16,6 +16,7 @@ use super::{
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
+    parent_reads::{ParentDatabase, ParentReadView},
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
@@ -26,7 +27,10 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    execute::ExecutableTxFor, parent_reads::ParentReadHooks, ConfigureEvm, Evm, EvmFor,
+    RecoveredTx, SpecFor,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -35,7 +39,6 @@ use reth_provider::{
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
@@ -327,10 +330,19 @@ where
 
         let Self {
             execution_cache,
-            ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
+            ctx:
+                PrewarmContext {
+                    env, metrics, cache_state_metrics, saved_cache, parent_read_view, ..
+                },
             ..
         } = self;
         let hash = env.hash;
+        // Worker completion and canonical termination precede this point. Close and release the
+        // view before the shared allocation can receive this block's post-state.
+        if let Some(view) = parent_read_view {
+            view.close();
+            drop(view);
+        }
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
@@ -581,6 +593,8 @@ where
     pub evm_config: Evm,
     /// The saved cache.
     pub saved_cache: Option<SavedCache>,
+    /// Exact provider/cache view shared with canonical execution, when opted in.
+    pub(crate) parent_read_view: Option<Arc<ParentReadView>>,
     /// Provider to obtain the state
     pub provider: OverlayStateProviderFactory<P, N>,
     /// Dedicated blocking pool for warming the BAL read-set. `Some` only on the BAL parallel
@@ -614,7 +628,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<Evm, ParentDatabase>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -633,28 +647,39 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider = match self.provider.database_provider_ro() {
-            Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
-            Err(err) => {
-                trace!(
-                    target: "engine::tree::payload_processor::prewarm",
-                    %err,
-                    "Failed to build state provider in prewarm thread"
-                );
-                return None
+        let state_provider = if let Some(view) = &self.parent_read_view {
+            match view.open_worker() {
+                Ok(provider) => provider,
+                Err(err) => {
+                    trace!(target: "engine::tree::payload_processor::prewarm", %err,
+                        "Failed to build parent state provider in prewarm thread");
+                    return None
+                }
             }
+        } else {
+            let mut state_provider = match self.provider.database_provider_ro() {
+                Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
+                    return None
+                }
+            };
+
+            // Use the caches to create a new provider with caching
+            if let Some(saved_cache) = &self.saved_cache {
+                let caches = saved_cache.cache().clone();
+                state_provider = Box::new(
+                    CachedStateProvider::new_prewarm(state_provider, caches)
+                        .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                );
+            }
+
+            ParentDatabase::unbound(state_provider)
         };
-
-        // Use the caches to create a new provider with caching
-        if let Some(saved_cache) = &self.saved_cache {
-            let caches = saved_cache.cache().clone();
-            state_provider = Box::new(
-                CachedStateProvider::new_prewarm(state_provider, caches)
-                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
-            );
-        }
-
-        let state_provider = StateProviderDatabase::new(state_provider);
 
         let mut evm_env = self.env.evm_env.clone();
 
@@ -668,7 +693,15 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = if state_provider.is_bound() {
+            self.evm_config.evm_with_env_and_parent_reads(
+                state_provider,
+                evm_env,
+                ParentReadHooks::Capture(ParentDatabase::capture_hooks()),
+            )
+        } else {
+            self.evm_config.evm_with_env(state_provider, evm_env)
+        };
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -899,6 +932,7 @@ mod tests {
             env: ExecutionEnv::test_default(),
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: None,
+            parent_read_view: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
                 OverlayManager::default().overlay_builder(B256::ZERO),
@@ -949,6 +983,7 @@ mod tests {
         // execution/conversion error. Keep input connected throughout to rule out EOF cleanup.
         let handle = CacheTaskHandle {
             saved_cache: None,
+            parent_read_view: None,
             to_prewarm_task: Some(actions_tx.clone()),
             executed_tx_index: committed,
             cache_metrics: None,
@@ -1007,6 +1042,7 @@ mod tests {
             env: ExecutionEnv { hash: B256::repeat_byte(2), ..ExecutionEnv::test_default() },
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: Some(saved_cache),
+            parent_read_view: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
                 OverlayManager::default().overlay_builder(B256::ZERO),
@@ -1193,6 +1229,7 @@ mod tests {
         let mut payload = PayloadHandle {
             prewarm_handle: CacheTaskHandle {
                 saved_cache: task.ctx.saved_cache.clone(),
+                parent_read_view: None,
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
                 cache_metrics: None,

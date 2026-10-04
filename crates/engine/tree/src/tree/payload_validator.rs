@@ -100,6 +100,7 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
+    parent_reads::{CanonicalOptions, ParentDatabase},
     payload_processor::{prewarm::TransactionPrewarmPolicy, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
@@ -153,8 +154,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    DatabaseProviderROFactory, EvmStateProviderBox, HashedPostStateProvider, HistoryReader,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
@@ -739,7 +740,17 @@ where
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
-            let state_provider = make_state_provider(false);
+            let state_provider = if let Some(view) = handle.parent_read_view() {
+                view.open_canonical(CanonicalOptions {
+                    cache_metrics: handle.cache_metrics(),
+                    cache_stats: cache_stats.clone(),
+                    instrumentation: state_provider_metrics
+                        .clone()
+                        .zip(state_provider_stats.clone()),
+                })
+            } else {
+                make_state_provider(false).map(ParentDatabase::unbound)
+            };
             match state_provider {
                 Ok(state_provider) => self.execute_block(
                     state_provider,
@@ -1027,9 +1038,9 @@ where
     /// 4. Merges state transitions and records execution metrics
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
-    fn execute_block<S, Err, T>(
+    fn execute_block<Err, T>(
         &mut self,
-        state_provider: S,
+        state_provider: ParentDatabase,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
@@ -1039,7 +1050,6 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: EvmStateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -1050,7 +1060,7 @@ where
         let has_bal = input.has_block_access_list();
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
-                .with_database(StateProviderDatabase::new(state_provider))
+                .with_database(state_provider)
                 .with_bundle_update()
                 .with_bal_builder_if(has_bal)
                 .build()
@@ -1060,7 +1070,17 @@ where
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
             let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
+            let evm = if db.database.is_bound() && !has_bal {
+                evm_config.evm_with_env_and_parent_reads(
+                    &mut db,
+                    env.evm_env,
+                    reth_evm::parent_reads::ParentReadHooks::Validate(
+                        ParentDatabase::validation_hooks(),
+                    ),
+                )
+            } else {
+                evm_config.evm_with_env(&mut db, env.evm_env)
+            };
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
@@ -1129,6 +1149,16 @@ where
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
+        if self.config.slow_block_threshold().is_some() || self.config.state_provider_metrics() {
+            debug!(
+                target: "engine::tree::payload_validator",
+                payload_hash = ?env.hash,
+                parent_hash = ?env.parent_hash,
+                bound = db.database.is_bound(),
+                certified_reads = db.database.certified_reads().unwrap_or_default(),
+                "Engine parent read cache"
+            );
+        }
 
         Ok((output, senders, result_rx, built_bal))
     }

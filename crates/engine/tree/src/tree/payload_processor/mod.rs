@@ -2,6 +2,7 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
+    parent_reads::ParentReadView,
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
     ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
@@ -449,6 +450,22 @@ where
             PrewarmMode::Skipped
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
+        let parent_read_view = if self.evm_config.supports_parent_read_cache() &&
+            env.decoded_bal.is_none() &&
+            matches!(&mode, PrewarmMode::Transactions { .. }) &&
+            let Some(saved_cache) = &saved_cache
+        {
+            ParentReadView::new(
+                state_provider_factory.clone(),
+                saved_cache.clone(),
+                env.txpool_snapshot.clone(),
+                env.hash,
+                env.parent_hash,
+                env.parent_state_root,
+            )
+        } else {
+            None
+        };
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
@@ -456,6 +473,7 @@ where
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
+            parent_read_view: parent_read_view.clone(),
             provider: state_provider_factory,
             bal_prewarm_pool: parallel_bal_execution.then(|| self.bal_prewarm_pool()),
             metrics: PrewarmMetrics::default(),
@@ -481,6 +499,7 @@ where
 
         CacheTaskHandle {
             saved_cache,
+            parent_read_view,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
@@ -612,6 +631,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
+    /// Returns the private provider construction shared with prewarm workers.
+    pub(crate) const fn parent_read_view(&self) -> Option<&Arc<ParentReadView>> {
+        self.prewarm_handle.parent_read_view.as_ref()
+    }
+
     /// Returns engine cache metrics if a cache exists for prewarming.
     pub fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.cache_metrics.clone()
@@ -665,6 +689,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 pub struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
+    /// Owns provider construction only until canonical execution terminates.
+    parent_read_view: Option<Arc<ParentReadView>>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -693,6 +719,9 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
+        if let Some(view) = self.parent_read_view.take() {
+            view.close();
+        }
         if let Some(tx) = self.to_prewarm_task.take() {
             let (valid_block_tx, valid_block_rx) = mpsc::channel();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
@@ -707,6 +736,9 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
 impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
+        if let Some(view) = self.parent_read_view.take() {
+            view.close();
+        }
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
             let _ = tx.send(PrewarmTaskEvent::Terminate {
@@ -898,6 +930,7 @@ mod tests {
             let handle = super::PayloadHandle {
                 prewarm_handle: super::CacheTaskHandle::<()> {
                     saved_cache: None,
+                    parent_read_view: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
                     cache_metrics: None,

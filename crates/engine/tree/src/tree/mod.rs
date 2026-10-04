@@ -65,6 +65,7 @@ pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
+mod parent_reads;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
