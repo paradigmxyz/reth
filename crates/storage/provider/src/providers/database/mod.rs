@@ -1005,7 +1005,10 @@ mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{
+            blocks::TEST_BLOCK, create_test_provider_factory,
+            create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
+        },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         StageCheckpointWriter, TransactionsProvider,
     };
@@ -1371,11 +1374,12 @@ mod tests {
     }
 
     #[test]
-    fn the_legacy_layout_only_refuses_snap_when_snap_would_run() {
-        let factory = create_test_provider_factory();
+    fn the_legacy_layout_refuses_snap_until_execution_passes_genesis() {
+        let factory = create_test_provider_factory_with_genesis_block_number(5);
         factory.set_storage_settings_cache(StorageSettings::v1());
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v1()).unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
         provider.commit().unwrap();
 
         // A fresh database would snap sync into a layout snap can't write.
