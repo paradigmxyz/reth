@@ -1,7 +1,7 @@
 //! Picks the engine's backfill at launch: the staged pipeline, or snap sync with `--snap.v2`.
 
 use super::{SnapBackfillSync, SnapHandoff};
-use reth_chainspec::{EthereumHardfork, EthereumHardforks};
+use reth_chainspec::EthereumHardforks;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
@@ -31,8 +31,7 @@ impl EthereumBackfill {
     // staged pipeline even with `--snap.v2`.
     fn snap(&self, chain_spec: &impl EthereumHardforks) -> bool {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        self.snap_v2 &&
-            chain_spec.is_ethereum_fork_active_at_timestamp(EthereumHardfork::Amsterdam, now)
+        self.snap_v2 && chain_spec.is_amsterdam_active_at_timestamp(now)
     }
 }
 
