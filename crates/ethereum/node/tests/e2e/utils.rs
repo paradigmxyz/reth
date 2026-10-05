@@ -55,7 +55,7 @@ pub(crate) async fn advance_with_random_transactions(
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create =
-                rng.random::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
+                rng.random::<bool>() && !tx_type.is_eip4844() && !tx_type.is_eip7702();
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
@@ -68,7 +68,7 @@ pub(crate) async fn advance_with_random_transactions(
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.random::<bool>() || tx_type == TxType::Eip2930 {
+            if rng.random::<bool>() || tx_type.is_eip2930() {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
@@ -78,7 +78,7 @@ pub(crate) async fn advance_with_random_transactions(
                 );
             }
 
-            if tx_type == TxType::Eip7702 {
+            if tx_type.is_eip7702() {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
                     chain_id: U256::from(provider.get_chain_id().await?),

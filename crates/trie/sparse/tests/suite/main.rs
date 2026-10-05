@@ -78,11 +78,8 @@ impl SuiteTestHarness {
         changes
             .iter()
             .map(|(&slot, &value)| {
-                let rlp_value = if value == U256::ZERO {
-                    Vec::new()
-                } else {
-                    encode_fixed_size(&value).to_vec()
-                };
+                let rlp_value =
+                    if value.is_zero() { Vec::new() } else { encode_fixed_size(&value).to_vec() };
                 (slot, LeafUpdate::Changed(rlp_value))
             })
             .collect()

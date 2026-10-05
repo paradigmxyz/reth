@@ -362,9 +362,7 @@ impl NewPooledTransactionHashes {
                     EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71
                 )
             }
-            Self::Eth72(_) => {
-                matches!(version, EthVersion::Eth72)
-            }
+            Self::Eth72(_) => version.is_eth72(),
         }
     }
 

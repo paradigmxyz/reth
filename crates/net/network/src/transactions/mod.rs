@@ -1389,7 +1389,7 @@ where
         // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
         // geth equivalently diverts these bodies into a buffer that is completed with cells
         // fetched via `GetCells`, which is not implemented yet.
-        if version == EthVersion::Eth72 {
+        if version.is_eth72() {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();

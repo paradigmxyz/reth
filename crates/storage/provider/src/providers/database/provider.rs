@@ -2342,7 +2342,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvide
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
-        if id == StageId::Finish {
+        if id.is_finish() {
             self.ensure_finish_may_advance(&checkpoint)?;
         }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
