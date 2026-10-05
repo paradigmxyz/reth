@@ -80,34 +80,37 @@ where
         pipeline: &mut Pipeline<N>,
         mut targets: watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
-        loop {
+        let verified = loop {
             match self.catch_up_headers(pipeline, &mut targets).await? {
                 Pass::Stopped => return Ok(STOPPED),
                 Pass::Again => continue,
                 Pass::Done => {}
             }
-            let pivot = match self.download(&mut targets).await? {
+            match self.download(&mut targets).await? {
                 SnapBootstrapOutcome::Stopped if self.stop.is_cancelled() => return Ok(STOPPED),
                 SnapBootstrapOutcome::Stopped => {
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
-                    continue
                 }
                 SnapBootstrapOutcome::TrieRebuild { write, pivot } => {
                     match self.rebuild_and_hand_off(pipeline, &mut targets, write, pivot).await? {
                         Pass::Stopped => return Ok(STOPPED),
-                        Pass::Again => continue,
-                        Pass::Done => pivot,
+                        Pass::Again => {}
+                        Pass::Done => break Some(pivot),
                     }
                 }
-                SnapBootstrapOutcome::Verified { pivot } => pivot,
-                SnapBootstrapOutcome::BeforeBlockAccessLists => {
-                    info!(target: "sync::snap", "Chain predates block access lists, syncing with the staged pipeline");
-                    return self.finish(pipeline, &mut targets).await
-                }
-            };
-            info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
-            return self.finish(pipeline, &mut targets).await
+                SnapBootstrapOutcome::Verified { pivot } => break Some(pivot),
+                SnapBootstrapOutcome::BeforeBlockAccessLists => break None,
+            }
+        };
+        match verified {
+            Some(pivot) => {
+                info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
+            }
+            None => {
+                info!(target: "sync::snap", "Chain predates block access lists, syncing with the staged pipeline");
+            }
         }
+        self.finish(pipeline, &mut targets).await
     }
 
     // Runs one bootstrap until the state is downloaded, the backfill stops or headers are due.
@@ -143,7 +146,8 @@ where
         outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))
     }
 
-    // Rebuilds the trie at `pivot`, catches headers up and publishes the state.
+    // Rebuilds the trie at the pivot of `write`'s attempt, then hands the state off. The rebuild
+    // can take hours, so it stops with the backfill.
     async fn rebuild_and_hand_off(
         &self,
         pipeline: &mut Pipeline<N>,
@@ -151,40 +155,46 @@ where
         write: SnapWrite,
         pivot: BlockNumHash,
     ) -> Result<Pass, PipelineError> {
-        // The rebuild reads every account and can take hours, so it runs on the blocking pool
-        // and stops with the backfill.
-        let rebuild = SnapHandoff::new(self.factory.clone());
-        let stop = self.stop.clone();
-        let rebuilt = self
-            .runtime
-            .spawn_blocking(move || rebuild.rebuild(write, &stop))
-            .await
-            .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
-        if rebuilt == RebuildOutcome::Stopped || self.stop.is_cancelled() {
-            return Ok(Pass::Stopped)
+        match self.with_handoff(move |handoff, stop| handoff.rebuild(write, stop)).await? {
+            RebuildOutcome::Rebuilt => self.hand_off(pipeline, targets, write, pivot).await,
+            RebuildOutcome::Stopped => Ok(Pass::Stopped),
         }
-        // Forkchoice may have moved meanwhile, so headers catch up before the handoff checks
-        // the pivot is still canonical.
+    }
+
+    // Catches headers up, since forkchoice may have moved during the rebuild, then publishes the
+    // state if its pivot is still canonical.
+    async fn hand_off(
+        &self,
+        pipeline: &mut Pipeline<N>,
+        targets: &mut watch::Receiver<B256>,
+        write: SnapWrite,
+        pivot: BlockNumHash,
+    ) -> Result<Pass, PipelineError> {
         let headers = self.catch_up_headers(pipeline, targets).await?;
         if headers != Pass::Done {
             return Ok(headers)
         }
+        Ok(match self.with_handoff(move |handoff, stop| handoff.hand_off(write, stop)).await? {
+            HandoffOutcome::Completed => Pass::Done,
+            HandoffOutcome::PivotReorged => {
+                info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before the handoff, restarting");
+                Pass::Again
+            }
+            HandoffOutcome::Stopped => Pass::Stopped,
+        })
+    }
+
+    // Runs `f` on the blocking pool, since rebuilding and publishing read every account.
+    async fn with_handoff<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(SnapHandoff<N>, &CancellationToken) -> Result<T, PipelineError> + Send + 'static,
+    ) -> Result<T, PipelineError> {
         let handoff = SnapHandoff::new(self.factory.clone());
-        // Publishing reads every account, so it runs on the blocking pool.
         let stop = self.stop.clone();
-        let handoff = self
-            .runtime
-            .spawn_blocking(move || handoff.hand_off(write, &stop))
+        self.runtime
+            .spawn_blocking(move || f(handoff, &stop))
             .await
-            .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
-        if handoff == HandoffOutcome::PivotReorged {
-            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before the handoff, restarting");
-            return Ok(Pass::Again)
-        }
-        if handoff == HandoffOutcome::Stopped {
-            return Ok(Pass::Stopped)
-        }
-        Ok(Pass::Done)
+            .map_err(|error| PipelineError::Internal(RethError::other(error)))?
     }
 
     // Runs every stage to the latest target, above the pivot once snap state is published.
@@ -253,11 +263,11 @@ mod tests {
     use crate::snap::{
         handoff::tests::{downloaded_attempt, PIVOT},
         tests::{
-            headers_done, headers_reach, pipeline, pipeline_on, pipeline_with, NEXT_TARGET, TARGET,
+            hashed_factory, headers_done, headers_reach, pipeline, pipeline_on, pipeline_with,
+            NEXT_TARGET, TARGET,
         },
     };
     use alloy_consensus::Header;
-    use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
     use reth_consensus::ConsensusError;
     use reth_network_p2p::NoopFullBlockClient;
     use reth_primitives_traits::SealedHeader;
@@ -265,11 +275,11 @@ mod tests {
         test_utils::{insert_headers, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     };
-    use reth_prune::PruneModes;
     use reth_snap_sync::{SnapStateVerifier, DEFAULT_SCAN_CHUNK};
-    use reth_stages::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+    use reth_stages::{
+        ExecInput, ExecOutput, Stage, StageError, StageSetBuilder, UnwindInput, UnwindOutput,
+    };
     use reth_stages_api::test_utils::TestStage;
-    use reth_static_file::StaticFileProducer;
     use std::{
         sync::{Arc, Mutex},
         task::{Context, Poll},
@@ -350,8 +360,21 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &CancellationToken::new()).unwrap();
         provider.commit().unwrap();
-        let pipeline = pipeline_on(&factory, headers, watch::channel(B256::ZERO).0);
+        let pipeline = pipeline_on(
+            &factory,
+            StageSetBuilder::default().add_stage(headers),
+            watch::channel(B256::ZERO).0,
+        );
         (pipeline, factory, write, pivot)
+    }
+
+    // A header stage error that unwinds the pipeline; only the unwind matters here.
+    fn detached_head() -> StageError {
+        StageError::DetachedHead {
+            local_head: Box::default(),
+            header: Box::default(),
+            error: Box::new(ConsensusError::BaseFeeMissing),
+        }
     }
 
     #[tokio::test]
@@ -361,13 +384,14 @@ mod tests {
         );
         let (targets, receiver) = watch::channel(TARGET);
         let (run, stop) = snap_run(&factory);
+        let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
-        headers_reach(&factory, 0).await;
+        headers_reach(&mut events, 0).await;
 
         targets.send(NEXT_TARGET).unwrap();
 
         // The bootstrap stopped, headers caught up to the new target and a new bootstrap resumed.
-        headers_reach(&factory, 1).await;
+        headers_reach(&mut events, 1).await;
         assert!(!run.is_finished());
 
         stop.cancel();
@@ -406,6 +430,7 @@ mod tests {
         insert_headers(&factory, &stored);
         let (targets, receiver) = watch::channel(TARGET);
         let (run, stop) = snap_run(&factory);
+        let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
 
         // Forkchoice moves while the first header pass is still downloading.
@@ -413,7 +438,7 @@ mod tests {
         targets.send(NEXT_TARGET).unwrap();
         open.send(true).unwrap();
 
-        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 2))
+        tokio::time::timeout(Duration::from_secs(5), headers_reach(&mut events, 2))
             .await
             .expect("headers are synced to the moved target");
         stop.cancel();
@@ -425,25 +450,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_detached_head_syncs_headers_again_before_the_bootstrap() {
-        let block = |number| BlockWithParent {
-            parent: B256::ZERO,
-            block: BlockNumHash::new(number, B256::repeat_byte(number as u8)),
-        };
         let (pipeline, factory) = pipeline(
             TestStage::new(StageId::Headers)
-                .add_exec(Err(StageError::DetachedHead {
-                    local_head: Box::new(block(1)),
-                    header: Box::new(block(2)),
-                    error: Box::new(ConsensusError::BaseFeeMissing),
-                }))
+                .add_exec(Err(detached_head()))
                 .add_exec(headers_done(2)),
         );
         let (_targets, receiver) = watch::channel(TARGET);
         let (run, stop) = snap_run(&factory);
+        let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
 
         // Forkchoice never moves, so only the unwind itself can trigger the second header run.
-        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 2))
+        tokio::time::timeout(Duration::from_secs(5), headers_reach(&mut events, 2))
             .await
             .expect("headers are synced again after the unwind");
         stop.cancel();
@@ -485,17 +503,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_reorg_during_the_rebuild_syncs_headers_again_without_a_handoff() {
-        let block = |number| BlockWithParent {
-            parent: B256::ZERO,
-            block: BlockNumHash::new(number, B256::repeat_byte(number as u8)),
-        };
-        let (mut pipeline, factory, write, pivot) = handoff_ready(
-            TestStage::new(StageId::Headers).add_exec(Err(StageError::DetachedHead {
-                local_head: Box::new(block(1)),
-                header: Box::new(block(2)),
-                error: Box::new(ConsensusError::BaseFeeMissing),
-            })),
-        );
+        let (mut pipeline, factory, write, pivot) =
+            handoff_ready(TestStage::new(StageId::Headers).add_exec(Err(detached_head())));
         let (_targets, mut receiver) = watch::channel(TARGET);
         let (run, _stop) = snap_run(&factory);
 
@@ -508,19 +517,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_chain_before_block_access_lists_syncs_with_the_staged_pipeline() {
-        let (_, factory) = pipeline(TestStage::new(StageId::Headers));
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let factory = hashed_factory();
+        let stages = StageSetBuilder::default()
             .add_stage(
                 TestStage::new(StageId::Headers)
                     .add_exec(headers_done(0))
                     .add_exec(headers_done(0)),
             )
-            .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(0)))
-            .with_tip_sender(watch::channel(B256::ZERO).0)
-            .build(
-                factory.clone(),
-                StaticFileProducer::new(factory.clone(), PruneModes::default()),
-            );
+            .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(0)));
+        let mut pipeline = pipeline_on(&factory, stages, watch::channel(B256::ZERO).0);
         insert_headers(&factory, &[SealedHeader::seal_slow(Header::default())]);
         let (_targets, receiver) = watch::channel(TARGET);
         let (run, _stop) = snap_run(&factory);

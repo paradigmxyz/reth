@@ -97,9 +97,7 @@ impl<C, F, X> SnapBootstrap<C, F, X> {
 
     /// Returns this run finishing the hand-off scan unless `shutdown` fires.
     ///
-    /// When set, cancellation through [`Self::with_cancellation`] lets an ongoing scan finish;
-    /// only `shutdown` cancels the scan. The scan reads every account and restarts from scratch
-    /// once stopped, so header refreshes should let it finish.
+    /// The scan restarts from scratch once stopped, so [`Self::with_cancellation`] lets it finish.
     pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
         self.shutdown = Some(shutdown);
         self

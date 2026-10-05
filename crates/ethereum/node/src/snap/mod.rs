@@ -1,28 +1,15 @@
 //! Runs a snap/2 bootstrap as the engine's backfill.
 //!
-//! Headers and snap state writes alternate in one task while the engine skips forkchoice, so no
-//! other writer touches the database during the run.
+//! One task alternates header sync and snap state writes while the engine skips forkchoice, so
+//! no other writer touches the database. Each pass:
 //!
-//! # Lifecycle
+//! 1. Syncs headers to the target; nothing below the pivot executes.
+//! 2. Selects a pivot under the head, or resumes the recorded attempt while its pivot is canonical.
+//! 3. Downloads state against the pivot's root, carried to newer pivots by block access lists.
+//! 4. Hands the state to [`SnapHandoff`], which rebuilds the trie and publishes it at the pivot.
 //!
-//! The engine starts a backfill with a target hash, as it does for the staged pipeline. A run
-//! then repeats four steps until the state is downloaded or the run stops:
-//!
-//! 1. Headers sync to the target, and nothing else: no stage below the pivot may execute over state
-//!    the node has not downloaded yet.
-//! 2. A pivot is selected under the head, or the attempt an earlier run recorded resumes, while its
-//!    pivot is still canonical.
-//! 3. Accounts, storage and code download against that pivot's state root and commit as they
-//!    arrive, while block access lists carry what is downloaded to a newer pivot as the chain moves
-//!    past it.
-//! 4. Once every account is covered, the state is handed to the merkle stage.
-//!
-//! A forkchoice update ends the current step at its next boundary, so headers catch up before
-//! the run continues from the progress it committed. Peers that do not serve the pivot's state
-//! wait instead of failing the run.
-//!
-//! [`SnapHandoff`] rebuilds and verifies the trie before publishing the state at its pivot. The
-//! staged pipeline then runs the remaining stages above the pivot.
+//! A forkchoice update ends the current step at its next boundary, so headers catch up first.
+//! The staged pipeline then runs the stages above the pivot.
 
 mod context;
 mod handoff;
@@ -49,9 +36,6 @@ use tokio::sync::{oneshot, watch};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 /// Backfills canonical headers, then snap/2 state at a recent pivot.
-///
-/// A new forkchoice target stops the bootstrap at its next step boundary, at most once per
-/// header refresh, so headers catch up and the next run resumes the committed attempt.
 #[derive(Debug)]
 pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
     // Serves the snap requests and reports peer counts.
@@ -233,7 +217,7 @@ enum SnapBackfillState<N: ProviderNodeTypes> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::future::poll_fn;
+    use futures::{future::poll_fn, Stream, StreamExt};
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{
@@ -244,20 +228,33 @@ mod tests {
         StageCheckpointWriter, StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
-    use reth_stages::{ControlFlow, ExecOutput, Stage, StageCheckpoint, StageError, StageId};
+    use reth_stages::{
+        ControlFlow, ExecOutput, PipelineEvent, Stage, StageCheckpoint, StageError, StageId,
+        StageSetBuilder,
+    };
     use reth_stages_api::test_utils::TestStage;
     use reth_static_file::StaticFileProducer;
-    use std::{task::Waker, time::Duration};
+    use std::task::Waker;
 
     pub(super) const TARGET: B256 = B256::repeat_byte(1);
     pub(super) const NEXT_TARGET: B256 = B256::repeat_byte(2);
 
     type TestBackfill = SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient>;
 
-    // A backfill whose pipeline holds only a scripted header stage.
-    fn backfill(headers: TestStage) -> TestBackfill {
+    type TestProvider =
+        <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW;
+
+    // A backfill whose pipeline holds only a scripted header stage, with that pipeline's events.
+    fn backfill(headers: TestStage) -> (TestBackfill, impl Stream<Item = PipelineEvent> + Unpin) {
         let (pipeline, factory) = pipeline(headers);
-        SnapBackfillSync::new(pipeline, NoopFullBlockClient::default(), factory, Runtime::test())
+        let events = pipeline.events();
+        let backfill = SnapBackfillSync::new(
+            pipeline,
+            NoopFullBlockClient::default(),
+            factory,
+            Runtime::test(),
+        );
+        (backfill, events)
     }
 
     // A pipeline holding only a scripted header stage, over a database in the hashed state
@@ -269,36 +266,34 @@ mod tests {
     }
 
     // Like `pipeline`, with any header stage and a tip channel the test can observe.
-    pub(super) fn pipeline_with<S>(
+    pub(super) fn pipeline_with<S: Stage<TestProvider> + 'static>(
         headers: S,
         tip: watch::Sender<B256>,
-    ) -> (Pipeline<MockNodeTypesWithDB>, ProviderFactory<MockNodeTypesWithDB>)
-    where
-        S: Stage<<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW>
-            + 'static,
-    {
+    ) -> (Pipeline<MockNodeTypesWithDB>, ProviderFactory<MockNodeTypesWithDB>) {
+        let factory = hashed_factory();
+        (pipeline_on(&factory, StageSetBuilder::default().add_stage(headers), tip), factory)
+    }
+
+    // A pipeline over `factory` holding `stages`.
+    pub(super) fn pipeline_on(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        stages: StageSetBuilder<TestProvider>,
+        tip: watch::Sender<B256>,
+    ) -> Pipeline<MockNodeTypesWithDB> {
+        Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stages(stages)
+            .with_tip_sender(tip)
+            .build(factory.clone(), StaticFileProducer::new(factory.clone(), PruneModes::default()))
+    }
+
+    // An empty database in the hashed state layout snap writes into.
+    pub(super) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
         provider.commit().unwrap();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        (pipeline_on(&factory, headers, tip), factory)
-    }
-
-    // A pipeline over `factory` holding only `headers`.
-    pub(super) fn pipeline_on<S>(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-        headers: S,
-        tip: watch::Sender<B256>,
-    ) -> Pipeline<MockNodeTypesWithDB>
-    where
-        S: Stage<<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW>
-            + 'static,
-    {
-        Pipeline::<MockNodeTypesWithDB>::builder()
-            .add_stage(headers)
-            .with_tip_sender(tip)
-            .build(factory.clone(), StaticFileProducer::new(factory.clone(), PruneModes::default()))
+        factory
     }
 
     pub(super) fn headers_done(block: u64) -> Result<ExecOutput, StageError> {
@@ -314,11 +309,19 @@ mod tests {
         provider.get_stage_checkpoint(StageId::Headers).unwrap().map(|it| it.block_number)
     }
 
-    // Waits for the running bootstrap's header stage to reach `block`.
-    pub(super) async fn headers_reach(factory: &ProviderFactory<MockNodeTypesWithDB>, block: u64) {
-        while headers_checkpoint(factory) != Some(block) {
-            tokio::time::sleep(Duration::from_millis(5)).await;
+    // Waits for the running bootstrap's header stage to commit `block`.
+    pub(super) async fn headers_reach(
+        events: &mut (impl Stream<Item = PipelineEvent> + Unpin),
+        block: u64,
+    ) {
+        while let Some(event) = events.next().await {
+            if let PipelineEvent::Ran { stage_id: StageId::Headers, result, .. } = event &&
+                result.checkpoint.block_number == block
+            {
+                return
+            }
         }
+        panic!("the pipeline stopped before headers reached {block}")
     }
 
     #[tokio::test]
@@ -361,7 +364,7 @@ mod tests {
 
     #[test]
     fn the_zero_hash_is_not_a_usable_target() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::ZERO)));
 
@@ -370,7 +373,7 @@ mod tests {
 
     #[test]
     fn the_finalized_block_is_kept_while_idle() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
         let finalized = backfill.finalized.subscribe();
 
         backfill.on_action(BackfillAction::UpdateFinalized(TARGET));
@@ -382,7 +385,7 @@ mod tests {
 
     #[test]
     fn a_target_update_while_idle_starts_nothing() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
         backfill.on_action(BackfillAction::UpdateTarget(TARGET));
 
@@ -392,14 +395,15 @@ mod tests {
 
     #[tokio::test]
     async fn an_active_bootstrap_holds_the_pipeline_and_coalesces_targets() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
+        let (mut backfill, mut events) =
+            backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
         assert!(matches!(
             poll_once(&mut backfill),
             Poll::Ready(BackfillEvent::Started(PipelineTarget::Sync(TARGET)))
         ));
-        headers_reach(&backfill.provider_factory, 0).await;
+        headers_reach(&mut events, 0).await;
 
         let SnapBackfillState::Running { targets, .. } = &backfill.state else {
             panic!("the run owns the pipeline")
@@ -420,10 +424,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_dropped_backfill_stops_its_run_and_releases_the_pipeline() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
+        let (mut backfill, mut events) =
+            backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
         assert!(poll_once(&mut backfill).is_ready());
-        headers_reach(&backfill.provider_factory, 0).await;
+        headers_reach(&mut events, 0).await;
 
         let SnapBackfillState::Running { _stop, result, .. } =
             std::mem::replace(&mut backfill.state, SnapBackfillState::Idle(None))
@@ -438,10 +443,11 @@ mod tests {
 
     #[tokio::test]
     async fn node_shutdown_keeps_committed_progress() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
+        let (mut backfill, mut events) =
+            backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
         assert!(poll_once(&mut backfill).is_ready());
-        headers_reach(&backfill.provider_factory, 0).await;
+        headers_reach(&mut events, 0).await;
 
         backfill.runtime.graceful_shutdown();
 
@@ -452,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_run_returns_the_pipeline() {
-        let mut backfill =
+        let (mut backfill, _events) =
             backfill(TestStage::new(StageId::Headers).add_exec(Err(StageError::ChannelClosed)));
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
         assert!(poll_once(&mut backfill).is_ready());
@@ -464,7 +470,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unwind_target_fails_without_starting_a_run() {
-        let mut backfill = backfill(TestStage::new(StageId::Headers));
+        let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Unwind(1)));
 

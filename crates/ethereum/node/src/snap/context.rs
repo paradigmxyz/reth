@@ -7,8 +7,8 @@ use reth_provider::{
 };
 use reth_snap_sync::{SnapSyncContext, SnapSyncError};
 use reth_tracing::tracing::debug;
-use std::time::Duration;
-use tokio::sync::watch;
+use std::{pin::pin, time::Duration};
+use tokio::{sync::watch, time::Instant};
 
 // Sampling well below the block time resumes a stalled step soon after new peers connect.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
@@ -82,8 +82,8 @@ where
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
         // Peers connected before the wait already failed to serve the stalled step.
         let peers = self.client.num_connected_peers();
-        let retry = tokio::time::sleep(self.retry);
-        tokio::pin!(retry);
+        let mut retry = pin!(tokio::time::sleep(self.retry));
+        let mut sample = tokio::time::interval_at(Instant::now() + self.interval, self.interval);
         loop {
             tokio::select! {
                 // New headers need the pipeline, which only runs once this run stops. A closed
@@ -94,7 +94,7 @@ where
                     debug!(target: "sync::snap", peers, "Retrying the stalled snap step");
                     return true
                 }
-                () = tokio::time::sleep(self.interval) => {}
+                _ = sample.tick() => {}
             }
             if self.client.num_connected_peers() > peers {
                 return true
@@ -106,14 +106,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
     use reth_db::{tables, transaction::DbTxMut};
     use reth_network_peers::PeerId;
-    use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{create_test_provider_factory, insert_headers, MockNodeTypesWithDB},
         DBProvider,
     };
+    use reth_testing_utils::generators::{self, random_header_range};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const TEST_INTERVAL: Duration = Duration::from_millis(5);
@@ -145,18 +144,7 @@ mod tests {
     #[test]
     fn the_finalized_block_resolves_once_its_header_is_synced() {
         let factory = create_test_provider_factory();
-        let mut parent = B256::ZERO;
-        let headers: Vec<_> = (0..=3)
-            .map(|number| {
-                let header = SealedHeader::seal_slow(Header {
-                    number,
-                    parent_hash: parent,
-                    ..Default::default()
-                });
-                parent = header.hash();
-                header
-            })
-            .collect();
+        let headers = random_header_range(&mut generators::rng(), 0..4, B256::ZERO);
         insert_headers(&factory, &headers);
         // The header stage indexes hashes alongside the headers.
         let provider = factory.database_provider_rw().unwrap();

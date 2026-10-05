@@ -196,6 +196,7 @@ pub enum RebuildOutcome {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::snap::tests::hashed_factory;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use futures::future::{ready, Ready};
@@ -214,9 +215,8 @@ pub(crate) mod tests {
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::Account;
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, MetadataProvider, MetadataWriter, StaticFileProviderFactory,
-        StaticFileSegment, StaticFileWriter, StorageSettings, StorageSettingsCache,
+        test_utils::MockNodeTypesWithDB, BlockWriter, MetadataProvider, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter,
     };
     use reth_snap_sync::{
         SnapAccountStore, SnapGeneration, DEFAULT_RESPONSE_BYTES, DEFAULT_SCAN_CHUNK, MAX_HASH,
@@ -298,12 +298,7 @@ pub(crate) mod tests {
 
     // Headers through the pivot on storage v2, each committing to `state_root`.
     fn with_headers_committing_to(state_root: B256) -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = create_test_provider_factory();
-        let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v2()).unwrap();
-        provider.commit().unwrap();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
+        let factory = hashed_factory();
         let static_files = factory.static_file_provider();
         let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
         let mut parent = B256::ZERO;

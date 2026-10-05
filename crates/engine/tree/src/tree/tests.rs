@@ -752,18 +752,24 @@ fn backfill_action_waits_while_payload_build_is_active() {
 
 #[test]
 fn forkchoice_notifies_active_backfill_of_a_new_head() {
-    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    let config = TreeConfig::default().with_backfill_follows_finalized(true);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
     harness.tree.backfill_sync_state = BackfillSyncState::Active;
     let head = B256::repeat_byte(0x42);
+    let finalized = B256::repeat_byte(0x41);
     let state = ForkchoiceState {
         head_block_hash: head,
         safe_block_hash: B256::ZERO,
-        finalized_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
     };
     assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
     assert!(matches!(
         harness.from_tree_rx.try_recv().unwrap(),
         EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
+    ));
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
     ));
     assert!(harness.tree.backfill_sync_state.is_active());
 }
@@ -779,55 +785,6 @@ fn forkchoice_does_not_notify_a_backfill_awaiting_revalidation() {
     };
     assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
     assert!(harness.from_tree_rx.try_recv().is_err());
-}
-
-#[test]
-fn forkchoice_notifies_active_backfill_of_the_finalized_block() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
-    harness.tree.backfill_sync_state = BackfillSyncState::Active;
-    let head = B256::repeat_byte(0x42);
-    let finalized = B256::repeat_byte(0x41);
-    let state = ForkchoiceState {
-        head_block_hash: head,
-        safe_block_hash: B256::ZERO,
-        finalized_block_hash: finalized,
-    };
-
-    assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
-
-    assert!(matches!(
-        harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
-    ));
-    assert!(matches!(
-        harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
-    ));
-}
-
-#[test]
-fn a_backfill_starts_with_the_latest_finalized_block() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
-    let finalized = B256::repeat_byte(0x41);
-    let state = ForkchoiceState {
-        head_block_hash: B256::repeat_byte(0x42),
-        safe_block_hash: B256::ZERO,
-        finalized_block_hash: finalized,
-    };
-    harness.tree.state.forkchoice_state_tracker.set_latest(state, ForkchoiceStatus::Syncing);
-
-    harness.tree.dispatch_backfill_action(BackfillAction::Start(B256::ZERO.into()));
-
-    assert!(matches!(
-        harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
-    ));
-    assert!(matches!(
-        harness.from_tree_rx.try_recv().unwrap(),
-        EngineApiEvent::BackfillAction(BackfillAction::Start(_))
-    ));
 }
 
 fn deferred_backfill_harness() -> (TestHarness, Vec<ExecutedBlock>, BackfillAction) {
@@ -1013,6 +970,30 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
         panic!("expected backfill action, got {emitted:?}")
     };
     assert_eq!(emitted_action, action);
+}
+
+#[test]
+fn a_backfill_starts_with_the_latest_finalized_block() {
+    let config = TreeConfig::default().with_backfill_follows_finalized(true);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
+    let finalized = B256::repeat_byte(0x41);
+    let state = ForkchoiceState {
+        head_block_hash: B256::repeat_byte(0x42),
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+    harness.tree.state.forkchoice_state_tracker.set_latest(state, ForkchoiceStatus::Syncing);
+
+    harness.tree.dispatch_backfill_action(BackfillAction::Start(B256::ZERO.into()));
+
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
+    ));
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::Start(_))
+    ));
 }
 
 #[test]
