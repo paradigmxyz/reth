@@ -2108,11 +2108,12 @@ impl IngressHandler {
 
         // A packet starts with the hash of everything that follows it, and `Message::decode`
         // rejects any packet whose contents do not hash to it. A repeat of a packet we already
-        // accepted can therefore be recognised from those 32 bytes alone, without decoding.
+        // accepted from the same IP can therefore be recognised from those 32 bytes alone,
+        // without decoding.
         // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from costing
         // a signature verification.
         if data.len() >= MIN_PACKET_SIZE &&
-            self.cache.contains_packet(B256::from_slice(&data[..32]))
+            self.cache.contains_packet(B256::from_slice(&data[..32]), src.ip())
         {
             trace!(target: "discv4", ?src, "Received duplicate packet.");
             return
@@ -2127,7 +2128,7 @@ impl IngressHandler {
 
                 // Only packets that decoded are remembered, so a peer cannot suppress a packet we
                 // have not seen yet by guessing its hash.
-                self.cache.insert_packet(packet.hash);
+                self.cache.insert_packet(packet.hash, src.ip());
 
                 IngressEvent::Packet(src, packet)
             }
@@ -2152,8 +2153,10 @@ struct ReceiveCache {
     /// This is used to count the number of messages received from a given IP address within an
     /// interval.
     ip_messages: HashMap<IpAddr, usize>,
-    // keeps track of unique packet hashes
-    unique_packets: schnellru::LruMap<B256, ()>,
+    /// Valid packet hashes paired with their canonical source IP.
+    ///
+    /// A replay from another IP must not suppress the genuine packet from the expected source.
+    unique_packets: schnellru::LruMap<(B256, IpAddr), ()>,
 }
 
 impl ReceiveCache {
@@ -2178,16 +2181,16 @@ impl ReceiveCache {
         *ctn
     }
 
-    /// Returns true if we previously received the packet.
+    /// Returns true if we previously received the packet from this IP.
     ///
     /// A hit refreshes the entry so that a packet being replayed repeatedly stays cached.
-    fn contains_packet(&mut self, hash: B256) -> bool {
-        self.unique_packets.get(&hash).is_some()
+    fn contains_packet(&mut self, hash: B256, ip: IpAddr) -> bool {
+        self.unique_packets.get(&(hash, ip.to_canonical())).is_some()
     }
 
     /// Remembers a packet we accepted.
-    fn insert_packet(&mut self, hash: B256) {
-        self.unique_packets.insert(hash, ());
+    fn insert_packet(&mut self, hash: B256, ip: IpAddr) {
+        self.unique_packets.insert((hash, ip.to_canonical()), ());
     }
 }
 
@@ -2643,15 +2646,17 @@ mod tests {
             enr_sq: None,
         });
         let (packet, hash) = msg.encode(&remote_key);
-        let src = "10.0.0.1:30303".parse().unwrap();
+        let src = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
 
         handler.handle_packet(&packet, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::Packet(_, _))));
 
-        // the replay is dropped on the hash prefix alone
-        handler.handle_packet(&packet, src).await;
-        assert!(rx.try_recv().is_err());
-        assert!(handler.cache.contains_packet(hash));
+        // Replays from the same IP are dropped regardless of address representation or port.
+        for duplicate_src in [src, SocketAddr::from(([10, 0, 0, 1], 40404))] {
+            handler.handle_packet(&packet, duplicate_src).await;
+            assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        }
+        assert!(handler.cache.contains_packet(hash, src.ip()));
     }
 
     #[tokio::test]
@@ -2678,7 +2683,7 @@ mod tests {
         forged[last] ^= 0xff;
         handler.handle_packet(&forged, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::BadPacket(..))));
-        assert!(!handler.cache.contains_packet(hash));
+        assert!(!handler.cache.contains_packet(hash, src.ip()));
 
         // so the genuine packet still gets through
         handler.handle_packet(&packet, src).await;
@@ -3606,5 +3611,60 @@ mod tests {
 
         let request = &service.pending_find_nodes[&record.id];
         assert!(request.answered);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_wrong_ip_replay_does_not_poison_cache() {
+        let (_discv4, mut service) = create_discv4().await;
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let record = NodeRecord::from_secret_key(node_addr, &remote_key);
+        insert_proven_node(&mut service, record);
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Message::Neighbours(Neighbours {
+            nodes: vec![discovered],
+            expire: service.find_node_expiration(),
+        });
+        let (packet, _) = msg.encode(&remote_key);
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut handler = IngressHandler::new(tx, *service.local_peer_id());
+
+        // A valid replay from another IP must not consume the request or suppress its reply.
+        handler.handle_packet(&packet, SocketAddr::from(([10, 0, 0, 2], 30303))).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().unwrap()
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(!request.answered);
+        assert_eq!(request.response_count, 0);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+        assert!(service.pending_pings.is_empty());
+
+        // The identical signed packet from the queried IP must still reach the service.
+        handler.handle_packet(&packet, node_addr).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().expect("genuine reply was suppressed by the wrong-IP replay")
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+
+        // A port change or mapped address must not bypass deduplication for the same IP.
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
+        handler.handle_packet(&packet, mapped).await;
+        assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
 }
