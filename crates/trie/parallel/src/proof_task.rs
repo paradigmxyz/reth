@@ -196,6 +196,30 @@ impl ProofWorkerHandle {
             + Sync
             + 'static,
     {
+        Self::new_inner(
+            runtime,
+            task_ctx,
+            worker_counts,
+            proof_result_tx,
+            #[cfg(test)]
+            None,
+        )
+    }
+
+    fn new_inner<Factory>(
+        runtime: &Runtime,
+        task_ctx: ProofTaskCtx<Factory>,
+        worker_counts: ProofWorkerCounts,
+        proof_result_tx: ProofResultSender,
+        #[cfg(test)] startup_hook: Option<ProofPoolStartupHook>,
+    ) -> Self
+    where
+        Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
@@ -221,6 +245,8 @@ impl ProofWorkerHandle {
 
         let storage_rt = runtime.clone();
         {
+            #[cfg(test)]
+            let startup_hook = startup_hook.clone();
             let task_ctx = task_ctx.clone();
             let work_rx = storage_work_rx;
             let availability = storage_availability.clone();
@@ -229,6 +255,15 @@ impl ProofWorkerHandle {
             let metrics = metrics.clone();
             let parent_span = tracing::Span::current();
             runtime.spawn_blocking_named("storage-workers", move || {
+                if !initialize_proof_pool("storage", &result_tx, || {
+                    #[cfg(test)]
+                    if let Some(hook) = &startup_hook {
+                        hook("storage");
+                    }
+                    storage_rt.proof_storage_worker_pool().current_num_threads();
+                }) {
+                    return;
+                }
                 let next_worker_id = AtomicUsize::new(0);
                 storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
                     let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
@@ -270,6 +305,15 @@ impl ProofWorkerHandle {
             let result_tx = proof_result_tx;
             let parent_span = tracing::Span::current();
             runtime.spawn_blocking_named("account-workers", move || {
+                if !initialize_proof_pool("account", &result_tx, || {
+                    #[cfg(test)]
+                    if let Some(hook) = &startup_hook {
+                        hook("account");
+                    }
+                    account_rt.proof_account_worker_pool().current_num_threads();
+                }) {
+                    return;
+                }
                 let next_worker_id = AtomicUsize::new(0);
                 account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
                     let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
@@ -1178,6 +1222,34 @@ enum AccountWorkerJob {
     },
 }
 
+/// Initializes a lazy proof pool before entering its long-lived broadcast.
+///
+/// Pool construction can panic if OS threads cannot be created. The named task catches
+/// panics, but dropping queued jobs alone cannot wake a sparse-trie consumer that retains
+/// its own result sender. Report this terminal startup error through the existing channel.
+/// The broadcast stays outside this boundary: it may wait on other workers after one panics.
+fn initialize_proof_pool(
+    pool: &'static str,
+    result_tx: &ProofResultSender,
+    initialize: impl FnOnce(),
+) -> bool {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(initialize)).is_ok() {
+        return true;
+    }
+    error!(target: "trie::proof_task", pool, "Proof worker pool initialization panicked");
+    let _ = result_tx.send(ProofResultMessage {
+        result: Err(StateRootTaskError::ProofWorker(format!(
+            "{pool} worker pool initialization panicked"
+        ))),
+        elapsed: Duration::ZERO,
+        state: Default::default(),
+    });
+    false
+}
+
+#[cfg(test)]
+type ProofPoolStartupHook = Arc<dyn Fn(&'static str) + Send + Sync>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1294,5 +1366,142 @@ mod tests {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }
+    }
+
+    /// A queued account job must not disappear while the caller retains its result sender.
+    /// Also require explicit startup notification for storage; a direct storage receiver can
+    /// already disconnect on startup failure, so that route is not an independent hang proof.
+    #[test]
+    fn proof_pool_startup_failure_reports_accepted_work() {
+        const WAIT: Duration = Duration::from_secs(3);
+        let mut failures = Vec::new();
+        for failed_pool in ["account", "storage"] {
+            let provider_factory =
+                create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+            let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+            let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+                provider_factory,
+                reth_storage_overlay::OverlayManager::<
+                    reth_ethereum_primitives::EthPrimitives,
+                >::default()
+                .overlay_builder(anchor_hash),
+            );
+            let runtime = reth_tasks::RuntimeBuilder::new(
+                reth_tasks::RuntimeConfig::default()
+                    .with_tokio(reth_tasks::TokioConfig::with_worker_threads(1))
+                    .with_rayon(reth_tasks::RayonConfig {
+                        cpu_threads: Some(1),
+                        proof_storage_worker_threads: Some(1),
+                        proof_account_worker_threads: Some(1),
+                        ..Default::default()
+                    }),
+            )
+            .build()
+            .unwrap();
+            let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+            let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+            let injected = Arc::new(AtomicBool::new(false));
+            let hook_injected = injected.clone();
+            let hook: ProofPoolStartupHook = Arc::new(move |pool| {
+                if pool == failed_pool {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(WAIT).expect("startup injection was not released");
+                    hook_injected.store(true, Ordering::SeqCst);
+                    panic!("injected {pool} proof pool initialization failure");
+                }
+            });
+            // Retain this sender until after receiving, as SparseTrieCacheTask does.
+            let (proof_result_tx, proof_result_rx) = unbounded();
+            let handle = ProofWorkerHandle::new_inner(
+                &runtime,
+                test_ctx(factory),
+                ProofWorkerCounts::new(1, 1),
+                proof_result_tx.clone(),
+                Some(hook),
+            );
+            let entered = entered_rx.recv_timeout(WAIT);
+            let (storage_result_tx, storage_result_rx) = unbounded();
+            let (dispatch, pending) = if failed_pool == "storage" {
+                let dispatch = handle.dispatch_storage_proof(
+                    StorageProofInput::new(B256::ZERO, vec![ProofV2Target::new(B256::ZERO)], true),
+                    storage_result_tx,
+                );
+                (dispatch, handle.pending_storage_tasks())
+            } else {
+                drop(storage_result_tx);
+                let dispatch = handle.dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: MultiProofTargetsV2 {
+                        account_targets: vec![ProofV2Target::new(B256::ZERO)],
+                        ..Default::default()
+                    },
+                    proof_result_sender: ProofResultContext::new(
+                        proof_result_tx.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                });
+                (dispatch, handle.pending_account_tasks())
+            };
+            // No assertion may strand the paused coordinator before this unconditional release.
+            let released = release_tx.try_send(());
+            let result = proof_result_rx.recv_timeout(WAIT);
+            drop(handle);
+            // Account workers retain a storage sender, so drain their coordinator first.
+            // Barriers use the actual named queues and every receive is bounded.
+            for name in ["account-workers", "storage-workers"] {
+                let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+                runtime.spawn_blocking_named(name, move || {
+                    let _ = done_tx.send(());
+                });
+                if let Err(error) = done_rx.recv_timeout(WAIT) {
+                    failures.push(format!("{failed_pool}: {name} did not stop: {error:?}"));
+                }
+            }
+            if entered.is_err() ||
+                dispatch.is_err() ||
+                pending != 1 ||
+                released.is_err() ||
+                !injected.load(Ordering::SeqCst)
+            {
+                failures.push(format!(
+                    "{failed_pool}: injection was not after accepted queued work: \
+                     entered={entered:?}, dispatch={dispatch:?}, pending={pending}, \
+                     released={released:?}, injected={}",
+                    injected.load(Ordering::SeqCst)
+                ));
+            }
+            let expected = format!("{failed_pool} worker pool initialization panicked");
+            match result {
+                Ok(ProofResultMessage {
+                    result: Err(StateRootTaskError::ProofWorker(error)),
+                    elapsed,
+                    state,
+                }) if error == expected && elapsed == Duration::ZERO && state.is_empty() => {}
+                other => failures.push(format!(
+                    "{failed_pool}: expected startup ProofWorker error, got {other:?}"
+                )),
+            }
+            if !matches!(proof_result_rx.try_recv(), Err(crossbeam_channel::TryRecvError::Empty)) {
+                failures.push(format!(
+                    "{failed_pool}: expected no second result while caller sender remains alive"
+                ));
+            }
+            drop(proof_result_tx);
+            if !matches!(
+                proof_result_rx.recv_timeout(WAIT),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+            ) {
+                failures.push(format!("{failed_pool}: result senders outlived coordinators"));
+            }
+            if failed_pool == "storage" &&
+                !matches!(
+                    storage_result_rx.try_recv(),
+                    Err(crossbeam_channel::TryRecvError::Disconnected)
+                )
+            {
+                failures.push("storage: direct result receiver should disconnect".to_string());
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
     }
 }
