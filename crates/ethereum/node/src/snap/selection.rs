@@ -70,7 +70,10 @@ where
             warn!(target: "sync::snap", "Amsterdam isn't active yet, so --snap.v2 keeps the staged pipeline");
         }
         SnapHandoff::new(provider_factory.clone()).resume_interrupted_publish()?;
-        provider_factory.database_provider_ro()?.ensure_sync_mode(snap)?;
+        // The snap layout is checked in `build`, after genesis initializes it.
+        if !snap {
+            provider_factory.database_provider_ro()?.ensure_sync_mode(false)?;
+        }
         Ok(())
     }
 }
@@ -174,7 +177,12 @@ mod tests {
 
     #[test]
     fn the_flag_selects_snap_sync() {
-        assert!(matches!(build(true, factory(amsterdam())), EthereumBackfillSync::Snap(_)));
+        let factory = factory(amsterdam());
+        assert!(recover(true, &factory).is_ok());
+
+        // Genesis supplies the layout before the backfill is built.
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(matches!(build(true, factory), EthereumBackfillSync::Snap(_)));
     }
 
     #[test]
