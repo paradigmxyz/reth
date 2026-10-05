@@ -6,7 +6,8 @@
 //! 1. Syncs headers to the target; nothing below the pivot executes.
 //! 2. Selects a pivot under the head, or resumes the recorded attempt while its pivot is canonical.
 //! 3. Downloads state against the pivot's root, carried to newer pivots by block access lists.
-//! 4. Hands the state to [`SnapHandoff`], which rebuilds the trie and publishes it at the pivot.
+//! 4. Hands the state to [`SnapHandoff`], which rebuilds the trie and publishes it at the pivot, or
+//!    abandons the attempt on a root mismatch so the next pass starts a new one.
 //!
 //! A forkchoice update ends the current step at its next boundary, so headers catch up first.
 //! The staged pipeline then runs the stages above the pivot.

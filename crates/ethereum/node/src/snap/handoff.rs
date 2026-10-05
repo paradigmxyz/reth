@@ -13,7 +13,7 @@ use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
 use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
 };
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{info, warn};
 use tokio_util::sync::CancellationToken;
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
@@ -32,7 +32,8 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
     }
 
     /// Rebuilds the trie at the pivot of `write`'s attempt and checks its root, abandoning the
-    /// attempt on a mismatch. Progress commits as it goes, and `stop` ends it early.
+    /// attempt on a mismatch so the next run starts a new one. Progress commits as it goes, and
+    /// `stop` ends it early.
     ///
     /// The attempt's state must have been handed to the merkle stage with
     /// [`SnapStateVerifier::start_trie_rebuild`].
@@ -42,17 +43,17 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         stop: &CancellationToken,
     ) -> Result<RebuildOutcome, PipelineError> {
         let pivot = self.pivot(write)?;
-        let rebuilt = self.rebuild_trie(pivot, stop);
-        if matches!(
-            &rebuilt,
+        match self.rebuild_trie(pivot, stop) {
             Err(PipelineError::Stage(StageError::Block {
-                error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
+                error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(diff)),
                 ..
-            }))
-        ) {
-            self.abandon()?;
+            })) => {
+                warn!(target: "sync::snap", ?pivot, %diff, "Snap state root mismatch, abandoning the attempt");
+                self.abandon()?;
+                Ok(RebuildOutcome::RootMismatch)
+            }
+            rebuilt => rebuilt,
         }
-        rebuilt
     }
 
     /// Publishes the state downloaded under `write` at its attempt's pivot and accepts it, so the
@@ -73,8 +74,10 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         }
 
         // A trie already rebuilt to the pivot returns at once.
-        if self.rebuild(write, stop)? == RebuildOutcome::Stopped {
-            return Ok(HandoffOutcome::Stopped)
+        match self.rebuild(write, stop)? {
+            RebuildOutcome::Rebuilt => {}
+            RebuildOutcome::RootMismatch => return Ok(HandoffOutcome::RootMismatch),
+            RebuildOutcome::Stopped => return Ok(HandoffOutcome::Stopped),
         }
 
         self.publish(write)?;
@@ -179,6 +182,9 @@ pub enum HandoffOutcome {
     Completed,
     /// The pivot left the canonical chain, so the attempt was abandoned for a new one.
     PivotReorged,
+    /// The rebuilt root differs from the pivot's header, so the attempt was abandoned for a new
+    /// one.
+    RootMismatch,
     /// The trie rebuild was stopped before reaching the pivot, so nothing was published.
     Stopped,
 }
@@ -189,6 +195,9 @@ pub enum HandoffOutcome {
 pub enum RebuildOutcome {
     /// The trie is rebuilt at the pivot and its root matches the pivot's header.
     Rebuilt,
+    /// The rebuilt root differs from the pivot's header, so the attempt was abandoned for a new
+    /// one.
+    RootMismatch,
     /// The rebuild was stopped before reaching the pivot. Its progress so far is committed.
     Stopped,
 }
@@ -498,7 +507,7 @@ pub(crate) mod tests {
 
         let handoff = SnapHandoff::new(factory.clone()).hand_off(write, &CancellationToken::new());
 
-        assert!(handoff.is_err());
+        assert_eq!(handoff.unwrap(), HandoffOutcome::RootMismatch);
 
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());

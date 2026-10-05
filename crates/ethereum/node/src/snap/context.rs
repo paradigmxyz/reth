@@ -17,10 +17,8 @@ const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 // where it was, so a step stalled on such a peer only resumes by retrying.
 const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-/// [`SnapSyncContext`] for one bootstrap run inside the snap backfill.
-///
-/// Headers only advance between runs, so a new forkchoice target ends a wait and lets the
-/// backfill refresh them.
+// `SnapSyncContext` for one bootstrap run inside the snap backfill. Headers only advance between
+// runs, so a new forkchoice target ends a wait and lets the backfill refresh them.
 #[derive(Debug)]
 pub(crate) struct NodeSnapContext<N: ProviderNodeTypes, C> {
     factory: ProviderFactory<N>,

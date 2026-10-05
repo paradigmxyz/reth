@@ -19,10 +19,10 @@ use std::{pin::pin, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-/// Minimum time between header refreshes while forkchoice moves.
-///
-/// Ten slots keeps the head well inside the ~128 recent blocks peers serve state for, without
-/// stopping the download every slot.
+// Minimum time between header refreshes while forkchoice moves.
+//
+// Ten slots keeps the head well inside the ~128 recent blocks peers serve state for, without
+// stopping the download every slot.
 const HEADER_REFRESH: Duration = Duration::from_secs(120);
 
 // Returning without progress hands control back to the engine without a fatal error.
@@ -157,6 +157,7 @@ where
     ) -> Result<Pass, PipelineError> {
         match self.with_handoff(move |handoff, stop| handoff.rebuild(write, stop)).await? {
             RebuildOutcome::Rebuilt => self.hand_off(pipeline, targets, write, pivot).await,
+            RebuildOutcome::RootMismatch => Ok(Pass::Again),
             RebuildOutcome::Stopped => Ok(Pass::Stopped),
         }
     }
@@ -180,6 +181,7 @@ where
                 info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before the handoff, restarting");
                 Pass::Again
             }
+            HandoffOutcome::RootMismatch => Pass::Again,
             HandoffOutcome::Stopped => Pass::Stopped,
         })
     }
@@ -251,7 +253,8 @@ where
 enum Pass {
     // The backfill stopped, so the run returns without progress.
     Stopped,
-    // Headers moved or the pivot was reorged out, so the run starts over from headers.
+    // Headers moved, or the pivot was reorged out or its root mismatched, so the run starts over
+    // from headers.
     Again,
     // The pass finished, so the run moves on to its next step.
     Done,
@@ -268,14 +271,16 @@ mod tests {
         },
     };
     use alloy_consensus::Header;
+    use alloy_eips::eip1898::BlockWithParent;
     use reth_consensus::ConsensusError;
+    use reth_db::{tables, transaction::DbTxMut};
     use reth_network_p2p::NoopFullBlockClient;
-    use reth_primitives_traits::SealedHeader;
+    use reth_primitives_traits::{Account, SealedHeader};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     };
-    use reth_snap_sync::{SnapStateVerifier, DEFAULT_SCAN_CHUNK};
+    use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{
         ExecInput, ExecOutput, Stage, StageError, StageSetBuilder, UnwindInput, UnwindOutput,
     };
@@ -371,8 +376,14 @@ mod tests {
     // A header stage error that unwinds the pipeline; only the unwind matters here.
     fn detached_head() -> StageError {
         StageError::DetachedHead {
-            local_head: Box::default(),
-            header: Box::default(),
+            local_head: Box::new(BlockWithParent {
+                parent: B256::ZERO,
+                block: BlockNumHash::default(),
+            }),
+            header: Box::new(BlockWithParent {
+                parent: B256::ZERO,
+                block: BlockNumHash::default(),
+            }),
             error: Box::new(ConsensusError::BaseFeeMissing),
         }
     }
@@ -513,6 +524,29 @@ mod tests {
 
         assert_eq!(pass, Pass::Again);
         assert!(!factory.provider().unwrap().snap_attempt().unwrap().unwrap().is_verified());
+    }
+
+    #[tokio::test]
+    async fn a_root_mismatch_starts_a_new_attempt_instead_of_failing() {
+        let (mut pipeline, factory, write, pivot) = handoff_ready(TestStage::new(StageId::Headers));
+        // State whose root differs from the one the pivot header commits to.
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                B256::repeat_byte(3),
+                Account { nonce: 1, ..Default::default() },
+            )
+            .unwrap();
+        provider.commit().unwrap();
+        let (_targets, mut receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        let pass =
+            run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
+
+        assert_eq!(pass, Pass::Again);
+        assert!(factory.provider().unwrap().active_snap_write().unwrap().is_none());
     }
 
     #[tokio::test]
