@@ -22,7 +22,7 @@ Working branch: `centaur/extend-dst-properties-1791211405`, based on
 ## Qualification record
 
 - `cargo check -p reth-dst-runner --features dst --bin reth-dst-node`: passed (one unrelated unused-variable warning).
-- Node seeds 0–15 passed with the expanded code/storage/receipt comparison. Seed 89 passed after canceled payload jobs were modeled. The extended node campaign from seed 90 is still running; record its final case count and last unique failure here before claiming qualification.
+- Node seeds 0–15 passed with the expanded code/storage/receipt comparison. Seed 89 passed after canceled payload jobs were modeled. The uninterrupted qualification from seed 90 ran for 1,860 seconds (31 minutes) at 32 actions per case: all 332 seeds 90–421 passed with no new distinct failure. The last unique reproduced product defect remains DST-1; the 10-defect discovery goal was not reached.
 - Deep-history runs passed seeds 2000–2009 at 128 actions and seeds 3000–3019 at 256 actions, including multi-error recovery. Decision bound for the deep runs was 65,536.
 - Native-worker differential seeds 0–23 passed (0–3 at 16 actions; 4–23 at 32 actions), as did seeds 100–103 at 256 actions, with `--features dst,native-differential` and `RETH_DST_NATIVE_WORKERS=1`. This does not simulate a real process crash or power loss, and the native mode does not inject database faults.
 - Node seeds 0 (injected commit failure) and 1 also passed strict semantic replay with `RETH_DST_VERIFY_PASSES=1` at 16 actions per case.
