@@ -80,7 +80,11 @@ response, or crash and restart the follower while requests are in flight.
 Accepted blocks contain 5–64 signed transactions built with txgen-core's account, nonce, and
 generation context APIs. The workload maintains nonces for 20 funded accounts and mixes legacy,
 EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and calls across four storage
-contracts with abi-fuzz-generated keys and values. Transaction count is a semantic trace decision.
+contracts with abi-fuzz-generated keys and values. Storage writes favor a small shared slot set
+so that later blocks overwrite and clear previously written values, while still sampling arbitrary
+keys. EIP-2930 and EIP-1559 transactions sometimes include an access-list entry for a written
+slot, and payloads include a withdrawal to a funded workload account. Transaction count is a
+semantic trace decision.
 Persistence threshold, state-masking window, and multiproof chunk size vary over their legal
 ranges by campaign seed and remain fixed across a node restart. Recovery uses the database tip
 observed at the crash boundary rather than assuming which blocks were durable.

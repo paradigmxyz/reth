@@ -14,7 +14,10 @@ use crate::{
 use abi_fuzz::{generators::RandomGenerator, Generator as AbiGenerator};
 use alloy_consensus::{BlockHeader as _, SignableTransaction, TxEip1559, TxEip2930, TxLegacy};
 use alloy_dyn_abi::{DynSolType, DynSolValue};
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{
+    eip2930::{AccessList, AccessListItem},
+    eip4895::Withdrawal,
+};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{keccak256, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState, PayloadId, PayloadStatus};
@@ -337,7 +340,12 @@ impl Node {
             timestamp: parent.timestamp + 12 + u64::from(branch),
             prev_randao: B256::repeat_byte(branch),
             suggested_fee_recipient: Address::repeat_byte(branch + 1),
-            withdrawals: Some(vec![]),
+            withdrawals: Some(vec![Withdrawal {
+                index: parent.number + 1,
+                validator_index: u64::from(branch),
+                address: workload_addresses()[branch as usize % WORKLOAD_ACCOUNT_COUNT],
+                amount: 1 + u64::from(branch),
+            }]),
             parent_beacon_block_root: Some(B256::repeat_byte(branch)),
             ..Default::default()
         };
@@ -584,27 +592,52 @@ fn materialize_block_transactions(
         let parent_nonce = parent_nonces[sender_index];
         let nonce = context.next_nonce(sender.0 .0);
         let action = context.rng.next_u64() % 4;
-        let (to, input, value, gas_limit) = if action < 2 {
+        let (to, input, value, gas_limit, accessed_slot) = if action < 2 {
             let mut input = Vec::with_capacity(256);
+            let mut accessed_slot = None;
             for _ in 0..4 {
                 let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
                     DynSolValue::Uint(value, _) => value,
                     _ => unreachable!(),
                 };
-                let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
+                // Revisit a small slot set across blocks, including clears and overwrites.
+                let key = if context.rng.next_u64() % 4 == 0 {
+                    key
+                } else {
+                    U256::from(context.rng.next_u64() % 8)
+                };
+                accessed_slot.get_or_insert(B256::from(key.to_be_bytes::<32>()));
+                let value = if context.rng.next_u64() % 4 == 0 {
+                    U256::ZERO
+                } else {
+                    match abi.generate(&DynSolType::Uint(256), context.rng) {
+                        DynSolValue::Uint(value, _) => value,
+                        _ => unreachable!(),
+                    }
                 };
                 input.extend_from_slice(&key.to_be_bytes::<32>());
                 input.extend_from_slice(&value.to_be_bytes::<32>());
             }
             let contract = storage_contract(context.rng.next_u64() as u8 % STORAGE_CONTRACT_COUNT);
-            (Some(contract), Bytes::from(input), U256::ZERO, 200_000)
+            (Some(contract), Bytes::from(input), U256::ZERO, 200_000, accessed_slot)
         } else if action == 2 {
             let recipient = addresses[context.rng.next_u64() as usize % WORKLOAD_ACCOUNT_COUNT];
-            (Some(recipient), Bytes::new(), U256::from(context.rng.next_u64() % 1_000), 21_000)
+            (
+                Some(recipient),
+                Bytes::new(),
+                U256::from(context.rng.next_u64() % 1_000),
+                21_000,
+                None,
+            )
         } else {
-            (None, Bytes::from_static(STORAGE_INIT_CODE), U256::ZERO, 200_000)
+            (None, Bytes::from_static(STORAGE_INIT_CODE), U256::ZERO, 200_000, None)
+        };
+        let access_list = if context.rng.next_u64() % 2 == 0 {
+            accessed_slot.map_or_else(AccessList::default, |slot| {
+                AccessList(vec![AccessListItem { address: to.unwrap(), storage_keys: vec![slot] }])
+            })
+        } else {
+            AccessList::default()
         };
         let to = to.map_or(TxKind::Create, TxKind::Call);
         let signer = accounts.get_by_index(&selected.pool, selected.index).unwrap();
@@ -630,7 +663,7 @@ fn materialize_block_transactions(
                     gas_limit,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -645,7 +678,7 @@ fn materialize_block_transactions(
                     max_priority_fee_per_gas: gas.max_priority_fee_per_gas,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -662,7 +695,7 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 12;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 13;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
