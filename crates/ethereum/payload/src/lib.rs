@@ -169,7 +169,7 @@ where
         mut cached_reads,
         execution_cache,
         mut state_root_handle,
-        state_provider_factory,
+        state_provider_factory: _,
         config,
         cancel,
         best_payload,
