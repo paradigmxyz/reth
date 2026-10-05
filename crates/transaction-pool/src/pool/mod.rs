@@ -113,6 +113,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
 mod frame_revalidation;
+#[cfg(test)]
+mod frame_tests;
 pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
 pub use blob::{blob_tx_priority, fee_delta, BlobOrd, BlobTransactions};
 pub use events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent};
@@ -574,7 +576,12 @@ where
         // update the pool
         let outcome = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, timestamp);
+            let mut affected = pool.affected_frame_transactions(&dependencies, timestamp);
+            // Blob payer exposure uses the head's blob price, which can change without any
+            // account or storage dependency being touched.
+            affected.extend(pool.blob_frame_transaction_hashes());
+            affected.sort_unstable();
+            affected.dedup();
             let mut queue = self.frame_revalidation.lock();
             for hash in &mined_transactions {
                 queue.cancel(hash);
@@ -612,7 +619,7 @@ where
                 .await;
             let (meta, discarded) = {
                 let mut pool = self.pool.write();
-                // Explicit removal or a newer sender transaction cancels this exact attempt.
+                // Explicit removal or a replacement at the same nonce cancels this exact attempt.
                 if !self.frame_revalidation.lock().take_current(&candidate) {
                     continue
                 }
@@ -711,12 +718,28 @@ where
                 };
 
                 let tx_sender = tx.sender();
+                let tx_nonce = tx.nonce();
+                // Withdrawal must not provide a window to bypass normal replacement fees.
+                let underpriced =
+                    self.frame_revalidation.lock().get(tx_sender, tx_nonce).is_some_and(
+                        |existing| {
+                            existing.hash() != tx.hash() &&
+                                existing.is_underpriced(&tx, &self.config.price_bumps)
+                        },
+                    );
+                if underpriced {
+                    return (
+                        Err(PoolError::new(*tx.hash(), PoolErrorKind::ReplacementUnderpriced)),
+                        None,
+                    )
+                }
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
                     Ok(added) => added,
                     Err(err) => return (Err(err), None),
                 };
                 let hash = *added.hash();
-                let cancelled_frame = self.frame_revalidation.lock().cancel_sender(tx_sender);
+                let cancelled_frame =
+                    self.frame_revalidation.lock().cancel_nonce(tx_sender, tx_nonce);
                 let state = added.transaction_state();
 
                 let meta = AddedTransactionMeta { added, blob_sidecar, cancelled_frame };
@@ -1221,12 +1244,13 @@ where
             for hash in &hashes {
                 if let Some(tx) = queue.remove(hash) {
                     pool.remove_descendants(tx.id(), &mut cancelled);
+                    cancelled.extend(queue.cancel_descendants(tx.sender(), tx.nonce()));
                     cancelled.push(tx);
                 }
             }
             let mut removed = pool.remove_transactions_and_descendants(hashes);
             for tx in &removed {
-                cancelled.extend(queue.cancel_sender(tx.sender()));
+                cancelled.extend(queue.cancel_descendants(tx.sender(), tx.nonce()));
             }
             removed.extend(cancelled);
             removed
@@ -1516,7 +1540,7 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
     blob_sidecar: Option<PooledBlobSidecar>,
-    /// An in-flight revalidation superseded by this newly admitted sender transaction.
+    /// An in-flight revalidation superseded by a newly admitted transaction at the same nonce.
     cancelled_frame: Option<Arc<ValidPoolTransaction<T>>>,
 }
 
