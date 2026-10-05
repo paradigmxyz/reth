@@ -4,6 +4,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
+use reth_tasks::TaskRuntime;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -229,19 +230,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
-                    PrewarmTarget::Account(addr, slots) => {
-                        let _ = provider.basic_account(&addr);
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
-                    PrewarmTarget::Storage(addr, slots) => {
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
-                }
+                warm_target(provider, target);
             }
             PrewarmMsg::EndBlock(end_tx) => {
                 provider = None;
@@ -259,6 +248,22 @@ impl Drop for SendOnDrop {
     fn drop(&mut self) {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
+        }
+    }
+}
+
+fn warm_target(provider: &impl EvmStateProvider, target: PrewarmTarget) {
+    match target {
+        PrewarmTarget::Account(address, slots) => {
+            let _ = provider.basic_account(&address);
+            for slot in slots {
+                let _ = provider.storage(address, slot);
+            }
+        }
+        PrewarmTarget::Storage(address, slots) => {
+            for slot in slots {
+                let _ = provider.storage(address, slot);
+            }
         }
     }
 }
