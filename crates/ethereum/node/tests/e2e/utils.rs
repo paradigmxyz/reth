@@ -1,4 +1,4 @@
-use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId};
 use alloy_primitives::{bytes, U256};
 use alloy_provider::{
     network::{
@@ -48,7 +48,7 @@ pub(crate) async fn advance_with_random_transactions(
 
             let nonce = provider
                 .get_transaction_count(signer.address())
-                .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                .block_id(BlockId::pending())
                 .await?;
 
             let mut tx =
@@ -85,7 +85,7 @@ pub(crate) async fn advance_with_random_transactions(
                     address: *call_destinations.choose(rng).unwrap(),
                     nonce: provider
                         .get_transaction_count(signer.address())
-                        .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                        .block_id(BlockId::pending())
                         .await?,
                 };
                 let sig = signer.sign_hash_sync(&auth.signature_hash())?;
@@ -94,7 +94,7 @@ pub(crate) async fn advance_with_random_transactions(
 
             let gas = provider
                 .estimate_gas(tx.clone())
-                .block(BlockId::Number(BlockNumberOrTag::Pending))
+                .block(BlockId::pending())
                 .await
                 .unwrap_or(1_000_000);
 
