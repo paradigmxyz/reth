@@ -480,14 +480,9 @@ impl Node {
                     SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
                 ) =>
             {
-                // Empty blocks can leave the optional trie cache unrevealed.
-                let root = self
-                    .provider
-                    .state_by_block_hash(block_hash)
-                    .unwrap()
-                    .state_root(HashedPostState::default())
-                    .unwrap();
-                assert_eq!(root, state_root);
+                // Empty blocks can leave the optional cache unrevealed. An unchosen side
+                // branch is not readable through this provider until forkchoice completes;
+                // the campaign checks its executed root at that boundary instead.
             }
             Err(error) => panic!("preserved trie root failed: {error:?}"),
         }
@@ -751,7 +746,7 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = 0;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 16;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 17;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]

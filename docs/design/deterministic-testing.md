@@ -106,7 +106,7 @@ remain test failures. Successful side-fork jobs are still validated and imported
 The cooperative sparse-trie worker hands its finalized trie to the validation job, which binds it
 to the validated block hash before caching it. A cache whose account trie remains blind after an
 empty block is checked through the executed state provider, rather than requiring an unrevealed
-cache to compute a root.
+cache to compute a root; the selected head's executed root is checked after forkchoice.
 
 The bounded developer profile runs four cases:
 
