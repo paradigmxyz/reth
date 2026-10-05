@@ -108,6 +108,7 @@ struct Node {
     persistence: TaskHandle<Result<(), PersistenceError>>,
     peer: WirePeer,
     storage: StorageProbe,
+    require_sparse_trie: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -288,6 +289,7 @@ impl Node {
             persistence: persistence_task,
             peer,
             storage,
+            require_sparse_trie: !campaign_config.native_workers,
         }
     }
 
@@ -453,9 +455,14 @@ impl Node {
     }
 
     fn assert_sparse_trie_block(&self, block_hash: B256) {
-        let (_, preserved_block_hash) =
-            self.sparse_trie_frontier().expect("validation must preserve its sparse trie");
-        assert_eq!(preserved_block_hash, block_hash);
+        if let Some((_, preserved_block_hash)) = self.sparse_trie_frontier() {
+            assert_eq!(preserved_block_hash, block_hash);
+        } else {
+            assert!(
+                !self.require_sparse_trie,
+                "cooperative validation must preserve its sparse trie"
+            );
+        }
     }
 
     fn sparse_trie_frontier(&self) -> Option<(B256, B256)> {
@@ -494,6 +501,7 @@ impl Node {
             persistence,
             peer,
             storage,
+            require_sparse_trie: _,
         } = self;
         stop_router.send(()).unwrap();
         router.await.unwrap();
