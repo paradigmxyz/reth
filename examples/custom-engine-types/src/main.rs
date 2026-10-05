@@ -339,6 +339,7 @@ where
             cached_reads,
             execution_cache,
             state_root_handle,
+            state_provider_factory,
             config,
             cancel,
             best_payload,
@@ -351,6 +352,7 @@ where
             cached_reads,
             execution_cache,
             state_root_handle,
+            state_provider_factory,
             config: PayloadConfig {
                 parent_header,
                 parent_block_info,
