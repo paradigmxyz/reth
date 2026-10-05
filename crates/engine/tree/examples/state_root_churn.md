@@ -57,6 +57,9 @@ evicted; both account and slot fractions must remain strictly below 0.1%.
 `blocks.csv` reports task latency separately from workload preparation, persisted-update cleanup, and pruning. `root_ready_ms`
 records the actual scheduled root completion; inputs are prepared before their fixed arrival,
 and `input_late_ms` explicitly records any time the generator misses that arrival; `deadline_ms` also includes post-root pruning.
+Input value construction and witness auditing use parallel reads of the preserved trie. This keeps
+the synthetic fixture generator from becoming the bottleneck at higher churn; the production root
+task, persistence, pruning, selected keys, and generated values are unchanged.
 `root_ms + cleanup_ms + prune_ms` measures the isolated state/persistence service work, excluding
 synthetic-input generation and witness auditing. Warmup and measurement are both paced. Fixed arrival
 timestamps do not slide forward when work falls behind. Deadline elapsed time includes any generator lateness and post-root pruning audits, making it a

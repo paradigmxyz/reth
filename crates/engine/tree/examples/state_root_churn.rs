@@ -7,6 +7,7 @@ use alloy_primitives::{map::B256Set, B256, U256};
 use eyre::{ensure, Result};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
 use rand::{rngs::StdRng, seq::index::sample, Rng, SeedableRng};
+use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::MAINNET;
 use reth_db::{
@@ -416,20 +417,43 @@ fn run(
                 selected.push(index);
             }
         }
+        // Prepare the fixture before arrival in parallel so synthetic input generation does not
+        // limit the measured state-root service. Witness checks only borrow the preserved trie.
+        let prepared: Vec<_> = selected
+            .par_iter()
+            .map(|&index| {
+                let entry = &entries[index];
+                let account_missing = !trie.is_account_revealed(entry.address);
+                let slots_missing =
+                    entry.slots.map(|slot| !trie.check_valid_storage_witness(entry.address, slot));
+                let mut account = entry.account;
+                account.nonce = account.nonce.checked_add(epoch).unwrap();
+                let storage = HashedStorage {
+                    storage: entry
+                        .slots
+                        .iter()
+                        .map(|s| (*s, slot_value(entry.address, *s, epoch)))
+                        .collect(),
+                };
+                (index, account_missing, slots_missing, account, storage)
+            })
+            .collect();
         let mut state = HashedPostState::default();
+        state.accounts.reserve(UPDATES);
+        state.storages.reserve(UPDATES);
         let mut account_misses = 0;
         let mut slot_misses = 0;
-        for index in selected {
+        for (index, account_missing, slots_missing, account, storage) in prepared {
             last_epoch[index] = epoch;
             let entry = &entries[index];
-            if !trie.is_account_revealed(entry.address) {
+            if account_missing {
                 account_misses += 1;
                 if block >= 2 && index < HOT {
                     ever_evicted.insert(entry.address);
                 }
             }
-            for slot in entry.slots {
-                if !trie.check_valid_storage_witness(entry.address, slot) {
+            for (slot, missing) in entry.slots.into_iter().zip(slots_missing) {
+                if missing {
                     slot_misses += 1;
                     if block >= 2 && index < HOT {
                         evicted_slots.insert(alloy_primitives::keccak256(
@@ -438,19 +462,8 @@ fn run(
                     }
                 }
             }
-            let mut account = entry.account;
-            account.nonce = account.nonce.checked_add(epoch).unwrap();
             state.accounts.insert(entry.address, Some(account));
-            state.storages.insert(
-                entry.address,
-                HashedStorage {
-                    storage: entry
-                        .slots
-                        .iter()
-                        .map(|s| (*s, slot_value(entry.address, *s, epoch)))
-                        .collect(),
-                },
-            );
+            state.storages.insert(entry.address, storage);
         }
         ensure!(
             state.accounts.len() == UPDATES && state.storages.len() == UPDATES,
