@@ -362,14 +362,22 @@ impl Discovery {
         }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
-        _ =
-            self.discovered_nodes.get_or_insert(peer_id, || {
-                self.queued_events.push_back(DiscoveryEvent::NewNode(
-                    DiscoveredEvent::EventQueued { peer_id, addr, fork_id },
-                ));
-
-                addr
-            })
+        let mut should_notify = false;
+        if let Some(discovered_addr) = self.discovered_nodes.get_or_insert(peer_id, || {
+            should_notify = true;
+            addr
+        }) && *discovered_addr != addr
+        {
+            *discovered_addr = addr;
+            should_notify = true;
+        }
+        if should_notify {
+            self.queued_events.push_back(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                addr,
+                fork_id,
+            }));
+        }
     }
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
@@ -541,7 +549,7 @@ impl Discovery {
 mod tests {
     use super::*;
     use secp256k1::SECP256K1;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
@@ -604,6 +612,45 @@ mod tests {
         )
         .await
         .expect("should start discv5")
+    }
+
+    #[test]
+    fn forwards_updated_peer_address() {
+        let mut discovery = Discovery::noop();
+        discovery.discovered_nodes = LruMap::new(10);
+
+        let peer_id = PeerId::random();
+        let ipv4_record =
+            NodeRecord::new(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 30303).into(), peer_id)
+                .with_udp_port(30304);
+        let ipv6_record =
+            NodeRecord::new(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 30303), peer_id)
+                .with_udp_port(30304);
+        let ipv6_addr = PeerAddr::new(ipv6_record.tcp_addr(), Some(ipv6_record.udp_addr()));
+
+        discovery.on_node_record_update(ipv4_record, None);
+        assert_eq!(
+            discovery.queued_events.pop_front(),
+            Some(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                addr: PeerAddr::new(ipv4_record.tcp_addr(), Some(ipv4_record.udp_addr())),
+                fork_id: None,
+            }))
+        );
+
+        discovery.on_node_record_update(ipv6_record, None);
+        assert_eq!(
+            discovery.queued_events.pop_front(),
+            Some(DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
+                peer_id,
+                addr: ipv6_addr,
+                fork_id: None,
+            }))
+        );
+
+        discovery.on_node_record_update(ipv6_record, None);
+        assert!(discovery.queued_events.is_empty());
+        assert_eq!(discovery.discovered_nodes.get(&peer_id).map(|addr| *addr), Some(ipv6_addr));
     }
 
     #[tokio::test]
