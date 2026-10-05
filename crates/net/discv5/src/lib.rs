@@ -369,13 +369,16 @@ impl Discv5 {
 
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        let tcp_port = (match self.rlpx_ip_mode {
-            IpMode::Ip4 => enr.tcp4(),
-            IpMode::Ip6 => enr.tcp6(),
-            IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
+        // The port must pair with the session socket's address, so select the
+        // ENR field by the socket's address family, not by the local node's
+        // RLPx listen family: an IPv4 session dials the `tcp` port, an IPv6
+        // session the `tcp6` port (falling back to `tcp`).
+        let tcp_port = (match address {
+            IpAddr::V4(_) => enr.tcp4(),
+            IpAddr::V6(_) => enr.tcp6().or_else(|| enr.tcp4()),
         })
         .unwrap_or(
-            // tcp socket is missing from ENR, or is wrong IP version.
+            // tcp socket is missing from ENR for the session's address family.
             //
             // by default geth runs discv5 and discv4 behind the same udp port (the discv4 default
             // port 30303), so rlpx has a chance of successfully dialing the peer on its discv5
@@ -906,6 +909,73 @@ mod test {
             },
             filtered_peer.unwrap().node_record
         )
+    }
+
+    #[test]
+    fn reachable_tcp_port_follows_session_address_family() {
+        // Regression test for https://github.com/paradigmxyz/reth/issues/27734:
+        // the TCP port paired with the session socket's IP must come from the
+        // ENR field of the *session's* address family, not the local node's
+        // RLPx listen family.
+        const TCP4_PORT: u16 = 30304;
+        const TCP6_PORT: u16 = 30306;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr =
+            Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
+
+        let v4_socket: SocketAddr = "127.0.0.1:30305".parse().unwrap();
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+
+        for local_mode in [IpMode::Ip4, IpMode::Ip6] {
+            let mut discv5 = discv5_noop();
+            discv5.rlpx_ip_mode = local_mode;
+
+            let record = discv5.try_into_reachable(&remote_enr, v4_socket).unwrap();
+            assert_eq!(
+                record.tcp_port, TCP4_PORT,
+                "v4 session with local mode {local_mode:?} must dial the tcp4 port"
+            );
+            assert_eq!(record.address, v4_socket.ip());
+            assert_eq!(record.udp_port, v4_socket.port());
+
+            let record = discv5.try_into_reachable(&remote_enr, v6_socket).unwrap();
+            assert_eq!(
+                record.tcp_port, TCP6_PORT,
+                "v6 session with local mode {local_mode:?} must dial the tcp6 port"
+            );
+            assert_eq!(record.address, v6_socket.ip());
+            assert_eq!(record.udp_port, v6_socket.port());
+        }
+    }
+
+    #[test]
+    fn reachable_tcp_port_v6_session_falls_back_to_tcp4() {
+        // A v6 session whose ENR carries only a `tcp` (v4) port uses that port
+        // rather than the session's UDP port.
+        const TCP4_PORT: u16 = 30304;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).build(&remote_key).unwrap();
+
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+
+        let mut discv5 = discv5_noop();
+        discv5.rlpx_ip_mode = IpMode::Ip6;
+        let record = discv5.try_into_reachable(&remote_enr, v6_socket).unwrap();
+        assert_eq!(record.tcp_port, TCP4_PORT);
+    }
+
+    #[test]
+    fn reachable_tcp_port_missing_falls_back_to_udp_port() {
+        // No TCP port in the ENR at all: keep the long-standing fallback to
+        // the session's UDP port, for either session family.
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().build(&remote_key).unwrap();
+
+        let discv5 = discv5_noop();
+        let v4_socket: SocketAddr = "127.0.0.1:30305".parse().unwrap();
+        assert_eq!(discv5.try_into_reachable(&remote_enr, v4_socket).unwrap().tcp_port, 30305);
+        let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
+        assert_eq!(discv5.try_into_reachable(&remote_enr, v6_socket).unwrap().tcp_port, 30307);
     }
 
     // Copied from sigp/discv5 with slight modification (U256 type)
