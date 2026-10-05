@@ -46,8 +46,7 @@ fn main() {
 
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching node");
-        let config = builder.config();
-        let backfill = EthereumBackfill::new(config.network.snap_v2, &*config.chain);
+        let backfill = EthereumBackfill::new(builder.config());
         let handle = builder
             .node(EthereumNode::default())
             .launch_with_debug_capabilities_and_backfill(backfill)

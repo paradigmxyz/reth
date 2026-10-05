@@ -4,7 +4,10 @@ use super::{SnapBackfillSync, SnapHandoff};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
-use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill};
+use reth_node_builder::{
+    sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
+    NodeConfig,
+};
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_tracing::tracing::warn;
 use std::{
@@ -20,13 +23,12 @@ pub struct EthereumBackfill {
 }
 
 impl EthereumBackfill {
-    /// Creates the builder for the `--snap.v2` setting on `chain_spec`.
-    ///
-    /// Snap pivots need block access lists, so a chain where Amsterdam isn't active keeps the
-    /// staged pipeline even with `--snap.v2`.
-    pub fn new(snap_v2: bool, chain_spec: &impl EthereumHardforks) -> Self {
+    /// Creates the builder for `config`'s `--snap.v2` setting. Snap pivots need block access
+    /// lists, so a chain where Amsterdam isn't active keeps the staged pipeline.
+    pub fn new<ChainSpec: EthereumHardforks>(config: &NodeConfig<ChainSpec>) -> Self {
+        let snap_v2 = config.network.snap_v2;
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        let snap = snap_v2 && chain_spec.is_amsterdam_active_at_timestamp(now);
+        let snap = snap_v2 && config.chain.is_amsterdam_active_at_timestamp(now);
         if snap_v2 && !snap {
             warn!(target: "sync::snap", "Amsterdam isn't active on this chain, so --snap.v2 keeps the staged pipeline");
         }
@@ -106,6 +108,7 @@ mod tests {
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_network_p2p::NoopFullBlockClient;
+    use reth_node_core::args::NetworkArgs;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StageCheckpointWriter,
@@ -126,6 +129,13 @@ mod tests {
         ChainSpecBuilder::mainnet().amsterdam_activated().build()
     }
 
+    // The `--snap.v2` setting on `factory`'s chain.
+    fn backfill(snap_v2: bool, factory: &TestFactory) -> EthereumBackfill {
+        let config = NodeConfig::new(factory.chain_spec())
+            .with_network(NetworkArgs { snap_v2, ..Default::default() });
+        EthereumBackfill::new(&config)
+    }
+
     // The backfill `EthereumBackfill` builds over `factory`, or why it refused to.
     fn build(
         snap_v2: bool,
@@ -136,19 +146,18 @@ mod tests {
             StageSetBuilder::default(),
             tokio::sync::watch::channel(B256::ZERO).0,
         );
-        let ctx = BackfillContext::new(
+        backfill(snap_v2, &factory).build(BackfillContext::new(
             pipeline,
             NoopFullBlockClient::default(),
             factory,
             Runtime::test(),
-        );
-        EthereumBackfill::new(snap_v2, &*ctx.provider_factory().chain_spec()).build(ctx)
+        ))
     }
 
     // Runs `EthereumBackfill`'s startup recovery over `factory`.
     fn recover(snap_v2: bool, factory: &TestFactory) -> eyre::Result<()> {
         BackfillSyncBuilder::<MockNodeTypesWithDB, NoopFullBlockClient>::recover(
-            &mut EthereumBackfill::new(snap_v2, &*factory.chain_spec()),
+            &mut backfill(snap_v2, factory),
             factory,
         )
     }
