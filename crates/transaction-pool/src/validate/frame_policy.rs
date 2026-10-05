@@ -8,7 +8,7 @@ use alloy_eips::{
         RECENT_ROOT_LENGTH, RECENT_ROOT_STORAGE_DOMAIN, RECENT_ROOT_TUPLE_BYTES,
     },
 };
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, Keccak256, B256, U256};
 
 /// One root reference declared by an EIP-8272 verifier frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,20 +25,20 @@ impl RecentRootReference {
     /// The EIP-8272 storage dependency for this reference.
     pub fn dependency(self) -> RecentRootDependency {
         let index = self.slot % RECENT_ROOT_LENGTH;
-        let mut storage_preimage = [0u8; 72];
-        storage_preimage[..32].copy_from_slice(RECENT_ROOT_STORAGE_DOMAIN.as_slice());
-        storage_preimage[32..64].copy_from_slice(self.source_id.as_slice());
-        storage_preimage[64..].copy_from_slice(&index.to_be_bytes());
+        let mut storage_hasher = Keccak256::new();
+        storage_hasher.update(RECENT_ROOT_STORAGE_DOMAIN);
+        storage_hasher.update(self.source_id);
+        storage_hasher.update(index.to_be_bytes());
 
-        let mut entry_preimage = [0u8; 104];
-        entry_preimage[..32].copy_from_slice(RECENT_ROOT_ENTRY_DOMAIN.as_slice());
-        entry_preimage[32..64].copy_from_slice(self.source_id.as_slice());
-        entry_preimage[64..72].copy_from_slice(&self.slot.to_be_bytes());
-        entry_preimage[72..].copy_from_slice(self.root.as_slice());
+        let mut entry_hasher = Keccak256::new();
+        entry_hasher.update(RECENT_ROOT_ENTRY_DOMAIN);
+        entry_hasher.update(self.source_id);
+        entry_hasher.update(self.slot.to_be_bytes());
+        entry_hasher.update(self.root);
 
         RecentRootDependency {
-            storage_key: U256::from_be_slice(keccak256(storage_preimage).as_slice()),
-            entry_hash: keccak256(entry_preimage),
+            storage_key: U256::from_be_bytes(storage_hasher.finalize().0),
+            entry_hash: entry_hasher.finalize(),
             expires_at_slot: self.slot.saturating_add(RECENT_ROOT_LENGTH),
         }
     }
@@ -230,7 +230,7 @@ fn is_pay(frame: &Frame) -> bool {
 mod tests {
     use super::*;
     use alloy_eips::eip8141::{FrameAddress, FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER};
-    use alloy_primitives::{b256, Bytes, U256};
+    use alloy_primitives::{b256, keccak256, Bytes, U256};
 
     fn frame(mode: FrameMode, flags: u8, target: FrameAddress) -> Frame {
         Frame {
@@ -488,5 +488,42 @@ mod tests {
             FrameValidationPolicy::new(&tx(vec![root, frame(FrameMode::Verify, 3, sender())]), 0),
             Err("verification gas budget exceeded")
         );
+    }
+
+    #[test]
+    fn dependency_hashes_match_fixed_width_preimages() {
+        for slot in [
+            0,
+            RECENT_ROOT_LENGTH - 1,
+            RECENT_ROOT_LENGTH,
+            RECENT_ROOT_LENGTH + 1,
+            0x0102_0304_0506_0708,
+            u64::MAX,
+        ] {
+            let reference = RecentRootReference {
+                source_id: B256::repeat_byte(0xab),
+                slot,
+                root: B256::repeat_byte(0xcd),
+            };
+            let mut storage_preimage = [0u8; 72];
+            storage_preimage[..32].copy_from_slice(RECENT_ROOT_STORAGE_DOMAIN.as_slice());
+            storage_preimage[32..64].copy_from_slice(reference.source_id.as_slice());
+            storage_preimage[64..].copy_from_slice(&(slot % RECENT_ROOT_LENGTH).to_be_bytes());
+
+            let mut entry_preimage = [0u8; 104];
+            entry_preimage[..32].copy_from_slice(RECENT_ROOT_ENTRY_DOMAIN.as_slice());
+            entry_preimage[32..64].copy_from_slice(reference.source_id.as_slice());
+            entry_preimage[64..72].copy_from_slice(&slot.to_be_bytes());
+            entry_preimage[72..].copy_from_slice(reference.root.as_slice());
+
+            assert_eq!(
+                reference.dependency(),
+                RecentRootDependency {
+                    storage_key: U256::from_be_bytes(keccak256(storage_preimage).0),
+                    entry_hash: keccak256(entry_preimage),
+                    expires_at_slot: slot.saturating_add(RECENT_ROOT_LENGTH),
+                }
+            );
+        }
     }
 }
