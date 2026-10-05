@@ -121,6 +121,8 @@ pub struct TxPool<T: TransactionOrdering> {
     all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
     metrics: TxPoolMetrics,
+    /// Number of identifiers retained by the last prune.
+    sender_id_prune_watermark: usize,
 }
 
 // === impl TxPool ===
@@ -139,6 +141,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             all_transactions: AllTransactions::new(&config),
             config,
             metrics: Default::default(),
+            sender_id_prune_watermark: 0,
         }
     }
 
@@ -1406,9 +1409,18 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             keep
         });
+        self.sender_id_prune_watermark = identifiers.len();
         self.metrics.sender_identifiers.set(identifiers.len() as f64);
         self.metrics.pruned_sender_identifiers.increment(pruned as u64);
         pruned
+    }
+
+    /// Returns whether identifier growth warrants another prune and updates the tracked count.
+    pub(crate) fn should_prune_sender_identifiers(&self, tracked: usize) -> bool {
+        self.metrics.sender_identifiers.set(tracked as f64);
+        self.config.sender_id_prune_threshold.is_some_and(|threshold| {
+            tracked > threshold.max(self.sender_id_prune_watermark.saturating_mul(2))
+        })
     }
 }
 

@@ -34,6 +34,9 @@ pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
 /// Default maximum allowed in flight delegated transactions per account.
 pub const DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS: usize = 1;
 
+/// Default sender identifier count above which unused mappings are pruned.
+pub const DEFAULT_SENDER_ID_PRUNE_THRESHOLD: usize = 100_000;
+
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -79,6 +82,13 @@ pub struct PoolConfig {
     /// mined nonce as pending. Assumes sender nonces only move forward, so this is primarily
     /// recommended for chains without reorgs and very low block times. Disabled by default.
     pub enforce_tracked_nonce: bool,
+    /// Prune unused sender identifiers after canonical updates once their count exceeds this
+    /// threshold and twice the count retained by the last prune. `None` disables pruning.
+    ///
+    /// Pools allocating identifiers outside transaction insertion must disable this and call
+    /// [`PoolInner::prune_sender_identifiers`](crate::pool::PoolInner::prune_sender_identifiers)
+    /// under their own allocation lock.
+    pub sender_id_prune_threshold: Option<usize>,
 }
 
 impl PoolConfig {
@@ -114,6 +124,12 @@ impl PoolConfig {
         self
     }
 
+    /// Sets the automatic pruning threshold, or disables it with `None`.
+    pub const fn with_sender_id_prune_threshold(mut self, threshold: Option<usize>) -> Self {
+        self.sender_id_prune_threshold = threshold;
+        self
+    }
+
     /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
@@ -144,6 +160,7 @@ impl Default for PoolConfig {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
             enforce_tracked_nonce: false,
+            sender_id_prune_threshold: Some(DEFAULT_SENDER_ID_PRUNE_THRESHOLD),
         }
     }
 }

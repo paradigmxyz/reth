@@ -545,6 +545,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
             enforce_tracked_nonce: default_config.enforce_tracked_nonce,
+            sender_id_prune_threshold: default_config.sender_id_prune_threshold,
         }
     }
 
