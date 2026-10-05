@@ -25,6 +25,7 @@ tracked separately and never counted toward a bug-free qualification interval.
 | `5fbd646697` + first generator extension | Seed 0; trace `target/reth-dst/failures/node-0-33bddf9b.dst` | An empty payload build waited for a txpool snapshot despite having no senders to prewarm. | Fixed the harness wait condition. The input is valid; this was a harness false positive, not a product invariant failure. |
 | First snapshot oracle | Seeds 0, 1, 2, 4; traces in `target/reth-dst/failures/` | The original snapshot compared storage `None` to `Some(0)` as different despite both reading as zero in Ethereum, and used bytecode `Debug` with an internal lazy hash cache. | Normalize absent storage to zero and compare original code bytes; the 12-seed matrix now passes strict replay. |
 | First 1900-second campaign | Seed 302; `target/reth-dst/failures/node-302-fccce47a.dst` | A modeled forkchoice changed heads while a payload build was pending; the old job returned `MissingPayload` on resolution, which the harness unconditionally unwrapped. | Strictly replayed the trace; recognize the canceled build only after an observed head change, discard its transactions, and preserve the existing success assertion for uninterrupted jobs. This was a harness lifecycle error, not a confirmed engine defect. Restart the clean-run clock on the rebuilt binary. |
+| Native-worker smoke after qualification | Seeds 318–325, first trace `target/reth-dst/failures/node-318-e2e08ad2.dst` | All eight cases hit the same `validation must preserve its sparse trie` harness assertion. | The native path selected a serial state-root fallback that does not preserve a sparse-trie frontier. Force the native differential lane to exercise parallel state-root workers even under a CPU quota; seed 318 and a subsequent eight-seed smoke pass. This was one harness configuration mismatch, not eight product defects. |
 
 After the canceled-build fix, seeds 298–309 passed with strict semantic replay, including seed
 302 and injected cursor, transaction-open, and write failures.
@@ -46,8 +47,9 @@ campaign ran from 2026-10-05 06:42:28 UTC to its observed completion at 07:14:14
 threshold. It used the debug `reth-dst-node` binary built from `23482a267e`, seed 318,
 `RETH_DST_SECONDS=1900`, `RETH_DST_STEPS=16`, and a 90-second host case watchdog. Seeds 318–882
 completed: **565 cases, zero distinct new invariant failures, zero inconclusive cases, exit code
-0**. The subsequent commits only removed an unused dependency and changed example and test
-fixtures/documentation; none changed the binary or runtime logic under qualification. Before this
+0**. The subsequent changes removed an unused dependency, changed example and test fixtures,
+and forced parallel state roots **only in the separate native-worker profile**; the cooperative
+runtime branch qualified above is unchanged. Before this
 clean interval, seed 302 reproduced a harness cancellation error; see the ledger above. No
 product-state invariant defect was confirmed during this run.
 

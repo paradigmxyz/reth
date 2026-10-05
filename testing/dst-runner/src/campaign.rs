@@ -158,6 +158,13 @@ impl Node {
             .with_persistence_backpressure_threshold(campaign_config.persistence_threshold + 2)
             .with_num_state_masking_blocks(campaign_config.state_masking_blocks)
             .with_multiproof_chunk_size(campaign_config.multiproof_chunk_size);
+        // The native differential lane deliberately exercises the sparse-trie worker even on
+        // CPU-quota-limited hosts where available_parallelism() would choose a serial fallback.
+        let config = if campaign_config.native_workers {
+            config.with_has_enough_parallelism(true)
+        } else {
+            config
+        };
         let (_, exex) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(factory.clone(), vec![], 5, 0, None, exex);
         let (metrics, _) = unbounded_channel();
