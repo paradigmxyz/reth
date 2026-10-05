@@ -30,7 +30,9 @@ pub(crate) struct NodeSnapContext<N: ProviderNodeTypes, C> {
     targets: watch::Receiver<B256>,
     // Finalized blocks forwarded by the engine, the zero hash until one arrives.
     finalized: watch::Receiver<B256>,
+    // How often to check for new peers.
     interval: Duration,
+    // How long to wait before retrying with the same peers.
     retry: Duration,
 }
 
