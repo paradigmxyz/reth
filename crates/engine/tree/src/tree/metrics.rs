@@ -633,7 +633,11 @@ pub(crate) struct BlockBufferMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use metrics_util::{
+        debugging::{DebuggingRecorder, Snapshotter},
+        layers::{Layer, PrefixLayer},
+    };
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::BlockExecutionResult;
     use reth_revm::db::BundleState;
@@ -694,5 +698,28 @@ mod tests {
 
         assert!(found_execution_metrics, "Expected to find sync.execution metrics");
         assert!(found_thread_resource_metrics, "Expected to find thread resource metrics");
+    }
+
+    /// Metric names referenced by production alerts. Renaming any of these silently breaks
+    /// alerting, so the exported Prometheus names are pinned here.
+    #[test]
+    fn test_alerted_metric_names() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&PrefixLayer::new("reth").layer(recorder), || {
+            EngineApiMetrics::default();
+        });
+        let rendered = handle.render();
+
+        for name in [
+            "reth_blockchain_tree_latest_reorg_depth",
+            "reth_consensus_engine_beacon_new_payload_invalid",
+            "reth_sync_block_validation_state_root_task_fallback_success_total",
+        ] {
+            assert!(
+                rendered.lines().any(|line| line.split([' ', '{']).next() == Some(name)),
+                "missing `{name}` in:\n{rendered}"
+            );
+        }
     }
 }

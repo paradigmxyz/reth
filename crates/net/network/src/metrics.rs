@@ -654,3 +654,28 @@ impl AnnouncedTxTypesMetrics {
         self.other.record(tx_types_counter.other as f64);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use metrics_util::layers::{Layer, PrefixLayer};
+
+    /// Metric names referenced by production alerts. Renaming any of these silently breaks
+    /// alerting, so the exported Prometheus names are pinned here.
+    #[test]
+    fn alerted_metric_names() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&PrefixLayer::new("reth").layer(recorder), || {
+            DirectionalDisconnectMetrics::default();
+        });
+        let rendered = handle.render();
+
+        let name = "reth_network_inbound_too_many_peers";
+        assert!(
+            rendered.lines().any(|line| line.split([' ', '{']).next() == Some(name)),
+            "missing `{name}` in:\n{rendered}"
+        );
+    }
+}
