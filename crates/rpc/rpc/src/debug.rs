@@ -1057,7 +1057,7 @@ where
                     break
                 }
 
-                let block_id = BlockId::Number(number.into());
+                let block_id = BlockId::number(number);
                 let block = match this.eth_api().recovered_block(block_id).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {

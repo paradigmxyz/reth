@@ -840,9 +840,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
                 tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                tx @ TransactionSource::Block { block_hash, .. } => {
-                    (tx, BlockId::Hash(block_hash.into()))
-                }
+                tx @ TransactionSource::Block { block_hash, .. } => (tx, BlockId::hash(block_hash)),
             }))
         }
     }
