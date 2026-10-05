@@ -582,6 +582,9 @@ fn run(
             eprintln!("block={block} root_ms={root_ms:.1} deadline_ms={deadline_ms:.1} partial_lag={} retained={}", epoch-partial, trie.retained_storage_tries_count());
         }
     }
+    // No more blocks will use this cache. Release it before the final full drain, which needs
+    // extra working memory to merge the remaining masked updates.
+    drop(trie);
     let drain = Instant::now();
     if saving {
         (db_tip, partial) = done_rx.recv_timeout(Duration::from_secs(600))?;
@@ -600,7 +603,6 @@ fn run(
     let drain_secs = drain.elapsed().as_secs_f64();
     drop(save_tx);
     persist.join().unwrap()?;
-    drop(trie);
     let provider = factory.provider()?;
     let mut proof = ProofCalculator::new(provider.state_trie_account_cursor()?);
     let node = proof.root_node()?;
