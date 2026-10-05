@@ -21,8 +21,8 @@
 //! the run continues from the progress it committed. Peers that do not serve the pivot's state
 //! wait instead of failing the run.
 //!
-//! [`SnapHandoff`] then publishes the state at its pivot, rebuilds and verifies its trie, and the
-//! staged pipeline runs the remaining stages above the pivot.
+//! [`SnapHandoff`] rebuilds and verifies the trie before publishing the state at its pivot. The
+//! staged pipeline then runs the remaining stages above the pivot.
 
 mod context;
 mod handoff;

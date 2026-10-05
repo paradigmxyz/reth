@@ -70,8 +70,8 @@ pub enum BackfillAction {
     /// Moves the target of a running backfill to the new forkchoice head, without starting another
     /// run. It may arrive when no run is active, in which case it should be ignored.
     UpdateTarget(B256),
-    /// Reports the new finalized block to a running backfill, which may anchor irreversible work
-    /// to it. Like [`Self::UpdateTarget`], it may arrive when no run is active.
+    /// Reports the new finalized block, which a backfill may anchor irreversible work to.
+    /// Backfills that use finality retain it while idle so the next run can use it.
     UpdateFinalized(B256),
 }
 
