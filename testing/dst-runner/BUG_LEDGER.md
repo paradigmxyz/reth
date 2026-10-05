@@ -40,10 +40,16 @@ After the canceled-build fix, seeds 298–309 passed with strict semantic replay
 ## Qualification
 
 The first 1,900-second attempt started at 2026-10-05 06:25:26 UTC on the pre-cancellation build
-and was stopped after seed 302 exposed the canceled-payload harness error. A replacement attempt
-started at 2026-10-05 06:42:28 UTC with seed 318, 16 workload steps per case, and a 90-second host
-case watchdog. Its end time, case count, and result must be filled in only after it actually runs
-for more than 30 minutes without a distinct new failure.
+and was stopped after seed 302 exposed the canceled-payload harness error. The replacement
+campaign ran from 2026-10-05 06:42:28 UTC to its observed completion at 07:14:14 UTC on
+2026-10-05: **31 minutes 46 seconds of wall-clock observation**, exceeding the 30-minute
+threshold. It used the debug `reth-dst-node` binary built from `23482a267e`, seed 318,
+`RETH_DST_SECONDS=1900`, `RETH_DST_STEPS=16`, and a 90-second host case watchdog. Seeds 318–882
+completed: **565 cases, zero distinct new invariant failures, zero inconclusive cases, exit code
+0**. The subsequent commits only removed an unused dependency and changed example and test
+fixtures/documentation; none changed the binary or runtime logic under qualification. Before this
+clean interval, seed 302 reproduced a harness cancellation error; see the ledger above. No
+product-state invariant defect was confirmed during this run.
 
 Start the 30-minute clock only after a successful build and after the last **new distinct**
 invariant failure. Record wall-clock start and end, build revision, campaign options, case count,
