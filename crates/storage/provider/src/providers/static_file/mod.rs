@@ -104,7 +104,8 @@ mod tests {
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{
-        ChangeSetReader, ReceiptProvider, StorageChangeSetReader, TransactionsProvider,
+        BlockHashReader, ChangeSetReader, ReceiptProvider, StorageChangeSetReader,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
@@ -727,7 +728,7 @@ mod tests {
                     info: Some(Account {
                         nonce: block_num,
                         balance: U256::from(block_num * 1000),
-                        bytecode_hash: None,
+                        ..Default::default()
                     }),
                 })
                 .collect()
@@ -787,9 +788,9 @@ mod tests {
             .expect("Failed to create static file provider");
 
         // Setup test data
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
 
         // Write changesets for multiple blocks
         {
@@ -814,7 +815,7 @@ mod tests {
                 .append_account_changeset(
                     vec![AccountBeforeTx {
                         address: other_address,
-                        info: Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
+                        info: Some(Account::default()),
                     }],
                     1,
                 )
@@ -828,7 +829,7 @@ mod tests {
                         info: Some(Account {
                             nonce: 1,
                             balance: U256::from(1000),
-                            bytecode_hash: None,
+                            ..Default::default()
                         }),
                     }],
                     2,
@@ -910,7 +911,7 @@ mod tests {
                         info: Some(Account {
                             nonce: block_num,
                             balance: U256::from(block_num * 1000 + i as u64),
-                            bytecode_hash: None,
+                            ..Default::default()
                         }),
                     });
                 }
@@ -1027,7 +1028,7 @@ mod tests {
                     info: Some(Account {
                         nonce: 1,
                         balance: U256::from(1000),
-                        bytecode_hash: None,
+                        ..Default::default()
                     }),
                 })
                 .collect();
@@ -1132,9 +1133,9 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
         let test_key = B256::with_last_byte(1);
         let other_key = B256::with_last_byte(2);
 
@@ -1330,7 +1331,7 @@ mod tests {
 
         let block_num = 0u64;
         let num_slots = 100;
-        let address = Address::from([4u8; 20]);
+        let address = Address::repeat_byte(4u8);
 
         let mut keys: Vec<B256> = Vec::with_capacity(num_slots);
         for i in 0..num_slots {
@@ -1354,7 +1355,7 @@ mod tests {
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[0]);
-            assert_eq!(entry.value, U256::from(0));
+            assert_eq!(entry.value, U256::ZERO);
 
             let result =
                 sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
@@ -1387,7 +1388,7 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let address = Address::from([5u8; 20]);
+        let address = Address::repeat_byte(5u8);
         let key = B256::with_last_byte(1);
 
         // Write changes for a single block without calling increment_block explicitly
@@ -1416,5 +1417,35 @@ mod tests {
         assert!(result.is_some(), "Should be able to read the changeset entry");
         let entry = result.unwrap();
         assert_eq!(entry.value, U256::from(42));
+    }
+
+    #[test]
+    fn test_read_headers_while_appending() {
+        let (static_dir, _) = create_test_static_files_dir();
+        let sf_rw: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir)
+                .build()
+                .expect("Failed to build static file provider");
+        let hash = |num: u64| B256::with_last_byte(num as u8 + 1);
+
+        let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
+        let mut header = Header::default();
+        for num in 0..=2 {
+            header.number = num;
+            header_writer.append_header(&header, &hash(num)).unwrap();
+        }
+        header_writer.commit().unwrap();
+
+        // Writes the next header to disk without committing it, as persistence does before the
+        // database commit.
+        header.number = 3;
+        header_writer.append_header(&header, &hash(3)).unwrap();
+        header_writer.sync_all().unwrap();
+
+        // Reloads the jar from disk meanwhile, as every static file deletion by the pruner does.
+        sf_rw.initialize_index().unwrap();
+
+        assert_eq!(sf_rw.block_hash(2).unwrap(), Some(hash(2)));
+        assert_eq!(sf_rw.block_hash(3).unwrap(), None);
     }
 }

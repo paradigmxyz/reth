@@ -9,9 +9,9 @@ use crate::{
     TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
-use alloy_eips::{BlockNumberOrTag, Decodable2718};
+use alloy_eips::{merge::SLOT_DURATION_SECS, BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{
-    map::{AddressSet, HashSet},
+    map::{AddressSet, B256Set, HashSet},
     Address, BlockHash, BlockNumber, Bytes,
 };
 use alloy_rlp::Encodable;
@@ -382,7 +382,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // all transactions mined in the new chain
                 let mined_transactions = new_blocks.transaction_hashes_vec();
                 let new_mined_transactions =
-                    mined_transactions.iter().copied().collect::<HashSet<_>>();
+                    mined_transactions.iter().copied().collect::<B256Set>();
 
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
@@ -512,8 +512,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
                 // If Osaka activates in 2 slots we need to convert blobs to new format.
                 if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp()) &&
-                    !chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(12)) &&
-                    chain_spec.is_osaka_active_at_timestamp(tip.timestamp().saturating_add(24))
+                    !chain_spec.is_osaka_active_at_timestamp(
+                        tip.timestamp().saturating_add(SLOT_DURATION_SECS),
+                    ) &&
+                    chain_spec.is_osaka_active_at_timestamp(
+                        tip.timestamp().saturating_add(2 * SLOT_DURATION_SECS),
+                    )
                 {
                     let pool = pool.clone();
                     let spawner = task_spawner.clone();
@@ -854,8 +858,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, U256};
+    use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip2718::Decodable2718};
+    use alloy_primitives::{address, hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
@@ -884,10 +888,11 @@ mod tests {
         let provider = MockEthProvider::default().with_genesis_block();
         let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();
-        let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
+        let sender = address!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326");
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+            .set_block_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
             .build(blob_store.clone());
 
         let txpool = Pool::new(

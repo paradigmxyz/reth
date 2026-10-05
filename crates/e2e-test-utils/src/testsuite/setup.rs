@@ -1,21 +1,19 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{testsuite::Environment, E2ETestSetupBuilder, NodeBuilderHelper};
+use crate::{
+    testsuite::{actions::expect_fcu_valid, Environment},
+    wait::{poll_until, poll_until_with, PollOpts},
+    E2ETestSetupExt, NodeBuilderHelper,
+};
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
-use reth_ethereum_primitives::Block;
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
-use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
-use reth_node_core::primitives::RecoveredBlock;
-use revm::state::EvmState;
-use std::{marker::PhantomData, path::Path, sync::Arc};
-use tokio::{
-    sync::mpsc,
-    time::{sleep, Duration},
-};
+use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes, TreeConfig};
+use reth_node_core::args::StorageArgs;
+use reth_rpc_api::clients::EngineApiClient;
+use std::{marker::PhantomData, path::Path, sync::Arc, time::Duration};
+use tokio::sync::mpsc;
 use tracing::debug;
 
 /// Configuration for setting up test environment
@@ -23,12 +21,6 @@ use tracing::debug;
 pub struct Setup<I> {
     /// Chain specification to use
     pub chain_spec: Option<Arc<ChainSpec>>,
-    /// Genesis block to use
-    pub genesis: Option<Genesis>,
-    /// Blocks to replay during setup
-    pub blocks: Vec<RecoveredBlock<Block>>,
-    /// Initial state to load
-    pub state: Option<EvmState>,
     /// Network configuration
     pub network: NetworkSetup,
     /// Engine tree configuration
@@ -37,7 +29,9 @@ pub struct Setup<I> {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
-    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history).
+    ///
+    /// Defaults to the node's `--storage.v2` default.
     pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
@@ -52,14 +46,11 @@ impl<I> Default for Setup<I> {
     fn default() -> Self {
         Self {
             chain_spec: None,
-            genesis: None,
-            blocks: Vec::new(),
-            state: None,
             network: NetworkSetup::default(),
             tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
-            storage_v2: false,
+            storage_v2: StorageArgs::default().v2,
             _phantom: Default::default(),
             import_result_holder: None,
             import_rlp_path: None,
@@ -86,30 +77,6 @@ where
         self
     }
 
-    /// Set the genesis block
-    pub const fn with_genesis(mut self, genesis: Genesis) -> Self {
-        self.genesis = Some(genesis);
-        self
-    }
-
-    /// Add a block to replay during setup
-    pub fn with_block(mut self, block: RecoveredBlock<Block>) -> Self {
-        self.blocks.push(block);
-        self
-    }
-
-    /// Add multiple blocks to replay during setup
-    pub fn with_blocks(mut self, blocks: Vec<RecoveredBlock<Block>>) -> Self {
-        self.blocks.extend(blocks);
-        self
-    }
-
-    /// Set the initial state
-    pub fn with_state(mut self, state: EvmState) -> Self {
-        self.state = Some(state);
-        self
-    }
-
     /// Set the network configuration
     pub const fn with_network(mut self, network: NetworkSetup) -> Self {
         self.network = network;
@@ -128,13 +95,19 @@ where
         self
     }
 
-    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history)
-    pub const fn with_storage_v2(mut self) -> Self {
-        self.storage_v2 = true;
+    /// Set whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
+        self.storage_v2 = storage_v2;
         self
     }
 
     /// Apply setup using pre-imported chain data from RLP file
+    ///
+    /// Returns once the engine of every node accepted the latest imported block as head and safe
+    /// block, with genesis as finalized block, which is the forkchoice state recorded in `env`.
+    /// Returns an error if a node does not accept it within [`WAIT_TIMEOUT`].
+    ///
+    /// [`WAIT_TIMEOUT`]: crate::wait::WAIT_TIMEOUT
     pub async fn apply_with_import<N>(
         &mut self,
         env: &mut Environment<I>,
@@ -180,7 +153,8 @@ where
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         // Note: this future is quite large so we box it
         Box::pin(self.apply_::<N>(env)).await
@@ -189,7 +163,8 @@ where
     /// Apply the setup to the environment
     async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
+        PayloadAttrTy<N>: From<PayloadAttributes>,
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
@@ -201,29 +176,20 @@ where
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        let is_dev = self.is_dev;
-        let storage_v2 = self.storage_v2;
-        let node_count = self.network.node_count;
         let tree_config = self.tree_config.clone();
 
-        let attributes_generator = Self::create_static_attributes_generator::<N>();
-
-        let mut builder = E2ETestSetupBuilder::<N, _>::new(
-            node_count,
+        let result = N::test_setup(
+            self.network.node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
-            attributes_generator,
         )
         .with_tree_config_modifier(move |base| {
             tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
         })
-        .with_node_config_modifier(move |config| config.set_dev(is_dev))
-        .with_connect_nodes(self.network.connect_nodes);
-
-        if storage_v2 {
-            builder = builder.with_storage_v2();
-        }
-
-        let result = builder.build().await;
+        .with_dev_mode(self.is_dev)
+        .with_storage_v2(self.storage_v2)
+        .with_connect_nodes(self.network.connect_nodes)
+        .build()
+        .await;
 
         let mut node_clients = Vec::new();
         match result {
@@ -263,45 +229,15 @@ where
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
-        let attributes_generator = move |timestamp| PayloadAttributes {
-            timestamp,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: alloy_primitives::Address::ZERO,
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-            slot_number: None,
-            ..Default::default()
-        };
-
         crate::setup_import::setup_engine_with_chain_import(
             self.network.node_count,
             chain_spec,
             self.is_dev,
+            self.storage_v2,
             self.tree_config.clone(),
             rlp_path,
-            attributes_generator,
         )
         .await
-    }
-
-    /// Create a static attributes generator that doesn't capture any instance data
-    fn create_static_attributes_generator<N>(
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Copy + use<N, I>
-    where
-        N: NodeBuilderHelper<Payload = I>,
-    {
-        move |timestamp| {
-            PayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-                slot_number: None,
-                ..Default::default()
-            }
-            .into()
-        }
     }
 
     /// Common finalization logic for both apply methods
@@ -337,14 +273,15 @@ where
         };
 
         // Initialize all node states
+        let fork_choice_state = ForkchoiceState {
+            head_block_hash: initial_block_info.hash,
+            safe_block_hash: initial_block_info.hash,
+            finalized_block_hash: genesis_block_info.hash,
+        };
         for (node_idx, node_state) in env.node_states.iter_mut().enumerate() {
             node_state.current_block_info = Some(initial_block_info);
             node_state.latest_header_time = initial_block_info.timestamp;
-            node_state.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: initial_block_info.hash,
-                safe_block_hash: initial_block_info.hash,
-                finalized_block_hash: genesis_block_info.hash,
-            };
+            node_state.latest_fork_choice_state = fork_choice_state;
 
             debug!(
                 "Node {} initialized with block {} (hash: {})",
@@ -352,19 +289,16 @@ where
             );
         }
 
+        // Fresh nodes are launched with genesis as their forkchoice state, nodes on an imported
+        // chain are not, so make the imported head canonical before actions build on it.
+        if use_latest_block {
+            self.wait_for_forkchoice_valid(&env.node_clients, fork_choice_state).await?;
+        }
+
         debug!(
             "Environment initialized with {} nodes, starting from block {} (hash: {})",
             self.network.node_count, initial_block_info.number, initial_block_info.hash
         );
-
-        // In test environments, explicitly set sync state to Idle after initialization
-        // This ensures that eth_syncing returns false as expected by tests
-        if let Some(import_result) = &self.import_result_holder {
-            for (idx, node_ctx) in import_result.nodes.iter().enumerate() {
-                debug!("Setting sync state to Idle for node {}", idx);
-                node_ctx.inner.network.update_sync_state(SyncState::Idle);
-            }
-        }
 
         Ok(())
     }
@@ -378,25 +312,44 @@ where
         P: PayloadTypes,
     {
         for (idx, client) in node_clients.iter().enumerate() {
-            let mut retry_count = 0;
-            const MAX_RETRIES: usize = 10;
+            poll_until(format!("node {idx} RPC endpoint to accept requests"), || async {
+                Ok(client.is_ready().await.then_some(()))
+            })
+            .await?;
+            debug!("Node {idx} RPC endpoint is ready");
+        }
+        Ok(())
+    }
 
-            while retry_count < MAX_RETRIES {
-                if client.is_ready().await {
-                    debug!("Node {idx} RPC endpoint is ready");
-                    break;
-                }
-
-                retry_count += 1;
-                debug!("Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}");
-                sleep(Duration::from_millis(500)).await;
-            }
-
-            if retry_count == MAX_RETRIES {
-                return Err(eyre!(
-                    "Failed to connect to node {idx} RPC endpoint after {MAX_RETRIES} retries"
-                ));
-            }
+    /// Waits until the engine of every node accepts `state` as its forkchoice state.
+    ///
+    /// The chain import leaves some stage checkpoints, e.g. of the prune stages, behind the
+    /// imported head, so a node launched on an imported chain starts with a backfill run to the
+    /// head and answers forkchoice updates with SYNCING until it finished. This resends the update
+    /// until the node answers with another status, and returns an error unless that status is
+    /// VALID. Every attempt is a forkchoice update, so attempts are spaced further apart than the
+    /// default poll interval.
+    async fn wait_for_forkchoice_valid(
+        &self,
+        node_clients: &[crate::testsuite::NodeClient<I>],
+        state: ForkchoiceState,
+    ) -> Result<()> {
+        for (idx, client) in node_clients.iter().enumerate() {
+            let engine = client.engine.http_client();
+            let response = poll_until_with(
+                PollOpts { interval: Duration::from_millis(100), ..Default::default() },
+                format!("node {idx} to stop syncing to block {}", state.head_block_hash),
+                || async {
+                    let response =
+                        EngineApiClient::<I>::fork_choice_updated_v3(&engine, state, None).await?;
+                    Ok((!response.is_syncing()).then_some(response))
+                },
+            )
+            .await?;
+            expect_fcu_valid(
+                &response,
+                &format!("Node {idx} forkchoice update to block {}", state.head_block_hash),
+            )?;
         }
         Ok(())
     }
@@ -422,10 +375,6 @@ where
         })
     }
 }
-
-/// Genesis block configuration
-#[derive(Debug)]
-pub struct Genesis {}
 
 /// Network configuration for setup
 #[derive(Debug, Default)]

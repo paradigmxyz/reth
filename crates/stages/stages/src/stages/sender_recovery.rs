@@ -206,10 +206,7 @@ where
 
         if self.prune_mode.is_none_or(|mode| !mode.is_full()) {
             // Lookup the next tx id after unwind_to block (first tx to remove)
-            let unwind_tx_from = provider
-                .block_body_indices(unwind_to)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-                .next_tx_num();
+            let unwind_tx_from = provider.next_tx_num_after_block(unwind_to)?;
 
             EitherWriter::new_senders(provider, unwind_to)?
                 .prune_senders(unwind_tx_from, unwind_to)?;

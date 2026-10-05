@@ -72,6 +72,13 @@ pub struct PoolConfig {
     ///
     /// This restricts how many executable transaction a delegated sender can stack.
     pub max_inflight_delegated_slot_limit: usize,
+    /// Whether to enforce the sender nonce tracked from canonical updates over the nonce a
+    /// transaction was validated against, rejecting transactions below it.
+    ///
+    /// Closes the window in which a validation result that predates a block inserts an already
+    /// mined nonce as pending. Assumes sender nonces only move forward, so this is primarily
+    /// recommended for chains without reorgs and very low block times. Disabled by default.
+    pub enforce_tracked_nonce: bool,
 }
 
 impl PoolConfig {
@@ -97,6 +104,13 @@ impl PoolConfig {
         max_inflight_delegation_limit: usize,
     ) -> Self {
         self.max_inflight_delegated_slot_limit = max_inflight_delegation_limit;
+        self
+    }
+
+    /// Configures whether the sender nonce tracked from canonical updates is enforced on
+    /// insertion, see [`Self::enforce_tracked_nonce`].
+    pub const fn with_enforce_tracked_nonce(mut self, enforce: bool) -> Self {
+        self.enforce_tracked_nonce = enforce;
         self
     }
 
@@ -129,6 +143,7 @@ impl Default for PoolConfig {
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
+            enforce_tracked_nonce: false,
         }
     }
 }
@@ -433,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_contains_local_address() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let mut local_addresses = AddressSet::default();
         local_addresses.insert(address);
 
@@ -443,12 +458,12 @@ mod tests {
         assert!(config.contains_local_address(&address));
 
         // Should not contain another random address
-        assert!(!config.contains_local_address(&Address::new([2; 20])));
+        assert!(!config.contains_local_address(&Address::repeat_byte(2)));
     }
 
     #[test]
     fn test_is_local_with_no_exemptions() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let config = LocalTransactionConfig {
             no_exemptions: true,
             local_addresses: AddressSet::default(),
@@ -461,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_is_local_without_no_exemptions() {
-        let address = Address::new([1; 20]);
+        let address = Address::repeat_byte(1);
         let mut local_addresses = AddressSet::default();
         local_addresses.insert(address);
 
@@ -469,13 +484,13 @@ mod tests {
             LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
 
         // Should return true as the transaction origin is local
-        assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, &Address::repeat_byte(2)));
         assert!(config.is_local(TransactionOrigin::Local, &address));
 
         // Should return true as the address is in the local_addresses set
         assert!(config.is_local(TransactionOrigin::External, &address));
         // Should return false as the address is not in the local_addresses set
-        assert!(!config.is_local(TransactionOrigin::External, &Address::new([2; 20])));
+        assert!(!config.is_local(TransactionOrigin::External, &Address::repeat_byte(2)));
     }
 
     #[test]

@@ -4,7 +4,6 @@ use crate::PayloadBuilderError;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
@@ -203,9 +202,7 @@ pub fn payload_id(
     hasher.update(attributes.prev_randao.as_slice());
     hasher.update(attributes.suggested_fee_recipient.as_slice());
     if let Some(withdrawals) = &attributes.withdrawals {
-        let mut buf = Vec::new();
-        withdrawals.encode(&mut buf);
-        hasher.update(buf);
+        hasher.update(alloy_rlp::encode(withdrawals));
     }
 
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
@@ -230,7 +227,7 @@ pub fn payload_id(
 mod tests {
     use super::*;
     use alloy_eips::eip4895::Withdrawal;
-    use alloy_primitives::{Address, B64};
+    use alloy_primitives::{address, b256, Address, B64};
     use core::str::FromStr;
 
     #[test]
@@ -242,19 +239,11 @@ mod tests {
     #[test]
     fn test_payload_id_basic() {
         // Create a parent block and payload attributes
-        let parent =
-            B256::from_str("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a")
-                .unwrap();
+        let parent = b256!("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a");
         let attributes = EthPayloadAttributes {
             timestamp: 0x5,
-            prev_randao: B256::from_str(
-                "0x0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            suggested_fee_recipient: Address::from_str(
-                "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            )
-            .unwrap(),
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
@@ -271,27 +260,22 @@ mod tests {
     #[test]
     fn test_payload_id_with_withdrawals() {
         // Set up the parent and attributes with withdrawals
-        let parent =
-            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
-                .unwrap();
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: Address::from_str(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            )
-            .unwrap(),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![
                 Withdrawal {
                     index: 1,
                     validator_index: 123,
-                    address: Address::from([0xAA; 20]),
+                    address: Address::repeat_byte(0xAA),
                     amount: 10,
                 },
                 Withdrawal {
                     index: 2,
                     validator_index: 456,
-                    address: Address::from([0xBB; 20]),
+                    address: Address::repeat_byte(0xBB),
                     amount: 20,
                 },
             ]),
@@ -310,26 +294,15 @@ mod tests {
     #[test]
     fn test_payload_id_with_parent_beacon_block_root() {
         // Set up the parent and attributes with a parent beacon block root
-        let parent =
-            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
-                .unwrap();
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let attributes = EthPayloadAttributes {
             timestamp: 1622553200,
-            prev_randao: B256::from_str(
-                "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
-            )
-            .unwrap(),
-            suggested_fee_recipient: Address::from_str(
-                "0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            )
-            .unwrap(),
-            withdrawals: None,
-            parent_beacon_block_root: Some(
-                B256::from_str(
-                    "0x2222222222222222222222222222222222222222222222222222222222222222",
-                )
-                .unwrap(),
+            prev_randao: b256!(
+                "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234"
             ),
+            suggested_fee_recipient: address!("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
+            withdrawals: None,
+            parent_beacon_block_root: Some(B256::repeat_byte(0x22)),
             slot_number: None,
             ..Default::default()
         };
@@ -343,16 +316,11 @@ mod tests {
 
     #[test]
     fn test_payload_id_with_slot_number() {
-        let parent =
-            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
-                .unwrap();
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: Address::from_str(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            )
-            .unwrap(),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),
@@ -367,17 +335,12 @@ mod tests {
 
     #[test]
     fn test_payload_id_with_target_gas_limit() {
-        let parent =
-            B256::from_str("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef")
-                .unwrap();
+        let parent = b256!("0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef");
         #[allow(clippy::needless_update)]
         let mut attributes = EthPayloadAttributes {
             timestamp: 1622553200,
             prev_randao: B256::from_slice(&[1; 32]),
-            suggested_fee_recipient: Address::from_str(
-                "0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b",
-            )
-            .unwrap(),
+            suggested_fee_recipient: address!("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::from_slice(&[2; 32])),
             slot_number: Some(1),

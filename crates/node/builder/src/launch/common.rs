@@ -49,7 +49,7 @@ use reth_db_common::init::{
 };
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, SenderRecoveryCache};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -71,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
-    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
-    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
+    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -484,6 +484,28 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.create_provider_factory_with_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn create_provider_factory_with_recovery<N, Evm>(
+        &self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<ProviderFactory<N>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         // Validate static files configuration
         let static_files_config = &self.toml_config().static_files;
         static_files_config.validate()?;
@@ -518,17 +540,19 @@ where
                 .with_default_tables()
                 .with_metrics()
                 .with_statistics()
+                .with_block_cache_size_opt(self.node_config().db.rocksdb_block_cache_size)
                 .build()?
         };
 
-        let balstore_cache_size = self
+        let bal_store = self
             .node_config()
             .db
             .balstore_cache_size
-            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -540,6 +564,8 @@ where
         .with_minimum_pruning_distance(prune_config.minimum_pruning_distance)
         .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
+
+        recover(&factory)?;
 
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
@@ -677,8 +703,35 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        self.with_provider_factory_and_recovery::<N, Evm>(
+            overlay_manager,
+            rocksdb_provider,
+            disabled_stages,
+            |_| Ok(()),
+        )
+        .await
+    }
+
+    /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
+    /// run left half-committed, before the consistency check.
+    pub async fn with_provider_factory_and_recovery<N, Evm>(
+        self,
+        overlay_manager: OverlayManager<N::Primitives>,
+        rocksdb_provider: Option<RocksDBProvider>,
+        disabled_stages: &[StageId],
+        recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
+    where
+        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
+        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    {
         let factory = self
-            .create_provider_factory::<N, Evm>(overlay_manager, rocksdb_provider, disabled_stages)
+            .create_provider_factory_with_recovery::<N, Evm>(
+                overlay_manager,
+                rocksdb_provider,
+                disabled_stages,
+                recover,
+            )
             .await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
@@ -944,6 +997,7 @@ where
             },
             node_adapter,
             head,
+            sender_recovery_cache: builder_ctx.sender_recovery_cache().cloned(),
         };
 
         let ctx = LaunchContextWith {
@@ -1004,6 +1058,11 @@ where
     /// Returns mutable reference to the configured `NodeAdapter`.
     pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
+    }
+
+    /// Returns the cache of recovered transaction senders shared by node components, if enabled.
+    pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
+        self.right().sender_recovery_cache.as_ref()
     }
 
     /// Returns a reference to the blockchain provider.
@@ -1369,6 +1428,8 @@ where
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 /// Returns the metrics hooks for the node.

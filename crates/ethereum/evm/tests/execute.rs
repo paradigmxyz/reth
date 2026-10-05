@@ -33,13 +33,8 @@ use std::sync::{mpsc, Arc};
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
 
-    let beacon_root_contract_account = AccountInfo {
-        balance: U256::ZERO,
-        code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
-        nonce: 1,
-        code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-        account_id: None,
-    };
+    let beacon_root_contract_account =
+        AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone()));
 
     db.insert_account_info(BEACON_ROOTS_ADDRESS, beacon_root_contract_account);
 
@@ -49,13 +44,8 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
 fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
 
-    let withdrawal_requests_contract_account = AccountInfo {
-        nonce: 1,
-        balance: U256::ZERO,
-        code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
-        code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        account_id: None,
-    };
+    let withdrawal_requests_contract_account =
+        AccountInfo::from_bytecode(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()));
 
     db.insert_account_info(
         WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
@@ -336,13 +326,8 @@ fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
     }
 
-    let blockhashes_contract_account = AccountInfo {
-        balance: U256::ZERO,
-        code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
-        code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
-        nonce: 1,
-        account_id: None,
-    };
+    let blockhashes_contract_account =
+        AccountInfo::from_bytecode(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone()));
 
     db.insert_account_info(HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);
 
@@ -574,7 +559,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap().is_zero()
     }));
 
     // attempt to execute block 2, this should not fail
@@ -605,8 +590,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap()),
+        executor.with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap()),
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
@@ -733,7 +717,7 @@ fn block_gas_limit_error() {
             gas_price: header.base_fee_per_gas.unwrap().into(),
             gas_limit: 2_500_000, // higher than block gas limit
             to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            value: U256::from(1),
+            value: U256::ONE,
             input,
         }),
     );

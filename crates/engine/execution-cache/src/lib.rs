@@ -5,6 +5,7 @@
 //! - [`SavedCache`]: An execution cache snapshot associated with a specific block hash
 //! - [`PayloadExecutionCache`]: Thread-safe wrapper for sharing cached state across payload
 //!   processing tasks
+//! - [`precompile_cache`]: Cross-block cache of precompile results
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -19,6 +20,8 @@ pub use cached_state::*;
 
 mod txpool;
 pub use txpool::*;
+
+pub mod precompile_cache;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
@@ -104,12 +107,13 @@ impl PayloadExecutionCache {
         None
     }
 
-    /// Waits until the execution cache becomes available for use.
+    /// Waits for the mutex protecting the stored `Option<SavedCache>` to be released.
     ///
-    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
-    /// This is useful for synchronization before starting payload processing.
+    /// This does not wait for other users to drop their [`ExecutionCache`] clones or for removed
+    /// caches to finish dropping after unlocking. A subsequent [`Self::get_cache_for`] can still
+    /// return `None`, causing its caller to allocate a new cache while those drops run.
     ///
-    /// Returns the time spent waiting for the lock.
+    /// Returns only the time spent waiting for the mutex, excluding post-unlock cleanup.
     pub fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
         // Acquire lock to wait for any current holders to finish
@@ -125,8 +129,13 @@ impl PayloadExecutionCache {
         elapsed
     }
 
-    /// Updates the cache with a closure that has exclusive access to the guard.
-    /// This ensures that all cache operations happen atomically.
+    /// Runs `update_fn` with mutable access to the stored `Option<SavedCache>` under the mutex.
+    /// Returns the closure's result after releasing the mutex, allowing removed caches to be
+    /// dropped outside the lock.
+    ///
+    /// Drop extra [`SavedCache`] or [`ExecutionCache`] clones of the stored cache before the
+    /// closure returns: [`Self::get_cache_for`] requires that cache's Arc strong reference
+    /// count to be one.
     ///
     /// ## CRITICAL SAFETY REQUIREMENT
     ///
@@ -138,12 +147,12 @@ impl PayloadExecutionCache {
     ///
     /// Violating this requirement can result in cache corruption, incorrect state data,
     /// and potential consensus failures.
-    pub fn update_with_guard<F>(&self, update_fn: F)
+    pub fn update_with_guard<F, R>(&self, update_fn: F) -> R
     where
-        F: FnOnce(&mut Option<SavedCache>),
+        F: FnOnce(&mut Option<SavedCache>) -> R,
     {
         let mut guard = self.inner.lock();
-        update_fn(&mut guard);
+        update_fn(&mut guard)
     }
 }
 
@@ -165,7 +174,7 @@ mod tests {
     #[test]
     fn single_checkout_blocks_second() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -181,7 +190,7 @@ mod tests {
     #[test]
     fn checkout_available_after_drop() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([2u8; 32]);
+        let hash = B256::repeat_byte(2u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -198,7 +207,7 @@ mod tests {
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([3u8; 32]);
+        let hash = B256::repeat_byte(3u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -220,8 +229,8 @@ mod tests {
     #[test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
-        let hash_a = B256::from([0xAA; 32]);
-        let hash_b = B256::from([0xBB; 32]);
+        let hash_a = B256::repeat_byte(0xAA);
+        let hash_b = B256::repeat_byte(0xBB);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))

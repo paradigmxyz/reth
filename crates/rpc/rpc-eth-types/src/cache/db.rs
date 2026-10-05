@@ -2,12 +2,12 @@
 
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use reth_revm::database::StateProviderDatabase;
-use reth_storage_api::StateProviderBox;
+use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
 use revm::{database::State, state::bal::Bal as RevmBal, Database};
 use std::sync::Arc;
 
 /// Helper alias type for the state's [`State`]
-pub type StateCacheDb = State<StateProviderDatabase<StateProviderBox>>;
+pub type StateCacheDb = State<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>;
 
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.
@@ -31,8 +31,9 @@ pub fn attach_bal_before_tx<DB: Database>(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::{address, Bytes, U256};
+    use alloy_primitives::{Address, Bytes, U256};
     use revm::{
         database::{CacheDB, EmptyDB},
         state::{
@@ -43,9 +44,9 @@ mod tests {
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
-        let covered = address!("0x0000000000000000000000000000000000000001");
-        let uncovered = address!("0x0000000000000000000000000000000000000002");
-        let written_slot = U256::from(1);
+        let covered = Address::with_last_byte(1);
+        let uncovered = Address::with_last_byte(2);
+        let written_slot = U256::ONE;
         let read_slot = U256::from(2);
 
         // pre-block state

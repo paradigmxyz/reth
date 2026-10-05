@@ -360,7 +360,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable { .. } => {
-                rpc_error_with_code(4444, error.to_string())
+                rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
@@ -544,6 +544,11 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             ProviderError::BlockExpired { requested, earliest_available } => {
                 Self::PrunedHistoryUnavailable { requested, earliest_available }
+            }
+            ProviderError::InsufficientChangesets { requested, available }
+                if requested < *available.start() =>
+            {
+                Self::PrunedHistoryUnavailable { requested, earliest_available: *available.start() }
             }
             err => Self::Internal(err.into()),
         }
@@ -1188,9 +1193,7 @@ mod tests {
         let cases = [
             (EthApiError::TracingTransactionNotFound, "transaction not found"),
             (
-                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
-                    "0x0000000000000000000000000000000000000000000000000000000000000001"
-                ))),
+                EthApiError::TracingBlockNotFound(BlockId::hash(B256::with_last_byte(1))),
                 "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
             ),
             (EthApiError::GenesisNotTraceable, "genesis is not traceable"),
@@ -1253,6 +1256,28 @@ mod tests {
             err.message(),
             "pruned history unavailable: requested 5, earliest available 100"
         );
+    }
+
+    #[test]
+    fn pruned_state_errors_use_history_unavailable_code() {
+        use reth_errors::ProviderError;
+
+        let err = EthApiError::from(ProviderError::InsufficientChangesets {
+            requested: 1,
+            available: 43..=48,
+        })
+        .into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable: requested 1, earliest available 43");
+
+        for requested in [43, 49] {
+            let err = EthApiError::from(ProviderError::InsufficientChangesets {
+                requested,
+                available: 43..=48,
+            })
+            .into_rpc_err();
+            assert_eq!(err.code(), -32603);
+        }
     }
 
     #[test]

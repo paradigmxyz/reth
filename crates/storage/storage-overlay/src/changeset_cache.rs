@@ -403,7 +403,7 @@ impl ChangesetCache {
         let overlay = overlay_manager
             .overlay_builder(finish.hash)
             .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish)?;
+            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -644,7 +644,7 @@ mod tests {
     }
 
     fn empty_overlay() -> StateTrieOverlay {
-        StateTrieOverlay::new(Arc::default(), Arc::default())
+        StateTrieOverlay::new(TrieInputSorted::default())
     }
 
     fn insert_test_changesets(
@@ -844,8 +844,8 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
-        let slot1 = B256::from(U256::from(1));
-        let slot2 = B256::from(U256::from(2));
+        let slot1 = B256::with_last_byte(1);
+        let slot2 = B256::with_last_byte(2);
         let account1 = test_account(10);
         let account2 = test_account(20);
         let account3 = test_account(30);
@@ -940,8 +940,8 @@ mod tests {
 
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
-        let slot1 = B256::from(U256::from(1));
-        let slot2 = B256::from(U256::from(2));
+        let slot1 = B256::with_last_byte(1);
+        let slot2 = B256::with_last_byte(2);
         let account1 = test_account(10);
         let account2 = test_account(20);
 

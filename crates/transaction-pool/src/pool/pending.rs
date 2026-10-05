@@ -751,13 +751,14 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
     use alloy_consensus::{Transaction, TxType};
-    use alloy_primitives::address;
+    use alloy_primitives::Address;
     use std::collections::HashSet;
 
     #[test]
@@ -900,10 +901,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
-        let a_sender = address!("0x000000000000000000000000000000000000000a");
-        let b_sender = address!("0x000000000000000000000000000000000000000b");
-        let c_sender = address!("0x000000000000000000000000000000000000000c");
-        let d_sender = address!("0x000000000000000000000000000000000000000d");
+        let a_sender = Address::with_last_byte(0x0a);
+        let b_sender = Address::with_last_byte(0x0b);
+        let c_sender = Address::with_last_byte(0x0c);
+        let d_sender = Address::with_last_byte(0x0d);
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
@@ -949,10 +950,10 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C, and D.
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
-        let d = address!("0x000000000000000000000000000000000000000d");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
+        let d = Address::with_last_byte(0x0d);
 
         // Create transaction chains for senders A, B, C, and D.
         let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
@@ -1177,9 +1178,9 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C
-        let a = address!("0x000000000000000000000000000000000000000a");
-        let b = address!("0x000000000000000000000000000000000000000b");
-        let c = address!("0x000000000000000000000000000000000000000c");
+        let a = Address::with_last_byte(0x0a);
+        let b = Address::with_last_byte(0x0b);
+        let c = Address::with_last_byte(0x0c);
 
         // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
         // sender B (external) - 2 transactions
@@ -1224,7 +1225,7 @@ mod tests {
     fn test_remove_non_highest_keeps_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000aa");
+        let sender = Address::with_last_byte(0xaa);
         let txs = MockTransactionSet::dependent(sender, 0, 3, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1242,7 +1243,7 @@ mod tests {
     fn test_cascade_removal_recomputes_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000bb");
+        let sender = Address::with_last_byte(0xbb);
         let txs = MockTransactionSet::dependent(sender, 0, 4, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);
@@ -1264,7 +1265,7 @@ mod tests {
     fn test_remove_only_tx_clears_highest() {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
-        let sender = address!("0x00000000000000000000000000000000000000cc");
+        let sender = Address::with_last_byte(0xcc);
         let txs = MockTransactionSet::dependent(sender, 0, 1, TxType::Eip1559).into_vec();
         for tx in txs {
             pool.add_transaction(f.validated_arc(tx), 0);

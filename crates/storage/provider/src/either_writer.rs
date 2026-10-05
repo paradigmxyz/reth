@@ -40,15 +40,17 @@ use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<'a, P, T> = EitherReader<
+type EitherReaderTy<'a, 'db, P, T> = EitherReader<
     'a,
+    'db,
     CursorTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for [`EitherReader`] constructors.
-type DupEitherReaderTy<'a, P, T> = EitherReader<
+type DupEitherReaderTy<'a, 'db, P, T> = EitherReader<
     'a,
+    'db,
     DupCursorTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
@@ -77,7 +79,7 @@ pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
 ///
 /// The `Option` allows callers to skip `RocksDB` access when it isn't needed
 /// (e.g., on legacy MDBX-only nodes).
-pub type RocksDBRefArg<'a> = Option<crate::providers::rocksdb::RocksReadSnapshot<'a>>;
+pub type RocksDBRefArg<'a, 'db> = Option<&'a crate::providers::rocksdb::RocksReadSnapshot<'db>>;
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -672,20 +674,20 @@ where
 
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
-pub enum EitherReader<'a, CURSOR, N> {
+pub enum EitherReader<'a, 'db, CURSOR, N> {
     /// Read from database table via cursor
     Database(CURSOR, PhantomData<&'a ()>),
     /// Read from static file
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` snapshot (works in both read-only and read-write modes)
-    RocksDB(crate::providers::rocksdb::RocksReadSnapshot<'a>),
+    RocksDB(&'a crate::providers::rocksdb::RocksReadSnapshot<'db>),
 }
 
-impl<'a> EitherReader<'a, (), ()> {
+impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &P,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionSenders>>
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionSenders>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
@@ -703,8 +705,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -724,8 +726,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -745,8 +747,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::AccountsHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -766,7 +768,7 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
         provider: &P,
-    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
+    ) -> ProviderResult<DupEitherReaderTy<'a, 'db, P, tables::AccountChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
@@ -782,7 +784,7 @@ impl<'a> EitherReader<'a, (), ()> {
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionSenders>,
 {
@@ -813,7 +815,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
 {
@@ -830,7 +832,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::StoragesHistory>,
 {
@@ -878,7 +880,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountsHistory>,
 {
@@ -924,7 +926,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountChangeSets>,
 {
@@ -1177,8 +1179,8 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 
@@ -1219,7 +1221,7 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
         let tx_num = 100u64;
 
         // First, write a value directly to RocksDB
@@ -1248,8 +1250,8 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_transaction_hash_numbers() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 
@@ -1265,7 +1267,7 @@ mod rocksdb_tests {
         assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
 
         // Test missing key
-        let missing_hash = B256::from([99u8; 32]);
+        let missing_hash = B256::repeat_byte(99u8);
         assert_eq!(tx.get::<tables::TransactionHashNumbers>(missing_hash).unwrap(), None);
     }
 
@@ -1274,7 +1276,7 @@ mod rocksdb_tests {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
         let address = Address::random();
-        let storage_key = B256::from([1u8; 32]);
+        let storage_key = B256::repeat_byte(1u8);
         let key = StorageShardedKey::new(address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10, 50]).unwrap();
 
@@ -1320,7 +1322,7 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_delete_transaction_hash_number() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
         let tx_num = 100u64;
 
         // First write
@@ -1341,7 +1343,7 @@ mod rocksdb_tests {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
         let address = Address::random();
-        let storage_key = B256::from([1u8; 32]);
+        let storage_key = B256::repeat_byte(1u8);
         let key = StorageShardedKey::new(address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10]).unwrap();
 
@@ -1443,7 +1445,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, '_, AccountsHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
                     PhantomData,
@@ -1532,7 +1534,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, '_, StoragesHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
                     PhantomData,
@@ -1599,7 +1601,7 @@ mod rocksdb_tests {
     /// 4. Pruning boundary - `lowest_available` boundary behavior (block at/after boundary)
     #[test]
     fn test_account_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Scenario 1: Single shard with blocks [100, 200, 300]
         run_account_history_scenario(
@@ -1671,7 +1673,7 @@ mod rocksdb_tests {
         );
 
         // Scenario 3: No history for address
-        let address_without_history = Address::from([0x43; 20]);
+        let address_without_history = Address::repeat_byte(0x43);
         run_account_history_scenario(
             "no_history",
             address_without_history,
@@ -1712,9 +1714,9 @@ mod rocksdb_tests {
     /// Tests storage history lookups across both MDBX and `RocksDB` backends.
     #[test]
     fn test_storage_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x01; 32]);
-        let other_storage_key = B256::from([0x02; 32]);
+        let address = Address::repeat_byte(0x42);
+        let storage_key = B256::repeat_byte(0x01);
+        let other_storage_key = B256::repeat_byte(0x02);
 
         // Single shard with blocks [100, 200, 300]
         run_storage_history_scenario(
@@ -1767,8 +1769,8 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 

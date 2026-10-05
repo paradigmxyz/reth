@@ -25,25 +25,18 @@
 //! - destroy/recreate cycles at the same `CREATE2` address across transactions and blocks,
 //!   including the collision of a recreate attempt with a persisting destroyed contract.
 
-use alloy_network::{EthereumWallet, TransactionBuilder};
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
-use futures::StreamExt;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    eth_payload_attributes_for_fork, setup_engine,
-    trie::{assert_trie_consistency, wait_for_persisted_block},
-    NodeHelperType,
+    trie::assert_trie_consistency, wallet::TestAccount, E2ETestSetupExt, NodeHelperType,
 };
-use reth_node_api::TreeConfig;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
 use reth_revm::db::BundleAccount;
-use std::{sync::Arc, time::Duration};
-
-const MAX_FEE_PER_GAS: u128 = 20_000_000_000;
-const MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+use std::sync::Arc;
 
 const ETH: u128 = 1_000_000_000_000_000_000;
 
@@ -69,25 +62,22 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
 
     // low persistence thresholds so the scenario blocks reach the database and the persisted
     // trie representation can be verified at the end of the suite
-    let tree_config =
-        TreeConfig::default().with_persistence_threshold(2).with_memory_block_buffer_target(1);
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, fork_spec(fork), false, tree_config, move |timestamp| {
-            eth_payload_attributes_for_fork(fork, timestamp)
+    let (node, wallet) = EthereumNode::test_setup_for(fork)
+        .with_tree_config_modifier(|config| {
+            config
+                .with_num_state_masking_blocks(0)
+                .with_persistence_threshold(2)
+                .with_memory_block_buffer_target(1)
         })
+        .build_single()
         .await?;
-    let node = nodes.pop().unwrap();
-    let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider();
 
     let mut ctx = SuiteCtx {
         node,
         provider,
         fork,
-        signer: signer.address(),
-        nonce: 0,
+        account: wallet.account(0).with_gas_limit(TX_GAS_LIMIT),
         factory: Address::ZERO,
         last_committed: None,
     };
@@ -109,8 +99,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
     for _ in 0..4 {
         ctx.mine_block(vec![]).await?;
     }
-    wait_for_persisted_block(&ctx.node.inner.provider, scenario_tip, Duration::from_secs(30))
-        .await?;
+    ctx.node.wait_for_persisted_block(scenario_tip).await?;
     assert_trie_consistency(&ctx.node.inner.provider)?;
 
     Ok(())
@@ -121,8 +110,8 @@ struct SuiteCtx<P> {
     node: NodeHelperType<EthereumNode>,
     provider: P,
     fork: EthereumHardfork,
-    signer: Address,
-    nonce: u64,
+    /// The account sending all transactions.
+    account: TestAccount,
     /// The mode-switched `CREATE2` factory all scenarios deploy through.
     factory: Address,
     /// The chain segment committed by the most recently mined block.
@@ -130,51 +119,21 @@ struct SuiteCtx<P> {
 }
 
 impl<P: Provider> SuiteCtx<P> {
-    /// Sends the given transactions from the signer and mines a block containing exactly them.
+    /// Sends the given transactions from the signer and mines a block containing exactly them,
+    /// failing if any of them reverted.
     ///
-    /// Nonces and fees are filled in automatically in transaction order.
+    /// Nonces, gas limits and fees are filled in by the account in transaction order.
     async fn mine_block(
         &mut self,
         txs: Vec<TransactionRequest>,
     ) -> eyre::Result<Vec<TransactionReceipt>> {
-        let expected = txs.len();
-        let mut pending = Vec::with_capacity(expected);
+        let mut raw_txs = Vec::with_capacity(txs.len());
         for tx in txs {
-            let nonce = self.nonce;
-            self.nonce += 1;
-            let tx = tx
-                .with_from(self.signer)
-                .with_nonce(nonce)
-                .with_max_fee_per_gas(MAX_FEE_PER_GAS)
-                .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS);
-            pending.push(self.provider.send_transaction(tx).await?);
+            raw_txs.push(self.account.sign_tx_bytes(tx).await);
         }
-
-        let payload = self.node.advance_block().await?;
-        let included = payload.block().body().transactions().count();
-        assert_eq!(included, expected, "block should contain exactly the sent transactions");
-
-        let notification = self
-            .node
-            .canonical_stream
-            .next()
-            .await
-            .ok_or_else(|| eyre::eyre!("canonical stream ended"))?;
-        self.last_committed = Some(notification.committed());
-
-        let mut receipts = Vec::with_capacity(expected);
-        for tx in pending {
-            receipts.push(tx.get_receipt().await?);
-        }
-        for (index, receipt) in receipts.iter().enumerate() {
-            assert!(
-                receipt.status(),
-                "transaction {index} in block {:?} reverted: gas used {}",
-                receipt.block_number,
-                receipt.gas_used,
-            );
-        }
-        Ok(receipts)
+        let mined = self.node.mine(raw_txs).await?.ensure_success()?;
+        self.last_committed = Some(mined.chain);
+        Ok(mined.receipts)
     }
 
     /// Returns the account entry of the most recently committed block's bundle state.
@@ -245,12 +204,12 @@ struct Fixtures {
 /// Deploys the `CREATE2` factory and the fixture contracts for the pre-existing and revert
 /// scenarios.
 async fn deploy_fixtures<P: Provider>(ctx: &mut SuiteCtx<P>) -> eyre::Result<Fixtures> {
-    let base_nonce = ctx.nonce;
-    ctx.factory = ctx.signer.create(base_nonce);
-    let self_destructing_to_self = ctx.signer.create(base_nonce + 1);
-    let revert_child = ctx.signer.create(base_nonce + 2);
-    let reverter = ctx.signer.create(base_nonce + 3);
-    let revert_wrapper = ctx.signer.create(base_nonce + 4);
+    let (signer, base_nonce) = (ctx.account.address(), ctx.account.nonce());
+    ctx.factory = signer.create(base_nonce);
+    let self_destructing_to_self = signer.create(base_nonce + 1);
+    let revert_child = signer.create(base_nonce + 2);
+    let reverter = signer.create(base_nonce + 3);
+    let revert_wrapper = signer.create(base_nonce + 4);
 
     let receipts = ctx
         .mine_block(vec![
@@ -530,26 +489,23 @@ async fn destroy_and_recreate_in_same_block<P: Provider>(
 
 // Transaction builders
 //
-// All transactions use a generous fixed gas limit: Amsterdam repricing raises costs well above
-// the historic values (a plain transfer no longer fits into 21k gas), and gas estimation cannot
-// be used because some transactions depend on contracts created earlier in the same block.
+// All transactions use the generous fixed gas limit of the account: Amsterdam repricing raises
+// costs well above the historic values (a plain transfer no longer fits into 21k gas), and gas
+// estimation cannot be used because some transactions depend on contracts created earlier in the
+// same block.
 
 const TX_GAS_LIMIT: u64 = 1_000_000;
 
 fn create_tx(initcode: Bytes, value: U256) -> TransactionRequest {
-    TransactionRequest::default()
-        .with_kind(TxKind::Create)
-        .with_input(initcode)
-        .with_value(value)
-        .with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_kind(TxKind::Create).with_input(initcode).with_value(value)
 }
 
 fn call_tx(to: Address) -> TransactionRequest {
-    TransactionRequest::default().with_to(to).with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(to)
 }
 
 fn transfer_tx(to: Address, value: U256) -> TransactionRequest {
-    TransactionRequest::default().with_to(to).with_value(value).with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(to).with_value(value)
 }
 
 /// Calls the factory to `CREATE2`-deploy the given initcode, optionally calling the deployed
@@ -562,14 +518,10 @@ fn factory_create_tx(
     value: U256,
 ) -> TransactionRequest {
     let mut input = Vec::with_capacity(64 + initcode.len());
-    input.extend_from_slice(&U256::from(call_after_create as u8).to_be_bytes::<32>());
+    input.extend_from_slice(B256::with_last_byte(call_after_create as u8).as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(initcode);
-    TransactionRequest::default()
-        .with_to(factory)
-        .with_input(input)
-        .with_value(value)
-        .with_gas_limit(TX_GAS_LIMIT)
+    TransactionRequest::default().with_to(factory).with_input(input).with_value(value)
 }
 
 // Scenario parameters and small conversion helpers
@@ -689,17 +641,4 @@ fn call_then_store_runtime(target: Address) -> Bytes {
     code.extend_from_slice(&[0x60, 0x01, 0x60, 0x00, 0x55]); // PUSH1 1 PUSH1 0 SSTORE
     code.push(0x00); // STOP
     code.into()
-}
-
-fn fork_spec(fork: EthereumHardfork) -> Arc<ChainSpec> {
-    let builder = ChainSpecBuilder::default()
-        .chain(MAINNET.chain)
-        .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap());
-    let builder = match fork {
-        EthereumHardfork::Cancun => builder.cancun_activated(),
-        EthereumHardfork::Osaka => builder.osaka_activated(),
-        EthereumHardfork::Amsterdam => builder.amsterdam_activated(),
-        fork => unimplemented!("no activation configured for {fork}"),
-    };
-    Arc::new(builder.build())
 }

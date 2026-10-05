@@ -233,7 +233,7 @@ mod tests {
         let decoded: StorageTrieUpdatesSorted = decoded.into();
         assert_eq!(decoded.storage_nodes, storage_nodes);
 
-        let storage_slots = vec![(B256::from([1; 32]), U256::from(1))];
+        let storage_slots = vec![(B256::repeat_byte(1), U256::ONE)];
         let encoded = rmp_serde::encode::to_vec(&(&storage_slots, false))?;
         let decoded: serde_bincode_compat::hashed_state::HashedStorageSorted<'_> =
             rmp_serde::decode::from_slice(&encoded)?;
@@ -286,8 +286,8 @@ mod tests {
         let block = Block::default().seal_slow().try_recover()?;
         let block_number = block.header().number();
 
-        let hashed_address = B256::from([1; 32]);
-        let storage_key = B256::from([2; 32]);
+        let hashed_address = B256::repeat_byte(1);
+        let storage_key = B256::repeat_byte(2);
 
         let trie_updates = TrieUpdates {
             account_nodes: HashMap::from_iter([
