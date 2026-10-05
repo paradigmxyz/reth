@@ -343,14 +343,14 @@ mod tests {
     use reth_trie_common::{proof::ProofRetainer, root::state_root, HashBuilder, Nibbles};
     use std::sync::Arc;
 
-    const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+    const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
     fn key(value: u64) -> B256 {
         B256::left_padding_from(&value.to_be_bytes())
     }
 
     fn account(nonce: u64) -> TrieAccount {
-        TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
+        TrieAccount { nonce, balance: U256::ONE, ..Default::default() }
     }
 
     fn root(accounts: &[(B256, TrieAccount)]) -> B256 {

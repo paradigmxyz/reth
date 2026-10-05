@@ -361,12 +361,13 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
 
 #[cfg(test)]
 mod tests {
+
     use crate::{
         mdbx::{DatabaseArguments, DatabaseEnv, DatabaseEnvKind},
         tables::StorageChangeSets,
         Database,
     };
-    use alloy_primitives::{address, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbDupCursorRW},
         models::{BlockNumberAddress, ClientVersion},
@@ -390,9 +391,9 @@ mod tests {
 
     #[test]
     fn test_import_table_with_range_works_on_dupsort() {
-        let addr1 = address!("0000000000000000000000000000000000000001");
-        let addr2 = address!("0000000000000000000000000000000000000002");
-        let addr3 = address!("0000000000000000000000000000000000000003");
+        let addr1 = Address::with_last_byte(1);
+        let addr2 = Address::with_last_byte(2);
+        let addr3 = Address::with_last_byte(3);
         let source_db = create_test_db();
         let target_db = create_test_db();
         let test_data = vec![

@@ -35,7 +35,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 
     // Verify RocksDB provider is functional (can query without error)
     let rocksdb = node.inner.provider.rocksdb_provider();
-    let missing_hash = B256::from([0xab; 32]);
+    let missing_hash = B256::repeat_byte(0xab);
     let result: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
     assert!(result.is_none(), "Missing hash should return None");
 
@@ -125,7 +125,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     assert_eq!(tx_number, 0, "First tx should have TxNumber 0");
 
     // Verify missing hash returns None
-    let missing_hash = B256::from([0xde; 32]);
+    let missing_hash = B256::repeat_byte(0xde);
     let rocksdb = node.inner.provider.rocksdb_provider();
     let missing_tx_number: Option<u64> =
         rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
@@ -457,7 +457,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     let balance_at_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
     let nonce_at_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
     assert!(balance_at_1 < genesis_balance, "Balance should decrease after transfer + gas");
-    assert_eq!(nonce_at_1, U256::from(1), "Nonce should be 1 after first tx");
+    assert_eq!(nonce_at_1, U256::ONE, "Nonce should be 1 after first tx");
 
     // Mine block 2 with another transfer (nonce 1)
     let raw_tx2 = account.transfer(Address::random(), U256::from(100)).await;
@@ -511,7 +511,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     let hist_balance_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
     let hist_nonce_1: U256 = client.request("eth_getTransactionCount", (sender, "0x1")).await?;
     assert_eq!(hist_balance_1, balance_at_1, "Historical balance at block 1 should match");
-    assert_eq!(hist_nonce_1, U256::from(1), "Historical nonce at block 1 should be 1");
+    assert_eq!(hist_nonce_1, U256::ONE, "Historical nonce at block 1 should be 1");
 
     let hist_balance_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
     let hist_nonce_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;

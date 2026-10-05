@@ -2469,7 +2469,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x33; 32]),
+            head_block_hash: B256::repeat_byte(0x33),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2536,7 +2536,7 @@ mod tests {
         );
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x44; 32]),
+            head_block_hash: B256::repeat_byte(0x44),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2592,7 +2592,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x11; 32]),
+            head_block_hash: B256::repeat_byte(0x11),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
@@ -2642,7 +2642,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         let state = ForkchoiceState {
-            head_block_hash: B256::from([0x22; 32]),
+            head_block_hash: B256::repeat_byte(0x22),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };

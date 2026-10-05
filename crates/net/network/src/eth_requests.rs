@@ -1197,7 +1197,7 @@ mod tests {
 
         let missing_storage_proof = MockEthProvider::default();
         missing_storage_proof
-            .push_snap_storage_range(vec![(B256::ZERO, U256::from(1))], RangeEnd::ByteLimit);
+            .push_snap_storage_range(vec![(B256::ZERO, U256::ONE)], RangeEnd::ByteLimit);
 
         let storage_disappears = MockEthProvider::default();
         storage_disappears.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
@@ -1517,7 +1517,7 @@ mod tests {
         let proof = vec![Bytes::from_static(&[0xcc])];
         // More entries exist beyond `limit_hash`, so the cursor stopped at the hash limit
         // rather than exhausting the trie -- a proof is required even though origin is zero.
-        provider.push_snap_storage_range(vec![(hash, U256::from(1))], RangeEnd::HashLimit);
+        provider.push_snap_storage_range(vec![(hash, U256::ONE)], RangeEnd::HashLimit);
         provider.set_snap_storage_proof(Some(proof.clone()));
 
         let handler = snap_handler(provider.clone());
@@ -1550,7 +1550,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.push_missing_snap_storage_account();
         provider.push_snap_storage_range(
-            vec![(B256::repeat_byte(0x01), U256::from(1))],
+            vec![(B256::repeat_byte(0x01), U256::ONE)],
             RangeEnd::Exhausted,
         );
         let missing_account = B256::repeat_byte(0x01);

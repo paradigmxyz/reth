@@ -1193,9 +1193,7 @@ mod tests {
         let cases = [
             (EthApiError::TracingTransactionNotFound, "transaction not found"),
             (
-                EthApiError::TracingBlockNotFound(BlockId::hash(b256!(
-                    "0x0000000000000000000000000000000000000000000000000000000000000001"
-                ))),
+                EthApiError::TracingBlockNotFound(BlockId::hash(B256::with_last_byte(1))),
                 "block 0x0000000000000000000000000000000000000000000000000000000000000001 not found",
             ),
             (EthApiError::GenesisNotTraceable, "genesis is not traceable"),

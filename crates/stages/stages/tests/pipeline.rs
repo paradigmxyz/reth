@@ -59,7 +59,7 @@ const COUNTER_DEPLOYED_BYTECODE: Bytes = bytes!(
 const INCREMENT_SELECTOR: [u8; 4] = [0xd0, 0x9d, 0xe0, 0x8a];
 
 /// Contract address (deterministic for test)
-const CONTRACT_ADDRESS: Address = Address::new([0x42; 20]);
+const CONTRACT_ADDRESS: Address = Address::repeat_byte(0x42);
 
 /// Creates a `FileClient` populated with the given blocks.
 fn create_file_client_from_blocks(blocks: Vec<SealedBlock<Block>>) -> Arc<FileClient<Block>> {
@@ -228,7 +228,7 @@ async fn run_pipeline_forward_and_unwind(
     let signer_address = public_key_to_address(key_pair.public_key());
 
     // Recipient address for ETH transfers
-    let recipient_address = Address::new([0x11; 20]);
+    let recipient_address = Address::repeat_byte(0x11);
 
     // Create a chain spec with:
     // - Signer pre-funded with 1000 ETH

@@ -114,7 +114,7 @@ mod tests {
     fn elaborate_account_changes(seed: u8) -> Vec<AccountChanges> {
         vec![
             AccountChanges {
-                address: Address::from([seed; 20]),
+                address: Address::repeat_byte(seed),
                 storage_changes: vec![SlotChanges::new(
                     U256::from_be_bytes([seed.wrapping_add(1); 32]),
                     vec![
@@ -146,7 +146,7 @@ mod tests {
                 )],
             },
             AccountChanges {
-                address: Address::from([seed.wrapping_add(9); 20]),
+                address: Address::repeat_byte(seed.wrapping_add(9)),
                 storage_changes: Vec::new(),
                 storage_reads: vec![U256::from_be_bytes([seed.wrapping_add(10); 32])],
                 balance_changes: vec![BalanceChange::new(

@@ -498,7 +498,7 @@ mod tests {
         drop(provider);
 
         let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
         assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied().number, 1);
     }
 
@@ -526,7 +526,7 @@ mod tests {
         let gap = provider.commit_block_access_list(write, block, parent, &credit(10));
 
         assert!(matches!(gap, Err(SnapSyncError::OutOfOrderBlock { expected: 2, got: 3 })));
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
@@ -540,7 +540,7 @@ mod tests {
         let refused = provider.commit_block_access_list(write, orphaned, parent, &credit(10));
 
         assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod tests {
         let progress = provider.commit_block_access_list(write, block, parent, &read_only).unwrap();
 
         assert_eq!(progress.applied(), block);
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
@@ -788,7 +788,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         // The orphaned branch changed the balance and the nonce.
         let orphaned = AccountChanges::new(CHANGED)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(1)))
+            .with_balance_change(BalanceChange::new(index(1), U256::ONE))
             .with_nonce_change(NonceChange::new(index(1), 1));
         let mut repairs = StateRepairs::default();
         repairs.insert_changes(keccak256(CHANGED), &orphaned);

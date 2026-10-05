@@ -844,11 +844,12 @@ pub struct PrewarmMetrics {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{address, B256, U256};
+    use alloy_primitives::{Address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -969,7 +970,7 @@ mod tests {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        let address = address!("0000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
         saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
         execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
         // Keep the drop worker occupied: a queued SavedCache would delay cache reuse.
@@ -1164,7 +1165,7 @@ mod tests {
         if insert_error {
             // Modified accounts without current info are rejected by insert_state.
             state.state.insert(
-                address!("0000000000000000000000000000000000000001"),
+                Address::with_last_byte(1),
                 BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
             );
         }
@@ -1226,8 +1227,7 @@ mod tests {
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_storage_read(U256::from(1));
+        let changes = AccountChanges::new(Address::with_last_byte(1)).with_storage_read(U256::ONE);
 
         assert!(!changes.account_info().changes_state_root(&changes));
     }
@@ -1235,13 +1235,13 @@ mod tests {
     #[test]
     #[allow(clippy::needless_update)]
     fn bal_account_uses_existing_fields_only_when_missing() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+        let changes = AccountChanges::new(Address::with_last_byte(1))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
         let info = changes.account_info();
 
         assert!(!info.is_complete());
         let mut account = Account {
-            balance: U256::from(1),
+            balance: U256::ONE,
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
             ..Default::default()

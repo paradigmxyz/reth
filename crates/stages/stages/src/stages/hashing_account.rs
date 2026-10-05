@@ -117,7 +117,7 @@ impl AccountHashingStage {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
-                    balance: balance - U256::from(1),
+                    balance: balance - U256::ONE,
                     ..Default::default()
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
@@ -462,7 +462,7 @@ mod tests {
                         let Account { nonce, balance, .. } = account;
                         let old_acc = Account {
                             nonce: nonce - 1,
-                            balance: balance - U256::from(1),
+                            balance: balance - U256::ONE,
                             ..Default::default()
                         };
                         let hashed_addr = keccak256(address);

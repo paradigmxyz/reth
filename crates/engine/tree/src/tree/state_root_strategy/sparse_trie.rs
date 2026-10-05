@@ -1784,7 +1784,7 @@ mod tests {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let address = keccak256(Address::random());
-        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
+        let slot = keccak256(B256::with_last_byte(42));
         let value = U256::from(999);
 
         let mut hashed_state = HashedPostState::default();
@@ -1855,11 +1855,11 @@ mod tests {
     #[test]
     #[allow(clippy::needless_update)]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
-        let storage_root = B256::from([0x99; 32]);
+        let storage_root = B256::repeat_byte(0x99);
         let account = Some(Account {
             nonce: 7,
             balance: U256::from(42),
-            bytecode_hash: Some(B256::from([0xAA; 32])),
+            bytecode_hash: Some(B256::repeat_byte(0xAA)),
             ..Default::default()
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
@@ -2009,7 +2009,7 @@ mod tests {
         state.storages.entry(address).or_default().storage.extend([
             (removed_slot, U256::from(8)),
             (changed_slot, U256::from(9)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         task.on_hashed_state_update(state);
@@ -2056,7 +2056,7 @@ mod tests {
 
         let expected_root = reth_trie_common::root::storage_root_unsorted([
             (changed_slot, U256::from(11)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         assert_eq!(
@@ -2072,7 +2072,7 @@ mod tests {
         let mut final_updates = B256Map::from_iter([
             (removed_slot, LeafUpdate::Changed(Vec::new())),
             (changed_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(11)))),
-            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(1)))),
+            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::ONE))),
             (sibling_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(2)))),
         ]);
         serial
@@ -2262,10 +2262,7 @@ mod tests {
                 };
                 let storage = (0..4u8)
                     .map(|slot| {
-                        (
-                            B256::repeat_byte(0x40 + index * 4 + slot),
-                            U256::from(slot) + U256::from(1),
-                        )
+                        (B256::repeat_byte(0x40 + index * 4 + slot), U256::from(slot) + U256::ONE)
                     })
                     .collect::<Vec<_>>();
                 (address, account, storage)
@@ -2320,7 +2317,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2404,7 +2401,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2471,17 +2468,17 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
         drop(updates_tx);
 
-        let account = B256::from([0x11; 32]);
-        let slot = B256::from([0x22; 32]);
-        let account_target = B256::from([0x33; 32]);
-        let storage_target = B256::from([0x44; 32]);
+        let account = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let account_target = B256::repeat_byte(0x33);
+        let storage_target = B256::repeat_byte(0x44);
 
         task.finished_state_updates = true;
         task.account_updates.insert(account, LeafUpdate::Touched);
@@ -2562,7 +2559,7 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );
@@ -2615,7 +2612,7 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );

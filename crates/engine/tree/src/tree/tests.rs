@@ -2448,7 +2448,7 @@ mod check_invalid_ancestors_tests {
         let unsealed_block = block.unseal();
 
         // Create payload with wrong hash (this makes it malformed)
-        let wrong_hash = B256::from([0xff; 32]);
+        let wrong_hash = B256::repeat_byte(0xff);
 
         ExecutionData {
             payload: ExecutionPayloadV1::from_block_unchecked(wrong_hash, &unsealed_block).into(),
@@ -3158,8 +3158,8 @@ fn test_backfill_reaching_sync_target_head_updates_finalized() {
 #[test]
 fn test_backfill_target_hash_eth_returns_finalized() {
     let test_harness = TestHarness::new(MAINNET.clone());
-    let head = B256::from([0xAA; 32]);
-    let finalized = B256::from([0xBB; 32]);
+    let head = B256::repeat_byte(0xAA);
+    let finalized = B256::repeat_byte(0xBB);
     let state = ForkchoiceState {
         head_block_hash: head,
         safe_block_hash: B256::ZERO,
@@ -3172,7 +3172,7 @@ fn test_backfill_target_hash_eth_returns_finalized() {
 #[test]
 fn test_backfill_target_hash_eth_returns_zero_finalized() {
     let test_harness = TestHarness::new(MAINNET.clone());
-    let head = B256::from([0xAA; 32]);
+    let head = B256::repeat_byte(0xAA);
     let state = ForkchoiceState {
         head_block_hash: head,
         safe_block_hash: B256::ZERO,
@@ -3186,8 +3186,8 @@ fn test_backfill_target_hash_eth_returns_zero_finalized() {
 fn test_backfill_target_hash_opstack_returns_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.engine_kind = EngineApiKind::OpStack;
-    let head = B256::from([0xAA; 32]);
-    let finalized = B256::from([0xBB; 32]);
+    let head = B256::repeat_byte(0xAA);
+    let finalized = B256::repeat_byte(0xBB);
     let state = ForkchoiceState {
         head_block_hash: head,
         safe_block_hash: B256::ZERO,
@@ -3227,8 +3227,8 @@ fn test_on_disconnected_downloaded_block_opstack_targets_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
     test_harness.tree.engine_kind = EngineApiKind::OpStack;
 
-    let head_hash = B256::from([0xAA; 32]);
-    let finalized_hash = B256::from([0xBB; 32]);
+    let head_hash = B256::repeat_byte(0xAA);
+    let finalized_hash = B256::repeat_byte(0xBB);
     test_harness.tree.state.forkchoice_state_tracker.set_latest(
         ForkchoiceState {
             head_block_hash: head_hash,
@@ -3240,9 +3240,9 @@ fn test_on_disconnected_downloaded_block_opstack_targets_head() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::repeat_byte(0xCC));
     let missing_parent =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::repeat_byte(0xDD));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3268,8 +3268,8 @@ fn test_on_disconnected_downloaded_block_opstack_targets_head() {
 fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    let head_hash = B256::from([0xAA; 32]);
-    let finalized_hash = B256::from([0xBB; 32]);
+    let head_hash = B256::repeat_byte(0xAA);
+    let finalized_hash = B256::repeat_byte(0xBB);
     test_harness.tree.state.forkchoice_state_tracker.set_latest(
         ForkchoiceState {
             head_block_hash: head_hash,
@@ -3281,9 +3281,9 @@ fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::repeat_byte(0xCC));
     let missing_parent =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::repeat_byte(0xDD));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3309,7 +3309,7 @@ fn test_on_disconnected_downloaded_block_eth_targets_finalized() {
 fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
 
-    let head_hash = B256::from([0xAA; 32]);
+    let head_hash = B256::repeat_byte(0xAA);
     test_harness.tree.state.forkchoice_state_tracker.set_latest(
         ForkchoiceState {
             head_block_hash: head_hash,
@@ -3321,9 +3321,9 @@ fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
 
     let canonical_head = BlockNumHash::new(0, B256::ZERO);
     let downloaded_block =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::from([0xCC; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 100, B256::repeat_byte(0xCC));
     let missing_parent =
-        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::from([0xDD; 32]));
+        BlockNumHash::new(DEFAULT_BACKFILL_RUN_THRESHOLD + 99, B256::repeat_byte(0xDD));
 
     let event = test_harness.tree.on_disconnected_downloaded_block(
         downloaded_block,
@@ -3376,7 +3376,7 @@ async fn assert_post_backfill_recheck_uses_threshold(
 
     // Place the buffered hash in the FCU slot the helper picks for this chain type, and put
     // an unrelated hash (not in buffer) in the other slot to keep the two slots distinct.
-    let other_hash = B256::from([0xFF; 32]);
+    let other_hash = B256::repeat_byte(0xFF);
     let (head_block_hash, finalized_block_hash) = if engine_kind.is_opstack() {
         (target_hash, other_hash)
     } else {
@@ -3442,7 +3442,7 @@ async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold(
 #[test]
 fn test_backfill_threshold_above_header_limit_triggers_backfill() {
     let mut test_harness = TestHarness::new(MAINNET.clone());
-    let target_hash = B256::from([0xAA; 32]);
+    let target_hash = B256::repeat_byte(0xAA);
     test_harness.tree.state.forkchoice_state_tracker.set_latest(
         ForkchoiceState {
             head_block_hash: target_hash,
@@ -3452,11 +3452,11 @@ fn test_backfill_threshold_above_header_limit_triggers_backfill() {
         ForkchoiceStatus::Syncing,
     );
     let local_tip = BlockNumHash::new(10, B256::ZERO);
-    let parent_hash = B256::from([0xBB; 32]);
+    let parent_hash = B256::repeat_byte(0xBB);
     test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(2048);
     for gap in [1024, 1025] {
         let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
-        let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::from([0xCC; 32]));
+        let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::repeat_byte(0xCC));
         let event = test_harness.tree.on_disconnected_downloaded_block(
             downloaded,
             missing_parent,

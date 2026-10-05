@@ -315,7 +315,7 @@ pub(super) fn test_touched_prewarm_then_changed_update<T: SparseTrie>(new_trie: 
     let key5 = B256::with_last_byte(0x50);
 
     let base_storage: BTreeMap<B256, U256> = [
-        (key1, U256::from(1)),
+        (key1, U256::ONE),
         (key2, U256::from(2)),
         (key3, U256::from(3)),
         (key4, U256::from(4)),
@@ -497,7 +497,7 @@ pub(super) fn test_find_leaf_before_update_to_check_existence<T: SparseTrie>(new
     let nonexistent_key = B256::with_last_byte(0x40);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let mut harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);

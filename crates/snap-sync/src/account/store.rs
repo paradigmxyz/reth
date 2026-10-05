@@ -238,7 +238,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         for account in kept {
             self.remove::<tables::HashedStorages>((start, Bound::Excluded(*account)))?;
             // Walks cannot start at an excluded key, so the next piece starts one key past it.
-            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::from(1)) else {
+            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::ONE) else {
                 return Ok(())
             };
             start = Bound::Included(after.into());
@@ -874,8 +874,8 @@ mod tests {
                 (ABSENT, Some(Account::from(account(9)))),
             ])
             .with_storages([
-                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
-                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
+                (key(2), HashedStorage::from_iter([(SLOT, U256::ONE), (OTHER, U256::from(2))])),
+                (ABSENT, HashedStorage::from_iter([(SLOT, U256::ONE)])),
             ]);
         provider.write_hashed_state(&stale.into_sorted()).unwrap();
         let mut repairs = StateRepairs::default();

@@ -735,7 +735,7 @@ mod tests {
             }],
             state: HashBuilderState::default(),
             account_nonce: 1,
-            account_balance: U256::from(1),
+            account_balance: U256::ONE,
             account_bytecode_hash: b256!(
                 "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
             ),

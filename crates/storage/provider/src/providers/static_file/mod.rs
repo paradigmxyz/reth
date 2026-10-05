@@ -788,9 +788,9 @@ mod tests {
             .expect("Failed to create static file provider");
 
         // Setup test data
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
 
         // Write changesets for multiple blocks
         {
@@ -1133,9 +1133,9 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let test_address = Address::from([1u8; 20]);
-        let other_address = Address::from([2u8; 20]);
-        let missing_address = Address::from([3u8; 20]);
+        let test_address = Address::repeat_byte(1u8);
+        let other_address = Address::repeat_byte(2u8);
+        let missing_address = Address::repeat_byte(3u8);
         let test_key = B256::with_last_byte(1);
         let other_key = B256::with_last_byte(2);
 
@@ -1331,7 +1331,7 @@ mod tests {
 
         let block_num = 0u64;
         let num_slots = 100;
-        let address = Address::from([4u8; 20]);
+        let address = Address::repeat_byte(4u8);
 
         let mut keys: Vec<B256> = Vec::with_capacity(num_slots);
         for i in 0..num_slots {
@@ -1355,7 +1355,7 @@ mod tests {
             assert!(result.is_some());
             let entry = result.unwrap();
             assert_eq!(entry.key, keys[0]);
-            assert_eq!(entry.value, U256::from(0));
+            assert_eq!(entry.value, U256::ZERO);
 
             let result =
                 sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
@@ -1388,7 +1388,7 @@ mod tests {
         let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
             .expect("Failed to create static file provider");
 
-        let address = Address::from([5u8; 20]);
+        let address = Address::repeat_byte(5u8);
         let key = B256::with_last_byte(1);
 
         // Write changes for a single block without calling increment_block explicitly

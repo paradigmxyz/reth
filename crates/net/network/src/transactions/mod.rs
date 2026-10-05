@@ -2349,7 +2349,7 @@ mod tests {
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
     use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
-    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2411,7 +2411,7 @@ mod tests {
         let policy = RecordingPolicy::default();
         manager.policies =
             NetworkPolicies::new(TransactionPropagationKind::default(), policy.clone());
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let (peer, mut rx) = new_mock_session(peer_id, EthVersion::Eth68);
         manager.peers.insert(peer_id, peer);
         let [pending, accepted, ignored, rejected, later, bad] =
@@ -2656,7 +2656,7 @@ mod tests {
             .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![TransactionSigned::new_unhashed(
@@ -2665,7 +2665,7 @@ mod tests {
                 nonce: 15u64,
                 gas_price: 2200000000,
                 gas_limit: 34811,
-                to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                 value: U256::from(1234u64),
                 input: Default::default(),
             }),
@@ -2810,8 +2810,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_session_closed_cleans_transaction_peer_state() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
-        let fallback_peer = PeerId::new([2; 64]);
+        let peer_id = PeerId::repeat_byte(1);
+        let fallback_peer = PeerId::repeat_byte(2);
         let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
         let (fallback, _) = new_mock_session(fallback_peer, EthVersion::Eth66);
         let hash_shared = B256::from_slice(&[1; 32]);
@@ -2848,7 +2848,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2869,7 +2869,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2890,7 +2890,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_non_blob_sidecar_error_still_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2988,7 +2988,7 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![
@@ -2998,7 +2998,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811,
-                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                    to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -3021,7 +3021,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: MIN_TRANSACTION_GAS,
-                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
+                    to: TxKind::Call(address!("61815774383099e24810ab832a5b2a5425c154d5")),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -3104,8 +3104,8 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
-        let peer_id_2 = PeerId::new([2; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
+        let peer_id_2 = PeerId::repeat_byte(2);
         let eth_version = EthVersion::Eth66;
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 
