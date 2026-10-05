@@ -558,6 +558,7 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         Bundle, TransactionRequest,
     };
+    use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -574,11 +575,11 @@ mod tests {
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::RpcInvalidTransactionError;
+    use reth_rpc_eth_types::{EthConfig, RpcInvalidTransactionError};
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
-    use reth_tasks::cancel::is_cancelled;
+    use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::time::{Duration, Instant};
@@ -1138,10 +1139,6 @@ mod tests {
 
     #[tokio::test]
     async fn call_allowance_respects_rpc_gas_cap() {
-        use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
-        use reth_rpc_eth_types::EthConfig;
-        use reth_tasks::pool::BlockingTaskGuard;
-
         let sender = Address::repeat_byte(0x11);
         let contract = Address::repeat_byte(0xaa);
         // Return the gas remaining after intrinsic gas and the GAS opcode.
@@ -1318,6 +1315,56 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(estimated, U256::from(21_000));
+    }
+
+    #[tokio::test]
+    async fn free_calls_reject_unaffordable_value() {
+        let sender = Address::repeat_byte(0x11);
+        let provider = MockEthProvider::default();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000)));
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let request = TransactionRequest {
+            value: Some(U256::from(1_001)),
+            ..TransactionRequest::default().with_from(sender).with_to(Address::repeat_byte(0xaa))
+        };
+
+        let err =
+            EthCall::call(&api, request.clone(), Some(BlockId::latest()), EvmOverrides::default())
+                .await
+                .unwrap_err();
+        assert!(
+            matches!(
+                err.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::InsufficientFunds { .. })
+            ),
+            "{err}"
+        );
+        let err = trace_api
+            .trace_call(TraceCallRequest {
+                call: request,
+                trace_types: std::iter::once(TraceType::Trace).collect(),
+                block_id: Some(BlockId::latest()),
+                state_overrides: None,
+                block_overrides: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::InsufficientFunds { .. })
+            ),
+            "{err}"
+        );
     }
 
     #[tokio::test]
