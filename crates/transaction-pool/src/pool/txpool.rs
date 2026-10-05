@@ -206,6 +206,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.frame_reservations.hashes().collect()
     }
 
+    /// Returns public frame transactions whose payer exposure depends on the head's blob price.
+    pub(crate) fn blob_frame_transaction_hashes(&self) -> Vec<TxHash> {
+        self.all_transactions
+            .frame_reservations
+            .hashes()
+            .filter(|hash| {
+                self.all_transactions.by_hash.get(hash).is_some_and(|tx| tx.is_blob_transaction())
+            })
+            .collect()
+    }
+
     /// Returns all senders in the pool
     pub(crate) fn unique_senders(&self) -> AddressSet {
         self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
