@@ -359,7 +359,7 @@ fn run(
         Ok(())
     });
     let mut log = BufWriter::new(File::create(output.join("blocks.csv"))?);
-    writeln!(log, "block,measured,root_ms,prepare_ms,prune_ms,deadline_ms,account_misses,slot_misses,hot_account_evictions,hot_slot_evictions,pending_blocks,partial_lag,retained_storages")?;
+    writeln!(log, "block,measured,root_ms,prepare_ms,input_late_ms,cleanup_ms,prune_ms,root_ready_ms,deadline_ms,account_misses,slot_misses,hot_account_evictions,hot_slot_evictions,pending_blocks,partial_lag,retained_storages")?;
     let mut metric_log = BufWriter::new(File::create(output.join("metrics.csv"))?);
     writeln!(metric_log, "block,metric,count,sum,p50,p90,p99,max")?;
     let mut rng = StdRng::seed_from_u64(7012026);
@@ -373,34 +373,13 @@ fn run(
     let mut last_epoch = vec![0_u64; entries.len()];
     // Two initialization blocks reveal every hot key. They are not timed as workload blocks.
     for block in 0..blocks + warmup + 2 {
-        if block == 2 || block == warmup + 2 {
-            arrival_start = Instant::now();
+        if block == 2 {
+            arrival_start = Instant::now() + period;
         }
         let measured = block >= warmup + 2;
-        let arrival = arrival_start +
-            period * (block.saturating_sub(if measured { warmup + 2 } else { 2 })) as u32;
-        if block >= 2 && Instant::now() < arrival {
-            thread::sleep(arrival - Instant::now());
-        }
+        let arrival = arrival_start + period * block.saturating_sub(2) as u32;
         let start = Instant::now();
         let epoch = base + block as u64 + 1;
-        let mut prune_cutoff = None;
-        let completed = match done_rx.try_recv() {
-            Ok(done) => Some(done),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                eyre::bail!("persistence worker exited: {:?}", persist.join().unwrap())
-            }
-        };
-        if let Some((new_db, new_partial)) = completed {
-            db_tip = new_db;
-            partial = new_partial;
-            saving = false;
-            while pending.front().is_some_and(|b| b.recovered_block().number() <= partial) {
-                pending.pop_front();
-            }
-            prune_cutoff = Some(partial + 1);
-        }
         let mut selected = if block < 2 {
             (block * UPDATES..(block + 1) * UPDATES).collect::<Vec<_>>()
         } else {
@@ -469,9 +448,37 @@ fn run(
             "duplicate update keys"
         );
         let prepare_ms = start.elapsed().as_secs_f64() * 1000.;
+        let input_late_ms = if block >= 2 {
+            Instant::now().saturating_duration_since(arrival).as_secs_f64() * 1000.
+        } else {
+            0.
+        };
+        if block >= 2 && Instant::now() < arrival {
+            thread::sleep(arrival - Instant::now());
+        }
+        let cleanup_start = Instant::now();
+        let mut prune_cutoff = None;
+        let completed = match done_rx.try_recv() {
+            Ok(done) => Some(done),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                eyre::bail!("persistence worker exited: {:?}", persist.join().unwrap())
+            }
+        };
+        if let Some((new_db, new_partial)) = completed {
+            db_tip = new_db;
+            partial = new_partial;
+            saving = false;
+            while pending.front().is_some_and(|b| b.recovered_block().number() <= partial) {
+                pending.pop_front();
+            }
+            prune_cutoff = Some(partial + 1);
+        }
+        let cleanup_ms = cleanup_start.elapsed().as_secs_f64() * 1000.;
         let root_start = Instant::now();
         let (outcome, next_trie) = compute(runtime, factory.clone(), trie, root, epoch, state)?;
         let root_ms = root_start.elapsed().as_secs_f64() * 1000.;
+        let root_ready_ms = if measured { arrival.elapsed().as_secs_f64() * 1000. } else { 0. };
         root = outcome.state_root;
         trie = next_trie;
         let parent_hash = parent.hash_slow();
@@ -546,7 +553,7 @@ fn run(
             saving = true;
         }
         let deadline_ms = if measured { arrival.elapsed().as_secs_f64() * 1000. } else { 0. };
-        writeln!(log, "{block},{measured},{root_ms},{prepare_ms},{prune_ms},{deadline_ms},{account_misses},{slot_misses},{hot_account_evictions},{hot_slot_evictions},{},{},{}", epoch - db_tip, epoch - partial, trie.retained_storage_tries_count())?;
+        writeln!(log, "{block},{measured},{root_ms},{prepare_ms},{input_late_ms},{cleanup_ms},{prune_ms},{root_ready_ms},{deadline_ms},{account_misses},{slot_misses},{hot_account_evictions},{hot_slot_evictions},{},{},{}", epoch - db_tip, epoch - partial, trie.retained_storage_tries_count())?;
         log.flush()?;
         collect_metrics(snapshotter, &mut metric_log, block)?;
         if block % 10 == 0 {

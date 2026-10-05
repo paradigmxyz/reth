@@ -51,9 +51,13 @@ increase retention. Check every hot key old enough to be pruned and audit 1,000 
 Also count any hot-key miss before an update after initialization, including distinct hot keys ever
 evicted; both account and slot fractions must remain strictly below 0.1%.
 
-`blocks.csv` reports task latency separately from workload preparation and pruning. Warmup and measurement are both paced. Fixed arrival
-timestamps do not slide forward when work falls behind. Deadline elapsed time includes workload
-preparation and pruning audits, making it a conservative end-to-end harness measure. `saves.csv`
+`blocks.csv` reports task latency separately from workload preparation, persisted-update cleanup, and pruning. `root_ready_ms`
+records the actual scheduled root completion; inputs are prepared before their fixed arrival,
+and `input_late_ms` explicitly records any time the generator misses that arrival; `deadline_ms` also includes post-root pruning.
+`root_ms + cleanup_ms + prune_ms` measures the isolated state/persistence service work, excluding
+synthetic-input generation and witness auditing. Warmup and measurement are both paced. Fixed arrival
+timestamps do not slide forward when work falls behind. Deadline elapsed time includes any generator lateness and post-root pruning audits, making it a
+conservative end-to-end harness measure. Arrival times are never reset at the warmup boundary. `saves.csv`
 includes actual commit time and final drain. `metrics.csv` records per-block distributions of the
 production histograms; these per-block percentiles must not be averaged to claim pooled percentiles.
 Keep CPU/memory and RocksDB compaction logs alongside the run. Report deferred work and memory,
