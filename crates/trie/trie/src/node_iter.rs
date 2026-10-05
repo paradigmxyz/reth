@@ -344,7 +344,8 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
+        let walker =
+            TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze()).unwrap();
 
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
@@ -475,7 +476,8 @@ mod tests {
         let walker = TrieWalker::<_>::state_trie(
             trie_cursor_factory.account_trie_cursor().unwrap(),
             prefix_set,
-        );
+        )
+        .unwrap();
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
