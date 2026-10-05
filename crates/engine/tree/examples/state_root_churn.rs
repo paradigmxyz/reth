@@ -456,7 +456,11 @@ fn run(
             state.storages.insert(
                 entry.address,
                 HashedStorage {
-                    storage: entry.slots.iter().map(|s| (*s, U256::from(epoch))).collect(),
+                    storage: entry
+                        .slots
+                        .iter()
+                        .map(|s| (*s, slot_value(entry.address, *s, epoch)))
+                        .collect(),
                 },
             );
         }
@@ -600,7 +604,10 @@ fn run(
             let Some(StateTrieNode::Leaf { value, .. }) = cursor.get(Nibbles::unpack(slot))? else {
                 eyre::bail!("missing persisted slot")
             };
-            ensure!(value == U256::from(last_epoch[index]), "persisted slot value mismatch");
+            ensure!(
+                value == slot_value(entry.address, slot, last_epoch[index]),
+                "persisted slot value mismatch"
+            );
             storage.storage.insert(slot, value);
         }
         check_state.storages.insert(entry.address, storage);
@@ -623,4 +630,13 @@ fn run(
     ensure!(ever_evicted.len() * 1000 < HOT, "premature hot account pruning exceeded 0.1%");
     ensure!(evicted_slots.len() * 1000 < HOT * 3, "premature hot slot pruning exceeded 0.1%");
     Ok(())
+}
+
+/// Vary full-width values independently across accounts, slots, and blocks.
+fn slot_value(address: B256, slot: B256, epoch: u64) -> U256 {
+    let mut input = [0; 72];
+    input[..32].copy_from_slice(address.as_slice());
+    input[32..64].copy_from_slice(slot.as_slice());
+    input[64..].copy_from_slice(&epoch.to_be_bytes());
+    U256::from_be_bytes(alloy_primitives::keccak256(input).0)
 }

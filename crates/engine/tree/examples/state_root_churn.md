@@ -33,7 +33,8 @@ accounts with at least three existing slots and a `HashedAccounts` entry. Three 
 select existing slots, with three distinct fallback slots for small tries. Random successor sampling
 is reproducible but is not an exactly uniform sample of table rows. No accounts or slots are created
 or deleted. Each selected account's nonce changes, and its three selected slots receive new nonzero
-values. Thus account and storage churn are correlated, and this workload has 100,000 storage tries
+values derived from the hash of `(account, slot, epoch)`. This prevents artificial compression
+from repeating one small integer across all slots. Thus account and storage churn are correlated, and this workload has 100,000 storage tries
 per block; it is not a workload concentrated in a few large contracts.
 
 The first 200,000 sampled accounts and their 600,000 slots form a stationary hot set. Two initialization
