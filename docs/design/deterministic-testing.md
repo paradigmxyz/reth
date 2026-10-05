@@ -636,9 +636,10 @@ RETH_DST_NATIVE_WORKERS=1 RETH_DST_SECONDS=3600 RETH_DST_STEPS=1000 \
 
 The native-worker profile explicitly enables the parallel state-root task even when the host's
 CPU quota makes `available_parallelism()` choose the serial fallback. This preserves the
-native sparse-trie frontier invariant checked by the cooperative lane. An eight-seed native
-smoke run is recorded separately from the deterministic wall-clock qualification in the bug
-ledger; it does not claim that native thread schedules are replayable.
+native sparse-trie frontier invariant checked by the cooperative lane. A 568-case native-worker
+campaign and the earlier eight-seed smoke are recorded separately from the deterministic
+wall-clock qualification in the bug ledger; neither claims that native thread schedules are
+replayable.
 
 The semantic workload, network, storage-fault, and lifecycle decisions remain recorded. Native
 Rayon worker ordering is intentionally outside the trace, so a native-only failure must reproduce

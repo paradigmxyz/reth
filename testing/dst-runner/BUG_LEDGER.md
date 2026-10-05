@@ -22,7 +22,8 @@ tracked separately and never counted toward a bug-free qualification interval.
 | `5fbd646697` | `cargo check -p reth-dst-runner --features dst --bin reth-dst-node` | The supplied branch did not compile: missing Engine message fields and type/async/handoff mismatches in engine-tree (28 diagnostics before reaching the runner). | Fixed in this branch; type-check passed. This is a build blocker, not a confirmed runtime invariant failure. |
 | `5fbd646697` and first PR CI run | GitHub Actions doctests on PR #27733 | Cargo could not fetch private `tempoxyz/abi-fuzz` (HTTP 401) on CI runners; the only manifest reference was an unused dependency of `reth-dst-runner`. | Removed its workspace and runner declarations and lock entry; head checkout now resolves locally without it. The compact-codec CI job explicitly checks out the unchanged base branch for comparison and still fails with the same 401; that base-side CI blocker cannot be fixed by a head-only change. No runtime behavior changed. |
 | `5fbd646697` and head-only workspace CI | `cargo test --no-run --workspace --exclude ef-tests --features asm-keccak --locked` | The custom-engine-types example did not forward the new `state_provider_factory` field in `BuildArguments`, producing E0027/E0063. | Forwarded that field in the example; `cargo check --locked -p example-custom-engine-types` passes. The next CI run still needs verification; this is unrelated to node-campaign runtime behavior. |
-| PR CI lint run | Docs and clippy jobs on PR #27733 | A `BuildArguments` destructuring in `reth-ethereum-payload-builder` bound an unused provider field; clippy also flags six transaction-pool documentation errors on files unchanged by this PR. | Explicitly ignore the unused field and validate the payload-builder crate. The unrelated pool-doc lint failures remain outside this DST change. |
+| PR CI lint run | Docs and clippy jobs on PR #27733 | A `BuildArguments` destructuring in `reth-ethereum-payload-builder` bound an unused provider field; clippy also flags six transaction-pool documentation errors on files unchanged by this PR. | Explicitly ignored the unused field; `cargo +nightly clippy -p reth-ethereum-payload-builder` passes. A `-D warnings` attempt still fails on an existing `reth-execution-cache` dependency warning. The unrelated pool-doc lint failures remain outside this DST change. |
+| PR CI unit run | GitHub Actions Ethereum test job, 3 of 3811 tests | Three unchanged `tree::payload_build_counter::tests::loom_*` tests terminate with `coroutine ... has overflowed its stack` under nextest. | The local serial `reth-engine-tree` suite with `dst` passed all 239 tests, but that does not reproduce the CI runner/feature matrix. Treat the loom failures as an unresolved CI/test-runtime limitation, not as proof of a product-state mismatch or a qualified weak-memory result. |
 | `5fbd646697` + first generator extension | Seed 0; trace `target/reth-dst/failures/node-0-33bddf9b.dst` | An empty payload build waited for a txpool snapshot despite having no senders to prewarm. | Fixed the harness wait condition. The input is valid; this was a harness false positive, not a product invariant failure. |
 | First snapshot oracle | Seeds 0, 1, 2, 4; traces in `target/reth-dst/failures/` | The original snapshot compared storage `None` to `Some(0)` as different despite both reading as zero in Ethereum, and used bytecode `Debug` with an internal lazy hash cache. | Normalize absent storage to zero and compare original code bytes; the 12-seed matrix now passes strict replay. |
 | First 1900-second campaign | Seed 302; `target/reth-dst/failures/node-302-fccce47a.dst` | A modeled forkchoice changed heads while a payload build was pending; the old job returned `MissingPayload` on resolution, which the harness unconditionally unwrapped. | Strictly replayed the trace; recognize the canceled build only after an observed head change, discard its transactions, and preserve the existing success assertion for uninterrupted jobs. This was a harness lifecycle error, not a confirmed engine defect. Restart the clean-run clock on the rebuilt binary. |
@@ -54,10 +55,15 @@ runtime branch qualified above is unchanged. Before this
 clean interval, seed 302 reproduced a harness cancellation error; see the ledger above. No
 product-state invariant defect was confirmed during this run.
 
-A separate native-worker qualification attempt started at 2026-10-05 07:19:00 UTC after the
-native serial-fallback harness mismatch was corrected. It uses `RETH_DST_NATIVE_WORKERS=1`,
-`RETH_DST_SECONDS=1900`, `RETH_DST_SEED=326`, `RETH_DST_STEPS=16`, and a 90-second host case
-watchdog. Do not infer an end time, case count, or qualification outcome until the run finishes.
+A separate native-worker campaign ran from 2026-10-05 07:19:00 UTC to observed completion at
+07:50:48 UTC on 2026-10-05: **31 minutes 48 seconds of wall-clock observation**. The native
+binary built from `10645c45c8` used `RETH_DST_NATIVE_WORKERS=1`, `RETH_DST_SECONDS=1900`,
+`RETH_DST_SEED=326`, `RETH_DST_STEPS=16`, and a 90-second host case watchdog. Seeds 326–893
+completed: **568 cases, zero distinct new invariant failures, zero inconclusive cases, exit code
+0**. The only subsequent runtime-source change ignores an unused field binding and has no
+behavioral effect. The native lane does not inject database faults and cannot replay native
+thread interleavings; it is not a weak-memory, OS-crash, mmap/writeback, or power-loss durability
+qualification.
 
 Start the 30-minute clock only after a successful build and after the last **new distinct**
 invariant failure. Record wall-clock start and end, build revision, campaign options, case count,
