@@ -919,6 +919,16 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
+        // A blob call without a positive blob fee cap runs at a zero blob base fee and pays no
+        // blob fee, as geth's `eth_call` does, so the cap can be omitted or set to zero.
+        let tx = request.as_ref();
+        if (tx.blob_versioned_hashes.is_some() || tx.max_fee_per_blob_gas.is_some()) &&
+            tx.max_fee_per_blob_gas.unwrap_or_default() == 0 &&
+            let Some(blob) = evm_env.block_env.inner_mut().blob_excess_gas_and_price.as_mut()
+        {
+            blob.blob_gasprice = 0;
+        }
+
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
