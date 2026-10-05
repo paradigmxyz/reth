@@ -566,7 +566,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+        if source.is_canonical() &&
             let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
@@ -576,7 +576,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
-        if matches!(source, BlockSource::Pending | BlockSource::Any) {
+        if source.is_pending() {
             return Ok(self
                 .canonical_in_memory_state
                 .pending_block()
@@ -592,7 +592,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<SealedOrRecoveredBlock<Self::Block>>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+        if source.is_canonical() &&
             let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| {
@@ -608,7 +608,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             return Ok(Some(block))
         }
 
-        if matches!(source, BlockSource::Pending | BlockSource::Any) &&
+        if source.is_pending() &&
             let Some(block_state) = self.canonical_in_memory_state.pending_state()
         {
             let recovered_block = Arc::clone(&block_state.block_ref().recovered_block);

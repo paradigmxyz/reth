@@ -284,7 +284,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         tx_meta.subpool
                     };
 
-                    if subpool == SubPool::Pending {
+                    if subpool.is_pending() {
                         on_promoted(&tx);
                     }
 
@@ -305,7 +305,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         tx_meta.subpool
                     };
 
-                    if subpool == SubPool::Pending {
+                    if subpool.is_pending() {
                         on_promoted(&tx);
                     }
 
@@ -366,7 +366,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         meta.subpool
                     };
 
-                    if subpool == SubPool::Pending {
+                    if subpool.is_pending() {
                         on_promoted(&tx);
                     }
 
@@ -620,7 +620,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.all_transactions
             .txs_iter(sender)
-            .find(|(id, tx)| id.nonce == nonce && tx.subpool == SubPool::Pending)
+            .find(|(id, tx)| id.nonce == nonce && tx.subpool.is_pending())
             .map(|(_, tx)| Arc::clone(&tx.transaction))
     }
 
@@ -1052,7 +1052,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Destination::Pool(move_to) => {
                     debug_assert_ne!(&move_to, &current, "destination must be different");
                     let moved = self.move_transaction(current, move_to, &id);
-                    if matches!(move_to, SubPool::Pending) &&
+                    if move_to.is_pending() &&
                         let Some(tx) = moved
                     {
                         trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");

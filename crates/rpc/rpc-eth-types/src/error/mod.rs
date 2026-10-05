@@ -5,7 +5,7 @@ use alloy_eips::BlockId;
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
-use alloy_sol_types::{ContractError, RevertReason};
+use alloy_sol_types::RevertReason;
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
@@ -989,7 +989,7 @@ impl std::fmt::Display for RevertError {
         if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
             let error = reason.to_string();
             let mut error = error.as_str();
-            if matches!(reason, RevertReason::ContractError(ContractError::Revert(_))) {
+            if reason.is_revert() {
                 // we strip redundant `revert: ` prefix from the revert reason
                 error = error.trim_start_matches("revert: ");
             }

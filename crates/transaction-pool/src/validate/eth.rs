@@ -2408,7 +2408,7 @@ mod tests {
             assert!(matches!(
                 err,
                 InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
-                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+                if funds_err.got.is_zero() && funds_err.expected == expected_cost
             ));
         } else {
             panic!("Expected Invalid outcome with InsufficientFunds error");

@@ -1022,7 +1022,7 @@ impl PeersManager {
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
-                if peer.state == PeerConnectionState::Idle {
+                if peer.state.is_idle() {
                     // Try connecting again.
                     peer.state = PeerConnectionState::PendingOut;
                     self.connection_info.inc_pending_out();
@@ -3250,7 +3250,7 @@ mod tests {
         let num_pendingout_states = peer_manager
             .peers
             .iter()
-            .filter(|(_, peer)| peer.state == PeerConnectionState::PendingOut)
+            .filter(|(_, peer)| peer.state.is_pending_out())
             .map(|(peer_id, _)| *peer_id)
             .collect::<Vec<PeerId>>();
         assert_eq!(

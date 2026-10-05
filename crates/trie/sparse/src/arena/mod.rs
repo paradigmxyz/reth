@@ -1658,9 +1658,7 @@ impl ArenaParallelSparseTrie {
         // would fail the `num_removals != num_changed` check, skip the proof
         // request for the blinded sibling, and later panic in
         // `maybe_collapse_or_remove_branch` when the subtrie empties inline.
-        let num_changed =
-            subtrie_updates.iter().filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_))).count()
-                as u64;
+        let num_changed = subtrie_updates.iter().filter(|(_, _, u)| u.is_changed()).count() as u64;
 
         if num_removals == 0 || num_removals != num_changed {
             return None;
@@ -2675,7 +2673,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         // Filter out Touched, as they don't affect the structure of the trie. So an
                         // update set with 2 removals and one Touched could still result in an empty
                         // sub trie.
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
+                        .filter(|(_, _, u)| u.is_changed())
                         .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
                     let subtrie_num_leaves = match &self.upper_arena[child_idx] {
                         ArenaSparseNode::Subtrie(s) => s.num_leaves,
@@ -3001,7 +2999,7 @@ mod tests {
             let mut leaf_updates: B256Map<LeafUpdate> = changes
                 .iter()
                 .map(|(&slot, &value)| {
-                    let rlp_value = if value == U256::ZERO {
+                    let rlp_value = if value.is_zero() {
                         Vec::new()
                     } else {
                         alloy_rlp::encode_fixed_size(&value).to_vec()
@@ -3115,7 +3113,7 @@ mod tests {
 
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
-                .filter(|(_, v)| *v != U256::ZERO)
+                .filter(|(_, v)| !v.is_zero())
                 .collect();
 
             let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);

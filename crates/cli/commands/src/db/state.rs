@@ -78,7 +78,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -105,7 +105,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -176,7 +176,7 @@ impl Command {
 
         for (idx, key) in storage_keys.iter().enumerate() {
             match provider.storage(address, *key) {
-                Ok(Some(value)) if value != U256::ZERO => {
+                Ok(Some(value)) if !value.is_zero() => {
                     entries.push((*key, value));
                 }
                 _ => {}
