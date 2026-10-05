@@ -8,7 +8,10 @@ use alloy_consensus::Header;
 use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
 use alloy_primitives::{Bytes, B256, U256};
-use futures::future::{ready, Ready};
+use futures::{
+    channel::oneshot,
+    future::{ready, FutureExt, Shared},
+};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -48,7 +51,9 @@ use reth_trie_common::{
 };
 use std::{
     collections::VecDeque,
+    future::Future,
     ops::Range,
+    pin::Pin,
     sync::{Mutex, MutexGuard},
 };
 
@@ -421,6 +426,9 @@ fn table_entries<T: Table>(provider: &impl DBProvider) -> Vec<(T::Key, T::Value)
     provider.tx_ref().cursor_read::<T>().unwrap().walk(None).unwrap().map(Result::unwrap).collect()
 }
 
+type ScriptedResponse =
+    Pin<Box<dyn Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync>>;
+
 /// Serves scripted answers in request order, recording what each request asked for.
 pub(crate) struct ScriptedSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
@@ -430,6 +438,9 @@ pub(crate) struct ScriptedSnapClient {
     block_requests: Mutex<Vec<Vec<B256>>>,
     on_block_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     on_storage_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    // Resolves storage responses held until a bytecode request is recorded.
+    code_requested: Mutex<Option<oneshot::Sender<()>>>,
+    storage_held: Option<Shared<oneshot::Receiver<()>>>,
 }
 
 impl ScriptedSnapClient {
@@ -444,6 +455,8 @@ impl ScriptedSnapClient {
             block_requests: Mutex::new(Vec::new()),
             on_block_request: Mutex::new(None),
             on_storage_request: Mutex::new(None),
+            code_requested: Mutex::new(None),
+            storage_held: None,
         }
     }
 
@@ -456,6 +469,14 @@ impl ScriptedSnapClient {
     /// Runs `hook` after the next storage request is recorded, before returning its response.
     pub(crate) fn on_storage_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
         *self.on_storage_request.lock().unwrap() = Some(Box::new(hook));
+        self
+    }
+
+    /// Holds every storage response until a bytecode request is recorded.
+    pub(crate) fn hold_storage_until_code(mut self) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        *self.code_requested.get_mut().unwrap() = Some(sender);
+        self.storage_held = Some(receiver.shared());
         self
     }
 
@@ -479,9 +500,9 @@ impl ScriptedSnapClient {
         self.block_requests.lock().unwrap()
     }
 
-    fn next_response(&self) -> Ready<PeerRequestResult<SnapResponse>> {
+    fn next_response(&self) -> ScriptedResponse {
         let response = self.responses.lock().unwrap().pop_front();
-        ready(response.unwrap_or(Err(RequestError::ChannelClosed)))
+        Box::pin(ready(response.unwrap_or(Err(RequestError::ChannelClosed))))
     }
 }
 
@@ -500,7 +521,7 @@ impl DownloadClient for ScriptedSnapClient {
 }
 
 impl SnapClient for ScriptedSnapClient {
-    type Output = Ready<PeerRequestResult<SnapResponse>>;
+    type Output = ScriptedResponse;
 
     fn get_account_range_with_priority(
         &self,
@@ -525,7 +546,12 @@ impl SnapClient for ScriptedSnapClient {
         if let Some(hook) = self.on_storage_request.lock().unwrap().take() {
             hook();
         }
-        self.next_response()
+        let response = self.next_response();
+        let Some(held) = self.storage_held.clone() else { return response };
+        Box::pin(async move {
+            let _ = held.await;
+            response.await
+        })
     }
 
     fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
@@ -538,6 +564,9 @@ impl SnapClient for ScriptedSnapClient {
         _priority: Priority,
     ) -> Self::Output {
         self.code_requests.lock().unwrap().push(request.hashes);
+        if let Some(sender) = self.code_requested.lock().unwrap().take() {
+            let _ = sender.send(());
+        }
         self.next_response()
     }
 

@@ -10,6 +10,7 @@ use crate::{
     StorageRangeDownload, StorageRangeStep, VerifiedRange, DEFAULT_SCAN_CHUNK,
 };
 use alloy_eips::BlockNumHash;
+use futures::{future::join, FutureExt};
 use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_primitives_traits::AlloyBlockHeader;
@@ -19,7 +20,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
-use std::{fmt, future::Future};
+use std::{cell::OnceCell, fmt, future::Future};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
@@ -398,7 +399,9 @@ where
             let Some(slots) = self.storage.repair_slots(&range).await? else {
                 return Ok(Some(Step::Wait))
             };
-            if let Some(step) = self.download_code(&range).await? {
+            if let Some(step) =
+                Self::download_code(&mut self.bytecode, &range, &self.cancel).await?
+            {
                 return Ok(Some(step))
             }
             let hashed_address = range.origin();
@@ -433,37 +436,60 @@ where
         Ok(Step::Continue)
     }
 
-    // Persists the storage and code `range` needs. `Some` ends the pass. Both commit as they
-    // arrive, so a range dropped here is fetched again without repeating them.
+    // Persists the storage and code `range` needs, one request of each in flight. `Some` ends the
+    // pass with the step of whichever ended first, and the other stops after committing its
+    // response. Every response commits, so a range dropped here does not fetch them again.
     async fn download_storage_and_code(
         &mut self,
         range: &VerifiedRange,
     ) -> Result<Option<Step>, SnapSyncError> {
+        let ended = self.cancel.child_token();
+        let first = OnceCell::new();
+        let end = |result: Result<Option<Step>, SnapSyncError>| {
+            if let Some(step) = result.transpose() {
+                let _ = first.set(step);
+                ended.cancel();
+            }
+        };
+        join(
+            Self::download_storage(&mut self.storage, range, &ended).map(end),
+            Self::download_code(&mut self.bytecode, range, &ended).map(end),
+        )
+        .await;
+        first.into_inner().transpose()
+    }
+
+    // Commits storage responses until `range`'s contracts are complete. Continuations stay
+    // sequential, and `Some` ends early, stopping between responses once `ended` fires.
+    async fn download_storage(
+        storage: &mut StorageRangeDownload<C, F>,
+        range: &VerifiedRange,
+        ended: &CancellationToken,
+    ) -> Result<Option<Step>, SnapSyncError> {
         loop {
-            match self.storage.next(range).await? {
-                StorageRangeStep::Complete => break,
+            match storage.next(range).await? {
+                StorageRangeStep::Complete => return Ok(None),
                 StorageRangeStep::Committed(_) => {}
                 StorageRangeStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's storage");
                     return Ok(Some(Step::Wait))
                 }
             }
-            // A large contract takes many responses, each committed, so any of them is a
-            // resumable place to stop.
-            if self.cancel.is_cancelled() {
+            if ended.is_cancelled() {
                 return Ok(Some(Step::Stop))
             }
         }
-        self.download_code(range).await
     }
 
-    // Persists the code `range` references. `Some` ends the pass.
+    // Commits code responses until `range`'s code is stored. `Some` ends early, stopping between
+    // responses once `ended` fires.
     async fn download_code(
-        &mut self,
+        bytecode: &mut BytecodeDownload<C, F>,
         range: &VerifiedRange,
+        ended: &CancellationToken,
     ) -> Result<Option<Step>, SnapSyncError> {
         loop {
-            match self.bytecode.next(range).await? {
+            match bytecode.next(range).await? {
                 BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
                 BytecodeStep::Unavailable { peer_id, .. } => {
@@ -471,7 +497,7 @@ where
                     return Ok(Some(Step::Wait))
                 }
             }
-            if self.cancel.is_cancelled() {
+            if ended.is_cancelled() {
                 return Ok(Some(Step::Stop))
             }
         }
@@ -602,7 +628,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, hashed_factory, header, key, policy, state_root,
+            account, account_range, byte_codes, hashed_factory, header, key, policy, state_root,
             storage_ranges, storage_root_of, stored_slots, verified_range, ReorgFactoryExt,
             ScriptedSnapClient,
         },
@@ -612,9 +638,9 @@ mod tests {
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
         NonceChange,
     };
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage},
+        snap::{AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
@@ -629,7 +655,7 @@ mod tests {
     use reth_stages_types::StageId;
     use reth_storage_api::{SnapAttemptId, StageCheckpointReader};
     use reth_trie_common::{HashedPostState, TrieAccount};
-    use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+    use std::{cell::RefCell, collections::VecDeque, sync::Arc, time::Duration};
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
@@ -1234,6 +1260,83 @@ mod tests {
 
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(client.storage_requests().len(), 1);
+    }
+
+    fn contract_slots() -> Vec<(B256, U256)> {
+        vec![(key(1), U256::from(11))]
+    }
+
+    fn contract_code() -> Bytes {
+        Bytes::from_static(&[1; 4])
+    }
+
+    // A contract whose storage takes one response and whose code is not stored yet.
+    fn contract_with_code() -> Vec<(B256, TrieAccount)> {
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&contract_slots());
+        contract.code_hash = keccak256(contract_code());
+        vec![(key(1), contract)]
+    }
+
+    #[tokio::test]
+    async fn storage_and_code_requests_overlap() {
+        let (accounts, slots, code) = (contract_with_code(), contract_slots(), contract_code());
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        // Storage is only served once code is requested, so sequential downloads never finish.
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[]),
+                storage_ranges(1, &[&slots], &slots, &[]),
+                byte_codes(1, &[code]),
+            ])
+            .hold_storage_until_code(),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy());
+
+        let outcome = tokio::time::timeout(Duration::from_secs(10), bootstrap.run())
+            .await
+            .expect("storage and code overlap")
+            .unwrap();
+
+        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }));
+        assert_eq!(client.storage_requests().len(), 1);
+        assert_eq!(client.code_requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unserved_code_keeps_the_range_uncommitted() {
+        let (accounts, slots, code) = (contract_with_code(), contract_slots(), contract_code());
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let no_code = ByteCodesMessage { request_id: 1, codes: Vec::new() };
+        let (_, mut bootstrap) = scripted(
+            &factory,
+            [
+                account_range(1, &accounts, 0..1, &[]),
+                storage_ranges(1, &[&slots], &slots, &[]),
+                Ok(WithPeerId::new(PeerId::random(), SnapResponse::ByteCodes(no_code))),
+            ],
+            [3],
+        );
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(stored_slots(&factory.database_provider_ro().unwrap(), key(1)), slots);
+
+        // Only the range and its code are fetched again, the committed storage is not.
+        let (client, mut resumed) = scripted(
+            &factory,
+            [account_range(1, &accounts, 0..1, &[]), byte_codes(1, &[code])],
+            [3],
+        );
+        let outcome = resumed.run().await.unwrap();
+
+        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }));
+        assert_eq!(*client.origins(), [B256::ZERO]);
+        assert!(client.storage_requests().is_empty());
     }
 
     #[tokio::test]
