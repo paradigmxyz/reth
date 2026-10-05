@@ -77,13 +77,36 @@ sync a follower through the production ETH codec. Follower sync is split into be
 so the controller can advance virtual time, partition or heal the link, corrupt the next encrypted
 response, or crash and restart the follower while requests are in flight.
 
-Accepted blocks contain 5–64 signed transactions built with txgen-core's account, nonce, and
+Accepted blocks contain 0–64 signed transactions built with txgen-core's account, nonce, and
 generation context APIs. The workload maintains nonces for 20 funded accounts and mixes legacy,
 EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and calls across four storage
 contracts with abi-fuzz-generated keys and values. Transaction count is a semantic trace decision.
 Persistence threshold, state-masking window, and multiproof chunk size vary over their legal
 ranges by campaign seed and remain fixed across a node restart. Recovery uses the database tip
 observed at the crash boundary rather than assuming which blocks were durable.
+
+The node campaign now biases half of contract storage writes toward four reusable slots and
+occasionally clears them, while retaining arbitrary ABI-generated keys and values. At canonical
+head transitions it compares the block ancestry, root, account state, and sampled contract slots
+with earlier observations of that same head. It repeats the check after rejecting malformed
+payloads, after follower convergence, and after a cold reopen. Producer and follower use different
+multiproof chunk sizes and opposite BAL prefetch settings for the same block history. Recent canonical ancestors are eligible for
+historical state reads as well as the tip. These are same-history metamorphic checks, not an
+independent execution reference; unvisited contract slots and unmodeled transaction families
+remain outside their coverage.
+
+After the final cold reopen, the campaign runs the production account/storage history pruner with
+a test-only two-block retention distance, reopens the provider, and compares the retained tip's
+ancestry, state root, funded accounts, and sampled contract slots with the unpruned state. It does
+not attempt to unwind across the pruned boundary.
+
+Forkchoice can invalidate an in-flight payload job; a missing result is counted as a cancellation
+only when the modeled head moved away from its parent. Missing results without such a transition
+remain test failures. Successful side-fork jobs are still validated and imported normally.
+The cooperative sparse-trie worker hands its finalized trie to the validation job, which binds it
+to the validated block hash before caching it. A cache whose account trie remains blind after an
+empty block is checked through the executed state provider, rather than requiring an unrevealed
+cache to compute a root; the selected head's executed root is checked after forkchoice.
 
 The bounded developer profile runs four cases:
 

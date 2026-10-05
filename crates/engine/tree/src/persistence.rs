@@ -413,6 +413,9 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let service_runtime = runtime.clone();
         let task = runtime.spawn_dedicated_task("persistence", async move {
             let result = service.run_cooperative(service_runtime).await;
+            if let Err(err) = &result {
+                error!(target: "engine::persistence", ?err, "Cooperative persistence service failed");
+            }
             drop(stopped_tx);
             result
         });

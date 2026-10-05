@@ -25,7 +25,7 @@ use commonware_runtime::{
 };
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, PreservedSparseTrie};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_dst::{
@@ -39,9 +39,8 @@ use reth_engine_tree::{
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler, FromEngine},
     persistence::{PersistenceError, PersistenceHandle},
     tree::{
-        payload_processor, BasicEngineValidator, EngineApiTreeHandler, TreeConfig,
-        TxPoolPrewarmCacheSnapshot, TxPoolPrewarmSource, TxPoolPrewarmTransaction,
-        TxPoolPrewarmTransactions,
+        BasicEngineValidator, EngineApiTreeHandler, TreeConfig, TxPoolPrewarmCacheSnapshot,
+        TxPoolPrewarmSource, TxPoolPrewarmTransaction, TxPoolPrewarmTransactions,
     },
 };
 use reth_eth_wire::simulation::LinkConfig;
@@ -53,16 +52,20 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_exex_types::FinishedExExHeight;
 use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_payload_primitives::PayloadKind;
+use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::{
     providers::BlockchainProvider, AccountReader, BlockHashReader, BlockNumReader, BlockReader,
     DatabaseProviderFactory, StateProviderBox, StateProviderFactory, StateRootProvider,
     StorageSettings,
 };
-use reth_prune::Pruner;
+use reth_prune::{
+    segments::{AccountHistory, StorageHistory},
+    PruneMode, PruneProgress, Pruner,
+};
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{TaskHandle, TaskRuntime};
+use reth_tracing::tracing::Span;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
     validate::{EthTransactionValidator, EthTransactionValidatorBuilder},
@@ -70,6 +73,10 @@ use reth_transaction_pool::{
     PoolTransaction, TransactionOrigin, TransactionPool, TransactionPoolExt,
 };
 use reth_trie::HashedPostState;
+use reth_trie_sparse::{
+    errors::{SparseStateTrieErrorKind, SparseTrieErrorKind},
+    TrieNodeEpoch,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
@@ -112,6 +119,7 @@ struct NodeCampaignConfig {
     persistence_threshold: u64,
     state_masking_blocks: u64,
     multiproof_chunk_size: usize,
+    disable_bal_batch_io: bool,
     inject_database_fault: bool,
     native_workers: bool,
 }
@@ -124,11 +132,20 @@ impl NodeCampaignConfig {
             persistence_threshold,
             state_masking_blocks: (seed >> 2) % persistence_threshold,
             multiproof_chunk_size: 1 + ((seed >> 5) % 16) as usize,
+            disable_bal_batch_io: false,
             // An in-process abort cannot reproduce the OS cleanup that releases RocksDB's lock
             // after a process crash. Database-fault recovery remains covered by the cooperative
             // lane, where every task holding a provider is controlled by the simulator.
             inject_database_fault: seed.is_multiple_of(4) && !native_workers,
             native_workers,
+        }
+    }
+
+    const fn follower(self) -> Self {
+        Self {
+            multiproof_chunk_size: 17 - self.multiproof_chunk_size,
+            disable_bal_batch_io: true,
+            ..self
         }
     }
 }
@@ -155,7 +172,8 @@ impl Node {
             .with_persistence_threshold(campaign_config.persistence_threshold)
             .with_persistence_backpressure_threshold(campaign_config.persistence_threshold + 2)
             .with_num_state_masking_blocks(campaign_config.state_masking_blocks)
-            .with_multiproof_chunk_size(campaign_config.multiproof_chunk_size);
+            .with_multiproof_chunk_size(campaign_config.multiproof_chunk_size)
+            .without_bal_batch_io(campaign_config.disable_bal_batch_io);
         let (_, exex) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(factory.clone(), vec![], 5, 0, None, exex);
         let (metrics, _) = unbounded_channel();
@@ -319,7 +337,7 @@ impl Node {
         // pauses it. A snapshot contains parent state, never speculative execution writes.
         assert!(self.forkchoice(parent.hash()).await.is_valid());
         let deadline = self.tasks.now() + Duration::from_secs(1);
-        loop {
+        while !expected_parent_nonces.is_empty() {
             if let Some(snapshot) = (self.txpool_snapshot)(parent.hash()) {
                 let all_senders_warm = expected_parent_nonces.iter().all(|(sender, nonce)| {
                     snapshot.account(sender).is_some_and(|account| {
@@ -344,6 +362,7 @@ impl Node {
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: parent.hash(),
                     safe_block_hash: B256::ZERO,
@@ -362,19 +381,28 @@ impl Node {
             branch,
             transaction_count,
             next_nonces,
+            invalidated: false,
         }
     }
 
-    async fn poll_build(&self, build: &PayloadBuild) -> Option<EthBuiltPayload> {
-        let payload = self
+    async fn poll_build(&self, build: &PayloadBuild) -> BuildPoll {
+        let payload = match self
             .payload_builder
             .resolve_kind(build.payload_id, PayloadKind::WaitForPending)
-            .await?
-            .unwrap();
+            .await
+        {
+            Some(Ok(payload)) => payload,
+            None | Some(Err(PayloadBuilderError::MissingPayload)) if build.invalidated => {
+                self.pool.remove_transactions(build.transaction_hashes.clone());
+                return BuildPoll::Canceled
+            }
+            None => return BuildPoll::Pending,
+            Some(Err(error)) => panic!("payload build failed: {error:?}"),
+        };
         self.pool.remove_transactions(build.transaction_hashes.clone());
         assert_eq!(payload.block().body().transactions.len(), build.transaction_count);
         assert!(payload.block().gas_used() >= 21_000 * build.transaction_count as u64);
-        Some(payload)
+        BuildPoll::Built(payload)
     }
 
     async fn build(
@@ -386,8 +414,10 @@ impl Node {
     ) -> (EthBuiltPayload, AccountNonces) {
         let build = self.begin_build(parent, parent_nonces, branch, transaction_count).await;
         loop {
-            if let Some(payload) = self.poll_build(&build).await {
-                return (payload, build.next_nonces)
+            match self.poll_build(&build).await {
+                BuildPoll::Built(payload) => return (payload, build.next_nonces),
+                BuildPoll::Canceled => panic!("final payload build unexpectedly canceled"),
+                BuildPoll::Pending => {}
             }
             self.tasks.sleep(Duration::from_millis(1)).await;
         }
@@ -395,7 +425,9 @@ impl Node {
 
     async fn new_payload(&self, payload: ExecutionData) -> PayloadStatus {
         let (tx, rx) = oneshot::channel();
-        self.input.send(BeaconEngineMessage::NewPayload { payload, tx }).unwrap();
+        self.input
+            .send(BeaconEngineMessage::NewPayload { cause: Span::none(), payload, tx })
+            .unwrap();
         rx.await.unwrap().unwrap()
     }
 
@@ -407,6 +439,7 @@ impl Node {
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: head,
                     safe_block_hash: B256::ZERO,
@@ -426,17 +459,60 @@ impl Node {
     }
 
     fn assert_sparse_root(&self, state_root: B256) {
-        let trie =
+        let preserved =
             self.overlay.take_sparse_trie().expect("validation must preserve its sparse trie");
-        assert_eq!(trie.state_root(), state_root);
-        self.overlay.store_sparse_trie(trie);
+        let block_hash = preserved.block_hash();
+        let anchor_hash = preserved.anchor_hash();
+        let mut trie = preserved.into_trie_for(block_hash).unwrap().unwrap();
+        let epoch =
+            TrieNodeEpoch::new(self.provider.best_block_number().unwrap().saturating_add(1));
+        let root = trie.root(epoch);
+        self.overlay.store_sparse_trie(PreservedSparseTrie::anchored(
+            trie,
+            block_hash,
+            anchor_hash,
+        ));
+        match root {
+            Ok(root) => assert_eq!(root, state_root),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                ) =>
+            {
+                // Empty blocks can leave the optional cache unrevealed. An unchosen side
+                // branch is not readable through this provider until forkchoice completes;
+                // the campaign checks its executed root at that boundary instead.
+            }
+            Err(error) => panic!("preserved trie root failed: {error:?}"),
+        }
     }
 
     fn sparse_trie_frontier(&self) -> Option<(B256, B256)> {
-        let trie = self.overlay.take_sparse_trie()?;
-        let frontier = (trie.anchor_hash(), trie.state_root());
-        self.overlay.store_sparse_trie(trie);
-        Some(frontier)
+        let preserved = self.overlay.take_sparse_trie()?;
+        let block_hash = preserved.block_hash();
+        let anchor_hash = preserved.anchor_hash();
+        let mut trie = preserved.into_trie_for(block_hash).unwrap().unwrap();
+        let epoch =
+            TrieNodeEpoch::new(self.provider.best_block_number().unwrap().saturating_add(1));
+        let root = trie.root(epoch);
+        self.overlay.store_sparse_trie(PreservedSparseTrie::anchored(
+            trie,
+            block_hash,
+            anchor_hash,
+        ));
+        match root {
+            Ok(root) => Some((anchor_hash, root)),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+                ) =>
+            {
+                None
+            }
+            Err(error) => panic!("preserved trie frontier failed: {error:?}"),
+        }
     }
 
     /// Stops the node under the production launcher's contract: once the engine acknowledges
@@ -587,13 +663,21 @@ fn materialize_block_transactions(
         let (to, input, value, gas_limit) = if action < 2 {
             let mut input = Vec::with_capacity(256);
             for _ in 0..4 {
-                let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
+                let key = if context.rng.next_u64().is_multiple_of(2) {
+                    U256::from(context.rng.next_u64() % 4)
+                } else {
+                    match abi.generate(&DynSolType::Uint(256), context.rng) {
+                        DynSolValue::Uint(value, _) => value,
+                        _ => unreachable!(),
+                    }
                 };
-                let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
+                let value = if context.rng.next_u64().is_multiple_of(4) {
+                    U256::ZERO
+                } else {
+                    match abi.generate(&DynSolType::Uint(256), context.rng) {
+                        DynSolValue::Uint(value, _) => value,
+                        _ => unreachable!(),
+                    }
                 };
                 input.extend_from_slice(&key.to_be_bytes::<32>());
                 input.extend_from_slice(&value.to_be_bytes::<32>());
@@ -660,9 +744,9 @@ fn materialize_block_transactions(
     (transactions, next_nonces)
 }
 
-const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
+const MIN_TRANSACTIONS_PER_BLOCK: usize = 0;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 12;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 17;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -701,6 +785,11 @@ struct NodeOutcome {
     accounts: Vec<(Address, u64, U256)>,
     prewarmed_transactions: [usize; 3],
     trie_frontier_reuses: u64,
+    state_rechecks: usize,
+    returned_heads: usize,
+    historical_reads: usize,
+    pruned_entries: usize,
+    canceled_builds: usize,
 }
 
 fn node_chain() -> Arc<ChainSpec> {
@@ -836,6 +925,13 @@ struct PayloadBuild {
     branch: u8,
     transaction_count: usize,
     next_nonces: AccountNonces,
+    invalidated: bool,
+}
+
+enum BuildPoll {
+    Pending,
+    Canceled,
+    Built(EthBuiltPayload),
 }
 
 struct StateRead {
@@ -843,6 +939,13 @@ struct StateRead {
     block: B256,
     state_root: B256,
     nonces: AccountNonces,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct StateObservation {
+    root: B256,
+    accounts: Vec<(u64, U256, Option<B256>)>,
+    contract_slots: Vec<(Option<B256>, [U256; 4])>,
 }
 
 struct CampaignModel {
@@ -857,6 +960,12 @@ struct CampaignModel {
     pending: BTreeMap<B256, PendingPayload>,
     payload_build: Option<PayloadBuild>,
     state_read: Option<StateRead>,
+    observations: BTreeMap<B256, StateObservation>,
+    last_observed_head: Option<B256>,
+    state_rechecks: usize,
+    returned_heads: usize,
+    historical_reads: usize,
+    canceled_builds: usize,
     follower_wire: Vec<WireEvent>,
     maximum_blocks: usize,
     database_faults: Arc<CampaignDatabaseFaults>,
@@ -894,6 +1003,12 @@ impl CampaignModel {
             pending: BTreeMap::new(),
             payload_build: None,
             state_read: None,
+            observations: BTreeMap::new(),
+            last_observed_head: None,
+            state_rechecks: 0,
+            returned_heads: 0,
+            historical_reads: 0,
+            canceled_builds: 0,
             follower_wire: Vec::new(),
             maximum_blocks,
             database_faults,
@@ -1020,7 +1135,13 @@ impl CampaignModel {
         if self.database_faults.can_arm() {
             actions.push(CampaignAction::EnableDatabaseFault);
         }
-        actions.push(CampaignAction::BeginStateRead { block: self.canonical_head });
+        actions.extend(
+            self.canonical_hashes(self.canonical_head)
+                .into_iter()
+                .rev()
+                .take(4)
+                .map(|block| CampaignAction::BeginStateRead { block }),
+        );
         actions.sort_unstable();
         actions.dedup();
         actions
@@ -1255,6 +1376,56 @@ impl CampaignModel {
             .expect("bootstrap did not build block one")
             .block()
             .clone()
+    }
+
+    fn assert_canonical_state(&mut self, provider: &Provider) {
+        let head = self.canonical_head;
+        let modeled = self.blocks.get(&head).expect("canonical head is absent from the model");
+        assert_eq!(provider.best_block_number().unwrap(), modeled.header.number);
+        for (number, hash) in self.canonical_hashes(head).into_iter().enumerate() {
+            assert_eq!(
+                provider.block_hash(number as u64).unwrap(),
+                Some(hash),
+                "canonical block {number} diverged after choosing head {head}"
+            );
+        }
+        let state = provider.state_by_block_hash(head).unwrap();
+        let root = state.state_root(HashedPostState::default()).unwrap();
+        assert_eq!(root, modeled.header.state_root, "state root diverged for head {head}");
+        let accounts = workload_addresses()
+            .into_iter()
+            .enumerate()
+            .map(|(index, address)| {
+                let account = state.basic_account(&address).unwrap().unwrap();
+                assert_eq!(account.nonce, modeled.next_nonces[index], "nonce at head {head}");
+                (account.nonce, account.balance, account.bytecode_hash)
+            })
+            .collect();
+        let contract_slots = (0..STORAGE_CONTRACT_COUNT)
+            .map(|index| {
+                let address = storage_contract(index);
+                let code_hash =
+                    state.basic_account(&address).unwrap().and_then(|a| a.bytecode_hash);
+                let slots = std::array::from_fn(|slot| {
+                    state.storage(address, U256::from(slot).into()).unwrap().unwrap_or_default()
+                });
+                (code_hash, slots)
+            })
+            .collect();
+        let observation = StateObservation { root, accounts, contract_slots };
+        if let Some(previous) = self.observations.get(&head) {
+            assert_eq!(
+                &observation, previous,
+                "return to head {head} changed its state across reorg, cache, or persistence"
+            );
+            self.state_rechecks += 1;
+            if self.last_observed_head.is_some_and(|last| last != head) {
+                self.returned_heads += 1;
+            }
+        } else {
+            self.observations.insert(head, observation);
+        }
+        self.last_observed_head = Some(head);
     }
 }
 
@@ -1707,7 +1878,15 @@ async fn execute_action(
         }
         CampaignAction::PollPayloadBuild => {
             let build = model.payload_build.as_ref().expect("poll without an active payload build");
-            let Some(payload) = producer.poll_build(build).await else { return };
+            let payload = match producer.poll_build(build).await {
+                BuildPoll::Pending => return,
+                BuildPoll::Canceled => {
+                    model.payload_build = None;
+                    model.canceled_builds += 1;
+                    return
+                }
+                BuildPoll::Built(payload) => payload,
+            };
             let build = model.payload_build.take().unwrap();
             let parent = build.parent;
             model.blocks.get_mut(&parent).unwrap().children += 1;
@@ -1728,6 +1907,9 @@ async fn execute_action(
         }
         CampaignAction::BeginStateRead { block } => {
             assert!(model.state_read.is_none(), "state read already active");
+            if block != model.canonical_head {
+                model.historical_reads += 1;
+            }
             let modeled = model.blocks.get(&block).expect("state read for unknown block");
             let provider = producer.provider.state_by_block_hash(block).unwrap();
             model.state_read = Some(StateRead {
@@ -1787,6 +1969,7 @@ async fn execute_action(
             );
             model.canonical_head =
                 producer.provider.canonical_in_memory_state().get_canonical_head().hash();
+            model.assert_canonical_state(&producer.provider);
         }
         CampaignAction::CorruptPayload { block, field } => {
             let pending =
@@ -1807,12 +1990,19 @@ async fn execute_action(
                 alloy_rpc_types_engine::ExecutionPayload::from_block_slow(&invalid);
             let status = producer.new_payload(ExecutionData::new(payload, sidecar)).await;
             assert!(status.is_invalid(), "mutated {field:?} payload was accepted: {status:?}");
+            model.assert_canonical_state(&producer.provider);
         }
         CampaignAction::SetHead { head } => {
             assert!(model.blocks.contains_key(&head));
+            if let Some(build) = &mut model.payload_build &&
+                head != build.parent
+            {
+                build.invalidated = true;
+            }
             assert!(producer.forkchoice(head).await.is_valid());
             model.canonical_head =
                 producer.provider.canonical_in_memory_state().get_canonical_head().hash();
+            model.assert_canonical_state(&producer.provider);
         }
         CampaignAction::BeginFollowerSync { head } => {
             assert!(model.follower_sync_target.is_none());
@@ -1925,7 +2115,7 @@ async fn execute_action(
                     tasks.clone(),
                     native.clone(),
                     restart_seed,
-                    campaign_config,
+                    campaign_config.follower(),
                 )
                 .await,
             );
@@ -2170,7 +2360,7 @@ fn simulate_node(
                     TaskRuntime::deterministic(context.child("follower")),
                     native.clone(),
                     seed.wrapping_add(1),
-                    campaign_config,
+                    campaign_config.follower(),
                 )
                 .await);
                 let genesis = SealedHeader::seal_slow(chain.genesis_header().clone());
@@ -2331,6 +2521,9 @@ fn simulate_node(
                 )
                 .await;
 
+                model.assert_canonical_state(&producer.provider);
+                model.assert_canonical_state(&follower.as_ref().unwrap().provider);
+
                 let canonical = model.canonical_hashes(head);
                 let canonical_without_genesis =
                     canonical.iter().copied().skip(1).collect::<Vec<_>>();
@@ -2431,6 +2624,7 @@ fn simulate_node(
                 )
                 .await;
                 assert_eq!(restarted.provider.best_block_number().unwrap(), head_number);
+                model.assert_canonical_state(&restarted.provider);
 
                 let branch = head_children;
                 let request = CampaignAction::BeginPayloadBuild { parent: head, branch };
@@ -2485,7 +2679,7 @@ fn simulate_node(
                 let final_factory = follower_storage
                     .open(OverlayManager::new(native.state_trie_overlay_worker_pool()), native);
                 assert_eq!(final_factory.check_consistency().unwrap(), (None, None));
-                let persisted = BlockchainProvider::new(final_factory).unwrap();
+                let persisted = BlockchainProvider::new(final_factory.clone()).unwrap();
                 let mut accounts = Vec::with_capacity(WORKLOAD_ACCOUNT_COUNT);
                 for (index, address) in workload_addresses().into_iter().enumerate() {
                     let account =
@@ -2502,6 +2696,28 @@ fn simulate_node(
                     .state_root(HashedPostState::default())
                     .unwrap();
                 assert_eq!(persisted_root, model.blocks[&final_hash].header.state_root);
+                model.assert_canonical_state(&persisted);
+                // Exercise the actual history pruner against the same committed database. A
+                // short test-only retention distance makes pruning observable in small cases;
+                // no fork is rewound into history that has already been pruned.
+                let (_, exex) = tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+                let mut pruner = Pruner::new_with_factory(
+                    final_factory.clone(),
+                    vec![
+                        Box::new(AccountHistory::new(PruneMode::Distance(2))),
+                        Box::new(StorageHistory::new(PruneMode::Distance(2))),
+                    ],
+                    0,
+                    100_000,
+                    None,
+                    exex,
+                )
+                .with_minimum_pruning_distance(2);
+                let prune_output = pruner.run(final_number).unwrap();
+                assert_eq!(prune_output.progress, PruneProgress::Finished);
+                let pruned_entries = prune_output.segments.iter().map(|(_, output)| output.pruned).sum();
+                let pruned = BlockchainProvider::new(final_factory).unwrap();
+                model.assert_canonical_state(&pruned);
                 let prewarmed_transactions =
                     [producer_prewarming, follower_prewarming, restarted_prewarming]
                         .map(|counter| counter.load(std::sync::atomic::Ordering::Relaxed));
@@ -2514,6 +2730,11 @@ fn simulate_node(
                     accounts,
                     prewarmed_transactions,
                     trie_frontier_reuses: model.trie_frontier_reuses,
+                    state_rechecks: model.state_rechecks,
+                    returned_heads: model.returned_heads,
+                    historical_reads: model.historical_reads,
+                    pruned_entries,
+                    canceled_builds: model.canceled_builds,
                 }
             })
             .await
@@ -2657,9 +2878,14 @@ pub(crate) fn run_node_campaign() {
             .map(|decision| decision.summary.as_str())
             .collect::<Vec<_>>();
         eprintln!(
-            "node seed={seed} decisions={} storage_decisions={storage_decisions} storage_job_schedules={storage_job_schedules} trie_frontier_reuses={} database_faults={injected_database_faults:?}",
+            "node seed={seed} decisions={} storage_decisions={storage_decisions} storage_job_schedules={storage_job_schedules} trie_frontier_reuses={} state_rechecks={} returned_heads={} historical_reads={} pruned_entries={} canceled_builds={} database_faults={injected_database_faults:?}",
             trace.decisions.len(),
             outcome.trie_frontier_reuses,
+            outcome.state_rechecks,
+            outcome.returned_heads,
+            outcome.historical_reads,
+            outcome.pruned_entries,
+            outcome.canceled_builds,
         );
         if std::env::var_os("RETH_DST_NATIVE_WORKERS").is_some() {
             // External Tokio/Rayon completion timing is intentionally uncontrolled. This mode
