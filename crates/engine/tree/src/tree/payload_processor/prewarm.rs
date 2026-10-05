@@ -237,7 +237,7 @@ where
     /// CPU job, so its database reader never crosses a scheduling boundary.
     fn transact<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
-        evm: &mut EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
+        evm: &mut EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>,
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
@@ -653,7 +653,9 @@ where
             BalPrewarmPool::prewarm_cooperative(
                 runtime,
                 Arc::new(move || {
-                    builder.database_provider_ro().map(|provider| Box::new(provider) as _)
+                    builder.database_provider_ro().map(|provider| {
+                        Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                    })
                 }),
                 saved_cache.cache().clone(),
                 ctx.env.txpool_snapshot.clone(),
@@ -998,9 +1000,11 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
-    use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, SlotChanges, StorageChange,
+    };
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{address, B256, U256};
+    use alloy_primitives::{address, bytes, Address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};

@@ -819,6 +819,19 @@ mod tests {
 
     #[test]
     fn test_read_only_consistency_across_reorg() {
+        // MDBX debug flags must be configured before the first environment is opened in a
+        // process. Other tests in this binary may already have opened an environment, even
+        // with --test-threads=1, so exercise the read-only multi-open case in a fresh process.
+        if std::env::var_os("RETH_READ_ONLY_REORG_TEST_CHILD").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "persistence::tests::test_read_only_consistency_across_reorg"])
+                .env("RETH_READ_ONLY_REORG_TEST_CHILD", "1")
+                .status()
+                .expect("start isolated read-only reorg test");
+            assert!(status.success(), "isolated read-only reorg test failed: {status}");
+            return;
+        }
+
         reth_tracing::init_test_tracing();
 
         // Allow opening the same MDBX env twice in-process

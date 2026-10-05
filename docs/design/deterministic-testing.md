@@ -77,13 +77,20 @@ sync a follower through the production ETH codec. Follower sync is split into be
 so the controller can advance virtual time, partition or heal the link, corrupt the next encrypted
 response, or crash and restart the follower while requests are in flight.
 
-Accepted blocks contain 5–64 signed transactions built with txgen-core's account, nonce, and
-generation context APIs. The workload maintains nonces for 20 funded accounts and mixes legacy,
-EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and calls across four storage
-contracts with abi-fuzz-generated keys and values. Transaction count is a semantic trace decision.
+Accepted blocks contain 0–64 signed transactions built with txgen-core's account and nonce
+context APIs, with choices concentrated around the small-block execution threshold. The workload
+maintains nonces for 20 funded accounts and mixes legacy, EIP-2930, and EIP-1559 envelopes,
+transfers, contract creation, calls across four storage contracts, nonempty access lists, and
+optional withdrawals. Sender, transaction type, destination, storage slot, value, envelope,
+withdrawal inclusion, and transaction count are independent semantic trace decisions. Reusing a
+small storage-slot set produces overwrite, clear, and fork-divergent histories.
 Persistence threshold, state-masking window, and multiproof chunk size vary over their legal
 ranges by campaign seed and remain fixed across a node restart. Recovery uses the database tip
 observed at the crash boundary rather than assuming which blocks were durable.
+Forkchoice may move away from a parent while its payload build is pending. The campaign records
+that interruption and accepts a canceled or already completed build only after the observed head
+changed; an uninterrupted build must still resolve successfully. Interrupted builds discard their
+pending pool transactions before subsequent generation.
 
 The bounded developer profile runs four cases:
 
@@ -97,6 +104,9 @@ network, and storage choices per case. Product panics are caught per case, print
 and written under `target/reth-dst/failures`. Cases that exhaust the decision bound print
 `INCONCLUSIVE`, write a trace under `target/reth-dst/inconclusive`, and let the campaign continue.
 `RETH_DST_ARTIFACT_DIR` replaces `target/reth-dst` as the artifact root.
+Record distinct reproducible failures and qualification intervals in
+`testing/dst-runner/BUG_LEDGER.md`; a clean campaign needs more than 30 minutes of actual runtime
+since the last new bug, not merely a 30-minute deadline during build or setup.
 Successful cases are not replayed during a campaign. Set `RETH_DST_VERIFY_PASSES=1` to replay each
 successful trace when validating simulator determinism; failures are always retained for strict
 replay with `RETH_DST_REPLAY`.
@@ -623,6 +633,13 @@ cargo build --release -p reth-dst-runner \
 RETH_DST_NATIVE_WORKERS=1 RETH_DST_SECONDS=3600 RETH_DST_STEPS=1000 \
   target/release/reth-dst-node
 ```
+
+The native-worker profile explicitly enables the parallel state-root task even when the host's
+CPU quota makes `available_parallelism()` choose the serial fallback. This preserves the
+native sparse-trie frontier invariant checked by the cooperative lane. A 568-case native-worker
+campaign and the earlier eight-seed smoke are recorded separately from the deterministic
+wall-clock qualification in the bug ledger; neither claims that native thread schedules are
+replayable.
 
 The semantic workload, network, storage-fault, and lifecycle decisions remain recorded. Native
 Rayon worker ordering is intentionally outside the trace, so a native-only failure must reproduce

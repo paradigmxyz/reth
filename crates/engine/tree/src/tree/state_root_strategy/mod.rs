@@ -626,7 +626,6 @@ impl DefaultStateRootStrategy {
         if let Some(runtime) = &self.task_runtime {
             self.spawn_cooperative_sparse_trie_task(
                 runtime.clone(),
-                overlay_manager.clone(),
                 proof_worker_handle,
                 proof_result_tx,
                 proof_result_rx,
@@ -788,7 +787,6 @@ impl DefaultStateRootStrategy {
     fn spawn_cooperative_sparse_trie_task<N: NodePrimitives>(
         &self,
         runtime: TaskRuntime,
-        overlay_manager: OverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
@@ -801,6 +799,7 @@ impl DefaultStateRootStrategy {
         let SparseTrieTaskOptions {
             parent_header,
             preserved_sparse_trie,
+            pending_trie_tx,
             chunk_size,
             pending_sparse_trie_prune_blocks,
         } = options;
@@ -810,8 +809,6 @@ impl DefaultStateRootStrategy {
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
             let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
-            let prune_before =
-                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
             let mut anchor_hash = parent_hash;
             let mut reused = false;
             let preserved = match preserved_sparse_trie {
@@ -819,7 +816,7 @@ impl DefaultStateRootStrategy {
                     let previous_anchor = preserved.anchor_hash();
                     // Cooperative workers publish only finalized tries. The named lane also
                     // finishes its previous job before this one starts, so this cannot wait.
-                    match preserved.into_trie_for(parent_state_root) {
+                    match preserved.into_trie_for(parent_hash) {
                         Ok(Some(trie)) => {
                             anchor_hash = previous_anchor;
                             reused = true;
@@ -836,6 +833,12 @@ impl DefaultStateRootStrategy {
                 }
                 None => None,
             };
+            let prune_target = sparse_trie_prune_target(
+                anchor_hash,
+                reused,
+                parent_header.num_hash(),
+                pending_sparse_trie_prune_blocks.as_deref(),
+            );
             let mut trie = preserved.unwrap_or_else(|| {
                 let default_trie =
                     RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -860,31 +863,32 @@ impl DefaultStateRootStrategy {
                 chunk_size,
             );
             let result = task.run_cooperative(&worker_runtime).await;
-            if let Ok(outcome) = &result {
+            let completer = if let Ok(outcome) = &result {
+                let (completer, receiver) = mpsc::channel();
+                let anchor_hash = prune_target.as_ref().map_or(anchor_hash, |(_, anchor)| *anchor);
+                let pending = PendingSparseTrie {
+                    state_root: outcome.state_root,
+                    anchor_hash,
+                    trie: receiver,
+                };
+                pending_trie_tx.send(pending).ok().map(|_| completer)
+            } else {
+                None
+            };
+            if state_root_tx.send(result).is_err() {
+                drop(completer);
+                drop(task.into_cleared_trie());
+                return;
+            }
+            if let Some(completer) = completer {
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(prune_before) = prune_before {
+                if let Some((prune_before, _)) = prune_target {
                     trie.prune(prune_before);
                 }
-                let anchor_hash = published_sparse_trie_anchor_hash(
-                    anchor_hash,
-                    parent_hash,
-                    reused,
-                    pending_sparse_trie_prune_blocks.as_deref(),
-                );
-                // Publish after finalization: a synchronous preserved-trie receiver must never
-                // wait on another actor on the simulator's only execution thread.
-                overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
-                    trie,
-                    outcome.state_root,
-                    anchor_hash,
-                ));
+                let _ = completer.send(trie);
                 drop(deferred);
             } else {
-                overlay_manager.clear_sparse_trie();
                 drop(task.into_cleared_trie());
-            }
-            if state_root_tx.send(result).is_err() {
-                overlay_manager.clear_sparse_trie();
             }
         });
         self.tasks.lock().expect("sparse task registry poisoned").push(task);
@@ -1048,6 +1052,8 @@ where
                 handle,
                 runtime: runtime.clone(),
                 timeout: config.state_root_task_timeout(),
+                pending_trie_rx,
+                overlay_manager: overlay_manager.clone(),
             })
         } else {
             Box::new(SparseTrieStateRootJob {
@@ -1185,13 +1191,15 @@ where
 }
 
 #[derive(Debug)]
-struct CooperativeSparseTrieStateRootJob {
+struct CooperativeSparseTrieStateRootJob<N: NodePrimitives> {
     handle: StateRootHandle,
     runtime: TaskRuntime,
     timeout: Option<Duration>,
+    pending_trie_rx: mpsc::Receiver<PendingSparseTrie>,
+    overlay_manager: OverlayManager<N>,
 }
 
-impl<N: NodePrimitives> StateRootJob<N> for CooperativeSparseTrieStateRootJob {
+impl<N: NodePrimitives> StateRootJob<N> for CooperativeSparseTrieStateRootJob<N> {
     fn name(&self) -> &'static str {
         "sparse-trie-cooperative"
     }
@@ -1209,7 +1217,7 @@ impl<N: NodePrimitives> StateRootJob<N> for CooperativeSparseTrieStateRootJob {
 
     fn finish_async<'a>(
         &'a mut self,
-        _block: &'a RecoveredBlock<N::Block>,
+        block: &'a RecoveredBlock<N::Block>,
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         _hashed_state: &'a LazyHashedPostState,
     ) -> BoxFuture<'a, ProviderResult<StateRootJobOutcome>> {
@@ -1222,6 +1230,14 @@ impl<N: NodePrimitives> StateRootJob<N> for CooperativeSparseTrieStateRootJob {
                         // A simulation must expose sparse-trie bugs, not mask them with a serial
                         // fallback. Header validation checks the actual computed root.
                         let outcome = result.map_err(ProviderError::other)?;
+                        if outcome.state_root == block.header().state_root() {
+                            publish_sparse_trie(
+                                &self.pending_trie_rx,
+                                &self.overlay_manager,
+                                block.hash(),
+                                outcome.state_root,
+                            );
+                        }
                         return Ok(StateRootJobOutcome::new(
                             outcome.state_root,
                             outcome.trie_updates,
@@ -1671,6 +1687,7 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
         let runtime = reth_tasks::Runtime::test();
+        let overlay_manager = OverlayManager::<EthPrimitives>::default();
         {
             let (completer, trie) = mpsc::channel();
             let preserved = PreservedSparseTrie::pending(trie, genesis_hash, B256::ZERO);
@@ -1680,7 +1697,7 @@ mod tests {
                     &runtime,
                     OverlayStateProviderFactory::new(
                         factory,
-                        OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                        overlay_manager.overlay_builder(genesis_hash),
                     ),
                     StateRootTaskOptions::<EthPrimitives> {
                         parent_header: SealedHeader::new(Default::default(), genesis_hash),
@@ -1722,11 +1739,12 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
         let runtime = reth_tasks::Runtime::test();
+        let overlay_manager = OverlayManager::<EthPrimitives>::default();
         let (mut handle, pending_trie_rx) = DefaultStateRootStrategy::default().spawn_state_root(
             &runtime,
             OverlayStateProviderFactory::new(
                 factory,
-                OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                overlay_manager.overlay_builder(genesis_hash),
             ),
             StateRootTaskOptions::<EthPrimitives> {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),

@@ -21,7 +21,6 @@ dst = [
 native-differential = ["dst", "commonware-runtime/external"]
 
 [dependencies]
-abi-fuzz.workspace = true
 alloy-consensus.workspace = true
 alloy-dyn-abi.workspace = true
 alloy-eips.workspace = true

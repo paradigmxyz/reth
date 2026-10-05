@@ -53,6 +53,7 @@ fn simulate_handoff(
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
         .with_cross_block_cache_size(1024 * 1024)
+        .with_num_state_masking_blocks(0)
         .with_memory_block_buffer_target(0)
         .with_persistence_threshold(2)
         .with_persistence_backpressure_threshold(3)
@@ -132,6 +133,7 @@ fn simulate_handoff(
                 to_tree
                     .send(FromEngine::Request(
                         BeaconEngineMessage::ForkchoiceUpdated {
+                            cause: tracing::Span::current(),
                             state: ForkchoiceState {
                                 head_block_hash,
                                 safe_block_hash: B256::ZERO,
@@ -256,6 +258,7 @@ fn engine_step_prioritizes_persistence_and_preserves_backpressure() {
     let mut harness = TestHarness::with_config(
         MAINNET.clone(),
         TreeConfig::default()
+            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(2)
             .with_memory_block_buffer_target(0)
             .with_persistence_backpressure_threshold(3)
@@ -317,6 +320,7 @@ fn engine_step_shutdown_drains_inflight_and_masked_state() {
     let mut harness = TestHarness::with_config(
         MAINNET.clone(),
         TreeConfig::default()
+            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(2)
             .with_memory_block_buffer_target(0)
             .with_persistence_backpressure_threshold(10)
@@ -415,6 +419,7 @@ fn engine_step_defers_explicit_persistence_wait_without_blocking() {
     let mut harness = TestHarness::with_config(
         MAINNET.clone(),
         TreeConfig::default()
+            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(2)
             .with_memory_block_buffer_target(0)
             .with_persistence_backpressure_threshold(10)
@@ -428,6 +433,7 @@ fn engine_step_defers_explicit_persistence_wait_without_blocking() {
         .to_tree_tx
         .send(FromEngine::Request(
             BeaconEngineMessage::RethNewPayload {
+                cause: tracing::Span::current(),
                 payload: ExecutionData::new(
                     ExecutionPayloadV1::from_block_slow(&Block {
                         header: Header {
