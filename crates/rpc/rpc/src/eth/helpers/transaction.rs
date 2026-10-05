@@ -752,4 +752,29 @@ mod tests {
             "max_fee_per_blob_gas should not be set for non-blob tx"
         );
     }
+
+    #[tokio::test]
+    async fn test_fill_transaction_estimates_with_filled_fee_cap() {
+        let address = Address::random();
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+
+        let eth_api = mock_eth_api(accounts);
+
+        // Only the tip is set, so the fee cap must be filled before gas is estimated.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            max_priority_fee_per_gas: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let filled =
+            eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
+
+        assert_eq!(filled.tx.gas_limit(), 21_000);
+        assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(1_000_000_000));
+    }
 }
