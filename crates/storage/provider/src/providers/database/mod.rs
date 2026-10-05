@@ -1347,28 +1347,33 @@ mod tests {
         assert!(provider.ensure_sync_mode(true).is_ok());
         drop(provider);
 
-        let mut attempt = SnapAttempt::start(
+        let unfinished = SnapAttempt::start(
             None,
             BlockNumHash::new(10, B256::repeat_byte(1)),
             B256::repeat_byte(2),
         );
-        let provider = factory.database_provider_rw().unwrap();
-        provider.write_snap_attempt(&attempt).unwrap();
-        provider.commit().unwrap();
+        let mut abandoned = unfinished;
+        abandoned.abandon();
+        let mut verified = unfinished;
+        verified.verify();
 
-        // Only snap finishes what an unfinished attempt left in the state tables.
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(matches!(
-            provider.ensure_sync_mode(false).err(),
-            Some(ProviderError::UnverifiedSnapState { attempt: 0 })
-        ));
-        assert!(provider.ensure_sync_mode(true).is_ok());
-        drop(provider);
+        // Only snap finishes or replaces what an unverified attempt left in the state tables.
+        for attempt in [unfinished, abandoned] {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_ro().unwrap();
+            assert!(matches!(
+                provider.ensure_sync_mode(false).err(),
+                Some(ProviderError::SnapStateRequiresSnapSync { attempt: 0 })
+            ));
+            assert!(provider.ensure_sync_mode(true).is_ok());
+        }
 
         // A verified attempt leaves the pipeline free to continue above the pivot.
-        attempt.verify();
         let provider = factory.database_provider_rw().unwrap();
-        provider.write_snap_attempt(&attempt).unwrap();
+        provider.write_snap_attempt(&verified).unwrap();
         provider.commit().unwrap();
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(false).is_ok());
     }
@@ -1377,7 +1382,6 @@ mod tests {
     fn the_legacy_layout_refuses_snap_until_execution_passes_genesis() {
         // Databases from before stored settings fall back to the legacy layout.
         let factory = create_test_provider_factory_with_genesis_block_number(5);
-        factory.set_storage_settings_cache(StorageSettings::v1());
         let provider = factory.database_provider_rw().unwrap();
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
         provider.commit().unwrap();
@@ -1393,13 +1397,33 @@ mod tests {
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42)).unwrap();
         provider.commit().unwrap();
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
+
+        // An unverified attempt is finished by snap whatever executed, so the layout matters again.
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_snap_attempt(&SnapAttempt::start(
+                None,
+                BlockNumHash::new(10, B256::repeat_byte(1)),
+                B256::repeat_byte(2),
+            ))
+            .unwrap();
+        provider.commit().unwrap();
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
     }
 
     #[test]
-    fn a_database_before_genesis_allows_snap() {
-        // Settings are stored at genesis, after startup recovery already ran.
+    fn a_database_without_an_execution_checkpoint_needs_the_snap_layout() {
+        // Startup checks run after genesis, so a missing checkpoint counts as nothing executed.
         let factory = create_test_provider_factory();
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
 
+        factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
     }
 }

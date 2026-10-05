@@ -1500,26 +1500,34 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         }
     }
 
+    /// Returns whether snap sync bootstraps this database: an attempt is left to finish or
+    /// replace, or nothing has executed past genesis.
+    ///
+    /// Call this after genesis is initialized: until then the cached settings fall back to the
+    /// legacy layout and no execution checkpoint exists.
+    pub fn snap_bootstraps(&self) -> ProviderResult<bool> {
+        if let Some(attempt) = self.snap_attempt()? {
+            return Ok(!attempt.is_verified())
+        }
+        let genesis = self.chain_spec().genesis_header().number();
+        Ok(self
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_none_or(|checkpoint| checkpoint.block_number == genesis))
+    }
+
     /// Refuses a database the selected sync can't continue: snap needs the hashed state layout
-    /// when it runs, and only snap can finish an unverified snap attempt.
-    pub fn ensure_sync_mode(&self, snap: bool) -> ProviderResult<()> {
+    /// when it bootstraps, and only snap can finish or replace an unverified snap attempt.
+    ///
+    /// Call this after genesis is initialized, see [`Self::snap_bootstraps`].
+    pub fn ensure_sync_mode(&self, snap_enabled: bool) -> ProviderResult<()> {
+        if snap_enabled {
+            return if self.snap_bootstraps()? { self.ensure_snap_sync_layout() } else { Ok(()) }
+        }
         match self.snap_attempt()? {
-            // Verified snap state continues with the staged pipeline.
-            Some(attempt) if attempt.is_verified() => Ok(()),
-            Some(_) if snap => self.ensure_snap_sync_layout(),
-            Some(attempt) => {
-                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::SnapStateRequiresSnapSync { attempt: attempt.id().into() })
             }
-            // Snap only bootstraps a database with nothing executed past genesis. Genesis writes
-            // the checkpoint, so a database without one gets its layout there.
-            None if snap &&
-                self.get_stage_checkpoint(StageId::Execution)?.is_some_and(|checkpoint| {
-                    checkpoint.block_number == self.chain_spec().genesis_header().number()
-                }) =>
-            {
-                self.ensure_snap_sync_layout()
-            }
-            None => Ok(()),
+            _ => Ok(()),
         }
     }
 }
