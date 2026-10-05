@@ -269,7 +269,7 @@ where
             eyre::bail!("No payload");
         };
 
-        let header = payload.block().sealed_header().clone();
+        let header = payload.block().clone_sealed_header();
         let res = self.to_engine.new_payload(payload.into()).await?;
 
         if !res.is_valid() {

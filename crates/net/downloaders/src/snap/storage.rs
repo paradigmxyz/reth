@@ -58,7 +58,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
         // Servers disagree on whether a finite limit applies only to the first account or every
         // account, so the final proof cannot be assigned reliably for this request shape.
-        if request.account_hashes.len() > 1 && origin == B256::ZERO && limit != MAX_HASH {
+        if request.account_hashes.len() > 1 && origin.is_zero() && limit != MAX_HASH {
             return Err(InvalidStorageRangeRequest::LimitedMultipleAccounts {
                 accounts: request.account_hashes.len(),
             })

@@ -103,7 +103,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .recovered_block(block)
                 .await?
                 .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
-            let parent = base_block.sealed_header().clone();
+            let parent = base_block.clone_sealed_header();
             let max_simulate_blocks = self.max_simulate_blocks();
             // Load the state of the block resolved above: resolving a tag such as `latest` again
             // could return a newer block than `parent`.

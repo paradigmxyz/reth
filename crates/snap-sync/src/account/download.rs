@@ -317,7 +317,7 @@ mod tests {
         assert!(matches!(
             step,
             AccountRangeStep::Unavailable { origin, peer_id }
-                if origin == B256::ZERO && peer_id == peer
+                if origin.is_zero() && peer_id == peer
         ));
         assert_eq!(download.coverage(), Some(AccountCoverage::START));
 

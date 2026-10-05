@@ -388,7 +388,7 @@ pub struct NetworkSetup {
 impl NetworkSetup {
     /// Create a new network setup with a single node
     pub const fn single_node() -> Self {
-        Self { node_count: 1, connect_nodes: true }
+        Self::multi_node(1)
     }
 
     /// Create a new network setup with multiple nodes (connected)

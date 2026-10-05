@@ -175,7 +175,7 @@ impl ArenaCursor {
 
         #[cfg(debug_assertions)]
         if let ArenaSparseNode::Subtrie(s) = node {
-            let entry_path = self.path.slice_unchecked(0, entry.path_len as usize);
+            let entry_path = self.entry_path(&entry);
             debug_assert_eq!(
                 s.path, entry_path,
                 "subtrie cached path {:?} does not match stack entry path {:?}",
@@ -349,11 +349,11 @@ impl ArenaCursor {
         // `full_path` exactly when its length fits within the common prefix of the previous
         // target and this one.
         let common = self.path.common_prefix_length(full_path);
-        while self.stack.len() > 1 && self.head_entry().path_len as usize > common {
+        while self.stack.len() > 1 && self.head_path_len() > common {
             self.pop(arena);
         }
 
-        if self.head_entry().path_len as usize > common {
+        if self.head_path_len() > common {
             // The target is not below the walk's root. Callers only seek within the root's
             // prefix, so this cannot happen for a revealed root; leaving `self.path` alone
             // keeps the entry paths derivable.

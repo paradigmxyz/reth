@@ -3,7 +3,7 @@
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{
     hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
-    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
+    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::SealedHeader;
@@ -107,7 +107,7 @@ pub fn bsc_chain_spec() -> Arc<ChainSpec> {
         .expect("Can't deserialize BSC Mainnet genesis json");
     let hardforks = BscHardfork::bsc_mainnet();
     ChainSpec {
-        chain: Chain::from_named(NamedChain::BinanceSmartChain),
+        chain: Chain::bsc_mainnet(),
         genesis: serde_json::from_str(include_str!("genesis.json"))
             .expect("Can't deserialize BSC Mainnet genesis json"),
         paris_block_and_final_difficulty: Some((0, U256::ZERO)),

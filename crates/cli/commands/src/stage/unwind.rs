@@ -107,7 +107,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
-                    Arc::new(NoopConsensus::default()),
+                    NoopConsensus::arc(),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
                     evm_config.clone(),
@@ -117,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 )
                 .set(ExecutionStage::new(
                     evm_config,
-                    Arc::new(NoopConsensus::default()),
+                    NoopConsensus::arc(),
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,

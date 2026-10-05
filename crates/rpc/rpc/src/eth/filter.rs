@@ -217,7 +217,7 @@ where
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
-        self.inner.eth_api.provider()
+        self.inner.provider()
     }
 
     /// Access the underlying pool.

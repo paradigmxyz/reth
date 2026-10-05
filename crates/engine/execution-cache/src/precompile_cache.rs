@@ -291,7 +291,7 @@ mod tests {
             state_gas_spilled: 0,
             reservoir: 0,
             gas_refunded: 0,
-            bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
+            bytes: Bytes::from_static(b"cached_result"),
         };
 
         let input = b"test_input";
@@ -326,7 +326,7 @@ mod tests {
                     state_gas_spilled: 0,
                     reservoir: 0,
                     gas_refunded: 0,
-                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
+                    bytes: Bytes::from_static(b"output_from_precompile_1"),
                 })
             }
         })
@@ -344,7 +344,7 @@ mod tests {
                     state_gas_spilled: 0,
                     reservoir: 0,
                     gas_refunded: 0,
-                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
+                    bytes: Bytes::from_static(b"output_from_precompile_2"),
                 })
             }
         })
