@@ -221,6 +221,9 @@ where
     /// This must only be used on paths that intentionally begin tracking a sender, such as
     /// transaction insertion. Read-only lookups should prefer [`Self::sender_id`] to avoid
     /// growing the sender-id map for unknown addresses.
+    ///
+    /// Pools allocating identifiers outside transaction insertion must disable
+    /// [`PoolConfig::sender_id_prune_threshold`] and synchronize manual pruning.
     pub fn get_sender_id(&self, addr: Address) -> SenderId {
         self.identifiers.write().sender_id_or_create(addr)
     }
@@ -234,7 +237,7 @@ where
     }
 
     /// Returns the internal [`SenderId`]s for the given addresses, allocating a new mapping for
-    /// every address that is not tracked yet.
+    /// every address that is not tracked yet. See [`Self::get_sender_id`] for pruning requirements.
     pub fn get_sender_ids(&self, addrs: impl IntoIterator<Item = Address>) -> Vec<SenderId> {
         self.identifiers.write().sender_ids_or_create(addrs)
     }
@@ -557,12 +560,18 @@ where
         let outcome = {
             let mut pool = self.pool.write();
             let changed_senders = self.changed_senders(changed_accounts.into_iter());
-            pool.on_canonical_state_change(
+            let outcome = pool.on_canonical_state_change(
                 block_info,
                 mined_transactions,
                 changed_senders,
                 update_kind,
-            )
+            );
+            if pool.should_prune_sender_identifiers(self.identifiers.read().len()) {
+                let pruned =
+                    pool.retain_sender_identifiers(&mut self.identifiers.write(), |_| false);
+                debug!(target: "txpool", pruned, "pruned unused sender identifiers");
+            }
+            outcome
         };
 
         // This will discard outdated transactions based on the account's nonce
@@ -1756,14 +1765,16 @@ mod tests {
         identifier::SenderId,
         test_utils::{testing_pool, MockTransaction, TestPool, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, FullTransactionEvent, PoolConfig, PoolTransaction, SubPool, SubPoolLimit,
-        TransactionListenerKind, TransactionOrigin, TransactionPool, TransactionPoolExt,
-        TransactionValidationOutcome, ValidPoolTransaction, U256,
+        BlockInfo, CanonicalStateUpdate, FullTransactionEvent, PoolConfig, PoolTransaction,
+        PoolUpdateKind, SubPool, SubPoolLimit, TransactionListenerKind, TransactionOrigin,
+        TransactionPool, TransactionPoolExt, TransactionValidationOutcome, ValidPoolTransaction,
+        U256,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use alloy_primitives::{Address, B256};
     use futures_util::{FutureExt, StreamExt};
+    use reth_primitives_traits::SealedBlock;
     use std::{fs, path::PathBuf, sync::Arc};
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -2194,5 +2205,86 @@ mod tests {
         assert_eq!(pool.inner().prune_sender_identifiers(|_| false), 1);
         assert!(pool.inner().identifiers.read().is_empty());
         pool.inner().get_pool_data().assert_invariants();
+    }
+
+    fn mine(pool: &TestPool, mined_transactions: Vec<B256>) {
+        let tip = SealedBlock::seal_slow(reth_ethereum_primitives::Block::default());
+        pool.on_canonical_state_change(CanonicalStateUpdate {
+            new_tip: &tip,
+            pending_block_base_fee: 0,
+            pending_block_blob_fee: None,
+            changed_accounts: Vec::new(),
+            mined_transactions,
+            update_kind: PoolUpdateKind::Commit,
+        });
+    }
+
+    #[test]
+    fn automatic_sender_identifier_pruning_threshold() {
+        for (threshold, retained) in [(None, 4), (Some(4), 4), (Some(3), 1), (Some(0), 1)] {
+            let config = PoolConfig::default().with_sender_id_prune_threshold(threshold);
+            let pool = TestPool::from(TestPoolBuilder::default().with_config(config));
+            let hashes = (1..=4)
+                .map(|byte| {
+                    let tx = MockTransaction::eip1559().with_sender(Address::with_last_byte(byte));
+                    let hash = *tx.hash();
+                    pool.pool
+                        .add_transactions(TransactionOrigin::External, [valid_outcome(tx, None)])
+                        .pop()
+                        .unwrap()
+                        .unwrap();
+                    hash
+                })
+                .collect::<Vec<_>>();
+            let sender = Address::with_last_byte(1);
+            let id = pool.inner().sender_id(&sender).unwrap();
+
+            mine(&pool, hashes[1..].to_vec());
+            assert_eq!(pool.inner().identifiers.read().len(), retained);
+            assert_eq!(pool.inner().sender_id(&sender), Some(id));
+            assert_eq!(pool.get_transactions_by_sender(sender).len(), 1);
+            for byte in 2..=4 {
+                assert_eq!(
+                    pool.inner().sender_id(&Address::with_last_byte(byte)).is_some(),
+                    retained == 4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_sender_identifier_pruning_waits_for_growth() {
+        let config = PoolConfig::default().with_sender_id_prune_threshold(Some(3));
+        let pool = TestPool::from(TestPoolBuilder::default().with_config(config));
+        let hashes = (1..=4)
+            .map(|byte| {
+                let tx = MockTransaction::eip1559().with_sender(Address::with_last_byte(byte));
+                let hash = *tx.hash();
+                pool.pool
+                    .add_transactions(TransactionOrigin::External, [valid_outcome(tx, None)])
+                    .pop()
+                    .unwrap()
+                    .unwrap();
+                hash
+            })
+            .collect::<Vec<_>>();
+        mine(&pool, hashes[2..].to_vec());
+        assert_eq!(pool.inner().identifiers.read().len(), 2);
+
+        // Exceeding the threshold is insufficient until the count exceeds twice the last prune.
+        for (byte, retained) in [(5, 3), (6, 4), (7, 2)] {
+            let tx = MockTransaction::eip1559().with_sender(Address::with_last_byte(byte));
+            let hash = *tx.hash();
+            pool.pool
+                .add_transactions(TransactionOrigin::External, [valid_outcome(tx, None)])
+                .pop()
+                .unwrap()
+                .unwrap();
+            mine(&pool, vec![hash]);
+            assert_eq!(pool.inner().identifiers.read().len(), retained);
+        }
+        for byte in 1..=2 {
+            assert_eq!(pool.get_transactions_by_sender(Address::with_last_byte(byte)).len(), 1);
+        }
     }
 }
