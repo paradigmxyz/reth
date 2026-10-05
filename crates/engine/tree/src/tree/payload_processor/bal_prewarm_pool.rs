@@ -4,6 +4,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
 use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
+use reth_tasks::TaskRuntime;
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -85,7 +86,19 @@ impl BalPrewarmPool {
                             {
                                 let provider = CachedStateProvider::new_prewarm(inner, caches)
                                     .with_txpool_snapshot(snapshot);
-                                warm_target(&provider, target);
+                                match target {
+                                    PrewarmTarget::Account(addr, slots) => {
+                                        let _ = provider.basic_account(&addr);
+                                        for &slot in &slots {
+                                            let _ = provider.storage(addr, slot);
+                                        }
+                                    }
+                                    PrewarmTarget::Storage(addr, slots) => {
+                                        for &slot in &slots {
+                                            let _ = provider.storage(addr, slot);
+                                        }
+                                    }
+                                }
                             }
                         })
                         .abort_on_drop(),

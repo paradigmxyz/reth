@@ -11,10 +11,11 @@ use crate::{
     },
     node_wire::{WireBlockClient, WireEvent, WirePeer},
 };
-use abi_fuzz::{generators::RandomGenerator, Generator as AbiGenerator};
 use alloy_consensus::{BlockHeader as _, SignableTransaction, TxEip1559, TxEip2930, TxLegacy};
-use alloy_dyn_abi::{DynSolType, DynSolValue};
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{
+    eip2930::{AccessList, AccessListItem},
+    eip4895::Withdrawal,
+};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{keccak256, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState, PayloadId, PayloadStatus};
@@ -23,7 +24,7 @@ use commonware_runtime::{
     deterministic::{self, RunnableTask, SchedulingPolicy},
     Name as TaskName, Runner, Supervisor,
 };
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, MAINNET};
@@ -57,8 +58,8 @@ use reth_payload_primitives::PayloadKind;
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::{
     providers::BlockchainProvider, AccountReader, BlockHashReader, BlockNumReader, BlockReader,
-    DatabaseProviderFactory, StateProviderBox, StateProviderFactory, StateRootProvider,
-    StorageSettings,
+    DatabaseProviderFactory, ReceiptProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, StorageSettings,
 };
 use reth_prune::Pruner;
 use reth_storage_overlay::OverlayManager;
@@ -72,6 +73,7 @@ use reth_transaction_pool::{
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt::Write as _,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex, OnceLock,
@@ -293,7 +295,8 @@ impl Node {
         parent: &SealedHeader,
         parent_nonces: AccountNonces,
         branch: u8,
-        transaction_count: usize,
+        inputs: Vec<TransactionInput>,
+        include_withdrawal: bool,
     ) -> PayloadBuild {
         // The harness supplies pool head maintenance while the production maintenance actor
         // remains outside this profile. The prewarmer uses the same live best-tx iterator.
@@ -302,8 +305,9 @@ impl Node {
         info.last_seen_block_number = parent.number;
         info.block_gas_limit = parent.gas_limit;
         self.pool.set_block_info(info);
+        let transaction_count = inputs.len();
         let (transactions, next_nonces) =
-            materialize_block_transactions(parent.hash(), parent_nonces, branch, transaction_count);
+            materialize_block_transactions(parent.hash(), parent_nonces, branch, &inputs);
         let mut hashes = Vec::new();
         let mut expected_parent_nonces = BTreeMap::new();
         for (transaction, sender, parent_nonce) in transactions {
@@ -320,6 +324,9 @@ impl Node {
         assert!(self.forkchoice(parent.hash()).await.is_valid());
         let deadline = self.tasks.now() + Duration::from_secs(1);
         loop {
+            if expected_parent_nonces.is_empty() {
+                break;
+            }
             if let Some(snapshot) = (self.txpool_snapshot)(parent.hash()) {
                 let all_senders_warm = expected_parent_nonces.iter().all(|(sender, nonce)| {
                     snapshot.account(sender).is_some_and(|account| {
@@ -337,13 +344,23 @@ impl Node {
             timestamp: parent.timestamp + 12 + u64::from(branch),
             prev_randao: B256::repeat_byte(branch),
             suggested_fee_recipient: Address::repeat_byte(branch + 1),
-            withdrawals: Some(vec![]),
+            withdrawals: Some(if include_withdrawal {
+                vec![Withdrawal {
+                    index: parent.number,
+                    validator_index: u64::from(branch),
+                    address: workload_addresses()[usize::from(branch) % WORKLOAD_ACCOUNT_COUNT],
+                    amount: 1,
+                }]
+            } else {
+                vec![]
+            }),
             parent_beacon_block_root: Some(B256::repeat_byte(branch)),
             ..Default::default()
         };
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: reth_tracing::tracing::Span::current(),
                 state: ForkchoiceState {
                     head_block_hash: parent.hash(),
                     safe_block_hash: B256::ZERO,
@@ -382,9 +399,11 @@ impl Node {
         parent: &SealedHeader,
         parent_nonces: AccountNonces,
         branch: u8,
-        transaction_count: usize,
+        inputs: Vec<TransactionInput>,
+        include_withdrawal: bool,
     ) -> (EthBuiltPayload, AccountNonces) {
-        let build = self.begin_build(parent, parent_nonces, branch, transaction_count).await;
+        let build =
+            self.begin_build(parent, parent_nonces, branch, inputs, include_withdrawal).await;
         loop {
             if let Some(payload) = self.poll_build(&build).await {
                 return (payload, build.next_nonces)
@@ -395,7 +414,13 @@ impl Node {
 
     async fn new_payload(&self, payload: ExecutionData) -> PayloadStatus {
         let (tx, rx) = oneshot::channel();
-        self.input.send(BeaconEngineMessage::NewPayload { payload, tx }).unwrap();
+        self.input
+            .send(BeaconEngineMessage::NewPayload {
+                cause: reth_tracing::tracing::Span::current(),
+                payload,
+                tx,
+            })
+            .unwrap();
         rx.await.unwrap().unwrap()
     }
 
@@ -407,6 +432,7 @@ impl Node {
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: reth_tracing::tracing::Span::current(),
                 state: ForkchoiceState {
                     head_block_hash: head,
                     safe_block_hash: B256::ZERO,
@@ -421,20 +447,20 @@ impl Node {
 
     async fn import(&self, payload: &EthBuiltPayload) {
         assert!(self.new_payload(payload.clone().into()).await.is_valid());
-        self.assert_sparse_root(payload.block().state_root());
+        self.assert_sparse_frontier(payload.block().hash());
         assert!(self.forkchoice(payload.block().hash()).await.is_valid());
     }
 
-    fn assert_sparse_root(&self, state_root: B256) {
+    fn assert_sparse_frontier(&self, block_hash: B256) {
         let trie =
             self.overlay.take_sparse_trie().expect("validation must preserve its sparse trie");
-        assert_eq!(trie.state_root(), state_root);
+        assert_eq!(trie.block_hash(), block_hash);
         self.overlay.store_sparse_trie(trie);
     }
 
     fn sparse_trie_frontier(&self) -> Option<(B256, B256)> {
         let trie = self.overlay.take_sparse_trie()?;
-        let frontier = (trie.anchor_hash(), trie.state_root());
+        let frontier = (trie.anchor_hash(), trie.block_hash());
         self.overlay.store_sparse_trie(trie);
         Some(frontier)
     }
@@ -506,6 +532,17 @@ type TxPool = Pool<
 
 type AccountNonces = [u64; WORKLOAD_ACCOUNT_COUNT];
 
+/// All semantic transaction inputs are selected as independent replay decisions.
+#[derive(Clone, Copy)]
+struct TransactionInput {
+    sender: usize,
+    action: usize,
+    destination: usize,
+    slot: usize,
+    value: usize,
+    envelope: usize,
+}
+
 const WORKLOAD_ACCOUNT_COUNT: usize = 20;
 const STORAGE_CONTRACT_COUNT: u8 = 4;
 const WORKLOAD_MNEMONIC: &str = "test test test test test test test test test test test junk";
@@ -542,11 +579,40 @@ fn workload_addresses() -> [Address; WORKLOAD_ACCOUNT_COUNT] {
     std::array::from_fn(|index| workload_accounts().get_by_index("users", index).unwrap().address())
 }
 
+fn state_snapshot(state: &StateProviderBox) -> String {
+    let mut snapshot = format!("root={:?};", state.state_root(HashedPostState::default()).unwrap());
+    for address in
+        workload_addresses().into_iter().chain((0..STORAGE_CONTRACT_COUNT).map(storage_contract))
+    {
+        write!(
+            snapshot,
+            "account={address:?}:{:?};code={:?};",
+            state.basic_account(&address).unwrap(),
+            state.account_code(&address).unwrap().map(|code| code.original_bytes()),
+        )
+        .unwrap();
+        if (0..STORAGE_CONTRACT_COUNT).any(|index| address == storage_contract(index)) {
+            for slot in 0..8 {
+                write!(
+                    snapshot,
+                    "slot={slot}:{:?};",
+                    state
+                        .storage(address, B256::from(U256::from(slot).to_be_bytes::<32>()))
+                        .unwrap()
+                        .unwrap_or(U256::ZERO),
+                )
+                .unwrap();
+            }
+        }
+    }
+    snapshot
+}
+
 fn materialize_block_transactions(
     parent: B256,
     parent_nonces: AccountNonces,
     branch: u8,
-    count: usize,
+    inputs: &[TransactionInput],
 ) -> (Vec<(TransactionSigned, Address, u64)>, AccountNonces) {
     let mut seed_material = Vec::with_capacity(33);
     seed_material.extend_from_slice(parent.as_slice());
@@ -563,17 +629,11 @@ fn materialize_block_transactions(
         nonces.reset(address.0 .0, parent_nonces[index]);
     }
     let mut context = BuildContext::new(1, &gas, accounts, &artifacts, &mut nonces, &mut rng);
-    let mut abi = RandomGenerator {
-        uint: abi_fuzz::generators::UintDistribution::Mixed(
-            abi_fuzz::generators::UintGenerator::new(256, []),
-        ),
-        ..Default::default()
-    };
     let mut next_nonces = parent_nonces;
-    let mut transactions = Vec::with_capacity(count);
+    let mut transactions = Vec::with_capacity(inputs.len());
 
-    for _ in 0..count {
-        let sender_index = context.rng.next_u64() as usize % WORKLOAD_ACCOUNT_COUNT;
+    for choice in inputs {
+        let sender_index = choice.sender;
         let selected = context
             .select_signer(&AccountRef {
                 pool: "users".to_owned(),
@@ -583,32 +643,36 @@ fn materialize_block_transactions(
         let sender = selected.address;
         let parent_nonce = parent_nonces[sender_index];
         let nonce = context.next_nonce(sender.0 .0);
-        let action = context.rng.next_u64() % 4;
-        let (to, input, value, gas_limit) = if action < 2 {
+        let (to, input, value, gas_limit) = if choice.action < 2 {
             let mut input = Vec::with_capacity(256);
-            for _ in 0..4 {
-                let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
-                };
-                let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
+            for offset in 0..4 {
+                // Adjacent writes deliberately revisit slots across blocks and forks. Values
+                // include clears and overwrites, with one wide value for trie encoding changes.
+                let key = U256::from((choice.slot + offset * usize::from(choice.action == 0)) % 8);
+                let value = match choice.value {
+                    0 => U256::ZERO,
+                    1 => U256::from(1),
+                    2 => U256::MAX,
+                    _ => U256::from((branch as usize + offset + 2) as u64),
                 };
                 input.extend_from_slice(&key.to_be_bytes::<32>());
                 input.extend_from_slice(&value.to_be_bytes::<32>());
             }
-            let contract = storage_contract(context.rng.next_u64() as u8 % STORAGE_CONTRACT_COUNT);
+            let contract = storage_contract(choice.destination as u8 % STORAGE_CONTRACT_COUNT);
             (Some(contract), Bytes::from(input), U256::ZERO, 200_000)
-        } else if action == 2 {
-            let recipient = addresses[context.rng.next_u64() as usize % WORKLOAD_ACCOUNT_COUNT];
-            (Some(recipient), Bytes::new(), U256::from(context.rng.next_u64() % 1_000), 21_000)
+        } else if choice.action == 2 {
+            let recipient = addresses[choice.destination];
+            (Some(recipient), Bytes::new(), U256::from(choice.value as u64), 30_000)
         } else {
             (None, Bytes::from_static(STORAGE_INIT_CODE), U256::ZERO, 200_000)
         };
         let to = to.map_or(TxKind::Create, TxKind::Call);
         let signer = accounts.get_by_index(&selected.pool, selected.index).unwrap();
-        let transaction = match context.rng.next_u64() % 3 {
+        let access_list = AccessList(vec![AccessListItem {
+            address: storage_contract(choice.destination as u8 % STORAGE_CONTRACT_COUNT),
+            storage_keys: vec![B256::from(U256::from(choice.slot).to_be_bytes::<32>())],
+        }]);
+        let transaction = match choice.envelope {
             0 => {
                 let tx = TxLegacy {
                     chain_id: Some(1),
@@ -630,7 +694,7 @@ fn materialize_block_transactions(
                     gas_limit,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -645,7 +709,7 @@ fn materialize_block_transactions(
                     max_priority_fee_per_gas: gas.max_priority_fee_per_gas,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -660,9 +724,9 @@ fn materialize_block_transactions(
     (transactions, next_nonces)
 }
 
-const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
+const MIN_TRANSACTIONS_PER_BLOCK: usize = 0;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 12;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 13;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -843,6 +907,7 @@ struct StateRead {
     block: B256,
     state_root: B256,
     nonces: AccountNonces,
+    snapshot: String,
 }
 
 struct CampaignModel {
@@ -916,7 +981,7 @@ impl CampaignModel {
             // An unwind commit waits synchronously for old MDBX readers. Finish the modeled read
             // before another workload action can request an unwind; scheduler tasks can still run
             // between the begin and completion decisions.
-            return vec![CampaignAction::CompleteStateRead]
+            return vec![CampaignAction::CompleteStateRead, CampaignAction::AdvanceTime]
         }
         if self.follower_sync_target.is_some() {
             let mut actions = vec![
@@ -1057,7 +1122,10 @@ impl CampaignModel {
     ) -> usize {
         let domain = DecisionDomain::Workload;
         let occurrence = self.next_occurrence(domain);
-        let choices = (MIN_TRANSACTIONS_PER_BLOCK..=MAX_TRANSACTIONS_PER_BLOCK)
+        let small = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
+        let counts = [0, 1, 2, small - 1, small, small + 1, 32, MAX_TRANSACTIONS_PER_BLOCK];
+        let choices = counts
+            .into_iter()
             .map(|count| {
                 (
                     count,
@@ -1081,6 +1149,61 @@ impl CampaignModel {
             .into_iter()
             .find_map(|(count, option)| (option.id() == selected).then_some(count))
             .expect("decision source returned a transaction count absent from the point")
+    }
+
+    fn choose_input(
+        &mut self,
+        source: &mut dyn DecisionSource,
+        tasks: &TaskRuntime,
+        label: &str,
+        count: usize,
+    ) -> usize {
+        let occurrence = self.next_occurrence(DecisionDomain::Workload);
+        let options = (0..count)
+            .map(|value| {
+                DecisionOption::new(
+                    OptionId(value as u64),
+                    [label.as_bytes(), &[value as u8]].concat(),
+                    format!("{label}={value}"),
+                )
+            })
+            .collect();
+        let point = DecisionPoint::new(
+            DecisionPointId {
+                domain: DecisionDomain::Workload,
+                actor: self.actor.clone(),
+                generation: 0,
+                occurrence,
+            },
+            virtual_micros(tasks),
+            self.state_digest(),
+            options,
+        )
+        .unwrap();
+        source.choose(&point).unwrap().0 as usize
+    }
+
+    fn choose_transaction_inputs(
+        &mut self,
+        source: &mut dyn DecisionSource,
+        tasks: &TaskRuntime,
+    ) -> Vec<TransactionInput> {
+        let count = self.choose_transaction_count(source, tasks);
+        (0..count)
+            .map(|_| TransactionInput {
+                sender: self.choose_input(source, tasks, "sender", WORKLOAD_ACCOUNT_COUNT),
+                action: self.choose_input(source, tasks, "action", 4),
+                destination: self.choose_input(
+                    source,
+                    tasks,
+                    "destination",
+                    WORKLOAD_ACCOUNT_COUNT,
+                ),
+                slot: self.choose_input(source, tasks, "storage slot", 8),
+                value: self.choose_input(source, tasks, "storage value", 4),
+                envelope: self.choose_input(source, tasks, "transaction envelope", 3),
+            })
+            .collect()
     }
 
     fn choose_time_advance(
@@ -1691,14 +1814,16 @@ async fn execute_action(
     match action {
         CampaignAction::BeginPayloadBuild { parent, branch } => {
             assert!(model.payload_build.is_none(), "payload build already active");
-            let transaction_count = model.choose_transaction_count(decisions, tasks);
+            let inputs = model.choose_transaction_inputs(decisions, tasks);
+            let include_withdrawal = model.choose_input(decisions, tasks, "withdrawal", 2) != 0;
             let parent_block = model.blocks.get(&parent).unwrap();
             let build = producer
                 .begin_build(
                     &parent_block.header,
                     parent_block.next_nonces,
                     branch,
-                    transaction_count,
+                    inputs,
+                    include_withdrawal,
                 )
                 .await;
             assert_eq!(build.parent, parent);
@@ -1730,11 +1855,13 @@ async fn execute_action(
             assert!(model.state_read.is_none(), "state read already active");
             let modeled = model.blocks.get(&block).expect("state read for unknown block");
             let provider = producer.provider.state_by_block_hash(block).unwrap();
+            let snapshot = state_snapshot(&provider);
             model.state_read = Some(StateRead {
                 provider,
                 block,
                 state_root: modeled.header.state_root,
                 nonces: modeled.next_nonces,
+                snapshot,
             });
         }
         CampaignAction::CompleteStateRead => {
@@ -1753,15 +1880,20 @@ async fn execute_action(
                 "retained state provider returned a torn trie view for block {}",
                 read.block
             );
+            assert_eq!(
+                state_snapshot(&read.provider),
+                read.snapshot,
+                "retained state provider returned a torn account/code/storage view for block {}",
+                read.block,
+            );
         }
         CampaignAction::ImportPayload { block } => {
             let pending = model.pending.remove(&block).expect("import without a pending payload");
             assert_eq!(pending.payload.block().hash(), block);
             let frontier_before = producer.sparse_trie_frontier();
-            let parent_state_root = model.blocks[&pending.parent].header.state_root;
             producer.import(&pending.payload).await;
-            if let Some((anchor_before, state_root_before)) = frontier_before &&
-                state_root_before == parent_state_root &&
+            if let Some((anchor_before, block_before)) = frontier_before &&
+                block_before == pending.parent &&
                 model.blocks.contains_key(&anchor_before)
             {
                 let (anchor_after, _) = producer
@@ -1792,6 +1924,8 @@ async fn execute_action(
             let pending =
                 model.pending.get_mut(&block).expect("corruption without a pending payload");
             assert_eq!(pending.payload.block().hash(), block);
+            let original_head = producer.provider.canonical_in_memory_state().get_canonical_head();
+            let original_state = state_snapshot(&producer.provider.latest().unwrap());
             let mut invalid = pending.payload.block().clone().into_block();
             match field {
                 CorruptField::ReceiptsRoot => {
@@ -1807,6 +1941,21 @@ async fn execute_action(
                 alloy_rpc_types_engine::ExecutionPayload::from_block_slow(&invalid);
             let status = producer.new_payload(ExecutionData::new(payload, sidecar)).await;
             assert!(status.is_invalid(), "mutated {field:?} payload was accepted: {status:?}");
+            assert_eq!(
+                status.latest_valid_hash,
+                Some(pending.parent),
+                "mutated {field:?} payload reported the wrong latest valid ancestor",
+            );
+            assert_eq!(
+                producer.provider.canonical_in_memory_state().get_canonical_head().num_hash(),
+                original_head.num_hash(),
+                "rejected payload changed the canonical head",
+            );
+            assert_eq!(
+                state_snapshot(&producer.provider.latest().unwrap()),
+                original_state,
+                "rejected payload changed canonical state",
+            );
         }
         CampaignAction::SetHead { head } => {
             assert!(model.blocks.contains_key(&head));
@@ -1834,6 +1983,12 @@ async fn execute_action(
                     .get_canonical_head()
                     .hash();
             } else {
+                if model.database_faults.needs_recovery() {
+                    // A failed read can cause the engine to cache an invalid ancestry until
+                    // the node is reopened. Recovery is the next modeled action.
+                    model.follower_sync_target = Some(head);
+                    return;
+                }
                 assert!(status.is_syncing(), "follower rejected modeled chain: {status:?}");
                 model.follower_sync_target = Some(head);
             }
@@ -1859,9 +2014,11 @@ async fn execute_action(
                     .canonical_in_memory_state()
                     .get_canonical_head()
                     .hash();
-                let root = model.blocks.get(&model.follower_head).unwrap().header.state_root;
-                follower.as_ref().unwrap().assert_sparse_root(root);
+                follower.as_ref().unwrap().assert_sparse_frontier(model.follower_head);
             } else {
+                if model.database_faults.needs_recovery() {
+                    return;
+                }
                 assert!(status.is_syncing(), "follower rejected modeled chain: {status:?}");
             }
         }
@@ -1929,6 +2086,18 @@ async fn execute_action(
                 )
                 .await,
             );
+            let reopened = &follower.as_ref().unwrap().provider;
+            assert_eq!(
+                reopened.best_block_number().unwrap(),
+                durable_number,
+                "cold reopen exposed a partial database transition",
+            );
+            assert_eq!(reopened.block_hash(durable_number).unwrap(), Some(durable_head));
+            assert_eq!(
+                reopened.latest().unwrap().state_root(HashedPostState::default()).unwrap(),
+                model.blocks[&durable_head].header.state_root,
+                "cold reopen exposed a partial account/trie transition",
+            );
             model.database_faults.resume();
             if model.database_faults.needs_recovery() {
                 model.database_faults.mark_recovered();
@@ -1952,6 +2121,19 @@ async fn execute_action(
     let expected = &model.blocks.get(&model.canonical_head).unwrap().header;
     let observed = producer.provider.canonical_in_memory_state().get_canonical_head();
     assert_eq!(observed.num_hash(), expected.num_hash());
+    assert_eq!(
+        producer.provider.latest().unwrap().state_root(HashedPostState::default()).unwrap(),
+        expected.state_root,
+        "canonical state root disagreed with selected head {}",
+        model.canonical_head,
+    );
+    for (number, hash) in model.canonical_hashes(model.canonical_head).iter().enumerate() {
+        assert_eq!(
+            producer.provider.block_hash(number as u64).unwrap(),
+            Some(*hash),
+            "canonical hash index disagreed at block {number}",
+        );
+    }
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -2353,6 +2535,17 @@ fn simulate_node(
                             .unwrap(),
                         Some(*hash)
                     );
+                    assert_eq!(producer.provider.block_hash(number as u64).unwrap(), Some(*hash));
+                    assert_eq!(
+                        producer.provider.receipts_by_block((*hash).into()).unwrap(),
+                        follower
+                            .as_ref()
+                            .unwrap()
+                            .provider
+                            .receipts_by_block((*hash).into())
+                            .unwrap(),
+                        "receipt mismatch at canonical block {number}",
+                    );
                 }
 
                 // The newest `persistence_threshold` blocks may remain in memory. Waiting for the
@@ -2399,6 +2592,15 @@ fn simulate_node(
                     assert_eq!(producer_account.unwrap().nonce, head_nonces[index]);
                 }
                 let first_block = model.first_block();
+                let committed_snapshot =
+                    state_snapshot(&follower.as_ref().unwrap().provider.state_by_block_hash(head).unwrap());
+                assert_eq!(
+                    state_snapshot(&producer.provider.state_by_block_hash(head).unwrap()),
+                    committed_snapshot,
+                    "producer/follower state mismatch at head {head}",
+                );
+                let committed_receipts =
+                    follower.as_ref().unwrap().provider.receipts_by_block(head.into()).unwrap();
                 let peer = &follower.as_ref().unwrap().peer;
                 let mut wire = std::mem::take(&mut model.follower_wire);
                 wire.extend(peer.trace());
@@ -2431,6 +2633,16 @@ fn simulate_node(
                 )
                 .await;
                 assert_eq!(restarted.provider.best_block_number().unwrap(), head_number);
+                assert_eq!(
+                    state_snapshot(&restarted.provider.state_by_block_hash(head).unwrap()),
+                    committed_snapshot,
+                    "state changed across cold restart at head {head}",
+                );
+                assert_eq!(
+                    restarted.provider.receipts_by_block(head.into()).unwrap(),
+                    committed_receipts,
+                    "receipts changed across cold restart at head {head}",
+                );
 
                 let branch = head_children;
                 let request = CampaignAction::BeginPayloadBuild { parent: head, branch };
@@ -2438,14 +2650,17 @@ fn simulate_node(
                 let CampaignAction::BeginPayloadBuild { parent, branch } = request else {
                     unreachable!()
                 };
-                let transaction_count = model.choose_transaction_count(&mut decisions, &tasks);
+                let inputs = model.choose_transaction_inputs(&mut decisions, &tasks);
+                let include_withdrawal =
+                    model.choose_input(&mut decisions, &tasks, "withdrawal", 2) != 0;
                 let parent = model.blocks.get(&parent).unwrap();
                 let (payload, final_nonces) = restarted
                     .build(
                         &parent.header,
                         parent.next_nonces,
                         branch,
-                        transaction_count,
+                        inputs,
+                        include_withdrawal,
                     )
                     .await;
                 let final_hash = payload.block().hash();
@@ -2496,6 +2711,21 @@ fn simulate_node(
                 let final_number = head_number + 1;
                 assert_eq!(persisted.best_block_number().unwrap(), final_number);
                 assert_eq!(persisted.block_hash(final_number).unwrap(), Some(final_hash));
+                for (number, hash) in canonical.iter().enumerate() {
+                    assert_eq!(persisted.block_hash(number as u64).unwrap(), Some(*hash));
+                }
+                let historical_snapshot =
+                    state_snapshot(&persisted.state_by_block_hash(head).unwrap());
+                if historical_snapshot != committed_snapshot {
+                    let mismatch = historical_snapshot
+                        .split(';')
+                        .zip(committed_snapshot.split(';'))
+                        .find(|(observed, expected)| observed != expected);
+                    panic!(
+                        "historical state changed after committing successor of {head}: first differing field {mismatch:?}",
+                    );
+                }
+                assert_eq!(persisted.receipts_by_block(head.into()).unwrap(), committed_receipts);
                 let persisted_root = persisted
                     .latest()
                     .unwrap()

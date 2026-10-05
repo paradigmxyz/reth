@@ -1905,6 +1905,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+    use reth_trie::updates::TrieUpdatesSorted;
     use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
@@ -2274,6 +2275,7 @@ mod tests {
                 let (updates, _updates_rx) = crossbeam_channel::unbounded();
                 let (cancel, cancel_rx) = StateRootTaskCancelGuard::channel();
                 let (result_tx, result_rx) = std::sync::mpsc::channel();
+                let (_pending_tx, pending_trie_rx) = std::sync::mpsc::channel();
                 let mut result_tx = Some(result_tx);
                 let mut job = CooperativeSparseTrieStateRootJob {
                     handle: StateRootHandle::new(
@@ -2285,6 +2287,8 @@ mod tests {
                     ),
                     runtime: runtime.clone(),
                     timeout: Some(Duration::from_millis(5)),
+                    pending_trie_rx,
+                    overlay_manager: OverlayManager::default(),
                 };
                 match mode {
                     0 => {
@@ -2297,7 +2301,7 @@ mod tests {
                         .unwrap()
                         .send(Ok(StateRootComputeOutcome {
                             state_root: unexpected_root,
-                            trie_updates: Arc::new(TrieUpdates::default()),
+                            trie_updates: Arc::new(TrieUpdatesSorted::default()),
                             hashed_state: Arc::new(HashedPostState::default()),
                         }))
                         .unwrap(),
