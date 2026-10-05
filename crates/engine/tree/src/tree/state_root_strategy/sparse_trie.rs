@@ -381,11 +381,37 @@ where
         let mut idle_start = Instant::now();
         let mut done = false;
         let mut finalized_hashed_state = None;
+        let mut updates_since_proof_service = 0;
 
         // Streaming phase: updates are still arriving. Ends when the finish marker is
         // processed. Only producers hold update senders, so the channel closing before the
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
+            if updates_since_proof_service == PROOF_SERVICE_UPDATE_BUDGET {
+                updates_since_proof_service = 0;
+                let mut t = Instant::now();
+                match self.proof_result_rx.try_recv() {
+                    Ok(result) => {
+                        let wake = Instant::now();
+                        total_idle_time += wake.duration_since(idle_start);
+                        self.metrics
+                            .sparse_trie_channel_wait_duration_histogram
+                            .record(wake.duration_since(t));
+                        t = wake;
+
+                        // Give completed proof work a turn without draining or reordering
+                        // the canonical input stream. Keep the existing proof coalescing.
+                        self.on_proof_results(result, &mut t)?;
+                        done = self.make_progress()?;
+                        idle_start = Instant::now();
+                        continue;
+                    }
+                    Err(crossbeam_channel::TryRecvError::Empty) => {}
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        unreachable!("we own the sender half")
+                    }
+                }
+            }
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
@@ -402,6 +428,7 @@ where
                         finalized_hashed_state = Some(hashed_state);
                     }
                     self.pending_updates += 1;
+                    updates_since_proof_service += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
                     let wake = Instant::now();
@@ -414,6 +441,7 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
+                    updates_since_proof_service = 0;
                     self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
@@ -1566,6 +1594,10 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
 
+/// Offer proof results a service turn after this many input messages. A service turn uses the
+/// existing coalesced drain, so this bounds input-message priority, not proof count or wall time.
+const PROOF_SERVICE_UPDATE_BUDGET: usize = 64;
+
 /// A round of storage passes that would do at most this much work - proof nodes to reveal plus
 /// leaf updates to apply - runs on the sparse trie task itself, because handing the tries to
 /// another thread and waiting for them to come back costs more than the work.
@@ -2645,5 +2677,133 @@ mod tests {
 
         drop(updates_tx);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn queued_proof_error_is_serviced_during_a_sustained_update_stream() {
+        let runtime = Runtime::test();
+        let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+        let (mut task, hashing_updates_tx, _cancel_guard) = test_task(&runtime, trie);
+        // Populate the consumer's channel directly, so neither hashing-worker
+        // scheduling nor a transient input gap can make the proof arm win.
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        task.updates = updates_rx;
+        let address = B256::repeat_byte(0x11);
+        let update_count = PROOF_SERVICE_UPDATE_BUDGET * 2 + 1;
+        for index in 0..update_count {
+            let mut state = HashedPostState::default();
+            state
+                .accounts
+                .insert(address, Some(Account { nonce: index as u64 + 1, ..Default::default() }));
+            updates_tx.send(SparseTrieTaskMessage::HashedState(state)).unwrap();
+        }
+        updates_tx.send(SparseTrieTaskMessage::FinishedStateUpdates).unwrap();
+        task.in_flight_proof_batches = 1;
+        task.proof_result_tx
+            .send(ProofResultMessage {
+                result: Err(StateRootTaskError::Other("queued proof failed".to_string())),
+                elapsed: std::time::Duration::ZERO,
+                state: HashedPostState::default(),
+            })
+            .unwrap();
+
+        let error = task.run().expect_err("the queued proof error must be surfaced");
+        assert!(
+            matches!(&error, StateRootTaskError::Other(message) if message == "queued proof failed")
+        );
+        assert!(!task.finished_state_updates, "proof errors must not wait for the finish marker");
+        assert_eq!(
+            task.final_hashed_state.accounts[&address].as_ref().unwrap().nonce,
+            PROOF_SERVICE_UPDATE_BUDGET as u64,
+        );
+        assert_eq!(task.updates.len(), update_count + 1 - PROOF_SERVICE_UPDATE_BUDGET);
+
+        drop(updates_tx);
+        drop(hashing_updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn proof_service_preserves_prequeued_state_order_and_root() {
+        for queued_proofs in [0, 2] {
+            let runtime = Runtime::test();
+            let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+            let trie = SparseStateTrie::default()
+                .with_accounts_trie(default_trie.clone())
+                .with_default_storage_trie(default_trie)
+                .with_updates(true);
+            let (mut task, hashing_updates_tx, _cancel_guard) = test_task(&runtime, trie);
+            let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+            task.updates = updates_rx;
+            let mut expected_state = HashedPostState::default();
+            for index in 0..PROOF_SERVICE_UPDATE_BUDGET * 3 + 7 {
+                let address = B256::repeat_byte(0x10 + (index % 8) as u8);
+                let slot = B256::repeat_byte(0x40 + ((index / 8) % 4) as u8);
+                let mut state = HashedPostState::default();
+                state.accounts.insert(
+                    address,
+                    Some(Account {
+                        nonce: index as u64 + 1,
+                        balance: U256::from(index),
+                        ..Default::default()
+                    }),
+                );
+                // Repeated keys and deletions make the final value depend on FIFO
+                // state order, including writes after the first proof-service turn.
+                state
+                    .storages
+                    .entry(address)
+                    .or_default()
+                    .storage
+                    .insert(slot, if index % 3 == 0 { U256::ZERO } else { U256::from(index + 1) });
+                expected_state.extend(state.clone());
+                updates_tx.send(SparseTrieTaskMessage::HashedState(state)).unwrap();
+            }
+            updates_tx.send(SparseTrieTaskMessage::FinishedStateUpdates).unwrap();
+            updates_tx.send(SparseTrieTaskMessage::PrefetchProofs(Default::default())).unwrap();
+            task.in_flight_proof_batches = queued_proofs;
+            for _ in 0..queued_proofs {
+                // The parent is already revealed and empty. These completed
+                // no-target batches exercise the service path without worker races.
+                task.proof_result_tx
+                    .send(ProofResultMessage {
+                        result: Ok(DecodedMultiProofV2::default()),
+                        elapsed: std::time::Duration::ZERO,
+                        state: HashedPostState::default(),
+                    })
+                    .unwrap();
+            }
+
+            let outcome = task.run().expect("the complete state stream must produce a root");
+            let expected_accounts = expected_state.accounts.iter().map(|(address, account)| {
+                let storage_root = reth_trie_common::root::storage_root_unsorted(
+                    expected_state.storages[address]
+                        .storage
+                        .iter()
+                        .filter(|(_, value)| !value.is_zero())
+                        .map(|(slot, value)| (*slot, *value)),
+                );
+                (*address, account.clone().unwrap().into_trie_account(storage_root))
+            });
+            assert_eq!(
+                outcome.state_root,
+                reth_trie_common::root::state_root_unsorted(expected_accounts)
+            );
+            assert_eq!(*outcome.hashed_state, expected_state);
+            assert_eq!(task.in_flight_proof_batches, 0);
+            assert_eq!(task.storage_in_flight, 0);
+            assert!(task.storage.is_empty());
+            assert_eq!(task.updates.len(), 1, "late hints remain unread after the finish marker");
+
+            drop(updates_tx);
+            drop(hashing_updates_tx);
+            drop(task);
+            drain_sparse_trie_tasks(&runtime);
+        }
     }
 }
