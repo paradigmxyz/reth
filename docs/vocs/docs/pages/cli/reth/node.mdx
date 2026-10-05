@@ -139,9 +139,7 @@ Networking:
           [default: 200]
 
       --snap.v2
-          Enable experimental snap/2: advertise and serve it, and bootstrap a fresh database from a post-Amsterdam pivot.
-
-          Databases with execution progress, and chains where Amsterdam isn't active yet, continue with the staged pipeline. While the node's own snap state is unverified, the state it serves over snap/2 is incomplete.
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it once Amsterdam is active, and keeps the staged pipeline otherwise
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.

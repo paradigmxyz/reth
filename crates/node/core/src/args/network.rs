@@ -241,12 +241,8 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    /// Enable experimental snap/2: advertise and serve it, and bootstrap a fresh database from a
-    /// post-Amsterdam pivot.
-    ///
-    /// Databases with execution progress, and chains where Amsterdam isn't active yet, continue
-    /// with the staged pipeline. While the node's own snap state is unverified, the state it
-    /// serves over snap/2 is incomplete.
+    /// Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with
+    /// it once Amsterdam is active, and keeps the staged pipeline otherwise.
     #[arg(long = "snap.v2")]
     pub snap_v2: bool,
 
@@ -1180,6 +1176,7 @@ mod tests {
     use clap::Parser;
     use reth_chainspec::MAINNET;
     use reth_config::Config;
+    use reth_network::EthNetworkPrimitives;
     use reth_network_peers::NodeRecord;
     use secp256k1::SecretKey;
     use std::{
@@ -1618,7 +1615,7 @@ mod tests {
             let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
             assert_eq!(args.snap_v2, enabled);
             let config = args
-                .network_config::<reth_network::EthNetworkPrimitives>(
+                .network_config::<EthNetworkPrimitives>(
                     &Config::default(),
                     MAINNET.clone(),
                     SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
@@ -1654,7 +1651,7 @@ mod tests {
 
         // Build the network config using a deterministic secret key
         let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
-        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+        let builder = args.network_config::<EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
             secret_key,
@@ -1680,7 +1677,7 @@ mod tests {
         let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let boot_nodes = |args: &NetworkArgs| {
-            args.network_config::<reth_network::EthNetworkPrimitives>(
+            args.network_config::<EthNetworkPrimitives>(
                 &config,
                 MAINNET.clone(),
                 secret_key,

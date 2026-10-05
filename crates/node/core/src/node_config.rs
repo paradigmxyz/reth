@@ -199,7 +199,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self.engine
             .tree_config()
             .with_skip_state_root(self.debug.skip_state_root)
-            // Snap anchors its pivot to the finalized block.
+            // Snap anchors its pivot to the finalized block, the staged pipeline ignores it.
             .with_backfill_follows_finalized(self.network.snap_v2)
     }
 

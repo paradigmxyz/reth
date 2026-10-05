@@ -4,10 +4,8 @@ use super::{SnapBackfillSync, SnapHandoff};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
-use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
-use reth_provider::{
-    providers::ProviderNodeTypes, ChainSpecProvider, DatabaseProviderFactory, ProviderFactory,
-};
+use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill};
+use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_tracing::tracing::warn;
 use std::{
     task::{Context, Poll},
@@ -17,45 +15,42 @@ use std::{
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
 #[derive(Debug, Clone, Copy)]
 pub struct EthereumBackfill {
-    // Whether snap sync is opted into.
-    snap_v2: bool,
+    // Whether the backfill snap syncs, decided once at launch.
+    snap: bool,
 }
 
 impl EthereumBackfill {
-    /// Creates the builder for the `--snap.v2` setting.
-    pub const fn new(snap_v2: bool) -> Self {
-        Self { snap_v2 }
-    }
-
-    // Snap pivots need block access lists, so a chain where Amsterdam isn't active yet keeps the
-    // staged pipeline even with `--snap.v2`.
-    fn snap(&self, chain_spec: &impl EthereumHardforks) -> bool {
+    /// Creates the builder for the `--snap.v2` setting on `chain_spec`.
+    ///
+    /// Snap pivots need block access lists, so a chain where Amsterdam isn't active keeps the
+    /// staged pipeline even with `--snap.v2`.
+    pub fn new(snap_v2: bool, chain_spec: &impl EthereumHardforks) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        self.snap_v2 && chain_spec.is_amsterdam_active_at_timestamp(now)
+        let snap = snap_v2 && chain_spec.is_amsterdam_active_at_timestamp(now);
+        if snap_v2 && !snap {
+            warn!(target: "sync::snap", "Amsterdam isn't active on this chain, so --snap.v2 keeps the staged pipeline");
+        }
+        Self { snap }
     }
 }
 
 impl<N, C> BackfillSyncBuilder<N, C> for EthereumBackfill
 where
-    N: ProviderNodeTypes<ChainSpec: EthereumHardforks>,
+    N: ProviderNodeTypes,
     C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     type Backfill = EthereumBackfillSync<N, C>;
 
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
-        let snap = self.snap(&*ctx.provider_factory().chain_spec());
         // Genesis has stored the storage settings by now, so the layout check covers a fresh
         // database too.
-        ctx.provider_factory().database_provider_ro()?.ensure_sync_mode(snap)?;
-        let runtime = ctx.runtime().clone();
-        if !snap {
-            return Ok(EthereumBackfillSync::Pipeline(PipelineSync::new(
-                ctx.into_pipeline(),
-                runtime,
-            )))
+        ctx.provider_factory().database_provider_ro()?.ensure_sync_mode(self.snap)?;
+        if !self.snap {
+            return PipelineBackfill.build(ctx).map(EthereumBackfillSync::Pipeline)
         }
         let client = ctx.client().clone();
         let provider_factory = ctx.provider_factory().clone();
+        let runtime = ctx.runtime().clone();
         Ok(EthereumBackfillSync::Snap(Box::new(SnapBackfillSync::new(
             ctx.into_pipeline(),
             client,
@@ -65,13 +60,9 @@ where
     }
 
     fn recover(&mut self, provider_factory: &ProviderFactory<N>) -> eyre::Result<()> {
-        let snap = self.snap(&*provider_factory.chain_spec());
-        if self.snap_v2 && !snap {
-            warn!(target: "sync::snap", "Amsterdam isn't active yet, so --snap.v2 keeps the staged pipeline");
-        }
         SnapHandoff::new(provider_factory.clone()).resume_interrupted_publish()?;
         // The snap layout is checked in `build`, after genesis initializes it.
-        if !snap {
+        if !self.snap {
             provider_factory.database_provider_ro()?.ensure_sync_mode(false)?;
         }
         Ok(())
@@ -110,18 +101,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snap::tests::pipeline_on;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        DBProvider, MetadataWriter, StageCheckpointWriter, StorageSettings, StorageSettingsCache,
+        ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StageCheckpointWriter,
+        StorageSettings, StorageSettingsCache,
     };
-    use reth_prune::PruneModes;
     use reth_snap_sync::{SnapAttemptStore, SnapGeneration};
-    use reth_stages::{Pipeline, StageCheckpoint, StageId};
-    use reth_static_file::StaticFileProducer;
+    use reth_stages::{StageCheckpoint, StageId, StageSetBuilder};
     use reth_tasks::Runtime;
     use std::sync::Arc;
 
@@ -136,68 +127,60 @@ mod tests {
     }
 
     // The backfill `EthereumBackfill` builds over `factory`, or why it refused to.
-    fn try_build(
+    fn build(
         snap_v2: bool,
         factory: TestFactory,
     ) -> eyre::Result<EthereumBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient>> {
-        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-            .with_tip_sender(tokio::sync::watch::channel(B256::ZERO).0)
-            .build(
-                factory.clone(),
-                StaticFileProducer::new(factory.clone(), PruneModes::default()),
-            );
+        let pipeline = pipeline_on(
+            &factory,
+            StageSetBuilder::default(),
+            tokio::sync::watch::channel(B256::ZERO).0,
+        );
         let ctx = BackfillContext::new(
             pipeline,
             NoopFullBlockClient::default(),
             factory,
             Runtime::test(),
         );
-        EthereumBackfill::new(snap_v2).build(ctx)
-    }
-
-    fn build(
-        snap_v2: bool,
-        factory: TestFactory,
-    ) -> EthereumBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient> {
-        try_build(snap_v2, factory).unwrap()
+        EthereumBackfill::new(snap_v2, &*ctx.provider_factory().chain_spec()).build(ctx)
     }
 
     // Runs `EthereumBackfill`'s startup recovery over `factory`.
     fn recover(snap_v2: bool, factory: &TestFactory) -> eyre::Result<()> {
         BackfillSyncBuilder::<MockNodeTypesWithDB, NoopFullBlockClient>::recover(
-            &mut EthereumBackfill::new(snap_v2),
+            &mut EthereumBackfill::new(snap_v2, &*factory.chain_spec()),
             factory,
         )
     }
 
     #[test]
     fn the_staged_pipeline_runs_without_the_flag() {
-        assert!(matches!(build(false, factory(amsterdam())), EthereumBackfillSync::Pipeline(_)));
+        assert!(matches!(
+            build(false, factory(amsterdam())).unwrap(),
+            EthereumBackfillSync::Pipeline(_)
+        ));
     }
 
     #[test]
     fn the_flag_selects_snap_sync() {
         let factory = factory(amsterdam());
-        assert!(recover(true, &factory).is_ok());
+        recover(true, &factory).unwrap();
 
         // Genesis supplies the layout before the backfill is built.
         factory.set_storage_settings_cache(StorageSettings::v2());
-        assert!(matches!(build(true, factory), EthereumBackfillSync::Snap(_)));
+        assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Snap(_)));
     }
 
     #[test]
-    fn a_chain_without_amsterdam_keeps_the_staged_pipeline() {
-        let factory = factory(ChainSpecBuilder::mainnet().build());
+    fn a_chain_without_active_amsterdam_keeps_the_staged_pipeline() {
+        let unscheduled = ChainSpecBuilder::mainnet().build();
+        let scheduled = ChainSpecBuilder::mainnet().with_amsterdam_at(u64::MAX).build();
+        for chain_spec in [unscheduled, scheduled] {
+            let factory = factory(chain_spec);
 
-        assert!(matches!(build(true, factory.clone()), EthereumBackfillSync::Pipeline(_)));
-        assert!(recover(true, &factory).is_ok());
-    }
-
-    #[test]
-    fn a_chain_before_amsterdam_keeps_the_staged_pipeline() {
-        let factory = factory(ChainSpecBuilder::mainnet().with_amsterdam_at(u64::MAX).build());
-
-        assert!(matches!(build(true, factory), EthereumBackfillSync::Pipeline(_)));
+            recover(true, &factory).unwrap();
+            assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Pipeline(_)));
+        }
     }
 
     #[test]
@@ -208,8 +191,13 @@ mod tests {
         provider.write_storage_settings(StorageSettings::v1()).unwrap();
         provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0)).unwrap();
         provider.commit().unwrap();
+
         // Recovery runs before genesis stores the settings, so only the build can refuse it.
-        assert!(try_build(true, factory).is_err());
+        let error = build(true, factory).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ProviderError>(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
     }
 
     #[test]
@@ -222,7 +210,11 @@ mod tests {
         provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(2))).unwrap();
         provider.commit().unwrap();
 
-        assert!(recover(false, &factory).is_err());
-        assert!(recover(true, &factory).is_ok());
+        let error = recover(false, &factory).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ProviderError>(),
+            Some(ProviderError::SnapStateRequiresSnapSync { .. })
+        ));
+        recover(true, &factory).unwrap();
     }
 }
