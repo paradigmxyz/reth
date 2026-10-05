@@ -1222,7 +1222,7 @@ mod tests {
     #[tokio::test]
     async fn a_field_the_new_branch_changes_too_needs_no_repair() {
         let balance = stale_changes()
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(1)));
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ONE));
 
         let origins = recover([vec![balance], Vec::new()], false).await;
 

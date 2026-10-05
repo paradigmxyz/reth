@@ -612,7 +612,7 @@ impl MockTransaction {
 
     /// Returns a new transaction with a higher value
     pub fn inc_value(&self) -> Self {
-        self.clone().with_value(self.get_value().checked_add(U256::from(1)).unwrap())
+        self.clone().with_value(self.get_value().checked_add(U256::ONE).unwrap())
     }
 
     /// Returns a new transaction with a higher gas limit

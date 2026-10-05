@@ -210,6 +210,15 @@ pub enum ProviderError {
         /// Attempt that owns the unverified state.
         attempt: u64,
     },
+    /// The staged pipeline was selected on a database holding state a snap attempt left
+    /// unverified, which only snap can finish or replace.
+    #[error(
+        "snap attempt {attempt} left unverified state, restart with snap sync or wipe the database"
+    )]
+    SnapStateRequiresSnapSync {
+        /// Attempt that owns the unverified state.
+        attempt: u64,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),

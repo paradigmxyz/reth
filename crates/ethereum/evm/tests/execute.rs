@@ -559,7 +559,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap().is_zero()
     }));
 
     // attempt to execute block 2, this should not fail
@@ -590,8 +590,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap()),
+        executor.with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap()),
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
@@ -718,7 +717,7 @@ fn block_gas_limit_error() {
             gas_price: header.base_fee_per_gas.unwrap().into(),
             gas_limit: 2_500_000, // higher than block gas limit
             to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            value: U256::from(1),
+            value: U256::ONE,
             input,
         }),
     );

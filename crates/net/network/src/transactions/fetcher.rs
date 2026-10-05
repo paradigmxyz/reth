@@ -1457,7 +1457,7 @@ mod tests {
     const KIB: usize = 1024;
 
     fn peer(n: u8) -> PeerId {
-        PeerId::new([n; 64])
+        PeerId::repeat_byte(n)
     }
 
     fn hash(n: u64) -> TxHash {

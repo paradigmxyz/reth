@@ -29,11 +29,9 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
-use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    receipt::await_successful_receipts, trie::assert_trie_consistency, wallet::TestAccount,
-    E2ETestSetupExt, NodeHelperType,
+    trie::assert_trie_consistency, wallet::TestAccount, E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
@@ -121,33 +119,21 @@ struct SuiteCtx<P> {
 }
 
 impl<P: Provider> SuiteCtx<P> {
-    /// Sends the given transactions from the signer and mines a block containing exactly them.
+    /// Sends the given transactions from the signer and mines a block containing exactly them,
+    /// failing if any of them reverted.
     ///
     /// Nonces, gas limits and fees are filled in by the account in transaction order.
     async fn mine_block(
         &mut self,
         txs: Vec<TransactionRequest>,
     ) -> eyre::Result<Vec<TransactionReceipt>> {
-        let expected = txs.len();
-        let mut pending = Vec::with_capacity(expected);
+        let mut raw_txs = Vec::with_capacity(txs.len());
         for tx in txs {
-            let raw_tx = self.account.sign_tx_bytes(tx).await;
-            pending.push(self.provider.send_raw_transaction(&raw_tx).await?);
+            raw_txs.push(self.account.sign_tx_bytes(tx).await);
         }
-
-        let payload = self.node.advance_block().await?;
-        let included = payload.block().body().transactions().count();
-        assert_eq!(included, expected, "block should contain exactly the sent transactions");
-
-        let notification = self
-            .node
-            .canonical_stream
-            .next()
-            .await
-            .ok_or_else(|| eyre::eyre!("canonical stream ended"))?;
-        self.last_committed = Some(notification.committed());
-
-        await_successful_receipts(pending).await
+        let mined = self.node.mine(raw_txs).await?.ensure_success()?;
+        self.last_committed = Some(mined.chain);
+        Ok(mined.receipts)
     }
 
     /// Returns the account entry of the most recently committed block's bundle state.
@@ -532,7 +518,7 @@ fn factory_create_tx(
     value: U256,
 ) -> TransactionRequest {
     let mut input = Vec::with_capacity(64 + initcode.len());
-    input.extend_from_slice(&U256::from(call_after_create as u8).to_be_bytes::<32>());
+    input.extend_from_slice(B256::with_last_byte(call_after_create as u8).as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(initcode);
     TransactionRequest::default().with_to(factory).with_input(input).with_value(value)

@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn storage_data_rejects_trailing_bytes() {
-        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::from(1));
+        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::ONE);
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());

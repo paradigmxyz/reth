@@ -3,7 +3,7 @@
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId, BlockNumberOrTag};
-use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
+use alloy_primitives::{bytes, Address, Bytes, TxHash, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
     transaction::TransactionRequest, Block, FeeHistory, Filter, Header, Index, Log,
     PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt,
@@ -182,9 +182,7 @@ where
     let call_request = TransactionRequest::default();
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();
-    let tx = Bytes::from(hex!(
-        "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
-    ));
+    let tx = bytes!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3");
     let typed_data = serde_json::from_str(
         r#"{
         "types": {

@@ -14,7 +14,7 @@ use std::fmt;
 pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 
 /// Inclusive upper bound covering the full trie keyspace.
-pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+pub const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
 /// Client, database and request settings a domain download sends and commits through.
 pub(crate) struct DownloadContext<C, F> {

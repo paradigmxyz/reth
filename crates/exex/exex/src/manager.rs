@@ -788,7 +788,7 @@ mod tests {
 
         // Define the notification for testing
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_hash(B256::repeat_byte(0x01));
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
@@ -806,7 +806,7 @@ mod tests {
 
         // Push another notification
         let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_hash(B256::repeat_byte(0x02));
         block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
@@ -849,7 +849,7 @@ mod tests {
 
         // Push some notifications to fill part of the buffer
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_hash(B256::repeat_byte(0x01));
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
@@ -1138,11 +1138,11 @@ mod tests {
 
         // Setup two blocks for the chain commit notification
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_hash(B256::repeat_byte(0x01));
         block1.set_block_number(10);
 
         let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_hash(B256::repeat_byte(0x02));
         block2.set_block_number(11);
 
         // Setup a notification
@@ -1191,7 +1191,7 @@ mod tests {
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_hash(B256::repeat_byte(0x01));
         block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {

@@ -100,6 +100,8 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: EnvKzgSettings,
@@ -575,16 +577,15 @@ where
             }
         }
 
-        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
-        // into the pool.
-        if transaction.is_dynamic_fee() &&
-            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        // Drop transactions with a priority fee lower than the configured minimum for acceptance
+        // into the pool. This applies to all transaction types: legacy and EIP-2930 transactions
+        // use their gas price as the priority fee.
+        if let Some(minimum_priority_fee) = self.minimum_priority_fee &&
+            transaction.priority_fee_or_price() < minimum_priority_fee
         {
             self.validation_metrics.rejected_priority_fee_below_minimum.increment(1);
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
-                minimum_priority_fee: self
-                    .minimum_priority_fee
-                    .expect("minimum priority fee is expected inside if statement"),
+                minimum_priority_fee,
             })
         }
 
@@ -1070,6 +1071,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
     ///
@@ -1305,6 +1308,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
+    ///
+    /// This applies to all transaction types. For legacy and EIP-2930 transactions the gas price
+    /// is used as the priority fee.
     pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: Option<u128>) -> Self {
         self.minimum_priority_fee = minimum_priority_fee;
         self
@@ -2232,6 +2238,103 @@ mod tests {
         assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
     }
 
+    /// Returns a legacy and an EIP-2930 transaction with the given gas price, and a provider
+    /// holding a funded sender account for both.
+    fn setup_gas_price_txs(gas_price: u128) -> ([EthPooledTransaction; 2], MockEthProvider) {
+        let sender = Address::repeat_byte(1);
+        let to = Address::repeat_byte(2);
+
+        let legacy = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+        let eip2930 = alloy_consensus::TxEip2930 {
+            chain_id: 1,
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+
+        let txs = [legacy.into(), eip2930.into()].map(|tx: alloy_consensus::TypedTransaction| {
+            let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+                tx.into(),
+                alloy_primitives::Signature::test_signature(),
+            );
+            EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(signed, sender),
+                200,
+            )
+        });
+
+        let provider = mock_provider();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        (txs, provider)
+    }
+
+    #[tokio::test]
+    async fn invalid_on_gas_price_lower_than_configured_minimum() {
+        let gas_price = 1_000_000_000;
+        let minimum_priority_fee = gas_price + 1;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // Legacy and EIP-2930 transactions use their gas price as the priority fee.
+        for transaction in txs {
+            assert!(!transaction.is_dynamic_fee());
+
+            for origin in
+                [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+            {
+                let outcome = validator.validate_one(origin, transaction.clone());
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Invalid(
+                        _,
+                        InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                            minimum_priority_fee: min_fee
+                        }
+                    ) if min_fee == minimum_priority_fee
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_at_or_above_minimum() {
+        let gas_price = 1_000_000_000;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+
+        for minimum_priority_fee in [gas_price, gas_price / 2] {
+            let validator = create_validator_with_minimum_fee(
+                provider.clone(),
+                Some(minimum_priority_fee),
+                None,
+            );
+
+            for transaction in txs.clone() {
+                let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+                assert!(outcome.is_valid());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_with_minimum_priority_fee_disabled() {
+        let (txs, provider) = setup_gas_price_txs(1);
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        for transaction in txs {
+            let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+            assert!(outcome.is_valid());
+        }
+    }
+
     #[test]
     fn reject_oversized_tx() {
         let mut transaction = get_transaction();
@@ -2305,7 +2408,7 @@ mod tests {
             assert!(matches!(
                 err,
                 InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
-                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+                if funds_err.got.is_zero() && funds_err.expected == expected_cost
             ));
         } else {
             panic!("Expected Invalid outcome with InsufficientFunds error");

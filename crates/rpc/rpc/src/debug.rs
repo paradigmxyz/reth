@@ -1582,7 +1582,7 @@ mod tests {
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
         let factory = create_test_provider_factory();
         let address = Address::with_last_byte(1);
-        let old_slot = U256::from(1);
+        let old_slot = U256::ONE;
         let new_slot = U256::from(2);
         let old_value = U256::from(10);
         let new_value = U256::from(20);
