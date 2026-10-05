@@ -1,20 +1,16 @@
 [package]
-name = "pureth-withdrawal-root"
+name = "reth-pureth-ssz"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-publish = false
+description = "Retained SSZ trees for execution objects"
 
 [lints]
 workspace = true
 
 [dependencies]
-alloy-eips = { workspace = true, features = ["ssz"] }
 alloy-primitives.workspace = true
-ethereum_ssz.workspace = true
-reth-pureth-ssz.workspace = true
-sha2.workspace = true
 tree_hash.workspace = true

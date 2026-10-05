@@ -7370,6 +7370,8 @@ version = "2.7.0"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
+ "ethereum_ssz",
+ "reth-pureth-ssz",
  "sha2 0.10.9",
  "tree_hash",
 ]
@@ -10080,10 +10082,20 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "ethereum_ssz",
+ "reth-chainspec",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-pureth-ssz",
  "serde_json",
+ "tree_hash",
+]
+
+[[package]]
+name = "reth-pureth-ssz"
+version = "2.7.0"
+dependencies = [
+ "alloy-primitives",
  "tree_hash",
 ]
 

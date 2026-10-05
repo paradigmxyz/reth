@@ -28,6 +28,18 @@ pub struct Log {
 }
 
 impl Log {
+    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        <Self as ssz::Decode>::from_ssz_bytes(bytes)
+    }
+
+    pub fn to_ssz_bytes(&self) -> Result<Vec<u8>, ReceiptSerializationError> {
+        let length = checked_log_length(self)?;
+        let mut bytes = Vec::with_capacity(length);
+        append_log(self, &mut bytes);
+        debug_assert_eq!(bytes.len(), length);
+        Ok(bytes)
+    }
+
     pub fn new(
         address: Address,
         topics: Vec<B256>,
@@ -101,6 +113,10 @@ pub enum Receipt {
 pub struct Receipts(Vec<Receipt>);
 
 impl Receipts {
+    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        <Self as ssz::Decode>::from_ssz_bytes(bytes)
+    }
+
     pub const fn new(receipts: Vec<Receipt>) -> Self {
         Self(receipts)
     }
@@ -123,6 +139,56 @@ impl Receipts {
 }
 
 impl Receipt {
+    pub fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        <Self as ssz::Decode>::from_ssz_bytes(bytes)
+    }
+
+    pub const fn from_(&self) -> Address {
+        match self {
+            Self::Basic(receipt) => receipt.from_,
+            Self::Create(receipt) => receipt.from_,
+            Self::SetCode(receipt) => receipt.from_,
+        }
+    }
+
+    pub const fn gas_used(&self) -> u64 {
+        match self {
+            Self::Basic(receipt) => receipt.gas_used,
+            Self::Create(receipt) => receipt.gas_used,
+            Self::SetCode(receipt) => receipt.gas_used,
+        }
+    }
+
+    pub const fn status(&self) -> bool {
+        match self {
+            Self::Basic(receipt) => receipt.status,
+            Self::Create(receipt) => receipt.status,
+            Self::SetCode(receipt) => receipt.status,
+        }
+    }
+
+    pub fn logs(&self) -> &[Log] {
+        match self {
+            Self::Basic(receipt) => &receipt.logs,
+            Self::Create(receipt) => &receipt.logs,
+            Self::SetCode(receipt) => &receipt.logs,
+        }
+    }
+
+    pub const fn contract_address(&self) -> Option<Address> {
+        match self {
+            Self::Create(receipt) => Some(receipt.contract_address),
+            Self::Basic(_) | Self::SetCode(_) => None,
+        }
+    }
+
+    pub fn authorities(&self) -> Option<&[Address]> {
+        match self {
+            Self::SetCode(receipt) => Some(&receipt.authorities),
+            Self::Basic(_) | Self::Create(_) => None,
+        }
+    }
+
     pub const fn selector(&self) -> u8 {
         match self {
             Self::Basic(_) => BASIC_RECEIPT_SELECTOR,
@@ -234,9 +300,11 @@ impl Eip6466ReceiptSnapshot {
         block: &RecoveredBlock<Block>,
         stored_receipts: &[StoredReceipt],
         eip658_active: bool,
+        authorization_outcomes: Option<&BlockAuthorizationOutcomes>,
     ) -> Result<Self, Eip6466SnapshotError> {
-        let receipts = receipts_from_block(block, stored_receipts, eip658_active)
-            .map_err(Eip6466SnapshotError::from_construction)?;
+        let receipts =
+            receipts_from_block(block, stored_receipts, eip658_active, authorization_outcomes)
+                .map_err(Eip6466SnapshotError::from_construction)?;
 
         Self::build(receipts)
     }
@@ -277,6 +345,39 @@ enum ReceiptKind {
     SetCode,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthorizationOutcome {
+    Accepted(Address),
+    Skipped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransactionAuthorizationOutcomes {
+    transaction_hash: B256,
+    outcomes: Vec<AuthorizationOutcome>,
+}
+
+impl TransactionAuthorizationOutcomes {
+    pub const fn new(transaction_hash: B256, outcomes: Vec<AuthorizationOutcome>) -> Self {
+        Self { transaction_hash, outcomes }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockAuthorizationOutcomes {
+    block_hash: B256,
+    transactions: Vec<Option<TransactionAuthorizationOutcomes>>,
+}
+
+impl BlockAuthorizationOutcomes {
+    pub const fn new(
+        block_hash: B256,
+        transactions: Vec<Option<TransactionAuthorizationOutcomes>>,
+    ) -> Self {
+        Self { block_hash, transactions }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReceiptConstructionError {
     InputCountMismatch { transactions: usize, receipts: usize },
@@ -289,6 +390,12 @@ pub enum ReceiptConstructionError {
     UnsupportedTransaction { tx_type: TxType, is_create: bool },
     MissingAuthorizationList,
     TooManyTopics { actual: usize, max: usize },
+    MissingAuthorizationOutcomes { transaction_hash: B256 },
+    AuthorizationBlockMismatch { expected: B256, actual: B256 },
+    AuthorizationRecordCountMismatch { transactions: usize, records: usize },
+    AuthorizationTransactionMismatch { expected: B256, actual: B256 },
+    AuthorizationOutcomeCountMismatch { authorizations: usize, outcomes: usize },
+    UnexpectedAuthorizationOutcomes { transaction_hash: B256 },
 }
 
 impl fmt::Display for ReceiptConstructionError {
@@ -332,6 +439,30 @@ impl fmt::Display for ReceiptConstructionError {
             Self::TooManyTopics { actual, max } => {
                 write!(formatter, "log has {actual} topics, maximum is {max}")
             }
+            Self::MissingAuthorizationOutcomes { transaction_hash } => write!(
+                formatter,
+                "authorization outcomes are unavailable for transaction {transaction_hash}"
+            ),
+            Self::AuthorizationBlockMismatch { expected, actual } => write!(
+                formatter,
+                "authorization block mismatch: expected {expected}, actual {actual}"
+            ),
+            Self::AuthorizationRecordCountMismatch { transactions, records } => write!(
+                formatter,
+                "authorization record count mismatch: {transactions} transactions, {records} records"
+            ),
+            Self::AuthorizationTransactionMismatch { expected, actual } => write!(
+                formatter,
+                "authorization transaction mismatch: expected {expected}, actual {actual}"
+            ),
+            Self::AuthorizationOutcomeCountMismatch { authorizations, outcomes } => write!(
+                formatter,
+                "authorization outcome count mismatch: {authorizations} authorizations, {outcomes} outcomes"
+            ),
+            Self::UnexpectedAuthorizationOutcomes { transaction_hash } => write!(
+                formatter,
+                "unexpected authorization outcomes for transaction {transaction_hash}"
+            ),
         }
     }
 }
@@ -342,14 +473,21 @@ impl ReceiptConstructionError {
     fn is_missing_data(&self) -> bool {
         match self {
             Self::InputCountMismatch { transactions, receipts } => receipts < transactions,
-            Self::PreEip658Block | Self::MissingAuthorizationList => true,
+            Self::PreEip658Block |
+            Self::MissingAuthorizationList |
+            Self::MissingAuthorizationOutcomes { .. } => true,
             Self::HeaderGasUsedExceedsLimit { .. } |
             Self::TransactionTypeMismatch { .. } |
             Self::DecreasingCumulativeGas { .. } |
             Self::CumulativeGasExceedsBlockLimit { .. } |
             Self::BlockGasUsedMismatch { .. } |
             Self::UnsupportedTransaction { .. } |
-            Self::TooManyTopics { .. } => false,
+            Self::TooManyTopics { .. } |
+            Self::AuthorizationBlockMismatch { .. } |
+            Self::AuthorizationRecordCountMismatch { .. } |
+            Self::AuthorizationTransactionMismatch { .. } |
+            Self::AuthorizationOutcomeCountMismatch { .. } |
+            Self::UnexpectedAuthorizationOutcomes { .. } => false,
         }
     }
 }
@@ -360,9 +498,15 @@ pub fn receipt_from_transaction(
     gas_used: u64,
     logs: Vec<Log>,
     status: bool,
+    authorization_outcomes: Option<&TransactionAuthorizationOutcomes>,
 ) -> Result<Receipt, ReceiptConstructionError> {
     let tx_type = transaction.tx_type();
     let kind = classify_receipt(tx_type, transaction.is_create())?;
+    let transaction_hash = *transaction.hash();
+
+    if kind != ReceiptKind::SetCode && authorization_outcomes.is_some() {
+        return Err(ReceiptConstructionError::UnexpectedAuthorizationOutcomes { transaction_hash });
+    }
 
     match kind {
         ReceiptKind::Basic => Ok(Receipt::Basic(BasicReceipt { from_, gas_used, logs, status })),
@@ -381,9 +525,32 @@ pub fn receipt_from_transaction(
             let authorizations = transaction
                 .authorization_list()
                 .ok_or(ReceiptConstructionError::MissingAuthorizationList)?;
-            let authorities = authorizations
+
+            let outcomes = authorization_outcomes.ok_or(
+                ReceiptConstructionError::MissingAuthorizationOutcomes { transaction_hash },
+            )?;
+
+            if outcomes.transaction_hash != transaction_hash {
+                return Err(ReceiptConstructionError::AuthorizationTransactionMismatch {
+                    expected: transaction_hash,
+                    actual: outcomes.transaction_hash,
+                });
+            }
+
+            if outcomes.outcomes.len() != authorizations.len() {
+                return Err(ReceiptConstructionError::AuthorizationOutcomeCountMismatch {
+                    authorizations: authorizations.len(),
+                    outcomes: outcomes.outcomes.len(),
+                });
+            }
+
+            let authorities = outcomes
+                .outcomes
                 .iter()
-                .map(|authorization| authorization.recover_authority().unwrap_or(Address::ZERO))
+                .map(|outcome| match outcome {
+                    AuthorizationOutcome::Accepted(authority) => *authority,
+                    AuthorizationOutcome::Skipped => Address::ZERO,
+                })
                 .collect();
 
             Ok(Receipt::SetCode(SetCodeReceipt { from_, gas_used, logs, status, authorities }))
@@ -395,6 +562,7 @@ pub fn receipts_from_block(
     block: &RecoveredBlock<Block>,
     stored_receipts: &[StoredReceipt],
     eip658_active: bool,
+    authorization_outcomes: Option<&BlockAuthorizationOutcomes>,
 ) -> Result<Receipts, ReceiptConstructionError> {
     let transaction_count = block.body().transactions.len();
 
@@ -417,6 +585,24 @@ pub fn receipts_from_block(
             gas_used: block_gas_used,
             gas_limit: block_gas_limit,
         });
+    }
+
+    if let Some(outcomes) = authorization_outcomes {
+        let block_hash = block.hash();
+
+        if outcomes.block_hash != block_hash {
+            return Err(ReceiptConstructionError::AuthorizationBlockMismatch {
+                expected: block_hash,
+                actual: outcomes.block_hash,
+            });
+        }
+
+        if outcomes.transactions.len() != transaction_count {
+            return Err(ReceiptConstructionError::AuthorizationRecordCountMismatch {
+                transactions: transaction_count,
+                records: outcomes.transactions.len(),
+            });
+        }
     }
 
     let mut previous_cumulative_gas = 0;
@@ -460,12 +646,16 @@ pub fn receipts_from_block(
         let from_ = transaction.signer();
         let signed_transaction = *transaction.inner();
 
+        let transaction_outcomes =
+            authorization_outcomes.and_then(|outcomes| outcomes.transactions[index].as_ref());
+
         converted.push(receipt_from_transaction(
             signed_transaction,
             from_,
             gas_used,
             logs,
             stored_receipt.success,
+            transaction_outcomes,
         )?);
     }
 
@@ -719,34 +909,34 @@ fn build_receipt_tree(receipt: &Receipt) -> Result<RetainedNode, TreeConstructio
 
 fn build_receipt_container_tree(receipt: &Receipt) -> Result<RetainedNode, TreeConstructionError> {
     let (fields, active_fields) = match receipt {
-        Receipt::Basic(receipt) => (
+        Receipt::Basic(BasicReceipt { from_, gas_used, logs, status }) => (
             vec![
-                RetainedNode::leaf(receipt.from_.tree_hash_root()),
-                RetainedNode::leaf(receipt.gas_used.tree_hash_root()),
+                RetainedNode::leaf(from_.tree_hash_root()),
+                RetainedNode::leaf(gas_used.tree_hash_root()),
                 RetainedNode::zero(),
-                build_logs_tree(&receipt.logs)?,
-                RetainedNode::leaf(receipt.status.tree_hash_root()),
+                build_logs_tree(logs)?,
+                RetainedNode::leaf(status.tree_hash_root()),
             ],
             &BASIC_RECEIPT_ACTIVE_FIELDS[..],
         ),
-        Receipt::Create(receipt) => (
+        Receipt::Create(CreateReceipt { from_, gas_used, contract_address, logs, status }) => (
             vec![
-                RetainedNode::leaf(receipt.from_.tree_hash_root()),
-                RetainedNode::leaf(receipt.gas_used.tree_hash_root()),
-                RetainedNode::leaf(receipt.contract_address.tree_hash_root()),
-                build_logs_tree(&receipt.logs)?,
-                RetainedNode::leaf(receipt.status.tree_hash_root()),
+                RetainedNode::leaf(from_.tree_hash_root()),
+                RetainedNode::leaf(gas_used.tree_hash_root()),
+                RetainedNode::leaf(contract_address.tree_hash_root()),
+                build_logs_tree(logs)?,
+                RetainedNode::leaf(status.tree_hash_root()),
             ],
             &CREATE_RECEIPT_ACTIVE_FIELDS[..],
         ),
-        Receipt::SetCode(receipt) => (
+        Receipt::SetCode(SetCodeReceipt { from_, gas_used, logs, status, authorities }) => (
             vec![
-                RetainedNode::leaf(receipt.from_.tree_hash_root()),
-                RetainedNode::leaf(receipt.gas_used.tree_hash_root()),
+                RetainedNode::leaf(from_.tree_hash_root()),
+                RetainedNode::leaf(gas_used.tree_hash_root()),
                 RetainedNode::zero(),
-                build_logs_tree(&receipt.logs)?,
-                RetainedNode::leaf(receipt.status.tree_hash_root()),
-                build_authorities_tree(&receipt.authorities)?,
+                build_logs_tree(logs)?,
+                RetainedNode::leaf(status.tree_hash_root()),
+                build_authorities_tree(authorities)?,
             ],
             &SET_CODE_RECEIPT_ACTIVE_FIELDS[..],
         ),
@@ -762,11 +952,13 @@ fn build_logs_tree(logs: &[Log]) -> Result<RetainedNode, TreeConstructionError> 
 }
 
 fn build_log_tree(log: &Log) -> Result<RetainedNode, TreeConstructionError> {
+    let Log { address, topics, data } = log;
+
     merkleize_fixed(
         vec![
-            RetainedNode::leaf(log.address.tree_hash_root()),
-            build_topics_tree(&log.topics)?,
-            progressive_byte_list(log.data.as_ref())?,
+            RetainedNode::leaf(address.tree_hash_root()),
+            build_topics_tree(topics)?,
+            progressive_byte_list(data.as_ref())?,
         ],
         4,
     )
@@ -786,6 +978,8 @@ fn build_authorities_tree(authorities: &[Address]) -> Result<RetainedNode, TreeC
 
     Ok(mix_in_length(merkleize_progressive(nodes)?, authorities.len()))
 }
+
+mod codec;
 
 #[cfg(test)]
 mod tests;

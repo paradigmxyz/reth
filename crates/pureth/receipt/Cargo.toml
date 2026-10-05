@@ -13,6 +13,7 @@ workspace = true
 
 [features]
 test-utils = [
+    "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
@@ -22,9 +23,11 @@ test-utils = [
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 ethereum_ssz.workspace = true
+reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-pureth-ssz.workspace = true
 tree_hash.workspace = true
 
 [dev-dependencies]
