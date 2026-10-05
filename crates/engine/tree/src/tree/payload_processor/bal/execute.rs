@@ -390,13 +390,10 @@ mod tests {
     use reth_primitives_traits::{
         crypto::secp256k1::public_key_to_address, Block as _, Recovered, SealedBlock,
     };
-    use reth_revm::db::BundleState;
+    use reth_revm::db::{BundleState, InMemoryDB};
     use reth_tasks::Runtime;
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-    use revm::{
-        database::{CacheDB, EmptyDB},
-        state::{AccountInfo, Bytecode},
-    };
+    use revm::state::{AccountInfo, Bytecode};
     use std::convert::Infallible;
 
     /// Wraps a `BlockAccessList` into an `Arc<DecodedBal>` by RLP-encoding the BAL.
@@ -409,8 +406,8 @@ mod tests {
     /// Builds an in-memory canonical DB pre-populated with the post-Cancun system contracts
     /// that `apply_pre_execution_changes` calls: beacon roots (EIP-4788), withdrawal requests
     /// (EIP-7002), and historical block hashes (EIP-2935).
-    fn system_contracts_db() -> CacheDB<EmptyDB> {
-        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+    fn system_contracts_db() -> InMemoryDB {
+        let mut db = InMemoryDB::default();
         db.insert_account_info(
             BEACON_ROOTS_ADDRESS,
             AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
@@ -540,9 +537,7 @@ mod tests {
         }
     }
 
-    fn db_factory(
-        db: CacheDB<EmptyDB>,
-    ) -> impl Fn() -> Result<CacheDB<EmptyDB>, BalExecutionError> + Sync {
+    fn db_factory(db: InMemoryDB) -> impl Fn() -> Result<InMemoryDB, BalExecutionError> + Sync {
         move || Ok(db.clone())
     }
 
@@ -604,7 +599,7 @@ mod tests {
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
-    fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
+    fn insert_funded(db: &mut InMemoryDB, addr: alloy_primitives::Address, balance: U256) {
         db.insert_account_info(
             addr,
             AccountInfo { balance, code_hash: B256::ZERO, code: None, ..Default::default() },
@@ -615,7 +610,7 @@ mod tests {
     /// composed BAL. Used to build the reference BAL for happy-path multi-tx tests.
     fn reference_bal_for_block<Tx>(
         evm_config: &EthEvmConfig,
-        mut db: CacheDB<EmptyDB>,
+        mut db: InMemoryDB,
         block: &SealedBlock<Block>,
         txs: Vec<Tx>,
     ) -> BlockAccessList
@@ -774,7 +769,7 @@ mod tests {
     /// (a) capture the composed BAL for the BAL-path input and (b) pull the bundle out after.
     fn run_serial_path(
         evm_config: &EthEvmConfig,
-        canonical_db: CacheDB<EmptyDB>,
+        canonical_db: InMemoryDB,
         block: &SealedBlock<Block>,
         txs: &[Recovered<TransactionSigned>],
     ) -> (ShadowOutput, BlockAccessList) {
@@ -818,7 +813,7 @@ mod tests {
     /// Shadow harness. Runs the block through both paths; asserts byte-equal outputs.
     fn assert_shadow_equal(
         evm_config: EthEvmConfig,
-        canonical_db_template: CacheDB<EmptyDB>,
+        canonical_db_template: InMemoryDB,
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
@@ -987,7 +982,7 @@ mod tests {
         tx1_gas_limit: u64,
         tx2_gas_limit: u64,
         fund_recipient: bool,
-    ) -> (CacheDB<EmptyDB>, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
+    ) -> (InMemoryDB, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
         let recipient = Address::repeat_byte(0xCA);
         let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
 
@@ -1030,7 +1025,7 @@ mod tests {
         tx_gas_limit: u64,
         bal_covers_first: bool,
     ) -> (
-        CacheDB<EmptyDB>,
+        InMemoryDB,
         BlockAccessList,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
@@ -1436,7 +1431,7 @@ mod tests {
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
 
-        let failing_make_db = || -> Result<CacheDB<EmptyDB>, BalExecutionError> {
+        let failing_make_db = || -> Result<InMemoryDB, BalExecutionError> {
             Err(reth_provider::ProviderError::BestBlockNotFound.into())
         };
 
