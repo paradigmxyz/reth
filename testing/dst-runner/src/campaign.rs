@@ -54,7 +54,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_exex_types::FinishedExExHeight;
 use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_payload_primitives::PayloadKind;
+use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::{
     providers::BlockchainProvider, AccountReader, BlockHashReader, BlockNumReader, BlockReader,
@@ -379,18 +379,22 @@ impl Node {
             branch,
             transaction_count,
             next_nonces,
+            interrupted: false,
         }
     }
 
-    async fn poll_build(&self, build: &PayloadBuild) -> Option<EthBuiltPayload> {
+    async fn poll_build(
+        &self,
+        build: &PayloadBuild,
+    ) -> Option<Result<EthBuiltPayload, PayloadBuilderError>> {
         let payload = self
             .payload_builder
             .resolve_kind(build.payload_id, PayloadKind::WaitForPending)
-            .await?
-            .unwrap();
-        self.pool.remove_transactions(build.transaction_hashes.clone());
-        assert_eq!(payload.block().body().transactions.len(), build.transaction_count);
-        assert!(payload.block().gas_used() >= 21_000 * build.transaction_count as u64);
+            .await?;
+        if let Ok(payload) = &payload {
+            assert_eq!(payload.block().body().transactions.len(), build.transaction_count);
+            assert!(payload.block().gas_used() >= 21_000 * build.transaction_count as u64);
+        }
         Some(payload)
     }
 
@@ -406,6 +410,8 @@ impl Node {
             self.begin_build(parent, parent_nonces, branch, inputs, include_withdrawal).await;
         loop {
             if let Some(payload) = self.poll_build(&build).await {
+                let payload = payload.expect("uninterrupted bootstrap payload build must succeed");
+                self.pool.remove_transactions(build.transaction_hashes.clone());
                 return (payload, build.next_nonces)
             }
             self.tasks.sleep(Duration::from_millis(1)).await;
@@ -726,7 +732,7 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = 0;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 13;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 14;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -900,6 +906,7 @@ struct PayloadBuild {
     branch: u8,
     transaction_count: usize,
     next_nonces: AccountNonces,
+    interrupted: bool,
 }
 
 struct StateRead {
@@ -1306,6 +1313,7 @@ impl CampaignModel {
             state.extend_from_slice(build.payload_id.0.as_slice());
             state.extend_from_slice(build.parent.as_slice());
             state.push(build.branch);
+            state.push(u8::from(build.interrupted));
             state.extend_from_slice(&(build.transaction_count as u64).to_be_bytes());
             for nonce in build.next_nonces {
                 state.extend_from_slice(&nonce.to_be_bytes());
@@ -1832,8 +1840,24 @@ async fn execute_action(
         }
         CampaignAction::PollPayloadBuild => {
             let build = model.payload_build.as_ref().expect("poll without an active payload build");
-            let Some(payload) = producer.poll_build(build).await else { return };
+            let Some(result) = producer.poll_build(build).await else {
+                assert!(build.interrupted, "active payload job vanished without forkchoice change");
+                producer.pool.remove_transactions(build.transaction_hashes.clone());
+                model.payload_build = None;
+                return
+            };
+            if build.interrupted {
+                assert!(
+                    result.is_ok() || matches!(result, Err(PayloadBuilderError::MissingPayload)),
+                    "interrupted payload build failed unexpectedly: {result:?}",
+                );
+                producer.pool.remove_transactions(build.transaction_hashes.clone());
+                model.payload_build = None;
+                return
+            }
+            let payload = result.expect("uninterrupted payload build must succeed");
             let build = model.payload_build.take().unwrap();
+            producer.pool.remove_transactions(build.transaction_hashes.clone());
             let parent = build.parent;
             model.blocks.get_mut(&parent).unwrap().children += 1;
             let hash = payload.block().hash();
@@ -1962,6 +1986,11 @@ async fn execute_action(
             assert!(producer.forkchoice(head).await.is_valid());
             model.canonical_head =
                 producer.provider.canonical_in_memory_state().get_canonical_head().hash();
+            if let Some(build) = &mut model.payload_build &&
+                build.parent != model.canonical_head
+            {
+                build.interrupted = true;
+            }
         }
         CampaignAction::BeginFollowerSync { head } => {
             assert!(model.follower_sync_target.is_none());

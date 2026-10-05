@@ -87,6 +87,10 @@ small storage-slot set produces overwrite, clear, and fork-divergent histories.
 Persistence threshold, state-masking window, and multiproof chunk size vary over their legal
 ranges by campaign seed and remain fixed across a node restart. Recovery uses the database tip
 observed at the crash boundary rather than assuming which blocks were durable.
+Forkchoice may move away from a parent while its payload build is pending. The campaign records
+that interruption and accepts a canceled or already completed build only after the observed head
+changed; an uninterrupted build must still resolve successfully. Interrupted builds discard their
+pending pool transactions before subsequent generation.
 
 The bounded developer profile runs four cases:
 
