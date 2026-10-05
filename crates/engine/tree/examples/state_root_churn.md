@@ -23,8 +23,11 @@ state_root_churn run /schelk/reth /path/outside-schelk/corpus.bin 30 1000 100 30
 ```
 
 Arguments after `run` are datadir, corpus, churn percent, measured blocks, warmup blocks, masking
-blocks, output directory, and optional arrival period in milliseconds (default 1000).
-The persistence threshold is masking blocks + 10, and the in-memory block buffer is five blocks.
+blocks, output directory, and optional arrival period in milliseconds (default 1000), persistence threshold (default masking + 10),
+and RocksDB cache GiB (default 12).
+The in-memory block buffer is five blocks. Reducing the persistence threshold limits the batch size
+without changing the minimum retention supplied by masking + buffer. This can reduce memory use
+and cleanup spikes while preserving the hot-pruning probability bound.
 As in the engine, persistence starts after the threshold is exceeded and only one save is in flight.
 The final drain advances both durable frontiers to the synthetic head and verifies the stored root.
 

@@ -67,7 +67,7 @@ struct Entry {
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    ensure!(args.len() >= 4, "sample DATADIR CORPUS COUNT | run DATADIR CORPUS CHURN BLOCKS WARMUP MASK OUTPUT [PERIOD_MS]");
+    ensure!(args.len() >= 4, "sample DATADIR CORPUS COUNT | run DATADIR CORPUS CHURN BLOCKS WARMUP MASK OUTPUT [PERIOD_MS [PERSISTENCE_THRESHOLD [CACHE_GIB]]]");
     if args[0] == "sample" {
         return sample_mainnet(&args[1], &args[2], args[3].parse()?);
     }
@@ -77,7 +77,12 @@ fn main() -> Result<()> {
     let warmup: usize = args[5].parse()?;
     let mask: u64 = args[6].parse()?;
     let period = Duration::from_millis(args.get(8).map_or(Ok(1000), |s| s.parse())?);
-    ensure!(churn <= 50 && mask > 0 && blocks > 0, "invalid experiment parameters");
+    let persistence_threshold = args.get(9).map_or(Ok(mask + 10), |s| s.parse())?;
+    let cache_gib: usize = args.get(10).map_or(Ok(12), |s| s.parse())?;
+    ensure!(
+        churn <= 50 && mask > 0 && blocks > 0 && persistence_threshold >= 5 && cache_gib > 0,
+        "invalid experiment parameters"
+    );
     std::fs::create_dir_all(&args[7])?;
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
@@ -105,6 +110,8 @@ fn main() -> Result<()> {
         blocks,
         warmup,
         mask,
+        persistence_threshold,
+        cache_gib,
         period,
         Path::new(&args[7]),
     );
@@ -292,6 +299,8 @@ fn run(
     blocks: usize,
     warmup: usize,
     mask: u64,
+    persistence_threshold: u64,
+    cache_gib: usize,
     period: Duration,
     output: &Path,
 ) -> Result<()> {
@@ -313,7 +322,7 @@ fn run(
     };
     let rocks = RocksDBProvider::builder(Path::new(datadir).join("rocksdb"))
         .with_default_tables()
-        .with_block_cache_size(12 << 30)
+        .with_block_cache_size(cache_gib << 30)
         .build()?;
     let factory = Factory::new(
         db,
@@ -536,7 +545,7 @@ fn run(
             }
         }
         // Engine threshold scheduling, with a five-block memory buffer and configurable masking.
-        if !saving && epoch - db_tip > mask + 10 {
+        if !saving && epoch - db_tip > persistence_threshold {
             let new_db = epoch - 5;
             let new_partial = new_db.saturating_sub(mask).max(partial);
             save_tx.send(SaveBlocksInput::new(
@@ -633,7 +642,7 @@ fn run(
         checked * 3
     );
     let mut summary = File::create(output.join("result.txt"))?;
-    writeln!(summary, "churn={churn}\nmask={mask}\npersistence_threshold={}\nblocks={blocks}\nwarmup={warmup}\nhot_accounts={HOT}\nhot_slots={}\nunique_hot_accounts_pruned={}\nunique_hot_slots_pruned={}\ndrain_secs={drain_secs}\nfinal_root={root}\nfinal_block={}\npersisted_root_verified=true\nverified_accounts={checked}\nfresh_trie_verified=true", mask+10, HOT*3, ever_evicted.len(), evicted_slots.len(), parent.number)?;
+    writeln!(summary, "churn={churn}\nmask={mask}\npersistence_threshold={persistence_threshold}\ncache_gib={cache_gib}\nblocks={blocks}\nwarmup={warmup}\nhot_accounts={HOT}\nhot_slots={}\nunique_hot_accounts_pruned={}\nunique_hot_slots_pruned={}\ndrain_secs={drain_secs}\nfinal_root={root}\nfinal_block={}\npersisted_root_verified=true\nverified_accounts={checked}\nfresh_trie_verified=true", HOT*3, ever_evicted.len(), evicted_slots.len(), parent.number)?;
     ensure!(ever_evicted.len() * 1000 < HOT, "premature hot account pruning exceeded 0.1%");
     ensure!(evicted_slots.len() * 1000 < HOT * 3, "premature hot slot pruning exceeded 0.1%");
     Ok(())
