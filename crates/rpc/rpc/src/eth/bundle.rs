@@ -335,7 +335,7 @@ pub enum EthBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthApiBuilder;
+    use crate::eth::core::EthApi;
     use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
@@ -391,7 +391,7 @@ mod tests {
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
 
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),

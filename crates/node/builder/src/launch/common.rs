@@ -37,7 +37,6 @@ use crate::{
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
-use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
@@ -86,7 +85,7 @@ use reth_stages::{
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::TaskExecutor;
+use reth_tasks::{pool::BlockingTaskPool, TaskExecutor};
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
@@ -237,7 +236,7 @@ impl LaunchContext {
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
         let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
-        if let Err(err) = ThreadPoolBuilder::new()
+        if let Err(err) = BlockingTaskPool::builder()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
             .build_global()
@@ -810,7 +809,7 @@ where
                 self.data_dir().pprof_dumps(),
             )
             .with_storage_settings_info(StorageSettingsInfo {
-                storage_v2: storage_settings.storage_v2,
+                storage_v2: storage_settings.is_v2(),
                 pruning_mode,
                 prune_config: serde_json::to_string(&prune_config)
                     .expect("serializing PruneConfig should not fail"),

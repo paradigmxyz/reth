@@ -254,7 +254,7 @@ impl PeersManager {
                 ),
                 kind: peer.kind,
                 fork_id: peer.fork_id.as_deref().copied(),
-                reputation: peer.reputation,
+                reputation: peer.reputation(),
             },
         )
     }
@@ -527,7 +527,7 @@ impl PeersManager {
         for peer in self.peers.iter_mut().filter(|(_, peer)| peer.state.is_connected()) {
             // update reputation via seconds connected, but keep the target _around_ the default
             // reputation.
-            if peer.1.reputation < DEFAULT_REPUTATION {
+            if peer.1.reputation() < DEFAULT_REPUTATION {
                 peer.1.reputation += secs_since_last_tick;
             }
         }
@@ -535,7 +535,7 @@ impl PeersManager {
 
     /// Returns the tracked reputation for a peer.
     pub(crate) fn get_reputation(&self, peer_id: &PeerId) -> Option<i32> {
-        self.peers.get(peer_id).map(|peer| peer.reputation)
+        self.peers.get(peer_id).map(|peer| peer.reputation())
     }
 
     /// Apply the corresponding reputation change to the given peer.
@@ -699,7 +699,7 @@ impl PeersManager {
                 return
             }
 
-            if peer.is_trusted() && is_connection_failed_reputation(peer.reputation) {
+            if peer.is_trusted() && is_connection_failed_reputation(peer.reputation()) {
                 // trigger resolution task for trusted peer since multiple connection failures
                 // occurred
                 self.trusted_peers_resolver.interval.reset_immediately();
@@ -778,7 +778,7 @@ impl PeersManager {
                 } else {
                     // If the error was not a backoff error, we reduce the peer's reputation
                     let reputation_change = self.reputation_weights.change(reputation_change);
-                    peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
+                    peer.reputation = peer.reputation().saturating_add(reputation_change.as_i32());
                 };
 
                 self.connection_info.decr_state(peer.state);
@@ -1099,7 +1099,7 @@ impl PeersManager {
             }
 
             // prefer higher reputation, break ties by fork_id presence
-            match maybe_better.1.reputation.cmp(&best_peer.1.reputation) {
+            match maybe_better.1.reputation().cmp(&best_peer.1.reputation()) {
                 std::cmp::Ordering::Greater => best_peer = maybe_better,
                 std::cmp::Ordering::Equal
                     if maybe_better.1.fork_id.is_some() && best_peer.1.fork_id.is_none() =>
@@ -3026,7 +3026,7 @@ mod tests {
 
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
-        assert!(peer.backed_off);
+        assert!(peer.is_backed_off());
 
         // Verify the peer is in the backed_off_peers set
         assert!(peers.backed_off_peers.contains_key(&peer_id));
@@ -3088,7 +3088,7 @@ mod tests {
 
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
-        assert!(peer.backed_off);
+        assert!(peer.is_backed_off());
         assert!(peers.backed_off_peers.contains_key(&peer_id));
 
         // Now simulate an incoming connection from the backed-off peer

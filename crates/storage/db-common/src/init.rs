@@ -271,13 +271,13 @@ where
     // not the genesis block number. This would cause increment_block(N) to fail.
     let static_file_provider = provider_rw.static_file_provider();
     if genesis_block_number > 0 {
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
                 .user_header_mut()
                 .set_expected_block_start(genesis_block_number);
         }
-        if genesis_storage_settings.storage_v2 {
+        if genesis_storage_settings.is_v2() {
             static_file_provider
                 .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
                 .user_header_mut()
@@ -316,7 +316,7 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
-    if genesis_storage_settings.storage_v2 {
+    if genesis_storage_settings.is_v2() {
         static_file_provider
             .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
             .user_header_mut()
@@ -688,7 +688,7 @@ where
         + NodePrimitivesProvider,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
-    if storage_settings.storage_v2 {
+    if storage_settings.is_v2() {
         return dump_state_v2(collector, provider_factory, block)
     }
 
@@ -1343,7 +1343,7 @@ mod tests {
 
         let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         let block = 10;
 
         dump_state(collector, &factory, block).unwrap();
@@ -1416,7 +1416,7 @@ mod tests {
 
         let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         let static_files = factory.static_file_provider();
 
         {
@@ -1642,7 +1642,7 @@ mod tests {
                 )
             };
 
-            let (accounts, storages) = if settings.storage_v2 {
+            let (accounts, storages) = if settings.is_v2() {
                 collect_rocksdb(&rocksdb)
             } else {
                 collect_from_mdbx(&factory)
@@ -1667,7 +1667,7 @@ mod tests {
     #[test]
     fn allow_same_storage_settings() {
         let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
-        let settings = StorageSettings::v2();
+        let settings = StorageSettings::base();
         init_genesis_with_settings(&factory, settings).unwrap();
 
         let result = init_genesis_with_settings(&factory, settings);

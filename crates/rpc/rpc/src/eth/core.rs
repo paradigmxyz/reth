@@ -548,7 +548,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{BlockId, BlockNumberOrTag};
     use alloy_network::TransactionBuilder;
@@ -608,7 +608,7 @@ mod tests {
     >(
         provider: P,
     ) -> FakeEthApi<P> {
-        EthApiBuilder::new(
+        EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -618,7 +618,7 @@ mod tests {
     }
 
     fn build_test_eth_api_with_gas_cap(provider: MockEthProvider, gas_cap: u64) -> FakeEthApi {
-        EthApiBuilder::new(
+        EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -784,7 +784,7 @@ mod tests {
             evm_memory_limit: 1 << 20,
             force_blob_sidecar_upcasting: true,
         };
-        let api = EthApiBuilder::new(
+        let api = EthApi::builder(
             MockEthProvider::default(),
             testing_pool(),
             NoopNetwork::default(),

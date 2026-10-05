@@ -960,7 +960,7 @@ where
         self.fork_tracker
             .max_initcode_size
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
-        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(evm_env.cfg_env());
         self.fork_tracker
             .tx_gas_limit_cap
             .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
@@ -1126,7 +1126,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .expect("latest header is not found");
         let evm_env =
             evm_config.evm_env(&tip).expect("evm_env should not fail for existing blocks");
-        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(evm_env.cfg_env());
 
         Self {
             block_gas_limit: tip.gas_limit().into(),
@@ -1808,7 +1808,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
         );
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
             .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
@@ -1832,7 +1832,7 @@ mod tests {
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
         );
-        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
@@ -1910,7 +1910,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
             .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
             .build(blob_store.clone());
 
@@ -1943,7 +1943,7 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+        let validator = TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
             .set_tx_fee_cap(100) // 100 wei cap
             .build(blob_store.clone());
 
@@ -1980,9 +1980,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .set_tx_fee_cap(0) // no cap
-            .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .set_tx_fee_cap(0) // no cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1998,9 +1999,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
-            .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -2016,9 +2018,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
-            .build(blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
+                .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         assert!(outcome.is_invalid());
@@ -2048,9 +2051,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .with_max_tx_gas_limit(None) // disabled
-            .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(None) // disabled
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -2066,9 +2070,10 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
-            .build(blob_store);
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
+                .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -2092,8 +2097,9 @@ mod tests {
         local_config: Option<LocalTransactionConfig>,
     ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction, EthEvmConfig> {
         let blob_store = InMemoryBlobStore::default();
-        let mut builder = EthTransactionValidatorBuilder::new(provider, test_evm_config())
-            .with_minimum_priority_fee(minimum_priority_fee);
+        let mut builder =
+            TransactionValidationTaskExecutor::eth_builder(provider, test_evm_config())
+                .with_minimum_priority_fee(minimum_priority_fee);
 
         if let Some(config) = local_config {
             builder = builder.with_local_transactions_config(config);
@@ -2398,9 +2404,11 @@ mod tests {
         );
 
         // Validate with balance check enabled
-        let validator =
-            EthTransactionValidatorBuilder::new(provider.clone(), EthEvmConfig::mainnet())
-                .build(InMemoryBlobStore::default());
+        let validator = TransactionValidationTaskExecutor::eth_builder(
+            provider.clone(),
+            EthEvmConfig::mainnet(),
+        )
+        .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
         let expected_cost = *transaction.cost();
@@ -2415,9 +2423,10 @@ mod tests {
         }
 
         // Validate with balance check disabled
-        let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
-            .disable_balance_check()
-            .build(InMemoryBlobStore::default());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider, EthEvmConfig::mainnet())
+                .disable_balance_check()
+                .build(InMemoryBlobStore::default());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
@@ -2426,7 +2435,7 @@ mod tests {
     #[test]
     fn block_gas_limit_from_latest_header() {
         let gas_limit = 60_000_000;
-        let validator = EthTransactionValidatorBuilder::new(
+        let validator = TransactionValidationTaskExecutor::eth_builder(
             mock_provider_with_gas_limit(gas_limit),
             test_evm_config(),
         )

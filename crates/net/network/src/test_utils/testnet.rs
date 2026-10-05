@@ -2,7 +2,7 @@
 
 use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
-    config::rng_secret_key,
+    config::{rng_secret_key, NetworkConfig},
     error::NetworkError,
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
@@ -12,7 +12,7 @@ use crate::{
         policy::NetworkPolicies,
         TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfigBuilder, NetworkHandle, NetworkManager, PeersConfig,
+    NetworkHandle, NetworkManager, PeersConfig,
 };
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
 use futures::{FutureExt, StreamExt};
@@ -570,7 +570,7 @@ impl<C> PeerConfig<C> {
         C: BlockNumReader + ChainSpecProvider<ChainSpec: Hardforks> + Clone + 'static,
     {
         let Self { client, secret_key, protocols, peers_config } = self;
-        let mut builder = NetworkConfigBuilder::new(secret_key, Runtime::test())
+        let mut builder = NetworkConfig::builder(secret_key, Runtime::test())
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_dns_discovery()

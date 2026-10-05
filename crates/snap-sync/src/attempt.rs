@@ -319,7 +319,7 @@ mod tests {
     fn factory() -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v2()).unwrap();
+        provider.write_storage_settings(StorageSettings::base()).unwrap();
         provider.commit().unwrap();
         insert_generation_headers(&factory);
         factory

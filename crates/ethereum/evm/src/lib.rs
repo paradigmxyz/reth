@@ -94,7 +94,7 @@ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
 impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
     pub fn mainnet() -> Self {
-        Self::ethereum(MAINNET.clone())
+        Self::new(MAINNET.clone())
     }
 }
 
@@ -432,7 +432,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create a custom configuration environment with a chain ID of 111
-        let cfg = CfgEnv::default().with_chain_id(111);
+        let cfg = CfgEnv::new().with_chain_id(111);
 
         let evm_env = EvmEnv { cfg_env: cfg.clone(), ..Default::default() };
 
@@ -503,7 +503,7 @@ mod tests {
         let evm_config = EthEvmConfig::mainnet();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let cfg_env = CfgEnv::default().with_chain_id(111);
+        let cfg_env = CfgEnv::new().with_chain_id(111);
         let block = BlockEnv::default();
         let evm_env = EvmEnv { cfg_env: cfg_env.clone(), block_env: block };
 

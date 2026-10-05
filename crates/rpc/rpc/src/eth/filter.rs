@@ -1439,7 +1439,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::EthApi, EthApiBuilder};
+    use crate::eth::EthApi;
     use alloy_network::Ethereum;
     use alloy_primitives::{Bloom, FixedBytes};
     use rand::Rng;
@@ -1494,7 +1494,7 @@ mod tests {
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
     > {
-        EthApiBuilder::new(
+        EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -2016,7 +2016,7 @@ mod tests {
             .inner
             .clone()
             .get_logs_in_block_range(
-                Filter::default(),
+                Filter::new(),
                 100,
                 102,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(2) },
@@ -2117,7 +2117,7 @@ mod tests {
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
 
         // Use default filter which will match any non-empty bloom
-        let filter = Filter::default();
+        let filter = Filter::new();
 
         // Get logs in the range - this will trigger the bloom filtering
         let logs = eth_filter
@@ -2155,7 +2155,7 @@ mod tests {
 
         let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
         let scan = eth_filter.inner.clone().get_logs_in_block_range(
-            Filter::default(),
+            Filter::new(),
             0,
             0,
             QueryLimits::default(),
@@ -2236,7 +2236,7 @@ mod tests {
         let logs = eth_filter
             .inner
             .clone()
-            .get_logs_in_block_range(Filter::default(), 0, 2_500, QueryLimits::default())
+            .get_logs_in_block_range(Filter::new(), 0, 2_500, QueryLimits::default())
             .await
             .unwrap();
         let blocks = logs.iter().map(|log| log.block_number.unwrap()).collect::<Vec<_>>();
@@ -2248,7 +2248,7 @@ mod tests {
             .inner
             .clone()
             .get_logs_in_block_range(
-                Filter::default(),
+                Filter::new(),
                 0,
                 2_500,
                 QueryLimits { max_blocks_per_filter: None, max_logs_per_response: Some(1) },

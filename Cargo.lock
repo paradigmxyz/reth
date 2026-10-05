@@ -9543,7 +9543,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "parking_lot",
- "rayon",
  "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",

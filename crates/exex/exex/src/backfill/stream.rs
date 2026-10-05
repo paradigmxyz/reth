@@ -278,7 +278,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -315,7 +315,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -418,7 +418,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthEvmConfig::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::new(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;

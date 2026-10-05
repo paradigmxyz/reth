@@ -1753,7 +1753,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{test_utils::MockEthProvider, Chain, ExecutionOutcome};
-    use reth_rpc::EthApiBuilder;
+    use reth_rpc::EthApi;
     use reth_rpc_eth_types::EthStateCacheConfig;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
@@ -1785,7 +1785,7 @@ mod tests {
                     block
                 })
                 .collect();
-            let api = EthApiBuilder::new(
+            let api = EthApi::builder(
                 provider,
                 NoopTransactionPool::default(),
                 NoopNetwork::default(),

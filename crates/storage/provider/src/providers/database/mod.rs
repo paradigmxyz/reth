@@ -1238,7 +1238,7 @@ mod tests {
     fn snap_sync_requires_the_hashed_state_layout() {
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         assert!(factory.database_provider_ro().unwrap().ensure_snap_sync_layout().is_ok());
 
         factory.set_storage_settings_cache(StorageSettings::v1());
@@ -1251,7 +1251,7 @@ mod tests {
     #[test]
     fn anchored_static_files_resume_after_the_pivot() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         let provider = factory.database_provider_rw().unwrap();
         provider.anchor_pruned_static_files(10).unwrap();
         provider.commit().unwrap();
@@ -1265,7 +1265,7 @@ mod tests {
     #[test]
     fn anchored_static_files_expire_history_below_the_pivot() {
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
         let provider = factory.database_provider_rw().unwrap();
         provider.anchor_pruned_static_files(10).unwrap();
         provider.commit().unwrap();
@@ -1298,7 +1298,7 @@ mod tests {
     fn rejected_unwind_below_the_anchor_leaves_the_database_untouched() {
         for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
             let factory = create_test_provider_factory();
-            factory.set_storage_settings_cache(StorageSettings::v2());
+            factory.set_storage_settings_cache(StorageSettings::base());
             let provider = factory.database_provider_rw().unwrap();
             provider.anchor_pruned_static_files(10).unwrap();
             provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(10)).unwrap();

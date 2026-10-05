@@ -608,7 +608,7 @@ mod tests {
         let segment = TransactionLookup::new(prune_mode);
 
         // Enable RocksDB storage for transaction hash numbers
-        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db.factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = db.factory.database_provider_rw().unwrap();
         let result = segment.prune(&provider, input).unwrap();
@@ -692,7 +692,7 @@ mod tests {
         }
 
         // Enable RocksDB storage for transaction hash numbers
-        db.factory.set_storage_settings_cache(StorageSettings::v2());
+        db.factory.set_storage_settings_cache(StorageSettings::base());
 
         let to_block: BlockNumber = 6;
         let prune_mode = PruneMode::Before(to_block);

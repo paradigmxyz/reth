@@ -557,7 +557,7 @@ mod tests {
 
         let loaded_nippy = NippyJar::load_without_header(file_path.path()).unwrap();
         assert_eq!(nippy.version, loaded_nippy.version);
-        assert_eq!(nippy.columns, loaded_nippy.columns);
+        assert_eq!(nippy.columns(), loaded_nippy.columns());
         assert_eq!(nippy.filter, loaded_nippy.filter);
         assert_eq!(nippy.phf, loaded_nippy.phf);
         assert_eq!(nippy.max_row_size, loaded_nippy.max_row_size);
@@ -840,7 +840,7 @@ mod tests {
             simulate_interrupted_prune(num_columns, file_path.path(), num_rows, missing_offsets);
 
             let nippy = NippyJar::load_without_header(file_path.path()).unwrap();
-            assert_eq!(nippy.rows, expected_rows);
+            assert_eq!(nippy.rows(), expected_rows);
         }
     }
 

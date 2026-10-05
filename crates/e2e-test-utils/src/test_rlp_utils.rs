@@ -146,7 +146,7 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock<Block>], path: &Path) -> std::i
 
     for (i, block) in blocks.iter().enumerate() {
         // Convert SealedBlock to Block before encoding
-        let block_for_encoding = block.clone().unseal();
+        let block_for_encoding = block.clone().into_block();
 
         let mut buf = Vec::new();
         block_for_encoding.encode(&mut buf);

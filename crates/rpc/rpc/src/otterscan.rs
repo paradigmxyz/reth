@@ -478,6 +478,7 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
 mod tests {
 
     use super::*;
+    use crate::eth::core::EthApi;
     use alloy_consensus::{constants::ETH_TO_WEI, Header};
     use alloy_primitives::{bytes, TxKind};
     use alloy_rpc_types_trace::parity::TransactionTrace;
@@ -604,7 +605,7 @@ mod tests {
             provider.add_block(hash, block.clone());
             provider.add_receipts(number, vec![]);
             let api = OtterscanApi::new(
-                crate::eth::EthApiBuilder::new(
+                EthApi::builder(
                     provider,
                     testing_pool(),
                     NoopNetwork::default(),
@@ -643,7 +644,7 @@ mod tests {
         provider.add_block(hash, block.clone());
         provider.add_receipts(126, vec![]);
         let api = OtterscanApi::new(
-            crate::eth::EthApiBuilder::new(
+            EthApi::builder(
                 provider,
                 testing_pool(),
                 NoopNetwork::default(),
@@ -666,7 +667,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_transactions_and_unimplemented_history_remain_distinct() {
         let api = OtterscanApi::new(
-            crate::eth::EthApiBuilder::new(
+            EthApi::builder(
                 MockEthProvider::default(),
                 testing_pool(),
                 NoopNetwork::default(),
@@ -713,7 +714,7 @@ mod tests {
         use std::time::Duration;
 
         let api = OtterscanApi::new(
-            crate::eth::EthApiBuilder::new(
+            EthApi::builder(
                 MockEthProvider::default(),
                 testing_pool(),
                 NoopNetwork::default(),
@@ -740,7 +741,7 @@ mod tests {
     #[tokio::test]
     async fn execution_fees_use_full_u256_width() {
         let api = OtterscanApi::new(
-            crate::eth::EthApiBuilder::new(
+            EthApi::builder(
                 MockEthProvider::default(),
                 testing_pool(),
                 NoopNetwork::default(),

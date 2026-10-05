@@ -1275,7 +1275,7 @@ mod tests {
             0,
             generators::BlockParams { tx_count: Some(0), ..Default::default() },
         )
-        .unseal();
+        .into_block();
         genesis.header.timestamp = 0;
         let genesis = genesis.seal_slow();
 
@@ -1288,7 +1288,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .unseal();
+        .into_block();
         block_1.header.timestamp = 10;
         let block_1 = block_1.seal_slow();
 
@@ -1301,7 +1301,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .unseal();
+        .into_block();
         block_2.header.timestamp = 20;
         let block_2 = block_2.seal_slow();
 
@@ -1477,7 +1477,7 @@ mod tests {
         // but no receipt data is written.
 
         let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         // Setup with block 1
         let provider_rw = factory.database_provider_rw().unwrap();

@@ -93,7 +93,7 @@ impl Command {
         // Update the setting based on the key
         match cmd {
             SetCommand::V2 { value } => {
-                if settings.storage_v2 == value {
+                if settings.is_v2() == value {
                     println!("storage_v2 is already set to {}", value);
                     return Ok(());
                 }

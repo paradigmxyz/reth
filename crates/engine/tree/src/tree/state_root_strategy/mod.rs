@@ -661,7 +661,7 @@ impl DefaultStateRootStrategy {
                 );
                 let default_trie =
                     RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-                SparseStateTrie::default()
+                SparseStateTrie::new()
                     .with_accounts_trie(default_trie.clone())
                     .with_default_storage_trie(default_trie)
                     .with_updates(true)
@@ -1506,13 +1506,13 @@ mod tests {
                 .unwrap();
             let next_hash = B256::with_last_byte(2);
             overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
-                SparseStateTrie::default(),
+                SparseStateTrie::new(),
                 next_hash,
                 block_hash,
             ));
 
             if completed {
-                completer.send(SparseStateTrie::default()).unwrap();
+                completer.send(SparseStateTrie::new()).unwrap();
                 drop(pending_trie_rx);
             } else {
                 drop(pending_trie_rx);
@@ -1760,7 +1760,7 @@ mod tests {
 
                 let storage_updates = update.iter().map(|(address, account)| {
                     let storage_entries = account.storage.iter().map(|(slot, value)| {
-                        StorageEntry { key: B256::from(*slot), value: value.present_value }
+                        StorageEntry { key: B256::from(*slot), value: value.present_value() }
                     });
                     (*address, storage_entries)
                 });
@@ -1776,7 +1776,7 @@ mod tests {
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
-                    .map(|(key, value)| (B256::from(*key), value.present_value))
+                    .map(|(key, value)| (B256::from(*key), value.present_value()))
                     .collect();
                 let entry = accumulated_state.entry(*address).or_default();
                 entry.0 = Account::from_revm_account(account);

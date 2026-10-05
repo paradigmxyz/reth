@@ -756,7 +756,7 @@ mod tests {
         let segment = StorageHistory::new(prune_mode);
 
         let provider = db.factory.database_provider_rw().unwrap();
-        provider.set_storage_settings_cache(StorageSettings::v2());
+        provider.set_storage_settings_cache(StorageSettings::base());
         let result = segment.prune(&provider, input).unwrap();
         provider.commit().expect("commit");
 
@@ -861,7 +861,7 @@ mod tests {
             };
 
             let provider = db.factory.database_provider_rw().unwrap();
-            provider.set_storage_settings_cache(StorageSettings::v2());
+            provider.set_storage_settings_cache(StorageSettings::base());
             let result = segment.prune(&provider, input).unwrap();
             segment
                 .save_checkpoint(

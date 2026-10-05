@@ -422,7 +422,7 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars 
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives_traits::{Block as _, RecoveredBlock};
+    use reth_primitives_traits::Block as _;
 
     #[test]
     fn into_execution_data_preserves_requests() {
@@ -434,7 +434,7 @@ mod tests {
         block.header.requests_hash = Some(requests.requests_hash());
 
         let payload = EthBuiltPayload::new(
-            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
+            Arc::new(block.seal_slow().with_senders(vec![])),
             U256::ZERO,
             Some(requests.clone()),
             None,
@@ -458,7 +458,7 @@ mod tests {
         block.header.block_access_list_hash = Some(B256::ZERO);
 
         let payload = EthBuiltPayload::new(
-            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
+            Arc::new(block.seal_slow().with_senders(vec![])),
             U256::ZERO,
             None,
             Some(block_access_list.clone()),

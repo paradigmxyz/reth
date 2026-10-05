@@ -1071,7 +1071,7 @@ mod tests {
             writer.commit().unwrap();
         }
 
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -1104,7 +1104,7 @@ mod tests {
 
         for transaction_senders_in_static_files in [false, true] {
             factory.set_storage_settings_cache(if transaction_senders_in_static_files {
-                StorageSettings::v2()
+                StorageSettings::base()
             } else {
                 StorageSettings::v1()
             });
@@ -1143,8 +1143,7 @@ mod tests {
 mod rocksdb_tests {
     use super::*;
     use crate::{
-        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
-        test_utils::create_test_provider_factory,
+        providers::rocksdb::RocksDBProvider, test_utils::create_test_provider_factory,
         RocksDBProviderFactory,
     };
     use alloy_primitives::{Address, B256};
@@ -1160,7 +1159,7 @@ mod rocksdb_tests {
 
     fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::AccountsHistory>()
@@ -1177,7 +1176,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let hash1 = B256::repeat_byte(1u8);
         let hash2 = B256::repeat_byte(2u8);
@@ -1219,7 +1218,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let hash = B256::repeat_byte(1u8);
         let tx_num = 100u64;
@@ -1767,7 +1766,7 @@ mod rocksdb_tests {
         let factory = create_test_provider_factory();
 
         // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let hash1 = B256::repeat_byte(1u8);
         let hash2 = B256::repeat_byte(2u8);
@@ -1825,7 +1824,7 @@ mod rocksdb_tests {
     fn test_settings_mismatch_panics() {
         let factory = create_test_provider_factory();
 
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.set_storage_settings_cache(StorageSettings::base());
 
         let provider = factory.database_provider_ro().unwrap();
         let _ = EitherReader::<(), ()>::new_accounts_history(&provider, None);

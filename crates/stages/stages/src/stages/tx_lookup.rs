@@ -614,7 +614,7 @@ mod tests {
             let runner = TransactionLookupTestRunner::default();
 
             // Enable RocksDB for transaction hash numbers
-            runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
+            runner.db.factory.set_storage_settings_cache(StorageSettings::base());
 
             let input = ExecInput {
                 target: Some(previous_stage),
@@ -680,7 +680,7 @@ mod tests {
             let runner = TransactionLookupTestRunner::default();
 
             // Enable RocksDB for transaction hash numbers
-            runner.db.factory.set_storage_settings_cache(StorageSettings::v2());
+            runner.db.factory.set_storage_settings_cache(StorageSettings::base());
 
             // Insert blocks with transactions
             let blocks = random_block_range(

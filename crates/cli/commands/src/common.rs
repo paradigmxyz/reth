@@ -80,7 +80,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// metadata (checked during genesis init).
     pub fn storage_settings(&self) -> StorageSettings {
         if self.storage.v2 {
-            StorageSettings::v2()
+            StorageSettings::base()
         } else {
             StorageSettings::v1()
         }

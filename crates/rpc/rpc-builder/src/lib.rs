@@ -21,7 +21,7 @@
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
-use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_provider::{builder, fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -275,7 +275,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
             RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
     {
-        EthApiBuilder::new(
+        EthApi::builder(
             self.provider.clone(),
             self.pool.clone(),
             self.network.clone(),
@@ -2328,9 +2328,8 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.http_url()?;
-        let provider = ProviderBuilder::default()
-            .with_recommended_fillers()
-            .connect_http(rpc_url.parse().expect("valid url"));
+        let provider =
+            builder().with_recommended_fillers().connect_http(rpc_url.parse().expect("valid url"));
         Some(provider)
     }
 
@@ -2368,7 +2367,7 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.ws_url()?;
-        let provider = ProviderBuilder::default()
+        let provider = builder()
             .with_recommended_fillers()
             .connect(&rpc_url)
             .await
@@ -2394,7 +2393,7 @@ impl RpcServerHandle {
         N: RecommendedFillers<RecommendedFillers: Unpin>,
     {
         let rpc_url = self.ipc_endpoint()?;
-        let provider = ProviderBuilder::default()
+        let provider = builder()
             .with_recommended_fillers()
             .connect(&rpc_url)
             .await

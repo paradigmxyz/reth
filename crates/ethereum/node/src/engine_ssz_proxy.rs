@@ -1258,6 +1258,7 @@ mod tests {
         PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
         PayloadAttributesShanghai,
     };
+    use reth_chainspec::ChainSpec;
     use ssz::Encode;
 
     #[tokio::test]
@@ -1503,8 +1504,8 @@ mod tests {
 
     #[test]
     fn payload_bodies_are_filtered_at_fork_boundaries() {
-        use reth_chainspec::{ChainSpecBuilder, ForkCondition};
-        let chain_spec = ChainSpecBuilder::default()
+        use reth_chainspec::ForkCondition;
+        let chain_spec = ChainSpec::builder()
             .chain(1.into())
             .genesis(Default::default())
             .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(10))

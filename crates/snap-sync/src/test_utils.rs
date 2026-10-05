@@ -123,10 +123,10 @@ pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesW
 pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let factory = create_test_provider_factory();
     let provider = factory.database_provider_rw().unwrap();
-    provider.write_storage_settings(StorageSettings::v2()).unwrap();
+    provider.write_storage_settings(StorageSettings::base()).unwrap();
     provider.commit().unwrap();
     // Writers consult the cache, not the table.
-    factory.set_storage_settings_cache(StorageSettings::v2());
+    factory.set_storage_settings_cache(StorageSettings::base());
     factory
 }
 

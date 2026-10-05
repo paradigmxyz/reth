@@ -816,7 +816,7 @@ impl DatabaseMetrics for RocksDBProvider {
 impl RocksDBProvider {
     /// Creates a new `RocksDB` provider.
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        RocksDBBuilder::new(path).build()
+        Self::builder(path).build()
     }
 
     /// Creates a new `RocksDB` provider builder.
@@ -1427,7 +1427,7 @@ impl RocksDBProvider {
         ctx: RocksDBWriteCtx,
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
-        if !ctx.storage_settings.storage_v2 {
+        if !ctx.storage_settings.is_v2() {
             return Ok(());
         }
 
@@ -1436,9 +1436,9 @@ impl RocksDBProvider {
         let mut r_storage_history = None;
 
         let write_tx_hash =
-            ctx.storage_settings.storage_v2 && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
-        let write_account_history = ctx.storage_settings.storage_v2;
-        let write_storage_history = ctx.storage_settings.storage_v2;
+            ctx.storage_settings.is_v2() && ctx.prune_tx_lookup.is_none_or(|m| !m.is_full());
+        let write_account_history = ctx.storage_settings.is_v2();
+        let write_storage_history = ctx.storage_settings.is_v2();
 
         // Propagate tracing context into rayon-spawned threads so that RocksDB
         // write spans appear as children of write_blocks_data in traces.
@@ -3202,7 +3202,8 @@ mod tests {
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider =
+            RocksDBProvider::builder(temp_dir.path()).with_default_tables().build().unwrap();
         let bal_key =
             reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
@@ -3235,7 +3236,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let value = b"test_value".to_vec();
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = RocksDBProvider::builder(temp_dir.path())
             .with_default_tables()
             .with_table::<TestTable>()
             .build()
@@ -3243,7 +3244,8 @@ mod tests {
         provider.put::<TestTable>(42, &value).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider =
+            RocksDBProvider::builder(temp_dir.path()).with_default_tables().build().unwrap();
         assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(value));
     }
 
@@ -3258,7 +3260,8 @@ mod tests {
                 1
         ]));
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider =
+            RocksDBProvider::builder(temp_dir.path()).with_default_tables().build().unwrap();
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider
             .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
@@ -3266,7 +3269,7 @@ mod tests {
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
+        let provider = RocksDBProvider::builder(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -3706,11 +3709,11 @@ mod tests {
 
         // Write data with a read-write provider
         let rw_provider =
-            RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            RocksDBProvider::builder(temp_dir.path()).with_default_tables().build().unwrap();
         rw_provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
 
         // Open read-only provider — it sees the initial data.
-        let ro_provider = RocksDBBuilder::new(temp_dir.path())
+        let ro_provider = RocksDBProvider::builder(temp_dir.path())
             .with_default_tables()
             .with_read_only(true)
             .build()

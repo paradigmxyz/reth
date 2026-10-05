@@ -291,7 +291,7 @@ where
         self.eth_api()
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
-                OpcodeGasInspector::default(),
+                OpcodeGasInspector::new(),
                 move |_tx_info, inspector, _res, _| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_hash,
@@ -872,7 +872,7 @@ pub struct BlockStorageAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthApiBuilder;
+    use crate::eth::core::EthApi;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
     use alloy_primitives::bytes;
@@ -903,7 +903,7 @@ mod tests {
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -937,7 +937,7 @@ mod tests {
             let header = Header { number, gas_limit: 30_000_000, ..Default::default() };
             provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
         }
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -973,7 +973,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_get_selects_tree_paths() {
-        use crate::EthApiBuilder;
         use alloy_consensus::{Header, TxLegacy};
         use alloy_primitives::{Signature, TxKind};
         use reth_chain_state::CanonStateNotification;
@@ -1019,7 +1018,7 @@ mod tests {
         };
         let block_hash = block.header.hash_slow();
         provider.add_block(block_hash, block.clone());
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -1072,14 +1071,13 @@ mod tests {
 
     #[tokio::test]
     async fn replay_missing_transaction_returns_null() {
-        use crate::EthApiBuilder;
         use reth_evm_ethereum::EthEvmConfig;
         use reth_network_api::noop::NoopNetwork;
         use reth_provider::test_utils::MockEthProvider;
         use reth_transaction_pool::test_utils::testing_pool;
 
         let provider = MockEthProvider::default();
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -1103,7 +1101,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_transaction_includes_transaction_hash() {
-        use crate::EthApiBuilder;
         use alloy_consensus::{Header, TxLegacy};
         use alloy_primitives::{Signature, TxKind};
         use reth_chain_state::CanonStateNotification;
@@ -1139,7 +1136,7 @@ mod tests {
         };
         let block_hash = block.header.hash_slow();
         provider.add_block(block_hash, block.clone());
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -1206,7 +1203,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider::new(factory).unwrap();
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
@@ -1276,7 +1273,6 @@ mod tests {
 
     #[tokio::test]
     async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
-        use crate::EthApiBuilder;
         use alloy_consensus::{Header, TxLegacy};
         use alloy_primitives::{Signature, TxKind};
         use reth_chain_state::CanonStateNotification;
@@ -1334,7 +1330,7 @@ mod tests {
             block.body.transactions.iter().map(|tx| tx.recover_signer().unwrap()).collect();
         provider.add_block(block_hash, block.clone());
         let recovered = RecoveredBlock::new_unhashed(block, senders);
-        let eth_api = EthApiBuilder::new(
+        let eth_api = EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),

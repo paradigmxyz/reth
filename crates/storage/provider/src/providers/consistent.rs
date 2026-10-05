@@ -1594,10 +1594,7 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                last_in_mem_block.clone(),
-                Default::default(),
-            )),
+            recovered_block: Arc::new(last_in_mem_block.clone().with_senders(Default::default())),
             ..Default::default()
         });
 
@@ -1882,14 +1879,14 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let outcome = provider.get_state(1)?.expect("should return execution outcome");
 
-        let state = &outcome.bundle.state;
+        let state = outcome.bundle.state();
         let account_state = state.get(&address).expect("should have account in bundle state");
         let storage = &account_state.storage;
 
         let storage_slot = storage.get(&slot).expect("should have the slot in storage");
 
         assert_eq!(
-            storage_slot.present_value,
+            storage_slot.present_value(),
             U256::from(100),
             "present_value should be 100 (the actual value in PlainStorageState)"
         );

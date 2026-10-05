@@ -3,13 +3,14 @@
 #![allow(dead_code)]
 
 use crate::{
+    config::NetworkConfig,
     transactions::{
         announcement::{AnnouncedTransaction, TransactionMetadata},
         constants::tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         fetcher::TransactionFetcher,
         PeerMetadata, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfigBuilder, NetworkManager,
+    NetworkManager,
 };
 use alloy_primitives::TxHash;
 use reth_eth_wire::EthVersion;
@@ -36,7 +37,7 @@ pub async fn new_tx_manager_with_config(
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 
-    let config = NetworkConfigBuilder::new(secret_key, Runtime::test())
+    let config = NetworkConfig::builder(secret_key, Runtime::test())
         // let OS choose port
         .listener_port(0)
         .disable_discovery()

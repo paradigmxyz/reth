@@ -47,7 +47,7 @@ where
 
     let span_builder = SpanExporter::builder();
 
-    let span_exporter = match otlp_config.protocol {
+    let span_exporter = match otlp_config.protocol() {
         OtlpProtocol::Http => {
             span_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
         }
@@ -56,7 +56,7 @@ where
         }
     };
 
-    let sampler = build_sampler(otlp_config.sample_ratio)?;
+    let sampler = build_sampler(otlp_config.sample_ratio())?;
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
@@ -96,7 +96,7 @@ pub fn log_layer(
 
     let log_builder = LogExporter::builder();
 
-    let log_exporter = match otlp_config.protocol {
+    let log_exporter = match otlp_config.protocol() {
         OtlpProtocol::Http => {
             log_builder.with_http().with_endpoint(otlp_config.endpoint.as_str()).build()?
         }

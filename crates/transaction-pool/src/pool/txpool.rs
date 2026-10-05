@@ -971,7 +971,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         let mut count = 0;
         for id in txs_by_sender {
-            if id == &transaction.transaction_id {
+            if id == transaction.id() {
                 // Transaction replacement is supported
                 return Ok(())
             }
@@ -1612,7 +1612,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
             // sender-local; only transactions from changed accounts can require updates.
             for sender in changed_accounts.keys() {
-                let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
+                let range = sender.into_transaction_id(0)..=sender.into_transaction_id(u64::MAX);
                 Self::update_txs(
                     pending_fees,
                     changed_accounts,
@@ -1874,7 +1874,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         tx_hash: &B256,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
-        let internal = self.txs.remove(&tx.transaction_id)?;
+        let internal = self.txs.remove(tx.id())?;
         self.remove_auths(&internal);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
@@ -2227,7 +2227,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let mut updates = std::mem::take(&mut self.update_buffer);
 
         // The next transaction of this sender
-        let on_chain_id = TransactionId::new(transaction.sender_id(), on_chain_nonce);
+        let on_chain_id = transaction.sender_id().into_transaction_id(on_chain_nonce);
         let pending_fees = self.pending_fees;
         {
             // Tracks the next nonce we expect if the transactions are gapless
@@ -2532,7 +2532,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(valid_tx.id()).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
@@ -2553,7 +2553,7 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let _ = pool.txs.get(valid_tx.id()).unwrap();
     }
 
     #[test]
@@ -2574,8 +2574,8 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
-        pool.remove_transaction(&valid_tx.transaction_id);
+        let _ = pool.txs.get(valid_tx.id()).unwrap();
+        pool.remove_transaction(valid_tx.id());
 
         pool.pending_fees.blob_fee = tx.max_fee_per_blob_gas().unwrap();
         let InsertOk { state, .. } =
@@ -2910,7 +2910,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BALANCE));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(valid_tx.id()).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
