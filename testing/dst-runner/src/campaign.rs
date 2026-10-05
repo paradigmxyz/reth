@@ -14,7 +14,10 @@ use crate::{
 use abi_fuzz::{generators::RandomGenerator, Generator as AbiGenerator};
 use alloy_consensus::{BlockHeader as _, SignableTransaction, TxEip1559, TxEip2930, TxLegacy};
 use alloy_dyn_abi::{DynSolType, DynSolValue};
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{
+    eip2930::{AccessList, AccessListItem},
+    eip4895::Withdrawal,
+};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{keccak256, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState, PayloadId, PayloadStatus};
@@ -25,7 +28,7 @@ use commonware_runtime::{
 };
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, PreservedSparseTrie};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_db_common::init::init_genesis_with_settings;
 use reth_dst::{
@@ -39,9 +42,8 @@ use reth_engine_tree::{
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler, FromEngine},
     persistence::{PersistenceError, PersistenceHandle},
     tree::{
-        payload_processor, BasicEngineValidator, EngineApiTreeHandler, TreeConfig,
-        TxPoolPrewarmCacheSnapshot, TxPoolPrewarmSource, TxPoolPrewarmTransaction,
-        TxPoolPrewarmTransactions,
+        BasicEngineValidator, EngineApiTreeHandler, TreeConfig, TxPoolPrewarmCacheSnapshot,
+        TxPoolPrewarmSource, TxPoolPrewarmTransaction, TxPoolPrewarmTransactions,
     },
 };
 use reth_eth_wire::simulation::LinkConfig;
@@ -53,7 +55,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_exex_types::FinishedExExHeight;
 use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_payload_primitives::PayloadKind;
+use reth_payload_primitives::{PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::{
     providers::BlockchainProvider, AccountReader, BlockHashReader, BlockNumReader, BlockReader,
@@ -61,6 +63,7 @@ use reth_provider::{
     StorageSettings,
 };
 use reth_prune::Pruner;
+use reth_storage_api::ReceiptProvider;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{TaskHandle, TaskRuntime};
 use reth_transaction_pool::{
@@ -105,6 +108,7 @@ struct Node {
     persistence: TaskHandle<Result<(), PersistenceError>>,
     peer: WirePeer,
     storage: StorageProbe,
+    require_sparse_trie: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -285,6 +289,7 @@ impl Node {
             persistence: persistence_task,
             peer,
             storage,
+            require_sparse_trie: !campaign_config.native_workers,
         }
     }
 
@@ -318,32 +323,43 @@ impl Node {
         // Let the persistent worker publish actual state reads before the payload-build lease
         // pauses it. A snapshot contains parent state, never speculative execution writes.
         assert!(self.forkchoice(parent.hash()).await.is_valid());
-        let deadline = self.tasks.now() + Duration::from_secs(1);
-        loop {
-            if let Some(snapshot) = (self.txpool_snapshot)(parent.hash()) {
-                let all_senders_warm = expected_parent_nonces.iter().all(|(sender, nonce)| {
-                    snapshot.account(sender).is_some_and(|account| {
-                        account.is_some_and(|account| account.nonce == *nonce)
-                    })
-                });
-                if all_senders_warm {
-                    break
+        if !expected_parent_nonces.is_empty() {
+            let deadline = self.tasks.now() + Duration::from_secs(1);
+            loop {
+                if let Some(snapshot) = (self.txpool_snapshot)(parent.hash()) {
+                    let all_senders_warm = expected_parent_nonces.iter().all(|(sender, nonce)| {
+                        snapshot.account(sender).is_some_and(|account| {
+                            account.is_some_and(|account| account.nonce == *nonce)
+                        })
+                    });
+                    if all_senders_warm {
+                        break
+                    }
                 }
+                assert!(
+                    self.tasks.now() < deadline,
+                    "txpool prewarming did not publish a snapshot"
+                );
+                self.tasks.sleep(Duration::from_millis(1)).await;
             }
-            assert!(self.tasks.now() < deadline, "txpool prewarming did not publish a snapshot");
-            self.tasks.sleep(Duration::from_millis(1)).await;
         }
         let attributes = EthPayloadAttributes {
             timestamp: parent.timestamp + 12 + u64::from(branch),
             prev_randao: B256::repeat_byte(branch),
             suggested_fee_recipient: Address::repeat_byte(branch + 1),
-            withdrawals: Some(vec![]),
+            withdrawals: Some(vec![Withdrawal {
+                index: parent.number + 1,
+                validator_index: u64::from(branch),
+                address: workload_addresses()[branch as usize % WORKLOAD_ACCOUNT_COUNT],
+                amount: 1 + u64::from(branch),
+            }]),
             parent_beacon_block_root: Some(B256::repeat_byte(branch)),
             ..Default::default()
         };
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: parent.hash(),
                     safe_block_hash: B256::ZERO,
@@ -365,16 +381,24 @@ impl Node {
         }
     }
 
-    async fn poll_build(&self, build: &PayloadBuild) -> Option<EthBuiltPayload> {
-        let payload = self
-            .payload_builder
-            .resolve_kind(build.payload_id, PayloadKind::WaitForPending)
-            .await?
-            .unwrap();
+    async fn poll_build(&self, build: &PayloadBuild) -> PayloadBuildPoll {
+        let Some(result) =
+            self.payload_builder.resolve_kind(build.payload_id, PayloadKind::WaitForPending).await
+        else {
+            return PayloadBuildPoll::Pending;
+        };
+        let payload = match result {
+            Ok(payload) => payload,
+            Err(PayloadBuilderError::MissingPayload) => {
+                self.pool.remove_transactions(build.transaction_hashes.clone());
+                return PayloadBuildPoll::Canceled;
+            }
+            Err(error) => panic!("payload build failed unexpectedly: {error}"),
+        };
         self.pool.remove_transactions(build.transaction_hashes.clone());
         assert_eq!(payload.block().body().transactions.len(), build.transaction_count);
         assert!(payload.block().gas_used() >= 21_000 * build.transaction_count as u64);
-        Some(payload)
+        PayloadBuildPoll::Ready(payload)
     }
 
     async fn build(
@@ -386,8 +410,10 @@ impl Node {
     ) -> (EthBuiltPayload, AccountNonces) {
         let build = self.begin_build(parent, parent_nonces, branch, transaction_count).await;
         loop {
-            if let Some(payload) = self.poll_build(&build).await {
-                return (payload, build.next_nonces)
+            match self.poll_build(&build).await {
+                PayloadBuildPoll::Ready(payload) => return (payload, build.next_nonces),
+                PayloadBuildPoll::Canceled => panic!("restarted payload build was canceled"),
+                PayloadBuildPoll::Pending => {}
             }
             self.tasks.sleep(Duration::from_millis(1)).await;
         }
@@ -395,7 +421,9 @@ impl Node {
 
     async fn new_payload(&self, payload: ExecutionData) -> PayloadStatus {
         let (tx, rx) = oneshot::channel();
-        self.input.send(BeaconEngineMessage::NewPayload { payload, tx }).unwrap();
+        self.input
+            .send(BeaconEngineMessage::NewPayload { cause: tracing::Span::none(), payload, tx })
+            .unwrap();
         rx.await.unwrap().unwrap()
     }
 
@@ -407,6 +435,7 @@ impl Node {
         let (tx, rx) = oneshot::channel();
         self.input
             .send(BeaconEngineMessage::ForkchoiceUpdated {
+                cause: tracing::Span::none(),
                 state: ForkchoiceState {
                     head_block_hash: head,
                     safe_block_hash: B256::ZERO,
@@ -421,21 +450,32 @@ impl Node {
 
     async fn import(&self, payload: &EthBuiltPayload) {
         assert!(self.new_payload(payload.clone().into()).await.is_valid());
-        self.assert_sparse_root(payload.block().state_root());
+        self.assert_sparse_trie_block(payload.block().hash());
         assert!(self.forkchoice(payload.block().hash()).await.is_valid());
     }
 
-    fn assert_sparse_root(&self, state_root: B256) {
-        let trie =
-            self.overlay.take_sparse_trie().expect("validation must preserve its sparse trie");
-        assert_eq!(trie.state_root(), state_root);
-        self.overlay.store_sparse_trie(trie);
+    fn assert_sparse_trie_block(&self, block_hash: B256) {
+        if let Some((_, preserved_block_hash)) = self.sparse_trie_frontier() {
+            assert_eq!(preserved_block_hash, block_hash);
+        } else {
+            assert!(
+                !self.require_sparse_trie,
+                "cooperative validation must preserve its sparse trie"
+            );
+        }
     }
 
     fn sparse_trie_frontier(&self) -> Option<(B256, B256)> {
-        let trie = self.overlay.take_sparse_trie()?;
-        let frontier = (trie.anchor_hash(), trie.state_root());
-        self.overlay.store_sparse_trie(trie);
+        let preserved = self.overlay.take_sparse_trie()?;
+        let block_hash = preserved.block_hash();
+        let anchor_hash = preserved.anchor_hash();
+        let trie = preserved.into_trie_for(block_hash).expect("sparse trie task completed")?;
+        let frontier = (anchor_hash, block_hash);
+        self.overlay.store_sparse_trie(PreservedSparseTrie::anchored(
+            trie,
+            block_hash,
+            anchor_hash,
+        ));
         Some(frontier)
     }
 
@@ -461,6 +501,7 @@ impl Node {
             persistence,
             peer,
             storage,
+            require_sparse_trie: _,
         } = self;
         stop_router.send(()).unwrap();
         router.await.unwrap();
@@ -584,27 +625,52 @@ fn materialize_block_transactions(
         let parent_nonce = parent_nonces[sender_index];
         let nonce = context.next_nonce(sender.0 .0);
         let action = context.rng.next_u64() % 4;
-        let (to, input, value, gas_limit) = if action < 2 {
+        let (to, input, value, gas_limit, accessed_slot) = if action < 2 {
             let mut input = Vec::with_capacity(256);
+            let mut accessed_slot = None;
             for _ in 0..4 {
                 let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
                     DynSolValue::Uint(value, _) => value,
                     _ => unreachable!(),
                 };
-                let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                    DynSolValue::Uint(value, _) => value,
-                    _ => unreachable!(),
+                // Revisit a small slot set across blocks, including clears and overwrites.
+                let key = if context.rng.next_u64().is_multiple_of(4) {
+                    key
+                } else {
+                    U256::from(context.rng.next_u64() % 8)
+                };
+                accessed_slot.get_or_insert_with(|| B256::from(key.to_be_bytes::<32>()));
+                let value = if context.rng.next_u64().is_multiple_of(4) {
+                    U256::ZERO
+                } else {
+                    match abi.generate(&DynSolType::Uint(256), context.rng) {
+                        DynSolValue::Uint(value, _) => value,
+                        _ => unreachable!(),
+                    }
                 };
                 input.extend_from_slice(&key.to_be_bytes::<32>());
                 input.extend_from_slice(&value.to_be_bytes::<32>());
             }
             let contract = storage_contract(context.rng.next_u64() as u8 % STORAGE_CONTRACT_COUNT);
-            (Some(contract), Bytes::from(input), U256::ZERO, 200_000)
+            (Some(contract), Bytes::from(input), U256::ZERO, 200_000, accessed_slot)
         } else if action == 2 {
             let recipient = addresses[context.rng.next_u64() as usize % WORKLOAD_ACCOUNT_COUNT];
-            (Some(recipient), Bytes::new(), U256::from(context.rng.next_u64() % 1_000), 21_000)
+            (
+                Some(recipient),
+                Bytes::new(),
+                U256::from(context.rng.next_u64() % 1_000),
+                21_000,
+                None,
+            )
         } else {
-            (None, Bytes::from_static(STORAGE_INIT_CODE), U256::ZERO, 200_000)
+            (None, Bytes::from_static(STORAGE_INIT_CODE), U256::ZERO, 200_000, None)
+        };
+        let access_list = if context.rng.next_u64().is_multiple_of(2) {
+            accessed_slot.map_or_else(AccessList::default, |slot| {
+                AccessList(vec![AccessListItem { address: to.unwrap(), storage_keys: vec![slot] }])
+            })
+        } else {
+            AccessList::default()
         };
         let to = to.map_or(TxKind::Create, TxKind::Call);
         let signer = accounts.get_by_index(&selected.pool, selected.index).unwrap();
@@ -630,7 +696,7 @@ fn materialize_block_transactions(
                     gas_limit,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -645,7 +711,7 @@ fn materialize_block_transactions(
                     max_priority_fee_per_gas: gas.max_priority_fee_per_gas,
                     to,
                     value,
-                    access_list: AccessList::default(),
+                    access_list,
                     input,
                 };
                 let signature = signer.sign_hash_sync(&tx.signature_hash()).unwrap();
@@ -660,9 +726,9 @@ fn materialize_block_transactions(
     (transactions, next_nonces)
 }
 
-const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
+const MIN_TRANSACTIONS_PER_BLOCK: usize = 0;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 12;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 14;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -836,6 +902,12 @@ struct PayloadBuild {
     branch: u8,
     transaction_count: usize,
     next_nonces: AccountNonces,
+}
+
+enum PayloadBuildPoll {
+    Pending,
+    Ready(EthBuiltPayload),
+    Canceled,
 }
 
 struct StateRead {
@@ -1707,7 +1779,19 @@ async fn execute_action(
         }
         CampaignAction::PollPayloadBuild => {
             let build = model.payload_build.as_ref().expect("poll without an active payload build");
-            let Some(payload) = producer.poll_build(build).await else { return };
+            let payload = match producer.poll_build(build).await {
+                PayloadBuildPoll::Pending => return,
+                PayloadBuildPoll::Ready(payload) => payload,
+                PayloadBuildPoll::Canceled => {
+                    model.payload_build.take();
+                    assert_eq!(
+                        producer.provider.canonical_in_memory_state().get_canonical_head().hash(),
+                        model.canonical_head,
+                        "canceled payload build changed fork choice"
+                    );
+                    return;
+                }
+            };
             let build = model.payload_build.take().unwrap();
             let parent = build.parent;
             model.blocks.get_mut(&parent).unwrap().children += 1;
@@ -1758,10 +1842,10 @@ async fn execute_action(
             let pending = model.pending.remove(&block).expect("import without a pending payload");
             assert_eq!(pending.payload.block().hash(), block);
             let frontier_before = producer.sparse_trie_frontier();
-            let parent_state_root = model.blocks[&pending.parent].header.state_root;
+            let parent_hash = pending.parent;
             producer.import(&pending.payload).await;
-            if let Some((anchor_before, state_root_before)) = frontier_before &&
-                state_root_before == parent_state_root &&
+            if let Some((anchor_before, block_hash_before)) = frontier_before &&
+                block_hash_before == parent_hash &&
                 model.blocks.contains_key(&anchor_before)
             {
                 let (anchor_after, _) = producer
@@ -1792,6 +1876,8 @@ async fn execute_action(
             let pending =
                 model.pending.get_mut(&block).expect("corruption without a pending payload");
             assert_eq!(pending.payload.block().hash(), block);
+            let canonical_before = producer.provider.best_block_number().unwrap();
+            let canonical_hash_before = producer.provider.block_hash(canonical_before).unwrap();
             let mut invalid = pending.payload.block().clone().into_block();
             match field {
                 CorruptField::ReceiptsRoot => {
@@ -1807,6 +1893,16 @@ async fn execute_action(
                 alloy_rpc_types_engine::ExecutionPayload::from_block_slow(&invalid);
             let status = producer.new_payload(ExecutionData::new(payload, sidecar)).await;
             assert!(status.is_invalid(), "mutated {field:?} payload was accepted: {status:?}");
+            assert_eq!(
+                status.latest_valid_hash,
+                Some(pending.parent),
+                "invalid {field:?} payload reported the wrong latest valid ancestor"
+            );
+            assert_eq!(producer.provider.best_block_number().unwrap(), canonical_before);
+            assert_eq!(
+                producer.provider.block_hash(canonical_before).unwrap(),
+                canonical_hash_before
+            );
         }
         CampaignAction::SetHead { head } => {
             assert!(model.blocks.contains_key(&head));
@@ -1859,8 +1955,7 @@ async fn execute_action(
                     .canonical_in_memory_state()
                     .get_canonical_head()
                     .hash();
-                let root = model.blocks.get(&model.follower_head).unwrap().header.state_root;
-                follower.as_ref().unwrap().assert_sparse_root(root);
+                follower.as_ref().unwrap().assert_sparse_trie_block(model.follower_head);
             } else {
                 assert!(status.is_syncing(), "follower rejected modeled chain: {status:?}");
             }
@@ -2343,6 +2438,7 @@ fn simulate_node(
                     follower.as_ref().unwrap().provider.best_block_number().unwrap(),
                     head_number
                 );
+                let mut canonical_receipts = Vec::with_capacity(canonical.len());
                 for (number, hash) in canonical.iter().enumerate() {
                     assert_eq!(
                         follower
@@ -2353,6 +2449,13 @@ fn simulate_node(
                             .unwrap(),
                         Some(*hash)
                     );
+                    let receipts = producer.provider.receipts_by_block((*hash).into()).unwrap();
+                    assert_eq!(
+                        receipts,
+                        follower.as_ref().unwrap().provider.receipts_by_block((*hash).into()).unwrap(),
+                        "canonical receipts diverged at block {number}"
+                    );
+                    canonical_receipts.push(receipts);
                 }
 
                 // The newest `persistence_threshold` blocks may remain in memory. Waiting for the
@@ -2398,6 +2501,24 @@ fn simulate_node(
                     assert_eq!(producer_account, follower_account);
                     assert_eq!(producer_account.unwrap().nonce, head_nonces[index]);
                 }
+                let producer_state = producer.provider.latest().unwrap();
+                let follower_state = follower.as_ref().unwrap().provider.latest().unwrap();
+                let mut contract_state = Vec::new();
+                for index in 0..STORAGE_CONTRACT_COUNT {
+                    let address = storage_contract(index);
+                    let code = producer_state.account_code(&address).unwrap();
+                    assert_eq!(code, follower_state.account_code(&address).unwrap());
+                    let slots = (0..8)
+                        .map(|slot| {
+                            let value = producer_state.storage(address, U256::from(slot).into()).unwrap().unwrap_or_default();
+                            assert_eq!(value, follower_state.storage(address, U256::from(slot).into()).unwrap().unwrap_or_default());
+                            value
+                        })
+                        .collect::<Vec<_>>();
+                    contract_state.push((address, code, slots));
+                }
+                drop(producer_state);
+                drop(follower_state);
                 let first_block = model.first_block();
                 let peer = &follower.as_ref().unwrap().peer;
                 let mut wire = std::mem::take(&mut model.follower_wire);
@@ -2431,6 +2552,21 @@ fn simulate_node(
                 )
                 .await;
                 assert_eq!(restarted.provider.best_block_number().unwrap(), head_number);
+                let cold_state = restarted.provider.latest().unwrap();
+                for (address, code, slots) in &contract_state {
+                    assert_eq!(cold_state.account_code(address).unwrap(), *code);
+                    for (slot, value) in slots.iter().enumerate() {
+                        assert_eq!(cold_state.storage(*address, U256::from(slot).into()).unwrap().unwrap_or_default(), *value);
+                    }
+                }
+                drop(cold_state);
+                for (hash, receipts) in canonical.iter().zip(&canonical_receipts) {
+                    assert_eq!(
+                        restarted.provider.receipts_by_block((*hash).into()).unwrap(),
+                        *receipts,
+                        "receipts changed across cold restart at block {hash}"
+                    );
+                }
 
                 let branch = head_children;
                 let request = CampaignAction::BeginPayloadBuild { parent: head, branch };

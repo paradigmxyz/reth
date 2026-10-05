@@ -9324,6 +9324,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
  "txgen-core",
 ]
 
@@ -9531,6 +9532,7 @@ dependencies = [
  "schnellru",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]

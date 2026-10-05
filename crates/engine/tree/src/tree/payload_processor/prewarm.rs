@@ -237,7 +237,7 @@ where
     /// CPU job, so its database reader never crosses a scheduling boundary.
     fn transact<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
-        evm: &mut EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>,
+        evm: &mut EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>,
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
@@ -653,7 +653,9 @@ where
             BalPrewarmPool::prewarm_cooperative(
                 runtime,
                 Arc::new(move || {
-                    builder.database_provider_ro().map(|provider| Box::new(provider) as _)
+                    builder.database_provider_ro().map(|provider| {
+                        Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                    })
                 }),
                 saved_cache.cache().clone(),
                 ctx.env.txpool_snapshot.clone(),

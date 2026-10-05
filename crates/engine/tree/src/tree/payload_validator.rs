@@ -900,6 +900,13 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
+        // Cooperative sparse-trie workers cannot make progress while a synchronous receiver
+        // blocks this executor, so compute the fallback before entering the CPU closure.
+        let cooperative_hashed_state = self.sequential_execution.then(|| {
+            Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                hashed_state_output.state.state(),
+            ))
+        });
         let parent_span = Span::current();
         let mut hashed_state: LazyHashedPostState =
             self.execute_or_spawn("hash-post-state", move || {
@@ -1155,7 +1162,12 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver<N::Receipt>,
+            Option<ExecutedBal>,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -1294,7 +1306,12 @@ where
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
+        (
+            BlockExecutionOutput<N::Receipt>,
+            Vec<Address>,
+            ReceiptRootReceiver<N::Receipt>,
+            Option<ExecutedBal>,
+        ),
         InsertBlockErrorKind,
     >
     where
@@ -2176,11 +2193,7 @@ where
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle);
         if let Some(factory) = state_provider_factory {
             resources = resources.with_state_provider_factory(PayloadStateProviderFactory::new(
-                move || {
-                    factory
-                        .database_provider_ro()
-                        .map(|provider| Box::new(provider) as StateProviderBox)
-                },
+                move || factory.database_provider_ro().map(|provider| Box::new(provider) as _),
             ));
         }
         if !self.sequential_execution {
