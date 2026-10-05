@@ -76,8 +76,8 @@ pub(crate) fn ephemery_genesis(mut genesis: Genesis) -> Genesis {
 /// Checks whether a chain ID falls within the Ephemery range.
 /// Each iteration increments the chain ID by one from the base.
 pub(crate) const fn is_ephemery_chain_id(chain_id: u64) -> bool {
-    chain_id >= EPHEMERY_BASE_CHAIN_ID &&
-        chain_id < EPHEMERY_BASE_CHAIN_ID + EPHEMERY_ITERATION_UPPER_BOUND
+    chain_id >= EPHEMERY_BASE_CHAIN_ID
+        && chain_id < EPHEMERY_BASE_CHAIN_ID + EPHEMERY_ITERATION_UPPER_BOUND
 }
 
 /// Builds the hardfork schedule for Ephemery.
@@ -110,7 +110,6 @@ pub(crate) fn ephemery_hardforks(genesis_timestamp: u64) -> ChainHardforks {
         (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Osaka.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Amsterdam.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Bpo1.boxed(), ForkCondition::Timestamp(genesis_timestamp + BPO1_OFFSET)),
         (EthereumHardfork::Bpo2.boxed(), ForkCondition::Timestamp(genesis_timestamp + BPO2_OFFSET)),
     ])
@@ -215,7 +214,6 @@ mod tests {
         assert!(hardforks.fork(EthereumHardfork::Cancun).active_at_timestamp(0));
         assert!(hardforks.fork(EthereumHardfork::Prague).active_at_timestamp(0));
         assert!(hardforks.fork(EthereumHardfork::Osaka).active_at_timestamp(0));
-        assert!(hardforks.fork(EthereumHardfork::Amsterdam).active_at_timestamp(0));
     }
 
     #[test]
