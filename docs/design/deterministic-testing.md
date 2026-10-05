@@ -77,7 +77,7 @@ sync a follower through the production ETH codec. Follower sync is split into be
 so the controller can advance virtual time, partition or heal the link, corrupt the next encrypted
 response, or crash and restart the follower while requests are in flight.
 
-Accepted blocks contain 5–64 signed transactions built with txgen-core's account, nonce, and
+Accepted blocks contain 0–64 signed transactions built with txgen-core's account, nonce, and
 generation context APIs. The workload maintains nonces for 20 funded accounts and mixes legacy,
 EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and calls across four storage
 contracts with abi-fuzz-generated keys and values. Storage writes favor a small shared slot set
