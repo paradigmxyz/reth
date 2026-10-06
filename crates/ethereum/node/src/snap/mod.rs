@@ -84,6 +84,13 @@ where
         // Once snap state is verified, or the node was not synced by snap, the staged pipeline
         // backfills alone, including unwinds.
         let event = match (self.needs_snap(), target) {
+            // The engine waits for every start to finish, so an unusable target fails the run
+            // instead of being dropped.
+            (_, PipelineTarget::Sync(hash)) if hash.is_zero() => {
+                BackfillEvent::Finished(Err(PipelineError::Internal(RethError::msg(
+                    "snap backfill cannot sync to the zero hash",
+                ))))
+            }
             (Err(error), _) => {
                 BackfillEvent::Finished(Err(PipelineError::Internal(RethError::other(error))))
             }
@@ -160,10 +167,8 @@ where
 {
     fn on_action(&mut self, action: BackfillAction) {
         match action {
-            // The zero hash is never a usable target.
-            BackfillAction::Start(PipelineTarget::Sync(hash)) |
-            BackfillAction::UpdateTarget(hash) |
-            BackfillAction::UpdateFinalized(hash)
+            // The zero hash never moves a target or anchors a pivot.
+            BackfillAction::UpdateTarget(hash) | BackfillAction::UpdateFinalized(hash)
                 if hash.is_zero() => {}
             BackfillAction::Start(target) => self.pending_target = Some(target),
             BackfillAction::UpdateTarget(hash) => {
@@ -366,12 +371,13 @@ mod tests {
     }
 
     #[test]
-    fn the_zero_hash_is_not_a_usable_target() {
+    fn a_zero_hash_target_fails_without_starting_a_run() {
         let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::ZERO)));
 
-        assert!(poll_once(&mut backfill).is_pending());
+        assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Finished(Err(_)))));
+        assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 
     #[test]
