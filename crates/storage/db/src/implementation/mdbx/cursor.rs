@@ -361,9 +361,10 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         mdbx::{DatabaseArguments, DatabaseEnv, DatabaseEnvKind},
-        tables::StorageChangeSets,
+        tables::{PackedStoragesTrie, StorageChangeSets, StoragesTrie},
         Database,
     };
     use alloy_primitives::{address, Address, B256, U256};
@@ -373,7 +374,8 @@ mod tests {
         table::TableImporter,
         transaction::{DbTx, DbTxMut},
     };
-    use reth_primitives_traits::StorageEntry;
+    use reth_primitives_traits::{StorageEntry, ValueWithSubKey};
+    use std::{collections::BTreeMap, hint::black_box, time::Instant};
     use tempfile::TempDir;
 
     fn create_test_db() -> DatabaseEnv {
@@ -461,6 +463,141 @@ mod tests {
         {
             assert_eq!(copied_key, expected_key);
             assert_eq!(copied_value, expected_value);
+        }
+    }
+
+    // Test-only screen: keep production cursor/API behavior unchanged until measured.
+    #[test]
+    #[ignore = "paired MDBX storage-trie update timing screen"]
+    fn test_storage_trie_seek_without_decode_screen() {
+        screen_storage_trie_seek::<StoragesTrie>();
+        screen_storage_trie_seek::<PackedStoragesTrie>();
+    }
+
+    fn screen_storage_trie_seek<T>()
+    where
+        T: DupSort<Key = B256>,
+        T::SubKey: From<Vec<u8>>,
+        T::Value: ValueWithSubKey<SubKey = T::SubKey> + Clone + PartialEq + std::fmt::Debug,
+    {
+        for duplicates in [16_usize, 512, 4096] {
+            for pair in 0..8 {
+                let mut elapsed = [0_u128; 2];
+                for raw_seek in [pair % 2 == 0, pair % 2 != 0] {
+                    let db = create_test_db();
+                    let mut expected = BTreeMap::new();
+                    let mut updates = Vec::new();
+                    // Include prefix-related subkeys and misses on either side of a row.
+                    let mut keys: Vec<Vec<u8>> = (0..duplicates)
+                        .map(|i| {
+                            (0..8).rev().map(|shift| ((i * 2 >> (shift * 4)) & 15) as u8).collect()
+                        })
+                        .collect();
+                    keys.extend([vec![1], vec![1, 0], vec![1, 0, 0], vec![15]]);
+                    keys.sort();
+                    for round in 0..6_u8 {
+                        let mut batch = Vec::new();
+                        for account in 1..=4 {
+                            let address = B256::repeat_byte(account);
+                            for (index, key) in keys.iter().enumerate() {
+                                let subkey = T::SubKey::from(key.clone());
+                                let value = if round > 0 && (index + round as usize) % 11 == 0 {
+                                    None
+                                } else {
+                                    // Use the actual trie table codec, varying branch width and
+                                    // encoded size across replacements, including a subtree root.
+                                    let hashes = 1 + (index + round as usize) % 16;
+                                    let mask = ((1_u32 << hashes) - 1) as u16;
+                                    let mut bytes = subkey.clone().encode().as_ref().to_vec();
+                                    for _ in 0..3 {
+                                        bytes.extend(mask.to_be_bytes());
+                                    }
+                                    bytes.extend(B256::repeat_byte(round ^ account).as_slice());
+                                    for hash in 0..hashes {
+                                        bytes.extend(
+                                            B256::repeat_byte(hash as u8 ^ round).as_slice(),
+                                        );
+                                    }
+                                    let value = T::Value::decompress(&bytes).unwrap();
+                                    assert_eq!(value.get_subkey(), subkey);
+                                    assert_eq!(value.clone().compress().as_ref(), bytes.as_slice());
+                                    Some(value)
+                                };
+                                batch.push((address, subkey, value));
+                            }
+                            // These adjacent odd subkeys were not seeded. Deleting one must
+                            // leave the next even key and other account rows intact.
+                            let absent = T::SubKey::from(vec![0, 0, 0, 0, 0, 0, 0, 1]);
+                            batch.push((address, absent, None));
+                        }
+                        batch.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+                        updates.push(batch);
+                    }
+                    for (round, batch) in updates.iter().enumerate() {
+                        let tx = db.tx_mut().unwrap();
+                        let mut cursor = tx.cursor_dup_write::<T>().unwrap();
+                        let started = Instant::now();
+                        for (address, subkey, value) in black_box(batch) {
+                            let found = if raw_seek {
+                                let encoded = subkey.clone().encode();
+                                cursor
+                                    .inner
+                                    .get_both_range::<Cow<'_, [u8]>>(
+                                        address.encode().as_ref(),
+                                        encoded.as_ref(),
+                                    )
+                                    .unwrap()
+                                    .is_some_and(|bytes| bytes.starts_with(encoded.as_ref()))
+                            } else {
+                                cursor
+                                    .seek_by_key_subkey(*address, subkey.clone())
+                                    .unwrap()
+                                    .is_some_and(|value| value.get_subkey() == *subkey)
+                            };
+                            if found {
+                                cursor.delete_current().unwrap();
+                            }
+                            if let Some(value) = value {
+                                cursor.upsert(*address, value).unwrap();
+                            }
+                        }
+                        let update_ns = started.elapsed().as_nanos();
+                        drop(cursor);
+                        // Check aborted writes as well as committed replacement/deletion batches.
+                        if round == 4 {
+                            drop(tx);
+                        } else {
+                            tx.commit().unwrap();
+                            for (address, subkey, value) in batch {
+                                let key = (*address, subkey.clone());
+                                if let Some(value) = value {
+                                    expected.insert(key, value.clone());
+                                } else {
+                                    expected.remove(&key);
+                                }
+                            }
+                        }
+                        let read = db.tx().unwrap();
+                        let actual = read
+                            .cursor_dup_read::<T>()
+                            .unwrap()
+                            .walk(None)
+                            .unwrap()
+                            .map(|row| {
+                                let (address, value) = row.unwrap();
+                                ((address, value.get_subkey()), value)
+                            })
+                            .collect::<BTreeMap<_, _>>();
+                        assert_eq!(actual, expected);
+                        if round > 0 {
+                            elapsed[usize::from(raw_seek)] += update_ns;
+                        }
+                    }
+                }
+                println!("{{\"table\":\"{}\",\"duplicates\":{},\"pair\":{},\"typed_ns\":{},\"raw_seek_ns\":{},\"time_reduction_pct\":{}}}",
+                    std::any::type_name::<T>(), duplicates, pair, elapsed[0], elapsed[1],
+                    100.0 * (1.0 - elapsed[1] as f64 / elapsed[0] as f64));
+            }
         }
     }
 }
