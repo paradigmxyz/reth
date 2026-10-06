@@ -13,7 +13,7 @@ use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
 use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
 };
-use reth_tracing::tracing::{info, warn};
+use reth_tracing::tracing::{error, info};
 use tokio_util::sync::CancellationToken;
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
@@ -48,7 +48,8 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
                 error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(diff)),
                 ..
             })) => {
-                warn!(target: "sync::snap", ?pivot, %diff, "Snap state root mismatch, abandoning the attempt");
+                // Downloaded state is authenticated against the pivot, so this is a local fault.
+                error!(target: "sync::snap", ?pivot, %diff, "Snap state root mismatch, abandoning the attempt");
                 self.abandon()?;
                 Ok(RebuildOutcome::RootMismatch)
             }
