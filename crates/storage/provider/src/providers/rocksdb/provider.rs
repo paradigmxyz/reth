@@ -333,10 +333,14 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::BlockAccessLists`] - Block access list payloads
+    /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
     }
 
     /// Enables metrics.
@@ -415,6 +419,16 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
+            if self.read_only {
+                // Legacy databases have no BAL tables; secondary opens cannot create them.
+                // Keep existing BAL tables; only omit those absent from disk.
+                cf_descriptors.retain(|cf| {
+                    !matches!(
+                        cf.name(),
+                        tables::BlockAccessLists::NAME | tables::BlockAccessListBlockNumbers::NAME
+                    ) || existing_column_families.iter().any(|name| name == cf.name())
+                });
+            }
             let unknown_column_families: Vec<String> = existing_column_families
                 .into_iter()
                 .filter(|name| {
@@ -912,6 +926,14 @@ impl RocksDBProvider {
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0.cf_handle::<T>()
+    }
+
+    /// Returns whether this provider opened the given table.
+    pub(crate) fn has_table<T: Table>(&self) -> bool {
+        match self.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { db, .. } => db.cf_handle(T::NAME).is_some(),
+            RocksDBProviderInner::Secondary { db, .. } => db.cf_handle(T::NAME).is_some(),
+        }
     }
 
     /// Executes a function and records metrics with the given operation and table name.
@@ -1545,7 +1567,7 @@ impl RocksDBProvider {
             for storage_block_reverts in reverts.storage {
                 for revert in storage_block_reverts {
                     for (slot, _) in revert.storage_revert {
-                        let plain_key = B256::new(slot.to_be_bytes());
+                        let plain_key = B256::from(slot);
                         storage_history
                             .entry((revert.address, plain_key))
                             .or_default()
@@ -3151,7 +3173,7 @@ mod tests {
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
         // Should be able to write/read TransactionHashNumbers
-        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        let tx_hash = TxHash::from(B256::repeat_byte(1u8));
         provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
         assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(100));
 
@@ -3166,22 +3188,25 @@ mod tests {
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
-        drop(provider);
-
-        let column_families = DB::list_cf(&Options::default(), temp_dir.path()).unwrap();
-        assert!(!column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
-        assert!(!column_families
-            .iter()
-            .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
+        let bal_key =
+            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
+        let bal_value =
+            reth_db_api::models::StoredBlockAccessList::new(Bytes::from_static(&[0xc0]));
+        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+        provider
+            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
+            .unwrap();
+        assert_eq!(
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
+            Some(bal_key.number())
+        );
     }
 
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path())
-            .with_table::<tables::BlockAccessLists>()
-            .build()
-            .unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
         let bal_key =
             reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
@@ -3237,12 +3262,7 @@ mod tests {
                 1
         ]));
 
-        let provider = RocksDBBuilder::new(temp_dir.path())
-            .with_default_tables()
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
-            .build()
-            .unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider
             .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
@@ -3250,7 +3270,12 @@ mod tests {
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
         drop(provider);
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
         assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
         assert_eq!(
             provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
@@ -3332,7 +3357,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        let tx_hash = TxHash::from(B256::repeat_byte(1u8));
 
         // Insert and retrieve
         provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
@@ -3342,7 +3367,7 @@ mod tests {
         provider
             .write_batch(|batch| {
                 for i in 0..10u64 {
-                    let hash = TxHash::from(B256::from([i as u8; 32]));
+                    let hash = TxHash::from(B256::repeat_byte(i as u8));
                     let value = i * 100;
                     batch.put::<tables::TransactionHashNumbers>(hash, &value)?;
                 }
@@ -3352,7 +3377,7 @@ mod tests {
 
         // Verify batch insertions
         for i in 0..10u64 {
-            let hash = TxHash::from(B256::from([i as u8; 32]));
+            let hash = TxHash::from(B256::repeat_byte(i as u8));
             assert_eq!(
                 provider.get::<tables::TransactionHashNumbers>(hash).unwrap(),
                 Some(i * 100)
@@ -3659,7 +3684,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Create a single shard starting at block 100
         let chunk = IntegerList::new([100, 200, 300]).unwrap();
@@ -3679,7 +3704,7 @@ mod tests {
     #[test]
     fn test_account_history_info_read_only_and_catch_up() {
         let temp_dir = TempDir::new().unwrap();
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         let chunk = IntegerList::new([100, 200, 300]).unwrap();
         let shard_key = ShardedKey::new(address, u64::MAX);
 
@@ -3708,7 +3733,7 @@ mod tests {
         assert_eq!(result, HistoryInfo::InPlainState);
 
         // Write new data via the primary.
-        let address2 = Address::from([0x43; 20]);
+        let address2 = Address::repeat_byte(0x43);
         let chunk2 = IntegerList::new([500, 600]).unwrap();
         let shard_key2 = ShardedKey::new(address2, u64::MAX);
         rw_provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
@@ -3731,7 +3756,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         provider
             .put::<tables::AccountsHistory>(
@@ -3755,7 +3780,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         provider
             .put::<tables::AccountsHistory>(
                 ShardedKey::new(address, u64::MAX),
@@ -3775,7 +3800,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         provider
             .put::<tables::AccountsHistory>(
                 ShardedKey::new(address, u64::MAX),
@@ -3796,7 +3821,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         let limit = NUM_OF_INDICES_IN_SHARD;
 
         // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
@@ -3827,7 +3852,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x43; 20]);
+        let address = Address::repeat_byte(0x43);
         let limit = NUM_OF_INDICES_IN_SHARD;
 
         // First batch: add NUM_OF_INDICES_IN_SHARD indices
@@ -3871,8 +3896,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x44; 20]);
-        let slot = B256::from([0x55; 32]);
+        let address = Address::repeat_byte(0x44);
+        let slot = B256::repeat_byte(0x55);
         let limit = NUM_OF_INDICES_IN_SHARD;
 
         // Add exactly NUM_OF_INDICES_IN_SHARD + 1 indices to trigger a split
@@ -3903,8 +3928,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x46; 20]);
-        let slot = B256::from([0x57; 32]);
+        let address = Address::repeat_byte(0x46);
+        let slot = B256::repeat_byte(0x57);
         let limit = NUM_OF_INDICES_IN_SHARD;
 
         // First batch: add NUM_OF_INDICES_IN_SHARD indices
@@ -3948,7 +3973,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         let key = ShardedKey::new(address, u64::MAX);
         let blocks = BlockNumberList::new_pre_sorted([1, 2, 3]);
 
@@ -3984,7 +4009,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Add blocks 0-10
         let mut batch = provider.batch();
@@ -4015,7 +4040,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Add blocks 5-10
         let mut batch = provider.batch();
@@ -4038,7 +4063,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Add blocks 0-5
         let mut batch = provider.batch();
@@ -4063,7 +4088,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Add blocks 0-5 (including block 0)
         let mut batch = provider.batch();
@@ -4089,7 +4114,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Create multiple shards by adding more than NUM_OF_INDICES_IN_SHARD entries
         // For testing, we'll manually create shards with specific keys
@@ -4132,7 +4157,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Create two shards
         let mut batch = provider.batch();
@@ -4164,8 +4189,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
-        let other_address = Address::from([0x43; 20]);
+        let address = Address::repeat_byte(0x42);
+        let other_address = Address::repeat_byte(0x43);
 
         // Add data for two addresses
         let mut batch = provider.batch();
@@ -4184,7 +4209,7 @@ mod tests {
         assert_eq!(shards[0].0.key, other_address);
 
         // Query shards for non-existent address
-        let non_existent = Address::from([0x99; 20]);
+        let non_existent = Address::repeat_byte(0x99);
         let shards = provider.account_history_shards(non_existent).unwrap();
         assert!(shards.is_empty());
     }
@@ -4194,7 +4219,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Add blocks 0-10
         let mut batch = provider.batch();
@@ -4216,7 +4241,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Create three shards with non-sentinel boundary
         let mut batch = provider.batch();
@@ -4418,7 +4443,7 @@ mod tests {
             },
         ];
 
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         for case in CASES {
             let temp_dir = TempDir::new().unwrap();
@@ -4554,8 +4579,8 @@ mod tests {
             },
         ];
 
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x01; 32]);
+        let address = Address::repeat_byte(0x42);
+        let storage_key = B256::repeat_byte(0x01);
 
         for case in CASES {
             let temp_dir = TempDir::new().unwrap();
@@ -4616,9 +4641,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
-        let slot1 = B256::from([0x01; 32]);
-        let slot2 = B256::from([0x02; 32]);
+        let address = Address::repeat_byte(0x42);
+        let slot1 = B256::repeat_byte(0x01);
+        let slot2 = B256::repeat_byte(0x02);
 
         // Two different storage slots
         let mut batch = provider.batch();
@@ -4656,8 +4681,8 @@ mod tests {
     #[test]
     fn test_prune_invariants() {
         // Test invariants: no empty shards, sentinel is always last
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x01; 32]);
+        let address = Address::repeat_byte(0x42);
+        let storage_key = B256::repeat_byte(0x01);
 
         // Test cases that exercise invariants
         #[expect(clippy::type_complexity)]
@@ -4761,9 +4786,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr1 = Address::from([0x01; 20]);
-        let addr2 = Address::from([0x02; 20]);
-        let addr3 = Address::from([0x03; 20]);
+        let addr1 = Address::repeat_byte(0x01);
+        let addr2 = Address::repeat_byte(0x02);
+        let addr3 = Address::repeat_byte(0x03);
 
         // Setup shards for each address
         let mut batch = provider.batch();
@@ -4816,9 +4841,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr1 = Address::from([0x01; 20]);
-        let addr2 = Address::from([0x02; 20]); // No shards for this one
-        let addr3 = Address::from([0x03; 20]);
+        let addr1 = Address::repeat_byte(0x01);
+        let addr2 = Address::repeat_byte(0x02); // No shards for this one
+        let addr3 = Address::repeat_byte(0x03);
 
         // Only setup shards for addr1 and addr3
         let mut batch = provider.batch();
@@ -4862,9 +4887,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr = Address::from([0x42; 20]);
-        let slot1 = B256::from([0x01; 32]);
-        let slot2 = B256::from([0x02; 32]);
+        let addr = Address::repeat_byte(0x42);
+        let slot1 = B256::repeat_byte(0x01);
+        let slot2 = B256::repeat_byte(0x02);
 
         // Setup shards
         let mut batch = provider.batch();
@@ -4953,8 +4978,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr = Address::from([0x42; 20]);
-        let slot = B256::from([0x01; 32]);
+        let addr = Address::repeat_byte(0x42);
+        let slot = B256::repeat_byte(0x01);
         seed_three_storage_shards(&provider, addr, slot);
 
         // Only the oldest shard holds blocks at or below the target.
@@ -4976,8 +5001,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr = Address::from([0x42; 20]);
-        let slot = B256::from([0x01; 32]);
+        let addr = Address::repeat_byte(0x42);
+        let slot = B256::repeat_byte(0x01);
         seed_three_storage_shards(&provider, addr, slot);
 
         // Every non-sentinel shard expires whole and the sentinel loses its lowest block.
@@ -4994,7 +5019,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr = Address::from([0x42; 20]);
+        let addr = Address::repeat_byte(0x42);
 
         let mut batch = provider.batch();
         batch
@@ -5027,8 +5052,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr1 = Address::from([0x01; 20]);
-        let addr2 = Address::from([0x02; 20]);
+        let addr1 = Address::repeat_byte(0x01);
+        let addr2 = Address::repeat_byte(0x02);
 
         let mut batch = provider.batch();
         batch
@@ -5070,9 +5095,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let addr = Address::from([0x42; 20]);
-        let slot1 = B256::from([0x01; 32]);
-        let slot2 = B256::from([0x02; 32]);
+        let addr = Address::repeat_byte(0x42);
+        let slot1 = B256::repeat_byte(0x01);
+        let slot2 = B256::repeat_byte(0x02);
         seed_three_storage_shards(&provider, addr, slot1);
 
         let mut batch = provider.batch();

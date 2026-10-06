@@ -27,7 +27,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -473,7 +473,7 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
@@ -494,6 +494,16 @@ impl ExtendedAccount {
         storage: impl IntoIterator<Item = (StorageKey, StorageValue)>,
     ) -> Self {
         self.storage.extend(storage);
+        self
+    }
+
+    /// Sets the account extension.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(
+        mut self,
+        extension: impl Into<reth_primitives_traits::AccountExtension>,
+    ) -> Self {
+        self.account.extension = extension.into();
         self
     }
 }
@@ -935,13 +945,13 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<T::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
         Ok(None)
     }
 

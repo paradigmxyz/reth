@@ -42,12 +42,12 @@ jobs:
       id-token: write
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
           toolchain: "1.95.0"
 
@@ -110,7 +110,6 @@ jobs:
               echo "ethereum_set<<EOF"
               echo "ethereum.tags=${REGISTRY}/reth:nightly"
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
-              echo "ethereum.args.RETH_ENGINE_SENDER_RECOVERY_CACHE=true"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 

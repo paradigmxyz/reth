@@ -1,4 +1,4 @@
-//! clap [`clap::Args`] for Dev testnet configuration
+//! clap [`Args`] for Dev testnet configuration.
 
 use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
 

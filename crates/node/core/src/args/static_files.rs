@@ -1,4 +1,4 @@
-//! clap [`clap::Args`] for static files configuration
+//! clap [`Args`] for static files configuration.
 
 use clap::Args;
 use reth_config::config::{BlocksPerFileConfig, StaticFilesConfig};

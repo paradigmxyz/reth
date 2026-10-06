@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_storage_changesets() {
-        let hashed_address = B256::from([1u8; 32]);
+        let hashed_address = B256::repeat_byte(1u8);
 
         // Create some initial storage trie state
         let path1 = Nibbles::from_nibbles([0x1, 0x2]);

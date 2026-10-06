@@ -200,9 +200,22 @@ pub enum ProviderError {
         /// Version this build writes.
         supported: u32,
     },
+    /// Snap sync was selected on a database that predates the hashed state layout it downloads
+    /// into.
+    #[error("snap sync requires the hashed state layout, which this database predates")]
+    SnapStorageLayoutUnsupported,
     /// State a snap attempt is still downloading was about to be marked complete.
     #[error("snap attempt {attempt} has not verified the downloaded state")]
     UnverifiedSnapState {
+        /// Attempt that owns the unverified state.
+        attempt: u64,
+    },
+    /// The staged pipeline was selected on a database holding state a snap attempt left
+    /// unverified, which only snap can finish or replace.
+    #[error(
+        "snap attempt {attempt} left unverified state, restart with snap sync or wipe the database"
+    )]
+    SnapStateRequiresSnapSync {
         /// Attempt that owns the unverified state.
         attempt: u64,
     },
@@ -240,7 +253,7 @@ impl ProviderError {
     /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
 

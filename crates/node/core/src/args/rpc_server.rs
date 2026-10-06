@@ -1,4 +1,4 @@
-//! clap [`clap::Args`] for RPC related arguments.
+//! clap [`Args`] for RPC related arguments.
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},

@@ -41,7 +41,7 @@ use reth_evm::debug_unreachable;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::ComputedTrieData;
+use reth_trie::{ComputedTrieData, HashedPostState, KeccakKeyHasher};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -68,7 +68,6 @@ mod metrics;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
-pub mod precompile_cache;
 pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
@@ -85,8 +84,9 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
+    precompile_cache, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+    TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
     Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
@@ -1202,6 +1202,13 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // Forward the head, since a long-running backfill such as snap must follow it. A run
+            // awaiting revalidation has not started and reads the latest head when it does.
+            if self.backfill_sync_state.is_pending() || self.backfill_sync_state.is_active() {
+                self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
+                    state.head_block_hash,
+                )));
+            }
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
@@ -1644,7 +1651,13 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            BeaconEngineMessage::ForkchoiceUpdated {
+                                cause,
+                                state,
+                                payload_attrs,
+                                tx,
+                            } => {
+                                let _cause = cause.enter();
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
@@ -1687,7 +1700,8 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload { cause, payload, tx } => {
+                                let _cause = cause.enter();
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
@@ -1717,12 +1731,14 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload {
+                                cause,
                                 payload,
                                 wait_for_persistence,
                                 wait_for_caches,
                                 tx,
                                 enqueued_at,
                             } => {
+                                let _cause = cause.enter();
                                 debug!(
                                     target: "engine::tree",
                                     wait_for_persistence,
@@ -2371,11 +2387,15 @@ where
         let bundle_state = execution_output.state();
         // `get_state` can return an in-memory execution outcome that retains destruction statuses.
         // Hashing it requires the parent provider to expand a pre-existing destroyed account's
-        // storage into zero-valued slots.
-        let hashed_state = self
-            .provider
-            .state_by_block_hash(block.parent_hash())?
-            .hashed_post_state(bundle_state)?;
+        // storage into zero-valued slots. Genesis has no parent state, and no account existed
+        // before it to be destroyed.
+        let hashed_state = if block.parent_hash().is_zero() {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        } else {
+            self.provider
+                .state_by_block_hash(block.parent_hash())?
+                .hashed_post_state(bundle_state)?
+        };
 
         debug!(
             target: "engine::tree",
@@ -3362,17 +3382,33 @@ where
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// A persisted header can still be found by hash while its disk reorg is pending, so it is
+    /// only canonical if it is not above the canonical head and matches the canonical hash at its
+    /// height. The in-memory canonical hash is preferred over the persisted one.
     pub fn find_canonical_header(
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
-
-        if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+            return Ok(Some(header))
         }
 
-        Ok(canonical)
+        let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
+        // Reorged-out headers remain on disk until persistence catches up, so reject old tips above
+        // the in-memory head and use in-memory hashes to reject old blocks at shared heights.
+        let number = header.number();
+        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+            return Ok(None)
+        }
+        let canonical_hash =
+            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+                Some(hash)
+            } else {
+                self.provider.block_hash(number)?
+            };
+
+        Ok((canonical_hash == Some(hash)).then_some(header))
     }
 
     /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
@@ -3386,9 +3422,9 @@ where
     /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
     /// blocks and the canonical prefix below its first block form the proposed chain. Without a
     /// chain update, the proposed head is already canonical, so only canonical blocks through its
-    /// height are eligible. For a canonical-prefix hash, the current in-memory or persisted
-    /// canonical hash must match too: a stale persisted header may still be found by hash while
-    /// disk reorg cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
+    /// height are eligible. Canonical-prefix hashes are resolved via
+    /// [`Self::find_canonical_header`], which rejects stale persisted headers whose disk reorg
+    /// cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
     /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
     ///
     /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
@@ -3417,19 +3453,6 @@ where
             }
             let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
             if header.number() > canonical_head_number {
-                return Ok(false)
-            }
-
-            // A persisted header can still be found by hash while its disk reorg is pending.
-            // Prefer the in-memory canonical hash at this height over the persisted one.
-            let canonical_hash = if let Some(hash) =
-                self.canonical_in_memory_state.hash_by_number(header.number())
-            {
-                Some(hash)
-            } else {
-                self.provider.block_hash(header.number())?
-            };
-            if canonical_hash != Some(hash) {
                 return Ok(false)
             }
         }

@@ -109,3 +109,14 @@ js-tracer = [
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
 ]
+account-ext = [
+    "reth-rpc-eth-api/account-ext",
+    "reth-primitives-traits/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-provider/account-ext",
+    "reth-evm/account-ext",
+    "evm2/account-ext",
+    "reth-execution-types/account-ext",
+    "revm/account-ext",
+]

@@ -1,4 +1,4 @@
-//! clap [`clap::Args`] for debugging purposes
+//! clap [`Args`] for debugging purposes.
 
 use alloy_primitives::B256;
 use clap::{

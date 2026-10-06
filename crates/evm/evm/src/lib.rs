@@ -29,8 +29,6 @@ pub use evm2::{
 
 /// Cached database adapters for payload building.
 pub mod cached;
-/// Cancellation markers for EVM execution work.
-pub use reth_revm::cancelled;
 /// Database adapters for EVM execution.
 pub mod database;
 pub mod either;
@@ -79,6 +77,15 @@ pub struct EvmTransactionValidationGas {
 }
 
 impl EvmTransactionValidationGasRules {
+    /// Returns the intrinsic regular gas cap, or zero when EIP-8037 is disabled.
+    pub const fn regular_gas_cap(&self) -> u64 {
+        if self.version.feature(evm2::EvmFeatures::EIP8037) {
+            self.version.tx_gas_limit_cap
+        } else {
+            0
+        }
+    }
+
     /// Calculates validation gas with the same native rules used during execution.
     #[expect(clippy::too_many_arguments)]
     pub fn calculate(

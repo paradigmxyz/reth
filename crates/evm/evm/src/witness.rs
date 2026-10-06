@@ -143,6 +143,10 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                     bytecode_hash: (!account.code_hash.is_zero() &&
                         account.code_hash != alloy_consensus::constants::KECCAK_EMPTY)
                         .then_some(account.code_hash),
+                    #[cfg(feature = "account-ext")]
+                    extension: reth_primitives_traits::AccountExtension::from_shared(
+                        account.extension.clone().into_shared(),
+                    ),
                 }),
             );
             if account.is_some() {
@@ -181,6 +185,25 @@ mod tests {
         let (hashed_state, _) = ExecutionWitnessRecord::new(&state).hashed_post_state();
         assert_eq!(hashed_state.accounts[&hashed_address], None);
         assert!(hashed_state.storages[&hashed_address].storage.is_empty());
+    }
+
+    #[cfg(feature = "account-ext")]
+    #[test]
+    fn witness_preserves_account_extension() {
+        let address = Address::with_last_byte(1);
+        let mut state = CacheDB::<EmptyDB>::default();
+        state.insert_account_info(
+            &address,
+            AccountInfo {
+                extension: evm2::evm::AccountExtension::copy_from_slice(b"account extension"),
+                ..Default::default()
+            },
+        );
+        let (hashed, _) = ExecutionWitnessRecord::new(&state).hashed_post_state();
+        assert_eq!(
+            hashed.accounts[&keccak256(address)].as_ref().unwrap().extension.as_ref(),
+            b"account extension"
+        );
     }
 
     #[test]

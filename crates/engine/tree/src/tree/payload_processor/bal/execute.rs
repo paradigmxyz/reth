@@ -212,6 +212,7 @@ impl AbortGuard {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_consensus::{BlockHeader, Header, TxLegacy};
     use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
@@ -830,8 +831,49 @@ mod tests {
         .expect("the capped regular gas limit should fit the remaining block gas");
         assert_eq!(output.receipts.len(), 2);
     }
-    /// Two funded senders each transferring to a fresh recipient, plus the reference BAL of a
-    /// block containing only the covered subset of those transfers.
+    /// Two funded senders transferring with independently chosen gas limits.
+    fn two_transfers(
+        tx1_gas_limit: u64,
+        tx2_gas_limit: u64,
+        fund_recipient: bool,
+    ) -> (TestDatabase, Recovered<TransactionSigned>, Recovered<TransactionSigned>) {
+        let recipient = Address::repeat_byte(0xca);
+        let balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, balance);
+        insert_funded(&mut pre_block_db, bob, balance);
+        if fund_recipient {
+            insert_funded(&mut pre_block_db, recipient, balance);
+        }
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, gas_limit, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit,
+                    to: alloy_primitives::TxKind::Call(recipient),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, tx1_gas_limit, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, tx2_gas_limit, 200u64), bob);
+        (pre_block_db, tx1, tx2)
+    }
+
+    /// [`two_transfers`] to a fresh recipient, plus the reference BAL of a block containing only
+    /// the covered subset of those transfers.
     fn two_transfers_with_reference_bal(
         evm_config: &EthEvmConfig,
         tx_gas_limit: u64,
@@ -842,48 +884,42 @@ mod tests {
         Recovered<reth_ethereum_primitives::TransactionSigned>,
         Recovered<reth_ethereum_primitives::TransactionSigned>,
     ) {
-        use alloy_consensus::TxLegacy;
-        use alloy_primitives::TxKind;
-        use reth_chainspec::MAINNET;
-        use reth_ethereum_primitives::Transaction;
-        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
-        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-
-        let recipient = alloy_primitives::Address::from([0xCA; 20]);
-        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
-
-        let alice_kp = generate_key(&mut rng());
-        let alice = public_key_to_address(alice_kp.public_key());
-        let bob_kp = generate_key(&mut rng());
-        let bob = public_key_to_address(bob_kp.public_key());
-
-        let mut pre_block_db = system_contracts_db();
-        insert_funded(&mut pre_block_db, alice, sender_balance);
-        insert_funded(&mut pre_block_db, bob, sender_balance);
-
-        let chain_id = MAINNET.chain.id();
-        let make_tx = |kp, value| {
-            sign_tx_with_key_pair(
-                kp,
-                Transaction::Legacy(TxLegacy {
-                    chain_id: Some(chain_id),
-                    nonce: 0,
-                    gas_price: 1,
-                    gas_limit: tx_gas_limit,
-                    to: TxKind::Call(recipient),
-                    value: U256::from(value),
-                    input: Default::default(),
-                }),
-            )
-        };
-        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
-        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
-
+        let (pre_block_db, tx1, tx2) = two_transfers(tx_gas_limit, tx_gas_limit, false);
         let reference_block = empty_amsterdam_block(B256::ZERO);
         let covered = if bal_covers_first { vec![tx1.clone()] } else { vec![] };
         let reference_bal =
             reference_bal_for_block(evm_config, pre_block_db.clone(), &reference_block, &covered);
         (pre_block_db, reference_bal, tx1, tx2)
+    }
+
+    #[test]
+    fn default_tx_gas_limit_cap_matches_serial_execution() {
+        let evm_config = test_evm_config();
+        let block_gas_limit = 20_000_000;
+        // The uncapped second limit exceeds the remaining regular budget. EIP-7825's
+        // default cap makes its regular part fit; the funded recipient consumes no state gas.
+        let (db, tx1, tx2) = two_transfers(100_000, 19_990_000, true);
+        let txs = vec![tx1, tx2];
+        let (serial, bal) = run_serial_path(
+            &evm_config,
+            db.clone(),
+            &empty_amsterdam_block_with_gas_limit(B256::ZERO, block_gas_limit),
+            &txs,
+        );
+        let block = empty_amsterdam_block_with_gas_limit(
+            compute_block_access_list_hash(&bal),
+            block_gas_limit,
+        );
+        let parallel = run_execute_block(
+            &Runtime::test(),
+            evm_config,
+            db_factory(db),
+            to_arc_decoded(bal),
+            &block,
+            txs,
+        )
+        .expect("the default regular cap must match serial execution");
+        assert_eq!(parallel.receipts, serial.receipts);
     }
 
     #[test]

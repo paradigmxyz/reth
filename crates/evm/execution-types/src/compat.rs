@@ -270,6 +270,8 @@ fn empty_account() -> Account {
         code_hash: alloy_primitives::KECCAK256_EMPTY,
         code: None,
         account_id: None,
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     })
 }
 
@@ -331,12 +333,15 @@ impl evm2::evm::StateChangeSource for BundleSource<'_> {
 
 /// Converts persistent account information into evm2's execution representation.
 pub fn native_account(info: &AccountInfo) -> evm2::evm::AccountInfo {
-    evm2::evm::AccountInfo::new(
-        info.balance,
-        info.nonce,
-        info.code_hash,
-        info.code.as_ref().map(native_bytecode),
-    )
+    evm2::evm::AccountInfo {
+        #[cfg(feature = "account-ext")]
+        extension: evm2::evm::AccountExtension::from_shared(info.extension.clone().into_shared()),
+        balance: info.balance,
+        nonce: info.nonce,
+        code_hash: info.code_hash,
+        code: info.code.as_ref().map(native_bytecode),
+        _non_exhaustive: (),
+    }
 }
 
 /// Converts persistent bytecode while retaining its analyzed jump destinations and padding.
@@ -366,13 +371,16 @@ pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
 
 /// Converts native account information into the persistent state representation.
 /// Bytecode is carried separately by the change stream; account updates only need its hash.
-pub const fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
+#[cfg_attr(not(feature = "account-ext"), allow(clippy::missing_const_for_fn))]
+pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
     AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
         code: None,
         account_id: None,
+        #[cfg(feature = "account-ext")]
+        extension: revm::state::AccountExtension::from_shared(info.extension.clone().into_shared()),
     }
 }
 
@@ -391,6 +399,46 @@ mod tests {
     use evm2::evm::{
         AccountChangeRef, AccountInfo as NativeAccount, StateChangeSink, StorageChange,
     };
+
+    #[cfg(feature = "account-ext")]
+    #[test]
+    fn account_extensions_survive_native_updates_and_reverts() {
+        let address = Address::with_last_byte(1);
+        let original = AccountInfo {
+            balance: U256::from(10),
+            extension: revm::state::AccountExtension::copy_from_slice(b"original extension"),
+            ..Default::default()
+        };
+        let native = native_account(&original);
+        assert_eq!(native.extension.as_ref(), original.extension.as_ref());
+        assert_eq!(native.extension.as_ref().as_ptr(), original.extension.as_ref().as_ptr());
+        let mut updated = native.clone();
+        updated.balance = U256::from(20);
+        updated.extension = evm2::evm::AccountExtension::copy_from_slice(b"updated extension");
+        let mut state = BlockState::new();
+        state
+            .transaction_sink()
+            .account(AccountChangeRef {
+                address,
+                original: Some(&native),
+                current: Some(&updated),
+                created: false,
+                selfdestructed: false,
+            })
+            .unwrap();
+        let mut bundle = state.into_bundle();
+        let account = bundle.state.get(&address).unwrap();
+        assert_eq!(
+            account.original_info.as_ref().unwrap().extension.as_ref(),
+            b"original extension"
+        );
+        assert_eq!(account.info.as_ref().unwrap().extension.as_ref(), b"updated extension");
+        assert!(bundle.revert_latest());
+        assert_eq!(
+            bundle.state.get(&address).unwrap().info.as_ref().unwrap().extension.as_ref(),
+            b"original extension"
+        );
+    }
 
     #[test]
     fn native_sink_preserves_storage_lifetimes_and_reverts() {

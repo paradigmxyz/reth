@@ -126,7 +126,7 @@ where
         arg: Option<&clap::Arg>,
         value: &std::ffi::OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        if value.to_str().map(|s| s.eq_ignore_ascii_case("max")).unwrap_or(false) {
+        if value.to_str().is_some_and(|s| s.eq_ignore_ascii_case("max")) {
             Ok(u64::MAX)
         } else {
             self.inner.parse_ref(cmd, arg, value).map(Into::into)

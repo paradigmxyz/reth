@@ -9,12 +9,18 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{B256, KECCAK256_EMPTY};
-use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx, RawKey, RawTable};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
+};
 use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttemptId,
-    StageCheckpointReader, StageCheckpointWriter,
+    BlockHashReader, BlockWriter, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    PruneCheckpointWriter, SnapAttemptId, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_storage_errors::provider::{ProviderError, RootMismatch};
 use serde::{Deserialize, Serialize};
@@ -24,9 +30,26 @@ use tokio_util::sync::CancellationToken;
 /// running.
 pub const DEFAULT_SCAN_CHUNK: u64 = 100_000;
 
+// Stages publishing moves to the pivot, since the downloaded state replaces their output. Headers
+// and era import run on their own, the merkle stage still rebuilds the trie, and `Finish` waits
+// for verification.
+const PUBLISHED_STAGES: [StageId; 11] = [
+    StageId::Bodies,
+    StageId::SenderRecovery,
+    StageId::Execution,
+    StageId::PruneSenderRecovery,
+    StageId::MerkleUnwind,
+    StageId::AccountHashing,
+    StageId::StorageHashing,
+    StageId::TransactionLookup,
+    StageId::IndexStorageHistory,
+    StageId::IndexAccountHistory,
+    StageId::Prune,
+];
+
 /// Decides whether downloaded state can be trusted as the node's state.
 ///
-/// Writes join the caller's transaction, so a refused check changes nothing.
+/// Verification writes join the caller's transaction, so a refused check changes nothing.
 pub trait SnapStateVerifier {
     /// Hands complete state to the merkle stage, which rebuilds its trie from scratch.
     ///
@@ -51,6 +74,21 @@ pub trait SnapStateVerifier {
     ) -> Result<(), SnapSyncError>
     where
         Self: DBProvider;
+
+    /// Publishes the state downloaded at `pivot`: makes it the node's state at that block, so the
+    /// pipeline resumes at `pivot + 1` instead of executing from genesis.
+    ///
+    /// - Moves the stages the downloaded state covers to `pivot`.
+    /// - Records history below `pivot` as pruned.
+    /// - Clears body indices, database receipts and transaction lookups, so transaction numbers
+    ///   restart at 0 above `pivot`. `RocksDB` lookups are cleared immediately, not on commit.
+    ///
+    /// Publishing is not verification: the merkle stage and `Finish` wait for the trie rebuild.
+    /// It cannot be undone, the node must not unwind below `pivot`, and the caller resets the
+    /// static files to `pivot` in the same commit.
+    fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
 
     /// Returns whether `write`'s state was handed to the merkle stage, so a resumed sync does not
     /// reset its rebuild.
@@ -117,6 +155,39 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         Ok(())
     }
 
+    fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
+    {
+        if pivot == 0 {
+            return Err(SnapSyncError::GenesisPivot)
+        }
+        // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
+        // transaction segments no longer hold.
+        self.tx_ref().clear::<tables::BlockBodyIndices>()?;
+        self.tx_ref().clear::<tables::TransactionBlocks>()?;
+        // Their withdrawals and ommers are appended per block, so writing above the pivot again
+        // would fail on the rows left behind. These are the Ethereum body tables, a chain storage
+        // with body tables of its own has to clear them as well.
+        self.tx_ref().clear::<tables::BlockWithdrawals>()?;
+        self.tx_ref().clear::<tables::BlockOmmers>()?;
+        // Receipt log filtering keeps receipts in MDBX even with storage v2. Their transaction
+        // numbers must be reusable after publication.
+        self.tx_ref().clear::<tables::Receipts>()?;
+        self.clear_transaction_lookup()?;
+
+        let checkpoint = StageCheckpoint::new(pivot);
+        for stage in PUBLISHED_STAGES {
+            self.save_stage_checkpoint(stage, checkpoint)?;
+        }
+        // Snap sync wrote no history below the pivot.
+        let pruned = PruneCheckpoint::pruned_through(pivot);
+        for segment in PruneSegment::variants() {
+            self.save_prune_checkpoint(segment, pruned)?;
+        }
+        Ok(())
+    }
+
     fn verify_completeness(
         &self,
         write: SnapWrite,
@@ -138,6 +209,10 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
                 applied: applied.number,
                 pivot: attempt.pivot().number,
             })
+        }
+        let repairs = self.snap_repairs(write)?;
+        if !repairs.is_empty() {
+            return Err(SnapSyncError::PendingRepairs { accounts: repairs.len() })
         }
         ensure_code_present(self.tx_ref(), chunk, cancel)
     }
@@ -229,17 +304,24 @@ mod tests {
         test_utils::{account, hashed_factory, header, key, state_root},
         SnapGeneration, SnapStorageStore, StorageChunk,
     };
-    use alloy_primitives::{map::B256Map, Bytes, U256};
+    use alloy_consensus::TxLegacy;
+    use alloy_eips::eip4895::{Withdrawal, Withdrawals};
+    use alloy_primitives::{map::B256Map, Address, Bytes, Signature, U256};
     use reth_db_api::transaction::DbTxMut;
+    use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
-        DatabaseProviderFactory, ProviderFactory,
+        BlockBodyIndicesProvider, DatabaseProviderFactory, EitherWriter, ProviderFactory,
+        PruneCheckpointReader, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        StorageSettings, StorageSettingsCache, TransactionsProvider,
     };
+    use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
     use revm::bytecode::Bytecode;
+    use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Provider = <Factory as DatabaseProviderFactory>::ProviderRW;
@@ -505,5 +587,264 @@ mod tests {
 
         assert!(matches!(start(&provider, write), Err(SnapSyncError::GenesisPivot)));
         assert_eq!(merkle_checkpoint(&provider), None);
+    }
+
+    #[test]
+    fn publishing_moves_the_covered_stages_while_the_trie_and_finish_wait() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        provider.publish_snap_state(7).unwrap();
+
+        // Every stage must be classified, so a new one fails here until it is.
+        let kept = [StageId::Era, StageId::Headers, StageId::MerkleExecute, StageId::Finish];
+        for stage in StageId::ALL {
+            let published = PUBLISHED_STAGES.contains(&stage);
+            assert_ne!(published, kept.contains(&stage), "{stage} must be published or kept");
+            let expected = published.then(|| StageCheckpoint::new(7));
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), expected, "{stage}");
+        }
+    }
+
+    #[test]
+    fn publishing_refuses_the_genesis_pivot() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        assert!(matches!(provider.publish_snap_state(0), Err(SnapSyncError::GenesisPivot)));
+    }
+
+    #[test]
+    fn publishing_records_the_history_below_the_pivot_as_pruned() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        provider.publish_snap_state(7).unwrap();
+
+        for segment in PruneSegment::variants() {
+            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
+            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
+        }
+    }
+
+    #[test]
+    fn bodies_downloaded_past_the_pivot_can_be_written_again_after_publishing() {
+        let factory = hashed_factory();
+        insert_chain(&factory, B256::ZERO);
+        let body = BlockBody {
+            withdrawals: Some(Withdrawals::new(vec![Withdrawal::default()])),
+            ..Default::default()
+        };
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .append_block_bodies(vec![
+                (0, None),
+                (1, Some(&body)),
+                (2, Some(&body)),
+                (3, Some(&body)),
+            ])
+            .unwrap();
+        provider.commit().unwrap();
+
+        // Publish at block 1 and reset the transaction file to it, as the caller does.
+        let static_files = factory.static_file_provider();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.publish_snap_state(1).unwrap();
+        static_files.delete_segment(StaticFileSegment::Transactions).unwrap();
+        static_files
+            .latest_writer(StaticFileSegment::Transactions)
+            .unwrap()
+            .ensure_at_block(1)
+            .unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+        provider.commit().unwrap();
+    }
+
+    #[test]
+    fn published_state_can_unwind_bodies_to_the_pivot() {
+        for tx_count in [0, 2] {
+            let factory = hashed_factory();
+            insert_chain(&factory, B256::ZERO);
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(1).unwrap();
+            factory
+                .static_file_provider()
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap()
+                .ensure_at_block(1)
+                .unwrap();
+            provider.commit().unwrap();
+
+            let body = BlockBody {
+                transactions: (0..tx_count)
+                    .map(|nonce| {
+                        TransactionSigned::new_unhashed(
+                            Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                            Signature::test_signature(),
+                        )
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_rw().unwrap();
+            assert_eq!(provider.block_body_indices(1).unwrap(), None);
+            assert_eq!(provider.next_tx_num_after_block(1).unwrap(), 0);
+            assert_eq!(provider.next_tx_num_after_block(2).unwrap(), tx_count);
+            provider.remove_bodies_above(1).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_ro().unwrap();
+            assert_eq!(provider.block_body_indices(1).unwrap(), None);
+            assert_eq!(provider.block_body_indices(2).unwrap(), None);
+            let static_files = factory.static_file_provider();
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(1)
+            );
+            assert_eq!(
+                static_files.get_highest_static_file_tx(StaticFileSegment::Transactions),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn startup_heals_an_interrupted_first_write_after_publishing() {
+        // An empty block is covered too, since transaction counts alone can't see its height.
+        for tx_count in [0, 1] {
+            let factory = hashed_factory();
+            insert_chain(&factory, B256::ZERO);
+            let static_files = factory.static_file_provider();
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(1).unwrap();
+            static_files
+                .latest_writer(StaticFileSegment::Transactions)
+                .unwrap()
+                .ensure_at_block(1)
+                .unwrap();
+            provider.commit().unwrap();
+
+            let body = BlockBody {
+                transactions: (0..tx_count)
+                    .map(|nonce| {
+                        TransactionSigned::new_unhashed(
+                            Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                            Signature::test_signature(),
+                        )
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+
+            // The static files commit, the database does not.
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            static_files.commit().unwrap();
+            drop(provider);
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(static_files.check_consistency(&provider).unwrap(), None, "{tx_count}");
+            assert_eq!(
+                static_files.get_highest_static_file_block(StaticFileSegment::Transactions),
+                Some(1),
+                "{tx_count}"
+            );
+            drop(provider);
+
+            let provider = factory.database_provider_rw().unwrap();
+            provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+            provider.commit().unwrap();
+        }
+    }
+
+    #[test]
+    fn publishing_clears_transaction_lookups_in_the_active_backend() {
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = hashed_factory();
+            factory.set_storage_settings_cache(settings);
+            let old_hash = B256::repeat_byte(0xaa);
+            let new_hash = B256::repeat_byte(0xbb);
+            let insert_lookup = |hash| {
+                let provider = factory.database_provider_rw().unwrap();
+                provider
+                    .with_rocksdb_batch(|batch| {
+                        let mut writer =
+                            EitherWriter::new_transaction_hash_numbers(&provider, batch)?;
+                        writer.put_transaction_hash_numbers_batch(vec![(hash, 0)], false)?;
+                        Ok(((), writer.into_raw_rocksdb_batch()))
+                    })
+                    .unwrap();
+                provider.commit().unwrap();
+            };
+            insert_lookup(old_hash);
+            assert_eq!(
+                factory.database_provider_ro().unwrap().transaction_id(old_hash).unwrap(),
+                Some(0)
+            );
+
+            let provider = factory.database_provider_rw().unwrap();
+            provider.publish_snap_state(7).unwrap();
+            provider.commit().unwrap();
+            assert_eq!(
+                factory.database_provider_ro().unwrap().transaction_id(old_hash).unwrap(),
+                None
+            );
+
+            insert_lookup(new_hash);
+            let provider = factory.database_provider_ro().unwrap();
+            assert_eq!(provider.transaction_id(old_hash).unwrap(), None);
+            assert_eq!(provider.transaction_id(new_hash).unwrap(), Some(0));
+        }
+    }
+
+    #[test]
+    fn publishing_resets_database_receipts_before_reusing_transaction_numbers() {
+        let factory = hashed_factory().with_prune_modes(PruneModes {
+            receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
+                Address::ZERO,
+                PruneMode::Before(0),
+            )])),
+            ..Default::default()
+        });
+        insert_chain(&factory, B256::ZERO);
+        let body = BlockBody {
+            transactions: (0..2)
+                .map(|nonce| {
+                    TransactionSigned::new_unhashed(
+                        Transaction::Legacy(TxLegacy { nonce, ..Default::default() }),
+                        Signature::test_signature(),
+                    )
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(0, None), (1, Some(&body))]).unwrap();
+        {
+            let mut writer = EitherWriter::new_receipts(&provider, 1).unwrap();
+            assert!(matches!(&writer, EitherWriter::Database(_)));
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+        }
+        provider.commit().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(1).unwrap();
+        provider.publish_snap_state(1).unwrap();
+        provider.commit().unwrap();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.append_block_bodies(vec![(2, Some(&body))]).unwrap();
+        {
+            let mut writer = EitherWriter::new_receipts(&provider, 2).unwrap();
+            writer.append_receipt(0, &Receipt::default()).unwrap();
+            writer.append_receipt(1, &Receipt::default()).unwrap();
+        }
+        provider.commit().unwrap();
     }
 }

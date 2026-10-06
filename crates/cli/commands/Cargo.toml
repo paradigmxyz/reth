@@ -89,7 +89,7 @@ tokio-stream.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 url.workspace = true
 metrics.workspace = true
-blake3.workspace = true
+blake3 = { workspace = true, features = ["rayon"] }
 rayon.workspace = true
 
 # io

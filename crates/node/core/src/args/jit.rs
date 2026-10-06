@@ -1,4 +1,4 @@
-//! clap [`clap::Args`] for JIT configuration.
+//! clap [`Args`] for JIT configuration.
 
 use clap::Args;
 use humantime::parse_duration;

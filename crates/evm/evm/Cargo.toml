@@ -45,6 +45,13 @@ fixed-cache.workspace = true
 reth-ethereum-primitives.workspace = true
 
 [features]
+account-ext = [
+    "evm2/account-ext",
+    "reth-execution-types/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
+    "reth-primitives-traits/account-ext",
+]
 default = ["std"]
 gmp = ["evm2/gmp"]
 asm-keccak = [

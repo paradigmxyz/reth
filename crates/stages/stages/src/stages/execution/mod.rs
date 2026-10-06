@@ -1041,16 +1041,13 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
-                Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
+                Account { bytecode_hash: Some(code_hash), ..Default::default() },
             )
             .unwrap();
         db_tx
-            .put::<tables::PlainAccountState>(
-                acc2,
-                Account { nonce: 0, balance, bytecode_hash: None },
-            )
+            .put::<tables::PlainAccountState>(acc2, Account { balance, ..Default::default() })
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1101,18 +1098,15 @@ mod tests {
                 // check post state
                 let account1 = address!("0x1000000000000000000000000000000000000000");
                 let account1_info =
-                    Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
+                    Account { bytecode_hash: Some(code_hash), ..Default::default() };
                 let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-                let account2_info = Account {
-                    balance: U256::from(0x1bc16d674ece94bau128),
-                    nonce: 0x00,
-                    bytecode_hash: None,
-                };
+                let account2_info =
+                    Account { balance: U256::from(0x1bc16d674ece94bau128), ..Default::default() };
                 let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
                 let account3_info = Account {
                     balance: U256::from(0x3635c9adc5de996b46u128),
                     nonce: 0x01,
-                    bytecode_hash: None,
+                    ..Default::default()
                 };
 
                 // assert accounts
@@ -1151,6 +1145,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn sanity_execute_unwind() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1185,13 +1180,13 @@ mod tests {
 
         let db_tx = provider.tx_ref();
         let acc1 = address!("0x1000000000000000000000000000000000000000");
-        let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let acc1_info = Account { bytecode_hash: Some(code_hash), ..Default::default() };
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let acc2_info = Account { balance, ..Default::default() };
 
-        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
-        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info.clone()).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info.clone()).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1330,6 +1325,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn test_selfdestruct() {
         let test_db = TestStageDB::default();
         let provider = test_db.factory.database_provider_rw().unwrap();
@@ -1365,20 +1361,22 @@ mod tests {
         let code_hash = keccak256(code);
 
         // pre state
-        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
-        let destroyed_info =
-            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+        let caller_info = Account { balance, ..Default::default() };
+        let destroyed_info = Account { bytecode_hash: Some(code_hash), ..Default::default() };
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         provider
             .tx_ref()
-            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info)
+            .put::<tables::PlainAccountState>(caller_address, caller_info.clone())
             .unwrap();
         provider
             .tx_ref()
-            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info.clone())
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into()))
             .unwrap();
         // set storage to check when account gets destroyed.
         provider
@@ -1392,7 +1390,7 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry { key: B256::with_last_byte(1), value: U256::ONE },
             )
             .unwrap();
 
@@ -1422,18 +1420,14 @@ mod tests {
             vec![
                 (
                     beneficiary_address,
-                    Account {
-                        nonce: 0,
-                        balance: U256::from(0x1bc16d674eca30a0u64),
-                        bytecode_hash: None
-                    }
+                    Account { balance: U256::from(0x1bc16d674eca30a0u64), ..Default::default() }
                 ),
                 (
                     caller_address,
                     Account {
                         nonce: 1,
                         balance: U256::from(0xde0b6b3a761cf60u64),
-                        bytecode_hash: None
+                        ..Default::default()
                     }
                 )
             ]
@@ -1467,7 +1461,7 @@ mod tests {
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry { key: B256::with_last_byte(1), value: U256::ONE }
                 )
             ]
         );

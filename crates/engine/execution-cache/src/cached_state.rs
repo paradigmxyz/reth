@@ -1340,7 +1340,7 @@ mod tests {
     fn test_uncached_storage_cached_state_provider() {
         let address = Address::random();
         let storage_key = StorageKey::random();
-        let storage_value = U256::from(1);
+        let storage_value = U256::ONE;
         let account =
             ExtendedAccount::new(0, U256::ZERO).extend_storage(vec![(storage_key, storage_value)]);
 
@@ -1363,7 +1363,7 @@ mod tests {
     fn test_get_storage_populated() {
         let address = Address::random();
         let storage_key = StorageKey::random();
-        let storage_value = U256::from(1);
+        let storage_value = U256::ONE;
 
         let caches = ExecutionCache::new(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
@@ -1401,7 +1401,7 @@ mod tests {
     #[test]
     fn test_saved_cache_multiple_references() {
         let execution_cache = ExecutionCache::new(1000);
-        let cache = SavedCache::new(B256::from([2u8; 32]), execution_cache);
+        let cache = SavedCache::new(B256::repeat_byte(2u8), execution_cache);
 
         let cache1 = cache.clone_guard_for_test();
         let cache2 = cache.clone_guard_for_test();
@@ -1442,11 +1442,10 @@ mod tests {
                 Address::random(),
                 BundleAccount::new(
                     Some(AccountInfo {
-                        balance: U256::ZERO,
                         nonce: 1,
                         code_hash: B256::random(), // Non-empty code hash
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     }),
                     None, // Destroyed, so no current info
                     Default::default(),
@@ -1491,7 +1490,7 @@ mod tests {
                         nonce: 1,
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     }),
                     None, // Destroyed
                     Default::default(),

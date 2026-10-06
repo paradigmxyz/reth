@@ -655,6 +655,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
+    #[allow(clippy::clone_on_copy)]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
@@ -680,7 +681,7 @@ where
             self.pending_account_updates.entry(address).or_insert(None);
         }
 
-        for (&address, &account) in &hashed_state_update.accounts {
+        for (&address, account) in &hashed_state_update.accounts {
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -689,7 +690,7 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            self.pending_account_updates.insert(address, Some(account.clone()));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -1611,7 +1612,8 @@ fn encode_account_leaf_value(
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    if account.as_ref().is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH
+    {
         return Vec::new();
     }
 
@@ -1676,7 +1678,7 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
-    use reth_trie_parallel::proof_task::ProofTaskCtx;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
@@ -1700,7 +1702,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(runtime),
             proof_result_tx.clone(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
@@ -1782,13 +1784,13 @@ mod tests {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
 
         let address = keccak256(Address::random());
-        let slot = keccak256(U256::from(42).to_be_bytes::<32>());
+        let slot = keccak256(B256::with_last_byte(42));
         let value = U256::from(999);
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            Some(Account { balance: U256::from(100), nonce: 1, ..Default::default() }),
         );
         let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
@@ -1812,9 +1814,9 @@ mod tests {
             panic!("expected HashedState message");
         };
 
-        let account = received.accounts.get(&address).unwrap().unwrap();
-        assert_eq!(account.balance, expected_state.accounts[&address].unwrap().balance);
-        assert_eq!(account.nonce, expected_state.accounts[&address].unwrap().nonce);
+        let account = received.accounts.get(&address).unwrap().as_ref().unwrap();
+        assert_eq!(account.balance, expected_state.accounts[&address].as_ref().unwrap().balance);
+        assert_eq!(account.nonce, expected_state.accounts[&address].as_ref().unwrap().nonce);
 
         let storage = received.storages.get(&address).unwrap();
         assert_eq!(*storage.storage.get(&slot).unwrap(), value);
@@ -1851,12 +1853,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
-        let storage_root = B256::from([0x99; 32]);
+        let storage_root = B256::repeat_byte(0x99);
         let account = Some(Account {
             nonce: 7,
             balance: U256::from(42),
-            bytecode_hash: Some(B256::from([0xAA; 32])),
+            bytecode_hash: Some(B256::repeat_byte(0xAA)),
+            ..Default::default()
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
 
@@ -1976,6 +1980,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2000,11 +2005,11 @@ mod tests {
         };
 
         let mut state = HashedPostState::default();
-        state.accounts.insert(address, Some(account));
+        state.accounts.insert(address, Some(account.clone()));
         state.storages.entry(address).or_default().storage.extend([
             (removed_slot, U256::from(8)),
             (changed_slot, U256::from(9)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         task.on_hashed_state_update(state);
@@ -2051,7 +2056,7 @@ mod tests {
 
         let expected_root = reth_trie_common::root::storage_root_unsorted([
             (changed_slot, U256::from(11)),
-            (new_slot, U256::from(1)),
+            (new_slot, U256::ONE),
             (sibling_slot, U256::from(2)),
         ]);
         assert_eq!(
@@ -2067,7 +2072,7 @@ mod tests {
         let mut final_updates = B256Map::from_iter([
             (removed_slot, LeafUpdate::Changed(Vec::new())),
             (changed_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(11)))),
-            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(1)))),
+            (new_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::ONE))),
             (sibling_slot, LeafUpdate::Changed(alloy_rlp::encode(U256::from(2)))),
         ]);
         serial
@@ -2237,6 +2242,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
         let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
@@ -2252,14 +2258,11 @@ mod tests {
                 let account = Account {
                     nonce: u64::from(index) + 1,
                     balance: U256::from(index),
-                    bytecode_hash: None,
+                    ..Default::default()
                 };
                 let storage = (0..4u8)
                     .map(|slot| {
-                        (
-                            B256::repeat_byte(0x40 + index * 4 + slot),
-                            U256::from(slot) + U256::from(1),
-                        )
+                        (B256::repeat_byte(0x40 + index * 4 + slot), U256::from(slot) + U256::ONE)
                     })
                     .collect::<Vec<_>>();
                 (address, account, storage)
@@ -2268,7 +2271,7 @@ mod tests {
 
         let mut state = HashedPostState::default();
         for (address, account, storage) in &accounts {
-            state.accounts.insert(*address, Some(*account));
+            state.accounts.insert(*address, Some(account.clone()));
             state.storages.entry(*address).or_default().storage.extend(storage.iter().copied());
         }
         updates_tx.send(StateRootMessage::HashedStateUpdate(state)).unwrap();
@@ -2279,7 +2282,7 @@ mod tests {
         let expected = accounts.iter().map(|(address, account, storage)| {
             let storage_root =
                 reth_trie_common::root::storage_root_unsorted(storage.iter().copied());
-            (*address, account.into_trie_account(storage_root))
+            (*address, account.clone().into_trie_account(storage_root))
         });
         assert_eq!(outcome.state_root, reth_trie_common::root::state_root_unsorted(expected));
         assert_eq!(task.storage_in_flight, 0);
@@ -2304,7 +2307,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2314,7 +2317,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2388,7 +2391,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2398,7 +2401,7 @@ mod tests {
             .with_default_storage_trie(default_trie)
             .with_updates(true);
 
-        let parent_state_root = B256::from([0x55; 32]);
+        let parent_state_root = B256::repeat_byte(0x55);
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
         let mut task = SparseTrieCacheTask::new_with_trie(
@@ -2443,7 +2446,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2465,17 +2468,17 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );
 
         drop(updates_tx);
 
-        let account = B256::from([0x11; 32]);
-        let slot = B256::from([0x22; 32]);
-        let account_target = B256::from([0x33; 32]);
-        let storage_target = B256::from([0x44; 32]);
+        let account = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let account_target = B256::repeat_byte(0x33);
+        let storage_target = B256::repeat_byte(0x44);
 
         task.finished_state_updates = true;
         task.account_updates.insert(account, LeafUpdate::Touched);
@@ -2534,7 +2537,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2556,7 +2559,7 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );
@@ -2587,7 +2590,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2609,7 +2612,7 @@ mod tests {
             proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
-            B256::from([0x55; 32]),
+            B256::repeat_byte(0x55),
             TrieNodeEpoch::UNMODIFIED,
             1,
         );

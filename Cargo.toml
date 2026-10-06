@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.5.2"
+version = "2.7.0"
 edition = "2024"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -323,8 +323,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { version = "0.8.1", default-features = false }
-reth-codecs-derive = "0.8.1"
+reth-codecs = { version = "0.8.2", default-features = false }
+reth-codecs-derive = "0.8.2"
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -390,7 +390,7 @@ reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives-traits = { version = "0.8.1", default-features = false }
+reth-primitives-traits = { version = "0.8.2", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -404,7 +404,8 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { version = "0.8.1", default-features = false }
+reth-rpc-traits = { version = "0.8.2", default-features = false }
+reth-snap-sync = { path = "crates/snap-sync" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -424,7 +425,7 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { version = "0.8.1", default-features = false }
+reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # revm
 revm = { version = "43.0.3", default-features = false }
@@ -432,7 +433,6 @@ revm = { version = "43.0.3", default-features = false }
 evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
 evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
 evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
-evm2-macros = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c" }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -444,7 +444,7 @@ alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
 alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
-alloy-trie = { version = "0.9.4", default-features = false }
+alloy-trie = { version = "0.9.8", default-features = false }
 
 alloy-hardforks = "0.4.9"
 
@@ -484,7 +484,6 @@ boyer-moore-magiclen = "0.2.16"
 bytes = { version = "1.11.1", default-features = false }
 blake3 = "1.8"
 brotli = "8"
-cfg-if = "1.0"
 clap = "4"
 dashmap = "6.2"
 derive_more = { version = "2", default-features = false, features = ["full"] }
@@ -516,11 +515,8 @@ serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
-slotmap = "1"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
-strum_macros = "0.27"
-syn = "2.0"
 thiserror = { version = "2.0.20", default-features = false }
 tar = "0.4.46"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
@@ -543,7 +539,7 @@ metrics-util = { default-features = false, version = "0.20.3" }
 tokio = { version = "1.52.3", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.29.0"
-tokio-util = { version = "0.7.4", features = ["codec"] }
+tokio-util = { version = "0.7.11", features = ["codec"] }
 
 # async
 async-compression = { version = "0.4", default-features = false }

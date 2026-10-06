@@ -4,9 +4,9 @@
 
 use std::{sync::Arc, time::Instant};
 
-use crate::block::BlockAndReceipts;
+use crate::block::{BlockAndReceipts, SharedReceipts};
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, TxHash, B256};
 use derive_more::Constructor;
 use reth_chain_state::{BlockState, ExecutedBlock};
@@ -30,7 +30,7 @@ pub struct PendingBlockEnv<Evm: ConfigureEvm> {
 #[derive(Clone, Debug)]
 pub enum PendingBlockEnvOrigin<B: Block = reth_ethereum_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
-    ActualPending(Arc<RecoveredBlock<B>>, Arc<Vec<R>>),
+    ActualPending(Arc<RecoveredBlock<B>>, SharedReceipts<R>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
@@ -60,8 +60,8 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     /// identify the block by its hash (latest block).
     pub fn state_block_id(&self) -> BlockId {
         match self {
-            Self::ActualPending(_, _) => BlockNumberOrTag::Pending.into(),
-            Self::DerivedFromLatest(latest) => BlockId::Hash(latest.hash().into()),
+            Self::ActualPending(_, _) => BlockId::pending(),
+            Self::DerivedFromLatest(latest) => BlockId::hash(latest.hash()),
         }
     }
 
@@ -78,8 +78,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     }
 }
 
-/// A type alias for a pair of an [`Arc`] wrapped [`RecoveredBlock`] and a vector of
-/// [`NodePrimitives::Receipt`].
+/// A type alias for a shared [`RecoveredBlock`] and its receipts.
 pub type PendingBlockAndReceipts<N> = BlockAndReceipts<N>;
 
 /// Locally built pending block for `pending` tag.
@@ -88,7 +87,7 @@ pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The receipts for the pending block
-    pub receipts: Arc<Vec<ReceiptTy<N>>>,
+    pub receipts: SharedReceipts<ReceiptTy<N>>,
     /// The locally built pending block with execution output.
     pub executed_block: ExecutedBlock<N>,
 }
@@ -99,7 +98,7 @@ impl<N: NodePrimitives> PendingBlock<N> {
     pub fn with_executed_block(expires_at: Instant, executed_block: ExecutedBlock<N>) -> Self {
         Self {
             expires_at,
-            receipts: Arc::new(executed_block.execution_output.receipts.clone()),
+            receipts: Arc::clone(&executed_block.execution_output).into(),
             executed_block,
         }
     }

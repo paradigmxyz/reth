@@ -11,7 +11,7 @@ use alloy_eips::{
 use alloy_primitives::{address, b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use evm2::{
     bytecode::Bytecode,
-    evm::{AccountInfo, CacheDB, Database, EmptyDB},
+    evm::{AccountInfo, Database, InMemoryDB},
 };
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
@@ -27,8 +27,8 @@ use reth_primitives_traits::{
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use std::sync::{mpsc, Arc};
 
-fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_beacon_root_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let beacon_root_contract_account = AccountInfo {
         balance: U256::ZERO,
@@ -43,8 +43,8 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     db
 }
 
-fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_withdrawal_requests_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let withdrawal_requests_contract_account = AccountInfo {
         nonce: 1,
@@ -144,7 +144,7 @@ fn eip_4788_no_code_cancun() {
         ..Header::default()
     };
 
-    let db = CacheDB::new(EmptyDB::default());
+    let db = InMemoryDB::default();
 
     // DON'T deploy the contract at genesis
     let chain_spec = Arc::new(
@@ -318,8 +318,8 @@ fn eip_4788_high_base_fee() {
 }
 
 /// Create a state provider with blockhashes and the EIP-2935 system contract.
-fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_block_hashes(latest_block: u64) -> InMemoryDB {
+    let mut db = InMemoryDB::default();
     for block_number in 0..=latest_block {
         db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
     }
@@ -660,7 +660,7 @@ fn block_gas_limit_error() {
             gas_price: header.base_fee_per_gas.unwrap().into(),
             gas_limit: 2_500_000, // higher than block gas limit
             to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            value: U256::from(1),
+            value: U256::ONE,
             input,
         }),
     );
@@ -701,7 +701,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = CacheDB::new(EmptyDB::default());
+    let mut db = InMemoryDB::default();
     let initial_balance = 100;
     db.insert_account_info(
         &withdrawal_recipient,

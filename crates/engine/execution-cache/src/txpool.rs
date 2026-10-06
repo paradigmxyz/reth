@@ -29,12 +29,10 @@ impl TxPoolPrewarmCacheSnapshot {
     /// Returns a cached account, preserving cached non-existence.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.reads.accounts.get(address).map(|account| {
-            account.info.as_ref().map(|info| Account {
-                nonce: info.nonce,
-                balance: info.balance,
-                bytecode_hash: (info.code_hash != alloy_primitives::KECCAK256_EMPTY)
-                    .then_some(info.code_hash),
-            })
+            account
+                .info
+                .as_ref()
+                .map(|info| Account::from(reth_execution_types::revm_account(info)))
         })
     }
 
@@ -77,7 +75,7 @@ mod tests {
 
         let mut reads = CachedReads::default();
         let mut storage = U256Map::default();
-        storage.insert(U256::from(1), U256::from(7));
+        storage.insert(U256::ONE, U256::from(7));
         storage.insert(U256::from(2), U256::ZERO);
         reads.insert_account(owner, AccountInfo { nonce: 3, ..Default::default() }, storage);
         reads.accounts.insert(missing, CachedAccount { info: None, storage: Default::default() });

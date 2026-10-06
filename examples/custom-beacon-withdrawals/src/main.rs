@@ -33,7 +33,8 @@ use reth_ethereum::{
     Block, EthPrimitives, Receipt, TransactionSigned,
 };
 
-const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
+/// Address of the example withdrawal contract.
+pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
 fn main() {
     Cli::parse_args()

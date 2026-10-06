@@ -914,6 +914,20 @@ impl PeersManager {
         }
     }
 
+    /// Called for a peer that was explicitly requested, e.g. via `admin_addPeer`.
+    ///
+    /// Same as [`Self::add_peer_kind`], but the peer is dialed right away if there's an outbound
+    /// slot instead of on the next refill tick like discovered peers.
+    pub(crate) fn add_requested_peer(
+        &mut self,
+        peer_id: PeerId,
+        kind: Option<PeerKind>,
+        addr: PeerAddr,
+    ) {
+        self.add_peer_kind(peer_id, kind, addr, None);
+        self.fill_outbound_slots();
+    }
+
     /// Removes the tracked node from the set.
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId) {
         let Entry::Occupied(entry) = self.peers.entry(peer_id) else { return };
@@ -1008,7 +1022,7 @@ impl PeersManager {
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
 
-                if peer.state == PeerConnectionState::Idle {
+                if peer.state.is_idle() {
                     // Try connecting again.
                     peer.state = PeerConnectionState::PendingOut;
                     self.connection_info.inc_pending_out();
@@ -1230,7 +1244,7 @@ impl PeersManager {
             while let Poll::Ready(Some(cmd)) = self.handle_rx.poll_next_unpin(cx) {
                 match cmd {
                     PeerCommand::Add(peer_id, addr) => {
-                        self.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+                        self.add_requested_peer(peer_id, None, PeerAddr::from_tcp(addr));
                     }
                     PeerCommand::Remove(peer) => self.remove_peer(peer),
                     PeerCommand::ReputationChange(peer_id, rep) => {
@@ -1518,7 +1532,7 @@ mod tests {
         io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         pin::Pin,
-        task::{Context, Poll},
+        task::{Context, Poll, Waker},
         time::Duration,
     };
     use url::Host;
@@ -1558,6 +1572,11 @@ mod tests {
         connected_at: std::time::Instant,
     ) {
         peers.peers.get_mut(&peer_id).expect("peer exists").connected_at = Some(connected_at);
+    }
+
+    /// Polls the manager once without waiting for an action.
+    fn poll_now(peers: &mut PeersManager) -> Poll<PeerAction> {
+        peers.poll(&mut Context::from_waker(Waker::noop()))
     }
 
     #[tokio::test]
@@ -3231,7 +3250,7 @@ mod tests {
         let num_pendingout_states = peer_manager
             .peers
             .iter()
-            .filter(|(_, peer)| peer.state == PeerConnectionState::PendingOut)
+            .filter(|(_, peer)| peer.state.is_pending_out())
             .map(|(peer_id, _)| *peer_id)
             .collect::<Vec<PeerId>>();
         assert_eq!(
@@ -3445,7 +3464,7 @@ mod tests {
         let config = PeersConfig::test().with_ip_filter(ip_filter);
         let mut peers = PeersManager::new(config);
 
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
 
         // Try to add a peer with an allowed IP
         let allowed_addr: SocketAddr = "192.168.1.100:30303".parse().unwrap();
@@ -3453,7 +3472,7 @@ mod tests {
         assert!(peers.peers.contains_key(&peer_id));
 
         // Try to add a peer with a disallowed IP
-        let peer_id2 = PeerId::new([2; 64]);
+        let peer_id2 = PeerId::repeat_byte(2);
         let disallowed_addr: SocketAddr = "10.0.0.1:30303".parse().unwrap();
         peers.add_peer(peer_id2, PeerAddr::from_tcp(disallowed_addr), None);
         assert!(!peers.peers.contains_key(&peer_id2));
@@ -3830,5 +3849,42 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    // Ensures explicitly added peers are dialed right away, while discovered peers wait for the
+    // next refill tick.
+    #[tokio::test]
+    async fn test_requested_peer_is_dialed_before_refill_tick() {
+        let mut peers = PeersManager::new(PeersConfig {
+            refill_slots_interval: Duration::from_secs(60),
+            ..PeersConfig::test()
+        });
+        // consume the initial refill tick
+        assert!(poll_now(&mut peers).is_pending());
+
+        let discovered = PeerId::random();
+        let discovered_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 1)), 8008);
+        peers.add_peer(discovered, PeerAddr::from_tcp(discovered_addr), None);
+        assert!(
+            matches!(poll_now(&mut peers), Poll::Ready(PeerAction::PeerAdded(id)) if id == discovered)
+        );
+        assert!(poll_now(&mut peers).is_pending());
+
+        let requested = PeerId::random();
+        let requested_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        peers.handle().add_peer(requested, requested_addr);
+        assert!(
+            matches!(poll_now(&mut peers), Poll::Ready(PeerAction::PeerAdded(id)) if id == requested)
+        );
+
+        // the requested peer fills all free outbound slots, including one for the discovered peer
+        let mut dialed = Vec::new();
+        while let Poll::Ready(PeerAction::Connect { peer_id, .. }) = poll_now(&mut peers) {
+            dialed.push(peer_id);
+        }
+        dialed.sort();
+        let mut expected = vec![discovered, requested];
+        expected.sort();
+        assert_eq!(dialed, expected);
     }
 }

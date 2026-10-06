@@ -386,14 +386,13 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -641,11 +640,11 @@ mod tests {
         let mut account_nodes = HashMap::default();
         let nibbles = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]);
         let branch_node = BranchNodeCompact::new(
-            0b1010,                      // state_mask
-            0b1010,                      // tree_mask - must be subset of state_mask
-            0b1000,                      // hash_mask
-            vec![B256::from([1u8; 32])], // hashes
-            None,                        // root_hash
+            0b1010,                       // state_mask
+            0b1010,                       // tree_mask - must be subset of state_mask
+            0b1000,                       // hash_mask
+            vec![B256::repeat_byte(1u8)], // hashes
+            None,                         // root_hash
         );
         account_nodes.insert(nibbles, branch_node);
 
@@ -676,7 +675,7 @@ mod tests {
         .unwrap();
 
         let trie_updates = create_test_trie_updates();
-        let original_root = B256::from([2u8; 32]); // Different from what will be computed
+        let original_root = B256::repeat_byte(2u8); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
         let hashed_state = hashed_state_for_bundle_state(bundle_state);
 
