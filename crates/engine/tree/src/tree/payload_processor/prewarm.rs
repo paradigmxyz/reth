@@ -782,6 +782,7 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
