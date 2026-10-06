@@ -437,7 +437,7 @@ mod tests {
             blocks.push(create_test_block(block_num, 32));
         }
 
-        let accumulator = Accumulator::new(B256::from([0xAA; 32]));
+        let accumulator = Accumulator::new(B256::repeat_byte(0xAA));
 
         let mut offsets = Vec::with_capacity(block_count);
         for i in 0..block_count {

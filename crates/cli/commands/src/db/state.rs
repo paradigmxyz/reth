@@ -78,7 +78,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -105,7 +105,7 @@ impl Command {
                 let mut last_log = Instant::now();
                 for (idx, entry) in walker.enumerate() {
                     let (_, storage_entry) = entry?;
-                    if storage_entry.value != U256::ZERO {
+                    if !storage_entry.value.is_zero() {
                         entries.push((storage_entry.key, storage_entry.value));
                     }
                     if entries.len() >= limit {
@@ -176,7 +176,7 @@ impl Command {
 
         for (idx, key) in storage_keys.iter().enumerate() {
             match provider.storage(address, *key) {
-                Ok(Some(value)) if value != U256::ZERO => {
+                Ok(Some(value)) if !value.is_zero() => {
                     entries.push((*key, value));
                 }
                 _ => {}
@@ -468,6 +468,7 @@ pub enum OutputFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
 
     #[test]
     fn parse_state_args() {
@@ -478,10 +479,7 @@ mod tests {
             "1000000",
         ])
         .unwrap();
-        assert_eq!(
-            cmd.address,
-            "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse::<Address>().unwrap()
-        );
+        assert_eq!(cmd.address, address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"));
         assert_eq!(cmd.block, Some(1000000));
     }
 

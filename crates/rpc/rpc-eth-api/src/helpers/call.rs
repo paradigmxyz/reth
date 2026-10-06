@@ -27,7 +27,6 @@ use reth_evm::{
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_revm::{
-    cancelled::CancelOnDrop,
     database::StateProviderDatabase,
     db::{
         bal::{BalState, EvmDatabaseError},
@@ -41,7 +40,8 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Cfg, Transaction},
@@ -49,7 +49,7 @@ use revm::{
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use std::collections::BTreeMap;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -105,10 +105,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
+            // Load the state of the block resolved above: resolving a tag such as `latest` again
+            // could return a newer block than `parent`.
+            let state_at = if block.is_pending() { block } else { parent.hash().into() };
 
-            self.spawn_with_state_at_block(block, move |this, db| {
+            self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _permit = permit;
-                let state_provider = db.database.0;
+                let state_provider = db.database.into_inner();
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
                     .with_bundle_update()
@@ -241,7 +244,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -263,7 +266,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -398,6 +401,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     // transact all transactions in the bundle
                     for (tx_index, tx) in transactions.into_iter().enumerate() {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
+
                         // Apply overrides, state overrides are only applied for the first tx in the
                         // request
                         let overrides =
@@ -464,10 +471,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                this.create_access_list_with(evm_env, at, request, state_override).await
-            })
-            .await
+            self.create_access_list_with(evm_env, at, request, state_override).await
         }
     }
 
@@ -533,16 +537,24 @@ pub trait Call:
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
-    fn call_gas_limit(&self) -> u64;
+    fn call_gas_limit(&self) -> u64 {
+        self.eth_api_settings().gas_cap
+    }
 
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
-    fn max_simulate_blocks(&self) -> u64;
+    fn max_simulate_blocks(&self) -> u64 {
+        self.eth_api_settings().max_simulate_blocks
+    }
 
     /// Returns whether `eth_simulateV1` should compute state roots.
-    fn compute_state_root_for_eth_simulate(&self) -> bool;
+    fn compute_state_root_for_eth_simulate(&self) -> bool {
+        self.eth_api_settings().compute_state_root_for_eth_simulate
+    }
 
     /// Returns the maximum memory the EVM can allocate per RPC request.
-    fn evm_memory_limit(&self) -> u64;
+    fn evm_memory_limit(&self) -> u64 {
+        self.eth_api_settings().evm_memory_limit
+    }
 
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(
@@ -639,10 +651,10 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        let at = at.into();
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(at).await?;
-            let db = State::builder().with_database(StateProviderDatabase::new(state)).build();
+        self.spawn_blocking_io_with_state(at.into(), move |this, state| {
+            let db = State::builder()
+                .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
+                .build();
             f(this, db)
         })
     }
@@ -755,6 +767,9 @@ pub trait Call:
                     if block_tx.tx_hash() == tx.tx_hash() {
                         break;
                     }
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
 
@@ -793,6 +808,9 @@ pub trait Call:
             if index == target_tx_index {
                 // reached the target transaction
                 break
+            }
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
             }
 
             let tx_env = self.evm_config().tx_env(tx);
@@ -853,7 +871,9 @@ pub trait Call:
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                // Callers routinely send gas limits above the cap, so this is not worth a warning.
+                // Log only the limits: the request carries caller calldata and addresses.
+                debug!(target: "rpc::eth::call", requested_gas, global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
         } else {
@@ -874,8 +894,12 @@ pub trait Call:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
 
-        // Disable EIP-7825 transaction gas limit to support larger transactions
-        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+        // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
+        // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
+        // it to execute the call like a transaction.
+        if !evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+        }
 
         // Disable additional fee charges, e.g. opstack operator fee charge
         // See:
@@ -907,7 +931,11 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
+                let mut cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
+                // The allowance must not raise the already applied RPC gas cap.
+                if self.call_gas_limit() != 0 {
+                    cap = cap.min(tx_env.gas_limit());
+                }
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
             }

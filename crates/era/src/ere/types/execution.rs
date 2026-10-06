@@ -363,14 +363,15 @@ impl Proof {
         let proof_type = ProofType::from_byte(proof_type_byte)
             .ok_or_else(|| E2sError::Rlp(format!("Unknown proof type: {proof_type_byte}")))?;
 
-        let ssz_bytes = alloy_primitives::Bytes::decode(&mut payload)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode proof SSZ bytes: {e}")))?;
+        let ssz_bytes = alloy_rlp::Header::decode_bytes(&mut payload, false)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode proof SSZ bytes: {e}")))?
+            .to_vec();
 
         if !payload.is_empty() {
             return Err(E2sError::Rlp("Unexpected extra items in Proof list".to_string()));
         }
 
-        Ok((proof_type, ssz_bytes.to_vec()))
+        Ok((proof_type, ssz_bytes))
     }
 
     /// Convert to an [`Entry`]
@@ -628,7 +629,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Bytes, U256};
+    use alloy_primitives::{b256, Bytes, U256};
     use reth_ethereum_primitives::{Receipt, TxType};
 
     #[test]
@@ -680,7 +681,7 @@ mod tests {
     fn test_total_difficulty_ssz_le_encoding() {
         // Verify that total-difficulty is encoded as SSZ uint256 (little-endian).
         // See https://github.com/eth-clients/e2store-format-specs/blob/main/formats/ere.md
-        let value = U256::from(1u64);
+        let value = U256::ONE;
         let td = TotalDifficulty::new(value);
         let entry = td.to_entry();
 
@@ -751,7 +752,7 @@ mod tests {
         );
         let full = base
             .with_receipts(CompressedSlimReceipts::new(vec![3]))
-            .with_total_difficulty(TotalDifficulty::new(U256::from(1u64)))
+            .with_total_difficulty(TotalDifficulty::new(U256::ONE))
             .with_proof(Proof::new(vec![4]));
         assert_eq!(full.component_count(), 5);
         assert!(full.receipts.is_some() && full.total_difficulty.is_some() && full.proof.is_some());
@@ -841,12 +842,12 @@ mod tests {
     fn test_accumulator_from_header_records_known_vectors() {
         // Known-answer vectors computed from the SSZ spec:
         //   hash_tree_root(List[HeaderRecord, 8192])
-        let expected_empty: B256 =
-            "4a8c3a07c8d23adc5bac61157555c3c784d53d9bc110c1370809bd23cd93777d".parse().unwrap();
-        let expected_single_zero: B256 =
-            "81fd641249670887a731386e756a7a1538dc781b1b0bf016889045d350812817".parse().unwrap();
-        let expected_single_nonzero: B256 =
-            "ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799".parse().unwrap();
+        let expected_empty =
+            b256!("4a8c3a07c8d23adc5bac61157555c3c784d53d9bc110c1370809bd23cd93777d");
+        let expected_single_zero =
+            b256!("81fd641249670887a731386e756a7a1538dc781b1b0bf016889045d350812817");
+        let expected_single_nonzero =
+            b256!("ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799");
 
         // Empty list
         let acc_empty = Accumulator::from_header_records(&[]).unwrap();
@@ -859,7 +860,7 @@ mod tests {
 
         // Single record with non-zero values
         let records2 = vec![HeaderRecord {
-            block_hash: B256::from([1u8; 32]),
+            block_hash: B256::repeat_byte(1u8),
             total_difficulty: U256::from(100u64),
         }];
         let acc2 = Accumulator::from_header_records(&records2).unwrap();

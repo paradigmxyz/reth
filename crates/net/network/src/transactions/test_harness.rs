@@ -193,11 +193,11 @@ mod tests {
     use reth_network_p2p::error::RequestError;
     use reth_transaction_pool::{test_utils::TransactionGenerator, TransactionPool};
 
-    const PEER_A: PeerId = PeerId::new([1; 64]);
-    const PEER_B: PeerId = PeerId::new([2; 64]);
+    const PEER_A: PeerId = PeerId::repeat_byte(1);
+    const PEER_B: PeerId = PeerId::repeat_byte(2);
 
     fn peer(n: u8) -> PeerId {
-        PeerId::new([n; 64])
+        PeerId::repeat_byte(n)
     }
 
     fn hash(n: u64) -> TxHash {

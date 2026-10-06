@@ -18,5 +18,16 @@ pub struct PruneCheckpoint {
     pub prune_mode: PruneMode,
 }
 
+impl PruneCheckpoint {
+    /// Returns a checkpoint for a segment pruned up to and including `block_number`.
+    pub const fn pruned_through(block_number: BlockNumber) -> Self {
+        Self {
+            block_number: Some(block_number),
+            tx_number: None,
+            prune_mode: PruneMode::before_inclusive(block_number),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "reth-codec"))]
 reth_codecs::impl_compression_for_compact!(PruneCheckpoint);

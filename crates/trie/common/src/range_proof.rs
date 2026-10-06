@@ -481,7 +481,7 @@ mod tests {
     use crate::{proof::ProofRetainer, BranchNode, ExtensionNode, TrieMask, EMPTY_ROOT_HASH};
     use alloc::{vec, vec::Vec};
 
-    const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+    const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
     fn verify_range_proof<I, V>(
         root: B256,

@@ -198,7 +198,7 @@ mod tests {
         ));
 
         // Finished adopts new progress
-        assert!(matches!(Finished.combine(Finished), Finished));
+        assert!(Finished.combine(Finished).is_finished());
         assert!(matches!(
             Finished.combine(HasMoreData(DeletedEntriesLimitReached)),
             HasMoreData(DeletedEntriesLimitReached)

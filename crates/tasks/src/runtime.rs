@@ -108,10 +108,10 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None` or zero, uses four times the resolved CPU pool thread count.
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None` or zero, uses four times the resolved CPU pool thread count.
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
@@ -214,6 +214,18 @@ impl RayonConfig {
         let _ = self.reserved_cpu_cores;
         self.cpu_threads.unwrap_or_else(|| available_parallelism().map_or(1, NonZeroUsize::get))
     }
+
+    /// Returns the explicitly configured proof storage worker thread count, treating zero as
+    /// unset.
+    fn proof_storage_worker_threads_override(&self) -> Option<usize> {
+        self.proof_storage_worker_threads.filter(|&threads| threads > 0)
+    }
+
+    /// Returns the explicitly configured proof account worker thread count, treating zero as
+    /// unset.
+    fn proof_account_worker_threads_override(&self) -> Option<usize> {
+        self.proof_account_worker_threads.filter(|&threads| threads > 0)
+    }
 }
 
 /// Configuration for building a [`Runtime`].
@@ -256,8 +268,8 @@ pub enum RuntimeBuildError {
 // ── RuntimeInner ──────────────────────────────────────────────────────
 
 struct RuntimeInner {
-    /// Owned tokio runtime, if we built one. Kept alive via the `Arc<RuntimeInner>`.
-    _tokio_runtime: Option<TokioRuntime>,
+    /// Owned tokio runtime, taken during shutdown even while other handles remain alive.
+    tokio_runtime: Mutex<Option<TokioRuntime>>,
     /// Handle to the tokio runtime.
     handle: Handle,
     /// Receiver of the shutdown signal.
@@ -286,6 +298,12 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: WorkerPool,
+    /// Proof storage worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_storage_worker_threads_override: Option<usize>,
+    /// Proof account worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_account_worker_threads_override: Option<usize>,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
@@ -302,6 +320,18 @@ struct RuntimeInner {
     /// The task monitors critical tasks for panics and fires the shutdown signal.
     /// Can be taken via [`Runtime::take_task_manager_handle`] to poll for panic errors.
     task_manager_handle: Mutex<Option<JoinHandle<Result<(), PanickedTaskError>>>>,
+}
+
+impl Drop for RuntimeInner {
+    fn drop(&mut self) {
+        // The last handle can belong to an async task, including one running on this runtime.
+        // Without explicit shutdown, let blocking tasks finish in the background in that case.
+        if Handle::try_current().is_ok() &&
+            let Some(runtime) = self.tokio_runtime.get_mut().unwrap().take()
+        {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 // ── Runtime ───────────────────────────────────────────────────────────
@@ -372,6 +402,24 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
+    }
+
+    /// Returns the proof storage worker thread count the operator configured explicitly, if any.
+    /// A configured count of zero is treated as unset.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_storage_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_storage_worker_threads_override
+    }
+
+    /// Returns the proof account worker thread count the operator configured explicitly, if any.
+    /// A configured count of zero is treated as unset.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_account_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_account_worker_threads_override
     }
 
     /// Get the prewarming pool.
@@ -823,6 +871,17 @@ impl Runtime {
         self.do_graceful_shutdown(Some(timeout))
     }
 
+    /// Shuts down the owned tokio runtime for all clones, waiting at most `timeout` for blocking
+    /// tasks. Externally supplied runtimes are left running.
+    ///
+    /// Panics if called from an async context while an owned runtime remains.
+    pub fn shutdown_timeout(self, timeout: Duration) {
+        let runtime = self.0.tokio_runtime.lock().unwrap().take();
+        if let Some(runtime) = runtime {
+            runtime.shutdown_timeout(timeout);
+        }
+    }
+
     fn do_graceful_shutdown(&self, timeout: Option<Duration>) -> bool {
         let _ = self.0.task_events_tx.send(TaskEvent::GracefulShutdown);
         let deadline = timeout.map(|t| Instant::now() + t);
@@ -922,13 +981,22 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+            // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
+            // cpu pool is built; size the proof pools from that resolved count so a zero never
+            // reaches the per-block worker budget.
+            let default_proof_worker_threads = cpu_pool.current_num_threads() * 4;
+
+            let proof_storage_worker_threads = config
+                .rayon
+                .proof_storage_worker_threads_override()
+                .unwrap_or(default_proof_worker_threads);
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
 
-            let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+            let proof_account_worker_threads = config
+                .rayon
+                .proof_account_worker_threads_override()
+                .unwrap_or(default_proof_worker_threads);
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
@@ -981,7 +1049,7 @@ impl RuntimeBuilder {
         });
 
         let inner = RuntimeInner {
-            _tokio_runtime: owned_runtime,
+            tokio_runtime: Mutex::new(owned_runtime),
             handle,
             on_shutdown,
             task_events_tx,
@@ -999,6 +1067,14 @@ impl RuntimeBuilder {
             proof_storage_worker_pool,
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            proof_storage_worker_threads_override: config
+                .rayon
+                .proof_storage_worker_threads_override(),
+            #[cfg(feature = "rayon")]
+            proof_account_worker_threads_override: config
+                .rayon
+                .proof_account_worker_threads_override(),
             #[cfg(feature = "rayon")]
             prewarming_pool,
             #[cfg(feature = "rayon")]
@@ -1039,6 +1115,57 @@ mod tests {
         assert!(count >= 1);
     }
 
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn zero_cpu_threads_still_size_the_proof_pools() {
+        let rt = TokioRuntime::new().unwrap();
+        let mut config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+        config.rayon.cpu_threads = Some(0);
+        config.rayon.proof_storage_worker_threads = None;
+        config.rayon.proof_account_worker_threads = None;
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
+
+        let resolved = runtime.cpu_pool().current_num_threads();
+        assert!(resolved >= 1);
+        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), resolved * 4);
+        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), resolved * 4);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn proof_worker_threads_keep_pinned_counts() {
+        let rt = TokioRuntime::new().unwrap();
+        for configured in [1, 8, 16, 17, 64] {
+            let mut config = Runtime::test_config()
+                .with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+            config.rayon.proof_storage_worker_threads = Some(configured);
+            config.rayon.proof_account_worker_threads = Some(configured);
+            let runtime = RuntimeBuilder::new(config).build().unwrap();
+            assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), configured);
+            assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), configured);
+            assert_eq!(runtime.proof_storage_worker_threads_override(), Some(configured));
+            assert_eq!(runtime.proof_account_worker_threads_override(), Some(configured));
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn zero_proof_worker_threads_use_the_default() {
+        let rt = TokioRuntime::new().unwrap();
+        let mut config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+        config.rayon.proof_storage_worker_threads = Some(0);
+        config.rayon.proof_account_worker_threads = Some(0);
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
+
+        let default = runtime.cpu_pool().current_num_threads() * 4;
+        assert_eq!(runtime.proof_storage_worker_pool().current_num_threads(), default);
+        assert_eq!(runtime.proof_account_worker_pool().current_num_threads(), default);
+        assert_eq!(runtime.proof_storage_worker_threads_override(), None);
+        assert_eq!(runtime.proof_account_worker_threads_override(), None);
+    }
+
     #[test]
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
@@ -1046,6 +1173,55 @@ mod tests {
             Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
         let runtime = RuntimeBuilder::new(config).build().unwrap();
         let _ = runtime.handle();
+    }
+
+    #[tokio::test]
+    async fn last_runtime_clone_can_drop_on_its_worker() {
+        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+        let task_runtime = runtime.clone();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let task = runtime.handle().spawn(async move {
+            wait.await.unwrap();
+            drop(task_runtime);
+        });
+
+        thread::spawn(move || drop(runtime)).join().unwrap();
+        release.send(()).unwrap();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_live_runtime_clones() {
+        let runtime = RuntimeBuilder::new(Runtime::test_config()).build().unwrap();
+        let retained = runtime.clone();
+        let task_runtime = runtime.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = runtime.handle().spawn(async move {
+            let _runtime = task_runtime;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+
+        thread::spawn(move || runtime.shutdown_timeout(Duration::from_secs(5))).join().unwrap();
+
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(retained.handle().spawn(async {}).await.unwrap_err().is_cancelled());
+        retained.shutdown_timeout(Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn shutdown_preserves_external_runtime() {
+        let runtime = RuntimeBuilder::new(
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(Handle::current())),
+        )
+        .build()
+        .unwrap();
+        let retained = runtime.clone();
+
+        runtime.shutdown_timeout(Duration::from_secs(5));
+
+        assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
     }
 
     #[test]

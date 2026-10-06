@@ -153,7 +153,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, hashed_storage)
+            let input = TrieInputSorted::from_state(
+                HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                )
+                .into_sorted(),
+            );
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, input)
                 .map_err(|err| ProviderError::Database(err.into()))
         })
     }
@@ -182,13 +189,15 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
-                self.tx(),
-                address,
-                slots,
-                hashed_storage,
-            )
-            .map_err(ProviderError::from)
+            let input = TrieInputSorted::from_state(
+                HashedPostState::from_hashed_storage(
+                    alloy_primitives::keccak256(address),
+                    hashed_storage,
+                )
+                .into_sorted(),
+            );
+            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(self.tx(), address, slots, input)
+                .map_err(ProviderError::from)
         })
     }
 }
@@ -335,9 +344,10 @@ reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider>
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::test_utils::create_test_provider_factory;
-    use alloy_primitives::{address, b256, keccak256, U256};
+    use alloy_primitives::{keccak256, U256};
     use reth_db_api::{
         models::StorageSettings,
         tables,
@@ -359,8 +369,8 @@ mod tests {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let address = address!("0x0000000000000000000000000000000000000001");
-        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(1);
 
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(slot);
@@ -378,15 +388,13 @@ mod tests {
 
         assert_eq!(provider_ref.storage(address, slot).unwrap(), Some(U256::from(42)));
 
-        let other_address = address!("0x0000000000000000000000000000000000000099");
-        let other_slot =
-            b256!("0x0000000000000000000000000000000000000000000000000000000000000099");
+        let other_address = Address::with_last_byte(0x99);
+        let other_slot = B256::with_last_byte(0x99);
         assert_eq!(provider_ref.storage(other_address, other_slot).unwrap(), None);
 
         let tx = factory.provider_rw().unwrap().into_tx();
-        let plain_address = address!("0x0000000000000000000000000000000000000002");
-        let plain_slot =
-            b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        let plain_address = Address::with_last_byte(2);
+        let plain_slot = B256::with_last_byte(2);
         tx.put::<tables::PlainStorageState>(
             plain_address,
             StorageEntry { key: plain_slot, value: U256::from(99) },
@@ -404,8 +412,8 @@ mod tests {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let address = address!("0x0000000000000000000000000000000000000001");
-        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(1);
 
         let db = factory.provider().unwrap();
         let provider_ref = LatestStateProviderRef::new(&db);
@@ -417,8 +425,8 @@ mod tests {
         let factory = create_test_provider_factory();
         assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
-        let address = address!("0x0000000000000000000000000000000000000001");
-        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(5);
 
         let tx = factory.provider_rw().unwrap().into_tx();
         tx.put::<tables::PlainStorageState>(
@@ -433,8 +441,7 @@ mod tests {
 
         assert_eq!(provider_ref.storage(address, slot).unwrap(), Some(U256::from(42)));
 
-        let other_slot =
-            b256!("0x0000000000000000000000000000000000000000000000000000000000000099");
+        let other_slot = B256::with_last_byte(0x99);
         assert_eq!(provider_ref.storage(address, other_slot).unwrap(), None);
     }
 
@@ -443,8 +450,8 @@ mod tests {
         let factory = create_test_provider_factory();
         assert!(!factory.provider().unwrap().cached_storage_settings().use_hashed_state());
 
-        let address = address!("0x0000000000000000000000000000000000000001");
-        let slot = b256!("0x0000000000000000000000000000000000000000000000000000000000000005");
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(5);
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(slot);
 

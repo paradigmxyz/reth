@@ -1,7 +1,7 @@
 //! Drives one snap synchronization attempt: what it targets, and when it stops.
 
-use crate::{SnapGeneration, SnapPivotPolicy, SnapSyncError};
-use reth_storage_api::HeaderProvider;
+use crate::{SnapAttemptStore, SnapGeneration, SnapPivotPolicy, SnapSyncError, SnapWrite};
+use reth_storage_api::{BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter};
 use tokio_util::sync::CancellationToken;
 
 /// One snap synchronization attempt, from the pivot it targets to the work it owns.
@@ -73,6 +73,53 @@ impl SnapSyncSession {
         Some((generation, self.cancellation.clone()))
     }
 
+    /// Takes over the target of an attempt a previous run recorded, as [`Self::start`] does for a
+    /// selected one.
+    ///
+    /// Only a session that has not handed out a target can take one over.
+    pub fn resume(&mut self, generation: SnapGeneration) -> Option<CancellationToken> {
+        if !matches!(self.state, SnapSyncSessionState::Waiting | SnapSyncSessionState::Selected(_))
+        {
+            return None
+        }
+        self.state = SnapSyncSessionState::Downloading(generation);
+        Some(self.cancellation.clone())
+    }
+
+    /// Re-anchors the downloaded target once it lags too far behind `head`, returning the new
+    /// write.
+    ///
+    /// The target is re-read from the attempt record first, so an advance whose transaction was
+    /// dropped is retried rather than assumed.
+    pub fn advance<P>(
+        &mut self,
+        provider: &P,
+        write: SnapWrite,
+        head: u64,
+        finalized: Option<u64>,
+    ) -> Result<Option<SnapWrite>, SnapSyncError>
+    where
+        P: HeaderProvider + BlockHashReader + MetadataProvider + MetadataWriter,
+    {
+        let SnapSyncSessionState::Downloading(mut current) = self.state else { return Ok(None) };
+        let attempt = provider.authorize_snap_write(write)?;
+        if attempt.pivot() != current.target() {
+            current = SnapGeneration::new(attempt.pivot(), attempt.state_root());
+            self.state = SnapSyncSessionState::Downloading(current);
+        }
+        if !self.policy.needs_advance(current, head) {
+            return Ok(None)
+        }
+        let Some(next) = self.policy.select(provider, head, finalized)? else { return Ok(None) };
+        // A policy anchoring further back than it re-anchors can select a block behind the pivot.
+        if next.target().number <= current.target().number {
+            return Ok(None)
+        }
+        let write = provider.advance_snap_pivot(write, next)?;
+        self.state = SnapSyncSessionState::Downloading(next);
+        Ok(Some(write))
+    }
+
     /// Signals outstanding work to stop and ends the session.
     ///
     /// Terminal: a later attempt needs a new session.
@@ -108,10 +155,30 @@ impl SnapSyncSessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{chain, policy, provider_with};
+    use crate::test_utils::{chain, hashed_factory, policy, provider_with};
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::{
+        test_utils::{insert_headers, MockNodeTypesWithDB},
+        DBProvider, DatabaseProviderFactory, ProviderFactory,
+    };
 
     fn session() -> SnapSyncSession {
         SnapSyncSession::new(policy())
+    }
+
+    // A session downloading block 1 under head 2, re-anchoring once its pivot lags by two blocks,
+    // with the attempt recorded in a database holding blocks 0 through 3.
+    fn downloading() -> (ProviderFactory<MockNodeTypesWithDB>, SnapSyncSession, SnapWrite) {
+        let factory = hashed_factory();
+        let headers: Vec<_> = chain(Some(0)).into_iter().map(SealedHeader::seal_slow).collect();
+        insert_headers(&factory, &headers);
+        let provider = factory.database_provider_rw().unwrap();
+        let mut session = SnapSyncSession::new(policy().with_advance_after(1));
+        session.select(&provider, 2, None).unwrap();
+        let (generation, _) = session.start().unwrap();
+        let write = provider.start_snap_attempt(generation).unwrap();
+        provider.commit().unwrap();
+        (factory, session, write)
     }
 
     #[test]
@@ -187,6 +254,23 @@ mod tests {
     }
 
     #[test]
+    fn a_recorded_target_is_resumed_once() {
+        let (factory, _, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        let attempt = provider.authorize_snap_write(write).unwrap();
+        let recorded = SnapGeneration::new(attempt.pivot(), attempt.state_root());
+        let mut session = SnapSyncSession::new(policy().with_advance_after(1));
+
+        assert!(session.resume(recorded).is_some());
+        assert!(session.resume(recorded).is_none());
+        assert!(session.start().is_none());
+        assert_eq!(session.state(), &SnapSyncSessionState::Downloading(recorded));
+        // A resumed target advances like a started one.
+        assert!(session.advance(&provider, write, 3, None).unwrap().is_some());
+        assert_eq!(session.target().unwrap().target().number, 2);
+    }
+
+    #[test]
     fn cancellation_stops_outstanding_work() {
         let provider = provider_with(chain(Some(0)));
         let mut session = session();
@@ -209,5 +293,73 @@ mod tests {
 
         assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSyncSessionState::Cancelled);
         assert!(session.start().is_none());
+    }
+
+    #[test]
+    fn a_lagging_target_advances_with_the_attempt() {
+        let (factory, mut session, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+
+        let advanced = session.advance(&provider, write, 3, None).unwrap().unwrap();
+
+        let target = *session.target().unwrap();
+        assert_eq!(target.target().number, 2);
+        assert!(matches!(session.state(), SnapSyncSessionState::Downloading(_)));
+        let attempt = provider.authorize_snap_write(advanced).unwrap();
+        assert_eq!((attempt.pivot(), attempt.state_root()), (target.target(), target.state_root()));
+        assert!(matches!(
+            provider.authorize_snap_write(write),
+            Err(SnapSyncError::StaleWrite { .. })
+        ));
+    }
+
+    #[test]
+    fn a_target_within_the_window_is_kept() {
+        let (factory, mut session, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        let before = *session.target().unwrap();
+
+        assert_eq!(session.advance(&provider, write, 2, None).unwrap(), None);
+
+        assert_eq!(session.target(), Some(&before));
+        provider.authorize_snap_write(write).unwrap();
+    }
+
+    #[test]
+    fn a_refused_advance_keeps_the_target() {
+        let (factory, mut session, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        let before = *session.target().unwrap();
+        provider.abandon_snap_attempt().unwrap();
+
+        let refused = session.advance(&provider, write, 3, None);
+
+        assert!(matches!(refused, Err(SnapSyncError::StaleWrite { .. })));
+        assert_eq!(session.state(), &SnapSyncSessionState::Downloading(before));
+    }
+
+    #[test]
+    fn a_rolled_back_advance_is_retried() {
+        let (factory, mut session, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        session.advance(&provider, write, 3, None).unwrap().unwrap();
+        drop(provider);
+
+        let provider = factory.database_provider_rw().unwrap();
+        let advanced = session.advance(&provider, write, 3, None).unwrap().unwrap();
+
+        assert_eq!(session.target().unwrap().target().number, 2);
+        assert_eq!(provider.authorize_snap_write(advanced).unwrap().pivot().number, 2);
+    }
+
+    #[test]
+    fn a_target_no_work_took_is_not_advanced() {
+        let (factory, _, write) = downloading();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut session = SnapSyncSession::new(policy().with_advance_after(1));
+        session.select(&provider, 2, None).unwrap();
+
+        assert_eq!(session.advance(&provider, write, 3, None).unwrap(), None);
+        assert_eq!(session.target().unwrap().target().number, 1);
     }
 }

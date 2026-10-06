@@ -5,7 +5,10 @@ use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionOutput, EvmStateProviderAdapter, StateProvider, StateProviderBox,
+    StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
@@ -116,7 +119,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<StateProviderBox>>,
+    mut db: State<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>,
 ) -> eyre::Result<CollectionResult> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
@@ -125,8 +128,7 @@ fn collect_execution_data(
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
+        codes.insert(code.hash_slow(), code.original_bytes());
     });
 
     // Collect preimages
@@ -214,7 +216,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, BundleState)> {
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider.state_by_block_hash(parent_header.hash())?,
+            self.provider.state_by_block_hash(parent_header.hash())?.into_evm_state_provider(),
         ));
 
         executor.execute_one(block)?;
@@ -452,14 +454,13 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -536,7 +537,9 @@ mod tests {
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
         let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
+            .with_database(StateProviderDatabase::new(
+                (Box::new(state_provider) as StateProviderBox).into_evm_state_provider(),
+            ))
             .with_bundle_update()
             .build();
 
@@ -678,12 +681,12 @@ mod tests {
 
         // Mock Data
         let mut codes = BTreeMap::new();
-        codes.insert(B256::from([1u8; 32]), Bytes::from("contract_code_1"));
-        codes.insert(B256::from([2u8; 32]), Bytes::from("contract_code_2"));
+        codes.insert(B256::repeat_byte(1u8), Bytes::from("contract_code_1"));
+        codes.insert(B256::repeat_byte(2u8), Bytes::from("contract_code_2"));
 
         let mut preimages = BTreeMap::new();
-        preimages.insert(B256::from([3u8; 32]), Bytes::from("preimage_1"));
-        preimages.insert(B256::from([4u8; 32]), Bytes::from("preimage_2"));
+        preimages.insert(B256::repeat_byte(3u8), Bytes::from("preimage_1"));
+        preimages.insert(B256::repeat_byte(4u8), Bytes::from("preimage_2"));
 
         let hashed_state = reth_trie::HashedPostState::default();
 
@@ -734,7 +737,7 @@ mod tests {
         let mut modified_state = create_bundle_state();
 
         // Modify the state to create a mismatch
-        let addr = Address::from([1u8; 20]);
+        let addr = Address::repeat_byte(1u8);
         if let Some(account) = modified_state.state.get_mut(&addr) &&
             let Some(ref mut info) = account.info
         {
@@ -767,11 +770,11 @@ mod tests {
         let mut account_nodes = HashMap::default();
         let nibbles = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]);
         let branch_node = BranchNodeCompact::new(
-            0b1010,                      // state_mask
-            0b1010,                      // tree_mask - must be subset of state_mask
-            0b1000,                      // hash_mask
-            vec![B256::from([1u8; 32])], // hashes
-            None,                        // root_hash
+            0b1010,                       // state_mask
+            0b1010,                       // tree_mask - must be subset of state_mask
+            0b1000,                       // hash_mask
+            vec![B256::repeat_byte(1u8)], // hashes
+            None,                         // root_hash
         );
         account_nodes.insert(nibbles, branch_node);
 
@@ -802,7 +805,7 @@ mod tests {
         .unwrap();
 
         let trie_updates = create_test_trie_updates();
-        let original_root = B256::from([2u8; 32]); // Different from what will be computed
+        let original_root = B256::repeat_byte(2u8); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
 
         // Test with trie updates - this will likely produce warnings due to mock data

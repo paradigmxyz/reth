@@ -117,8 +117,8 @@ impl AccountHashingStage {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
-                    balance: balance - U256::from(1),
-                    bytecode_hash: None,
+                    balance: balance - U256::ONE,
+                    ..Default::default()
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, &acc_before_tx)?;
@@ -235,7 +235,7 @@ where
                     ..Default::default()
                 });
 
-            Ok(ExecOutput { checkpoint, done: true })
+            Ok(ExecOutput::done(checkpoint))
         } else {
             // Stream changesets entry-by-entry, bounded by both block count
             // (commit_threshold) and entry count (commit_entries), whichever comes first.
@@ -462,8 +462,8 @@ mod tests {
                         let Account { nonce, balance, .. } = account;
                         let old_acc = Account {
                             nonce: nonce - 1,
-                            balance: balance - U256::from(1),
-                            bytecode_hash: None,
+                            balance: balance - U256::ONE,
+                            ..Default::default()
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

@@ -14,7 +14,7 @@ use std::fmt;
 pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 
 /// Inclusive upper bound covering the full trie keyspace.
-pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+pub const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
 /// Client, database and request settings a domain download sends and commits through.
 pub(crate) struct DownloadContext<C, F> {
@@ -64,6 +64,18 @@ where
     F: DatabaseProviderFactory + Clone + 'static,
     F::ProviderRW: DBProvider,
 {
+    /// Runs `read` on the blocking pool, where scans touching many keys belong.
+    pub(crate) async fn read<T: Send + 'static>(
+        &self,
+        read: impl FnOnce(&F::Provider) -> Result<T, SnapSyncError> + Send + 'static,
+    ) -> Result<T, SnapSyncError> {
+        let factory = self.factory.clone();
+        self.runtime
+            .spawn_blocking(move || read(&factory.database_provider_ro()?))
+            .await
+            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+    }
+
     /// Runs `write` in one transaction on the blocking pool, committing only if it succeeds.
     pub(crate) async fn commit<T: Send + 'static>(
         &self,

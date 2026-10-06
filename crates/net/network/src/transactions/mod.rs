@@ -1108,6 +1108,12 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // don't serve pending transactions to peers the policy doesn't propagate to
+            if !self.policies.propagation_policy().can_propagate(peer) {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
+
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
@@ -1204,6 +1210,11 @@ where
         // transactions in the pool.
         if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
             trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            return
+        }
+
+        // skip peers we should not propagate to
+        if !self.policies.propagation_policy().can_propagate(peer) {
             return
         }
 
@@ -1378,7 +1389,7 @@ where
         // EIP-8070, so their sidecars can never validate. Drop them before touching the pool;
         // geth equivalently diverts these bodies into a buffer that is completed with cells
         // fetched via `GetCells`, which is not implemented yet.
-        if version == EthVersion::Eth72 {
+        if version.is_eth72() {
             let len_before = transactions.len();
             transactions.retain(|tx| !tx.is_eip4844());
             let dropped = len_before - transactions.len();
@@ -1430,11 +1441,10 @@ where
         let txs_len = transactions.len();
 
         let recover = |tx| {
-            let recovered = if let Some(cache) = &self.sender_recovery_cache {
-                Pool::Transaction::try_recover_with_cache(tx, cache)
-            } else {
-                Pool::Transaction::try_recover(tx)
-            };
+            let recovered = Pool::Transaction::try_recover_with_cache_opt(
+                tx,
+                self.sender_recovery_cache.as_ref(),
+            );
             match recovered {
                 Ok(tx) => Some(tx),
                 Err(badtx) => {
@@ -2339,7 +2349,7 @@ mod tests {
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
     use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
-    use alloy_primitives::{hex, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2401,7 +2411,7 @@ mod tests {
         let policy = RecordingPolicy::default();
         manager.policies =
             NetworkPolicies::new(TransactionPropagationKind::default(), policy.clone());
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let (peer, mut rx) = new_mock_session(peer_id, EthVersion::Eth68);
         manager.peers.insert(peer_id, peer);
         let [pending, accepted, ignored, rejected, later, bad] =
@@ -2493,17 +2503,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ignored_tx_broadcasts_while_initially_syncing() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
-
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        let listener0 = peer0.event_listener();
+        peer0.add_peer(peer1);
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
@@ -2548,7 +2552,7 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         poll_fn(|cx| {
@@ -2557,23 +2561,16 @@ mod tests {
         })
         .await;
         assert!(pool.is_empty());
-        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_tx_broadcasts_through_two_syncs() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
-
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        let listener0 = peer0.event_listener();
+        peer0.add_peer(peer1);
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
@@ -2621,7 +2618,7 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         poll_fn(|cx| {
@@ -2632,7 +2629,6 @@ mod tests {
         assert!(!NetworkInfo::is_initially_syncing(&network_handle));
         assert!(NetworkInfo::is_syncing(&network_handle));
         assert!(!pool.is_empty());
-        handle.terminate().await;
     }
 
     // Ensure that the transaction manager correctly handles the `IncomingPooledTransactionHashes`
@@ -2660,7 +2656,7 @@ mod tests {
             .transactions(pool.clone(), transactions_manager_config)
             .split_with_handle();
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![TransactionSigned::new_unhashed(
@@ -2669,7 +2665,7 @@ mod tests {
                 nonce: 15u64,
                 gas_price: 2200000000,
                 gas_limit: 34811,
-                to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                 value: U256::from(1234u64),
                 input: Default::default(),
             }),
@@ -2743,18 +2739,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(3).await;
+        let net = Testnet::create(3).await.spawn();
+        let [peer0, peer1, _] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
+        let listener0 = peer0.event_listener();
 
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        peer0.add_peer(peer1);
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
@@ -2797,14 +2787,14 @@ mod tests {
         );
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         assert!(transactions
             .transactions_by_peers
             .get(signed_tx.tx_hash())
             .unwrap()
-            .contains(handle1.peer_id()));
+            .contains(peer1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {
@@ -2815,14 +2805,13 @@ mod tests {
 
         assert!(!pool.is_empty());
         assert!(pool.get(signed_tx.tx_hash()).is_some());
-        handle.terminate().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_session_closed_cleans_transaction_peer_state() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
-        let fallback_peer = PeerId::new([2; 64]);
+        let peer_id = PeerId::repeat_byte(1);
+        let fallback_peer = PeerId::repeat_byte(2);
         let (peer, _) = new_mock_session(peer_id, EthVersion::Eth66);
         let (fallback, _) = new_mock_session(fallback_peer, EthVersion::Eth66);
         let hash_shared = B256::from_slice(&[1; 32]);
@@ -2859,7 +2848,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[1; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2880,7 +2869,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_blob_sidecar_not_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[3; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2901,7 +2890,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_non_blob_sidecar_error_still_cached_as_bad_import() {
         let (mut tx_manager, _network) = new_tx_manager().await;
-        let peer_id = PeerId::new([1; 64]);
+        let peer_id = PeerId::repeat_byte(1);
         let hash = B256::from_slice(&[2; 32]);
 
         tx_manager.network.update_sync_state(SyncState::Idle);
@@ -2920,18 +2909,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_on_get_pooled_transactions_network() {
         reth_tracing::init_test_tracing();
-        let net = Testnet::create(2).await;
+        let net = Testnet::create(2).await.spawn();
+        let [peer0, peer1] = net.peers_array();
 
-        let mut handles = net.handles();
-        let handle0 = handles.next().unwrap();
-        let handle1 = handles.next().unwrap();
+        let listener0 = peer0.event_listener();
 
-        drop(handles);
-        let handle = net.spawn();
-
-        let listener0 = handle0.event_listener();
-
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        peer0.add_peer(peer1);
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let client = NoopProvider::default();
@@ -2967,7 +2950,6 @@ mod tests {
                 }
             }
         }
-        handle.terminate().await;
 
         let tx = MockTransaction::eip1559();
         let _ = transactions
@@ -2981,7 +2963,7 @@ mod tests {
             oneshot::channel::<RequestResult<PooledTransactions<PooledTransactionVariant>>>();
 
         transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
-            peer_id: *handle1.peer_id(),
+            peer_id: *peer1.peer_id(),
             request,
             response: send,
         });
@@ -3006,7 +2988,7 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
         let eth_version = EthVersion::Eth66;
 
         let txs = vec![
@@ -3016,7 +2998,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811,
-                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                    to: TxKind::Call(address!("cf7f9e66af820a19257a2108375b180b0ec49167")),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -3039,7 +3021,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: MIN_TRANSACTION_GAS,
-                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
+                    to: TxKind::Call(address!("61815774383099e24810ab832a5b2a5425c154d5")),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -3122,8 +3104,8 @@ mod tests {
         let mut tx_manager = new_tx_manager().await.0;
         let tx_fetcher = &mut tx_manager.transaction_fetcher;
 
-        let peer_id_1 = PeerId::new([1; 64]);
-        let peer_id_2 = PeerId::new([2; 64]);
+        let peer_id_1 = PeerId::repeat_byte(1);
+        let peer_id_2 = PeerId::repeat_byte(2);
         let eth_version = EthVersion::Eth66;
         let seen_hashes = [B256::from_slice(&[1; 32]), B256::from_slice(&[2; 32])];
 

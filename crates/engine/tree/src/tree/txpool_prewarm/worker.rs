@@ -200,9 +200,12 @@ where
                 return BatchEnd::Rest
             }
         };
-        let mut state = State::builder()
-            .with_database(self.cache.as_db_mut(StateProviderDatabase::new(state_provider)))
-            .build();
+        let mut state =
+            State::builder()
+                .with_database(self.cache.as_db_mut(StateProviderDatabase::new(
+                    state_provider.into_evm_state_provider(),
+                )))
+                .build();
         // The environment is the head block's own, not a predicted next-block one, and execution
         // is out of context by design: transaction viability is the pool's business, so nonce,
         // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
@@ -471,7 +474,7 @@ mod tests {
         let transaction = TxLegacy {
             gas_limit: 21_000,
             to: TxKind::Call(Address::repeat_byte(recipient)),
-            value: U256::from(1),
+            value: U256::ONE,
             ..Default::default()
         };
         let hash = B256::repeat_byte(recipient);

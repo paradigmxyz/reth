@@ -676,6 +676,7 @@ impl Deref for DatabaseEnv {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         tables::{
@@ -694,7 +695,6 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-    use std::str::FromStr;
     use tempfile::TempDir;
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
@@ -722,7 +722,6 @@ mod tests {
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
     const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
-    const ERROR_ETH_ADDRESS: &str = "Invalid address.";
 
     #[test]
     fn db_creation() {
@@ -795,8 +794,8 @@ mod tests {
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
 
-        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
-        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::ZERO };
+        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
 
         dup_cursor.upsert(Address::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
         dup_cursor.upsert(Address::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
@@ -1334,7 +1333,7 @@ mod tests {
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
         let subkey = B256::random();
 
-        let value = U256::from(1);
+        let value = U256::ONE;
         let entry1 = StorageEntry { key: subkey, value };
         dup_cursor.upsert(key, &entry1).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey).unwrap(), Some(entry1));
@@ -1411,6 +1410,8 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
+    #[allow(clippy::clone_on_copy)]
     fn db_closure_put_get() {
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();
@@ -1419,16 +1420,16 @@ mod tests {
             nonce: 18446744073709551615,
             bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
+            ..Default::default()
         };
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         {
             let env = create_test_db_with_path(DatabaseEnvKind::RW, path);
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);
@@ -1451,8 +1452,7 @@ mod tests {
     #[test]
     fn db_dup_sort() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1463,7 +1463,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Iterate with cursor
@@ -1495,8 +1495,7 @@ mod tests {
     #[test]
     fn db_walk_dup_with_not_existing_key() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
-            .expect(ERROR_ETH_ADDRESS);
+        let key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
@@ -1507,7 +1506,7 @@ mod tests {
         env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Try to walk_dup with not existing key should immediately return None
@@ -1523,17 +1522,15 @@ mod tests {
     #[test]
     fn db_iterate_over_all_dup_values() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
-            .expect(ERROR_ETH_ADDRESS);
-        let key2 = Address::from_str("0x2222222222222222222222222222222222222222")
-            .expect(ERROR_ETH_ADDRESS);
+        let key1 = Address::repeat_byte(0x11);
+        let key2 = Address::repeat_byte(0x22);
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
         env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (1,1)
-        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
@@ -1569,11 +1566,11 @@ mod tests {
     #[test]
     fn dup_value_with_same_subkey() {
         let (_tempdir, env) = create_test_db(DatabaseEnvKind::RW);
-        let key1 = Address::new([0x11; 20]);
-        let key2 = Address::new([0x22; 20]);
+        let key1 = Address::repeat_byte(0x11);
+        let key2 = Address::repeat_byte(0x22);
 
         // PUT key1 (0,1)
-        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::from(1) };
+        let value01 = StorageEntry { key: B256::with_last_byte(0), value: U256::ONE };
         env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (0,0)

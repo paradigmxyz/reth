@@ -27,9 +27,10 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx,
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
@@ -400,8 +401,7 @@ where
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                        let provider = worker.get_or_init::<Option<EvmStateProviderBox>>(|| None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
@@ -428,18 +428,17 @@ where
             // - dispatch_bal_batch_io is false
             // - execution cache is not disabled
             //
-            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // we launch prewarming of the BAL accounts and declared storages (both storage_reads
+            // and storage_changes). Bytecode is loaded on demand during execution.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
             let caches = saved_cache.cache().clone();
             let state_provider_factory = ctx.provider.clone();
             let build = Arc::new(move || {
-                state_provider_factory
-                    .database_provider_ro()
-                    .map(|provider| Box::new(provider) as _)
+                state_provider_factory.database_provider_ro().map(|provider| {
+                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                })
             });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
@@ -582,8 +581,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, StateProviderDatabase<reth_provider::StateProviderBox>>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -602,8 +600,8 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
-            Ok(provider) => Box::new(provider),
+        let mut state_provider = match self.provider.database_provider_ro() {
+            Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -678,7 +676,7 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
+        provider: &mut Option<EvmStateProviderBox>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
     ) {
@@ -722,7 +720,7 @@ where
                 .entered();
 
                 let inner = match self.provider.database_provider_ro() {
-                    Ok(p) => p,
+                    Ok(p) => p.into_evm_state_provider(),
                     Err(err) => {
                         warn!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -732,7 +730,7 @@ where
                         return;
                     }
                 };
-                let boxed: Box<dyn AccountReader> =
+                let boxed: EvmStateProviderBox =
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();
@@ -783,12 +781,75 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     }
 }
 
+/// The events the pre-warm task can handle.
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
+/// execution path without cloning the expensive `BundleState`.
+#[derive(Debug)]
+pub enum PrewarmTaskEvent<R> {
+    /// Signals the prewarm workers to stop executing further transactions.
+    ///
+    /// This only sets the termination flag the workers poll; the task keeps running to save the
+    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
+    /// not race ahead on transactions that will never be used.
+    TerminateTransactionExecution,
+    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
+    /// final output, and exits.
+    ///
+    /// Sent when execution completed successfully (carrying the output to save) or when the task
+    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
+    /// also stops the workers, since a teardown may arrive without a preceding
+    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
+    Terminate {
+        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
+        /// dropped handle). Using `Arc` allows sharing with the main execution path without
+        /// cloning the expensive `BundleState`.
+        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
+        /// Receiver for the block validation result.
+        ///
+        /// Cache saving is racing the state root validation. We optimistically construct the
+        /// updated cache but only save it once we know the block is valid.
+        valid_block_rx: mpsc::Receiver<()>,
+    },
+    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
+    /// cancelled, reporting how many were executed.
+    FinishedTxExecution {
+        /// Number of transactions executed
+        executed_transactions: usize,
+    },
+}
+
+/// Metrics for transactions prewarming.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.prewarm")]
+pub struct PrewarmMetrics {
+    /// The number of transactions to prewarm
+    pub(crate) transactions: Gauge,
+    /// A histogram of the number of transactions to prewarm
+    pub(crate) transactions_histogram: Histogram,
+    /// A histogram of duration per transaction prewarming
+    pub(crate) total_runtime: Histogram,
+    /// A histogram of EVM execution duration per transaction prewarming
+    pub(crate) execution_duration: Histogram,
+    /// A histogram for prefetch targets per transaction prewarming
+    pub(crate) prefetch_storage_targets: Histogram,
+    /// Time spent in `save_cache`, including dropping its removed `SavedCache` values.
+    /// Excludes any later freeing of cache contents by other `ExecutionCache` clones.
+    pub(crate) cache_saving_duration: Gauge,
+    /// Counter for transaction execution errors during prewarming
+    pub(crate) transaction_errors: Counter,
+    /// A histogram of BAL slot iteration duration during prefetching
+    pub(crate) bal_slot_iteration_duration: Histogram,
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
-    use alloy_primitives::{address, B256, U256};
+    use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
+    use alloy_primitives::{Address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -909,7 +970,7 @@ mod tests {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        let address = address!("0000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
         saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
         execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
         // Keep the drop worker occupied: a queued SavedCache would delay cache reuse.
@@ -971,7 +1032,7 @@ mod tests {
 
     impl AsRef<[u8]> for CacheDropProbe {
         fn as_ref(&self) -> &[u8] {
-            &[0xef, 0x01, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            &EIP7702_CLEARED_DELEGATION
         }
     }
 
@@ -1104,7 +1165,7 @@ mod tests {
         if insert_error {
             // Modified accounts without current info are rejected by insert_state.
             state.state.insert(
-                address!("0000000000000000000000000000000000000001"),
+                Address::with_last_byte(1),
                 BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
             );
         }
@@ -1166,23 +1227,24 @@ mod tests {
 
     #[test]
     fn bal_read_only_account_does_not_change_state_root() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_storage_read(U256::from(1));
+        let changes = AccountChanges::new(Address::with_last_byte(1)).with_storage_read(U256::ONE);
 
         assert!(!changes.account_info().changes_state_root(&changes));
     }
 
     #[test]
+    #[allow(clippy::needless_update)]
     fn bal_account_uses_existing_fields_only_when_missing() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
+        let changes = AccountChanges::new(Address::with_last_byte(1))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
         let info = changes.account_info();
 
         assert!(!info.is_complete());
         let mut account = Account {
-            balance: U256::from(1),
+            balance: U256::ONE,
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            ..Default::default()
         };
         account.apply_bal_info(info);
 
@@ -1190,65 +1252,4 @@ mod tests {
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
     }
-}
-
-/// The events the pre-warm task can handle.
-///
-/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
-/// execution path without cloning the expensive `BundleState`.
-#[derive(Debug)]
-pub enum PrewarmTaskEvent<R> {
-    /// Signals the prewarm workers to stop executing further transactions.
-    ///
-    /// This only sets the termination flag the workers poll; the task keeps running to save the
-    /// cache. Sent once the authoritative execution no longer needs prewarming, so the workers do
-    /// not race ahead on transactions that will never be used.
-    TerminateTransactionExecution,
-    /// Tears the whole task down: stops the workers, optionally saves the warmed cache from the
-    /// final output, and exits.
-    ///
-    /// Sent when execution completed successfully (carrying the output to save) or when the task
-    /// handle is dropped (carrying no output, e.g. after an execution error). Handling this event
-    /// also stops the workers, since a teardown may arrive without a preceding
-    /// [`TerminateTransactionExecution`](Self::TerminateTransactionExecution).
-    Terminate {
-        /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
-        /// dropped handle). Using `Arc` allows sharing with the main execution path without
-        /// cloning the expensive `BundleState`.
-        execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
-        /// Receiver for the block validation result.
-        ///
-        /// Cache saving is racing the state root validation. We optimistically construct the
-        /// updated cache but only save it once we know the block is valid.
-        valid_block_rx: mpsc::Receiver<()>,
-    },
-    /// Emitted by the worker-dispatch side once every dispatched transaction has finished or been
-    /// cancelled, reporting how many were executed.
-    FinishedTxExecution {
-        /// Number of transactions executed
-        executed_transactions: usize,
-    },
-}
-
-/// Metrics for transactions prewarming.
-#[derive(Metrics, Clone)]
-#[metrics(scope = "sync.prewarm")]
-pub struct PrewarmMetrics {
-    /// The number of transactions to prewarm
-    pub(crate) transactions: Gauge,
-    /// A histogram of the number of transactions to prewarm
-    pub(crate) transactions_histogram: Histogram,
-    /// A histogram of duration per transaction prewarming
-    pub(crate) total_runtime: Histogram,
-    /// A histogram of EVM execution duration per transaction prewarming
-    pub(crate) execution_duration: Histogram,
-    /// A histogram for prefetch targets per transaction prewarming
-    pub(crate) prefetch_storage_targets: Histogram,
-    /// Time spent in `save_cache`, including dropping its removed `SavedCache` values.
-    /// Excludes any later freeing of cache contents by other `ExecutionCache` clones.
-    pub(crate) cache_saving_duration: Gauge,
-    /// Counter for transaction execution errors during prewarming
-    pub(crate) transaction_errors: Counter,
-    /// A histogram of BAL slot iteration duration during prefetching
-    pub(crate) bal_slot_iteration_duration: Histogram,
 }
