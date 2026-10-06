@@ -91,6 +91,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![allow(rustdoc::redundant_explicit_links)]
 
 /// Support for backfill sync mode.
 pub mod backfill;
