@@ -242,7 +242,7 @@ pub struct NetworkArgs {
     pub discovery: DiscoveryArgs,
 
     /// Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with
-    /// it once Amsterdam is active, and keeps the staged pipeline otherwise.
+    /// it on chains that schedule Amsterdam, and keeps the staged pipeline otherwise.
     #[arg(long = "snap.v2")]
     pub snap_v2: bool,
 
