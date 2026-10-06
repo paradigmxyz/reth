@@ -1,7 +1,6 @@
 //! Picks the engine's backfill at launch: the staged pipeline, or snap sync with `--snap.v2`.
 
 use super::{SnapBackfillSync, SnapHandoff};
-use reth_chainspec::{EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_node_builder::{
@@ -9,7 +8,6 @@ use reth_node_builder::{
     NodeConfig,
 };
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
-use reth_tracing::tracing::warn;
 use std::task::{Context, Poll};
 
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
@@ -22,19 +20,13 @@ pub enum EthereumBackfill {
 }
 
 impl EthereumBackfill {
-    /// Picks the backfill for `config`'s `--snap.v2` setting. Snap pivots need block access
-    /// lists, so a chain that never schedules Amsterdam keeps the staged pipeline.
-    pub fn new<ChainSpec: EthereumHardforks>(config: &NodeConfig<ChainSpec>) -> Self {
-        if !config.network.snap_v2 {
-            return Self::Pipeline
+    /// Picks the backfill for `config`'s `--snap.v2` setting.
+    pub const fn new<ChainSpec>(config: &NodeConfig<ChainSpec>) -> Self {
+        if config.network.snap_v2 {
+            Self::Snap
+        } else {
+            Self::Pipeline
         }
-        if config.chain.ethereum_fork_activation(EthereumHardfork::Amsterdam) ==
-            ForkCondition::Never
-        {
-            warn!(target: "sync::snap", "This chain has no block access lists, so --snap.v2 keeps the staged pipeline");
-            return Self::Pipeline
-        }
-        Self::Snap
     }
 }
 
@@ -182,14 +174,6 @@ mod tests {
         // Genesis supplies the layout before the backfill is built.
         factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Snap(_)));
-    }
-
-    #[test]
-    fn a_chain_without_amsterdam_keeps_the_staged_pipeline() {
-        let factory = factory(ChainSpecBuilder::mainnet().build());
-
-        recover(true, &factory).unwrap();
-        assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Pipeline(_)));
     }
 
     #[test]
