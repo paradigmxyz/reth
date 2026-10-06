@@ -1967,8 +1967,8 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = QmdbConfig::new(tempdir.path()).with_partition_prefix("holesky");
         let qmdb = QmdbState::open(config.clone()).unwrap();
-        let block1 = decode_holesky_block(include_str!("../test-data/holesky/1.rlp"));
-        let block2 = decode_holesky_block(include_str!("../test-data/holesky/2.rlp"));
+        let block1 = decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/1.rlp"));
+        let block2 = decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/2.rlp"));
 
         assert_eq!(block2.parent_hash(), block1.hash());
 
