@@ -205,9 +205,9 @@ where
         session.select(&provider, head, self.context.finalized())?;
         let Some((generation, _)) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
-            // Headers are synced to forkchoice by now, so the chain itself hasn't forked yet.
-            // Falling back keeps the node syncing instead of waiting for the fork, and once it
-            // executes past genesis it stays on the staged pipeline.
+            // Once the staged pipeline executes past genesis, the node stays on it. The first header
+            // pass may stop at the finalized block, so if block access lists activated between it
+            // and the head, the node full syncs. That window is narrow and accepted.
             return match provider.sealed_header(head)? {
                 Some(header) if header.block_access_list_hash().is_none() => {
                     Ok(Resolved::BeforeBlockAccessLists)
