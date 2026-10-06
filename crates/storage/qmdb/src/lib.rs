@@ -15,7 +15,10 @@ use commonware_storage::{
     journal::contiguous::fixed::Config as JournalConfig,
     merkle::Location,
     mmr::{self, journaled::Config as MmrConfig},
-    qmdb::current::{unordered::fixed::Db as UnorderedFixedDb, FixedConfig},
+    qmdb::{
+        any::operation::update::Unordered,
+        current::{batch::MerkleizedBatch, unordered::fixed::Db as UnorderedFixedDb, FixedConfig},
+    },
     translator::EightCap,
 };
 use commonware_utils::{sequence::FixedBytes, NZUsize, NZU16, NZU64};
@@ -68,6 +71,8 @@ pub type QmdbKey = FixedBytes<KEY_BYTES>;
 pub type QmdbValue = FixedBytes<VALUE_BYTES>;
 type QmdbLocation = Location<mmr::Family>;
 type QmdbDb<E> = UnorderedFixedDb<mmr::Family, E, QmdbKey, QmdbValue, Sha256, EightCap, CHUNK_SIZE>;
+type QmdbBatch =
+    Arc<MerkleizedBatch<mmr::Family, sha256::Digest, Unordered<QmdbKey, QmdbValue>, CHUNK_SIZE>>;
 
 /// Stage ID used by the staged pipeline integration.
 pub const QMDB_STAGE_ID: StageId = StageId::Other("QmdbStateRoot");
@@ -329,6 +334,20 @@ impl QmdbState {
     /// Computes the `QMDb` root for `hashed_state` without committing it.
     pub fn overlay_root(&self, hashed_state: HashedPostState) -> Result<QmdbCommit, QmdbError> {
         self.request(|response| Command::Overlay { hashed_state, response })
+    }
+
+    /// Computes a speculative root against an executed parent without changing durable state.
+    pub fn preview(
+        &self,
+        parent_hash: B256,
+        hashed_state: HashedPostState,
+    ) -> Result<QmdbCommit, QmdbError> {
+        self.request(|response| Command::Preview { parent_hash, hashed_state, response })
+    }
+
+    /// Associates a successfully executed block with its speculative root.
+    pub fn remember(&self, block: QmdbBlock, root: B256) -> Result<(), QmdbError> {
+        self.request(|response| Command::Remember { block, root, response })
     }
 
     /// Computes the `QMDb` root for already encoded, last-write-wins flat mutations without
@@ -1101,6 +1120,16 @@ impl Drop for QmdbActor {
 
 #[derive(Debug)]
 enum Command {
+    Preview {
+        parent_hash: B256,
+        hashed_state: HashedPostState,
+        response: mpsc::Sender<Result<QmdbCommit, QmdbError>>,
+    },
+    Remember {
+        block: QmdbBlock,
+        root: B256,
+        response: mpsc::Sender<Result<(), QmdbError>>,
+    },
     Root(mpsc::Sender<Result<B256, QmdbError>>),
     Head(mpsc::Sender<Result<Option<QmdbHead>, QmdbError>>),
     Overlay {
@@ -1323,11 +1352,12 @@ fn run_actor(
         let qmdb_config = create_commonware_config(&context, &config)?;
         let mut db = QmdbDb::init(context, qmdb_config).await.map_err(commonware_error)?;
         let mut journal = QmdbCommitJournal::open(config.journal_path())?;
+        let mut speculative = SpeculativeState::default();
         reconcile_journal(&mut db, &mut journal).await?;
         let _ = init_tx.send(Ok(()));
 
         while let Ok(command) = command_rx.recv() {
-            if !handle_actor_command(command, &mut db, &mut journal).await? {
+            if !handle_actor_command(command, &mut db, &mut journal, &mut speculative).await? {
                 break;
             }
         }
@@ -1340,11 +1370,25 @@ async fn handle_actor_command<E>(
     command: Command,
     db: &mut QmdbDb<E>,
     journal: &mut QmdbCommitJournal,
+    speculative: &mut SpeculativeState,
 ) -> Result<bool, QmdbError>
 where
     E: commonware_storage::Context,
 {
     match command {
+        Command::Preview { parent_hash, hashed_state, response } => {
+            let result = preview_root(db, journal, speculative, parent_hash, hashed_state).await;
+            let _ = response.send(result);
+        }
+        Command::Remember { block, root, response } => {
+            let result = if speculative.roots.contains_key(&root) {
+                speculative.blocks.insert(block.hash, (block, root));
+                Ok(())
+            } else {
+                Err(QmdbError::UnknownBlock { number: block.number })
+            };
+            let _ = response.send(result);
+        }
         Command::Root(response) => {
             let _ = response.send(Ok(digest_to_b256(db.root())));
         }
@@ -1369,6 +1413,8 @@ where
             let _ = response.send(commit_blocks_mutations(db, journal, blocks).await);
         }
         Command::RewindToBlock { number, response } => {
+            speculative.roots.clear();
+            speculative.blocks.clear();
             let _ = response.send(rewind_to_block(db, journal, number).await);
         }
         Command::Account { hashed_address, response } => {
@@ -1398,6 +1444,75 @@ where
         Command::Shutdown => return Ok(false),
     }
     Ok(true)
+}
+
+#[derive(Default)]
+struct SpeculativeState {
+    roots: HashMap<B256, QmdbBatch>,
+    blocks: HashMap<B256, (QmdbBlock, B256)>,
+}
+
+async fn preview_root<E: commonware_storage::Context>(
+    db: &QmdbDb<E>,
+    journal: &QmdbCommitJournal,
+    speculative: &mut SpeculativeState,
+    parent_hash: B256,
+    hashed_state: HashedPostState,
+) -> Result<QmdbCommit, QmdbError> {
+    let head = journal.head().ok_or(QmdbError::UnanchoredState)?;
+    let parent = if head.hash == parent_hash {
+        db.to_batch()
+    } else {
+        let mut cursor = parent_hash;
+        let mut remaining = speculative.blocks.len();
+        while cursor != head.hash {
+            let (block, _) = speculative
+                .blocks
+                .get(&cursor)
+                .ok_or(QmdbError::InvalidParent { expected: head.hash, got: parent_hash })?;
+            if remaining == 0 {
+                return Err(QmdbError::InvalidParent { expected: head.hash, got: parent_hash });
+            }
+            remaining -= 1;
+            cursor = block.parent_hash;
+        }
+        let (_, root) =
+            speculative.blocks.get(&parent_hash).expect("the parent ancestry was checked");
+        speculative
+            .roots
+            .get(root)
+            .cloned()
+            .ok_or(QmdbError::InvalidParent { expected: head.hash, got: parent_hash })?
+    };
+    let mut desired = Vec::new();
+    for (address, account) in &hashed_state.accounts {
+        desired.push((account_key(address), account.as_ref().map(encode_account)));
+    }
+    for (address, storage) in &hashed_state.storages {
+        for (slot, value) in &storage.storage {
+            desired.push((
+                storage_key(address, slot),
+                (!value.is_zero()).then(|| encode_storage(*value)),
+            ));
+        }
+    }
+    desired.sort_unstable_by_key(|(key, _)| key.clone());
+    let mut batch = parent.new_batch::<Sha256>();
+    let mut entries = 0;
+    for (key, value) in desired {
+        if parent.get(&key, db).await.map_err(commonware_error)? != value {
+            batch = batch.write(key, value);
+            entries += 1;
+        }
+    }
+    let merkleized = if entries == 0 {
+        parent
+    } else {
+        batch.merkleize(db, None).await.map_err(commonware_error)?
+    };
+    let root = digest_to_b256(merkleized.root());
+    speculative.roots.insert(root, merkleized);
+    Ok(QmdbCommit { root, entries })
 }
 
 fn create_commonware_config(
