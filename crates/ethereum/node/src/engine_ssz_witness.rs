@@ -1,9 +1,16 @@
-//! Execution witness generation and wire types for the SSZ Engine API extension.
+//! Execution witness generation and temporary Bogota SSZ Engine API wire types.
 
-use alloy_primitives::{Bytes, B256};
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use alloy_primitives::{Address, Bytes, B128, B256};
 use alloy_rpc_types_engine::{
-    ssz_engine_types::{Optional, PayloadStatus, PayloadStatusKind},
-    ExecutionData,
+    ssz_engine_types::{
+        BuiltPayloadAmsterdam, ConversionError, ExecutionPayloadAmsterdam,
+        ExecutionPayloadBodyAmsterdam, Optional, PayloadAttributesAmsterdam,
+        PayloadAttributesConversionError, PayloadStatus, PayloadStatusKind, ValidationError,
+    },
+    ExecutionData, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
+    ForkchoiceState, ForkchoiceUpdatedResponseV2, PayloadAttributes as LegacyPayloadAttributes,
+    PayloadId, PayloadStatusV2,
 };
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -250,6 +257,416 @@ impl ssz::Decode for PayloadStatusWithWitness {
     }
 }
 
+/// Bogota execution payload, with the Amsterdam wire shape.
+pub type ExecutionPayloadBogota = ExecutionPayloadAmsterdam;
+
+/// Bogota execution payload body, with the Amsterdam wire shape.
+pub type ExecutionPayloadBodyBogota = ExecutionPayloadBodyAmsterdam;
+
+/// Bogota built payload, with the Amsterdam wire shape.
+pub type BuiltPayloadBogota = BuiltPayloadAmsterdam;
+
+/// Maximum cumulative transaction byte length returned by `/inclusion-list`.
+pub const MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST: usize = 1 << 13;
+
+/// Bogota payload attributes, with inclusion-list transactions appended to Amsterdam fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct PayloadAttributesBogota {
+    /// Payload timestamp.
+    pub timestamp: u64,
+    /// Previous RANDAO value.
+    pub prev_randao: B256,
+    /// Suggested fee recipient.
+    pub suggested_fee_recipient: Address,
+    /// Withdrawals to include in the payload.
+    #[ssz(with = "bogota_bounds")]
+    pub withdrawals: Vec<Withdrawal>,
+    /// Root of the parent beacon block.
+    pub parent_beacon_block_root: B256,
+    /// Consensus-layer slot number.
+    pub slot_number: u64,
+    /// Target gas limit.
+    pub target_gas_limit: u64,
+    /// Transactions used to enforce the EIP-7805 inclusion-list constraints.
+    #[ssz(with = "bogota_bounds")]
+    pub inclusion_list_transactions: Vec<Bytes>,
+}
+
+impl PayloadAttributesBogota {
+    /// Separates the Amsterdam fields and inclusion list without discarding either.
+    pub fn into_parts(self) -> (PayloadAttributesAmsterdam, Vec<Bytes>) {
+        (
+            PayloadAttributesAmsterdam {
+                timestamp: self.timestamp,
+                prev_randao: self.prev_randao,
+                suggested_fee_recipient: self.suggested_fee_recipient,
+                withdrawals: self.withdrawals,
+                parent_beacon_block_root: self.parent_beacon_block_root,
+                slot_number: self.slot_number,
+                target_gas_limit: self.target_gas_limit,
+            },
+            self.inclusion_list_transactions,
+        )
+    }
+}
+
+/// Bogota payload-submission request.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ExecutionPayloadEnvelopeBogota {
+    /// Submitted execution payload.
+    #[ssz(with = "bogota_bounds")]
+    pub payload: ExecutionPayloadBogota,
+    /// Root of the parent beacon block.
+    pub parent_beacon_block_root: B256,
+    /// EIP-7685 execution requests.
+    #[ssz(with = "bogota_bounds")]
+    pub execution_requests: Requests,
+    /// Transactions used to enforce the EIP-7805 inclusion-list constraints.
+    #[ssz(with = "bogota_bounds")]
+    pub inclusion_list_transactions: Vec<Bytes>,
+}
+
+/// Bogota forkchoice-update request.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct ForkchoiceUpdateBogota {
+    /// Current forkchoice state.
+    pub forkchoice_state: ForkchoiceState,
+    /// Optional Bogota payload attributes.
+    pub payload_attributes: Optional<PayloadAttributesBogota>,
+    /// Optional `Bitvector[128]` custody-column selection.
+    pub custody_columns: Optional<B128>,
+}
+
+/// Bogota payload status, with `inclusion_list_satisfied` appended to the common fields.
+///
+/// The common fields are flattened in SSZ; nesting `PayloadStatus` would change the wire layout.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+pub struct PayloadStatusBogota {
+    /// Payload validation status.
+    pub status: PayloadStatusKind,
+    /// Most recent valid block hash.
+    pub latest_valid_hash: Optional<B256>,
+    /// Optional payload validation error bytes.
+    pub validation_error: Optional<ValidationError>,
+    /// Inclusion-list validation result, permitted only for a `VALID` payload.
+    pub inclusion_list_satisfied: Optional<bool>,
+}
+
+impl ssz::Decode for PayloadStatusBogota {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        let mut builder = ssz::SszDecoderBuilder::new(bytes);
+        builder.register_type::<PayloadStatusKind>()?;
+        builder.register_type::<Optional<B256>>()?;
+        builder.register_type::<Optional<ValidationError>>()?;
+        builder.register_type::<Optional<bool>>()?;
+        let mut decoder = builder.build()?;
+        let response = Self {
+            status: decoder.decode_next()?,
+            latest_valid_hash: decoder.decode_next()?,
+            validation_error: decoder.decode_next()?,
+            inclusion_list_satisfied: decoder.decode_next()?,
+        };
+        if response.status != PayloadStatusKind::Invalid && response.validation_error.is_some() {
+            return Err(ssz::DecodeError::BytesInvalid(
+                "validation error is only valid for INVALID status".into(),
+            ));
+        }
+        if response.status != PayloadStatusKind::Valid &&
+            response.inclusion_list_satisfied.is_some()
+        {
+            return Err(ssz::DecodeError::BytesInvalid(
+                "inclusion list result is only valid for VALID status".into(),
+            ));
+        }
+        Ok(response)
+    }
+}
+
+/// Error converting Bogota JSON-RPC responses into REST-SSZ containers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BogotaConversionError {
+    /// A common status field is invalid.
+    Status(ConversionError),
+    /// An inclusion-list result was supplied for a non-valid payload.
+    InvalidInclusionListStatus,
+}
+
+impl core::fmt::Display for BogotaConversionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Status(error) => core::fmt::Display::fmt(error, f),
+            Self::InvalidInclusionListStatus => {
+                f.write_str("inclusion list result is only valid for VALID status")
+            }
+        }
+    }
+}
+
+impl core::error::Error for BogotaConversionError {}
+
+impl TryFrom<PayloadStatusV2> for PayloadStatusBogota {
+    type Error = BogotaConversionError;
+
+    fn try_from(value: PayloadStatusV2) -> Result<Self, Self::Error> {
+        let status =
+            PayloadStatus::try_from(value.payload_inner).map_err(BogotaConversionError::Status)?;
+        if status.status != PayloadStatusKind::Valid && value.inclusion_list_satisfied.is_some() {
+            return Err(BogotaConversionError::InvalidInclusionListStatus);
+        }
+        Ok(Self {
+            status: status.status,
+            latest_valid_hash: status.latest_valid_hash,
+            validation_error: status.validation_error,
+            inclusion_list_satisfied: value.inclusion_list_satisfied.into(),
+        })
+    }
+}
+
+impl From<PayloadStatusBogota> for PayloadStatusV2 {
+    fn from(value: PayloadStatusBogota) -> Self {
+        Self {
+            payload_inner: PayloadStatus {
+                status: value.status,
+                latest_valid_hash: value.latest_valid_hash,
+                validation_error: value.validation_error,
+            }
+            .into(),
+            inclusion_list_satisfied: value.inclusion_list_satisfied.into_option(),
+        }
+    }
+}
+
+/// Bogota forkchoice response, carrying the extended payload status.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
+pub struct ForkchoiceUpdateResponseBogota {
+    /// Restricted payload status; `ACCEPTED` is invalid here.
+    pub payload_status: PayloadStatusBogota,
+    /// Opaque server-assigned payload identifier.
+    pub payload_id: Optional<PayloadId>,
+}
+
+impl ssz::Decode for ForkchoiceUpdateResponseBogota {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        let mut builder = ssz::SszDecoderBuilder::new(bytes);
+        builder.register_type::<PayloadStatusBogota>()?;
+        builder.register_type::<Optional<PayloadId>>()?;
+        let mut decoder = builder.build()?;
+        let response =
+            Self { payload_status: decoder.decode_next()?, payload_id: decoder.decode_next()? };
+        if response.payload_status.status == PayloadStatusKind::Accepted {
+            return Err(ssz::DecodeError::BytesInvalid(
+                "ACCEPTED is not valid in a forkchoice response".into(),
+            ));
+        }
+        Ok(response)
+    }
+}
+
+impl TryFrom<ForkchoiceUpdatedResponseV2> for ForkchoiceUpdateResponseBogota {
+    type Error = BogotaConversionError;
+
+    fn try_from(value: ForkchoiceUpdatedResponseV2) -> Result<Self, Self::Error> {
+        let payload_status = PayloadStatusBogota::try_from(value.payload_status)?;
+        if payload_status.status == PayloadStatusKind::Accepted {
+            return Err(BogotaConversionError::Status(ConversionError::AcceptedForkchoice));
+        }
+        Ok(Self { payload_status, payload_id: value.payload_id.into() })
+    }
+}
+
+impl From<ForkchoiceUpdateResponseBogota> for ForkchoiceUpdatedResponseV2 {
+    fn from(value: ForkchoiceUpdateResponseBogota) -> Self {
+        Self {
+            payload_status: value.payload_status.into(),
+            payload_id: value.payload_id.into_option(),
+        }
+    }
+}
+
+/// REST-SSZ response for `GET /inclusion-list`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode)]
+pub struct InclusionListResponse {
+    /// Non-empty, non-blob transactions totaling at most 8,192 bytes.
+    pub transactions: Vec<Bytes>,
+}
+
+impl InclusionListResponse {
+    /// Checks the transaction constraints required by the inclusion-list endpoint.
+    pub fn validate(&self) -> Result<(), ssz::DecodeError> {
+        let mut total = 0;
+        for transaction in &self.transactions {
+            if transaction.is_empty() || transaction[0] == 3 {
+                return Err(ssz::DecodeError::BytesInvalid(
+                    "inclusion list transactions must be non-empty and must not be blobs".into(),
+                ));
+            }
+            // Check each addition against the remaining budget before adding, avoiding overflow.
+            if transaction.len() > MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST - total {
+                return Err(ssz::DecodeError::BytesInvalid(
+                    "inclusion list exceeds 8192 transaction bytes".into(),
+                ));
+            }
+            total += transaction.len();
+        }
+        Ok(())
+    }
+}
+
+impl ssz::Decode for InclusionListResponse {
+    fn is_ssz_fixed_len() -> bool {
+        false
+    }
+
+    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
+        let mut builder = ssz::SszDecoderBuilder::new(bytes);
+        builder.register_type::<Vec<Bytes>>()?;
+        let mut decoder = builder.build()?;
+        let response = Self { transactions: decoder.decode_next()? };
+        response.validate()?;
+        Ok(response)
+    }
+}
+
+const MAX_TXS_PER_PAYLOAD: usize = 1 << 20;
+
+mod bogota_bounds {
+    use super::*;
+    use ssz::{Decode, DecodeError};
+
+    pub(super) fn check(actual: usize, max: usize, field: &str) -> Result<(), DecodeError> {
+        if actual > max {
+            return Err(DecodeError::BytesInvalid(format!(
+                "{field} exceeds SSZ bound: {actual} > {max}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) trait Validate {
+        fn validate(&self) -> Result<(), DecodeError>;
+    }
+
+    impl Validate for Vec<Bytes> {
+        fn validate(&self) -> Result<(), DecodeError> {
+            check(self.len(), MAX_TXS_PER_PAYLOAD, "transactions")?;
+            for transaction in self {
+                check(transaction.len(), 1 << 30, "transaction")?;
+            }
+            Ok(())
+        }
+    }
+
+    impl Validate for Vec<Withdrawal> {
+        fn validate(&self) -> Result<(), DecodeError> {
+            check(self.len(), 16, "withdrawals")
+        }
+    }
+
+    impl Validate for Bytes {
+        fn validate(&self) -> Result<(), DecodeError> {
+            check(self.len(), 1 << 30, "block_access_list")
+        }
+    }
+
+    impl Validate for Requests {
+        fn validate(&self) -> Result<(), DecodeError> {
+            check(self.len(), 256, "execution_requests")?;
+            for request in self.iter() {
+                check(request.len(), 1 << 30, "execution_request")?;
+            }
+            Ok(())
+        }
+    }
+
+    impl Validate for ExecutionPayloadV1 {
+        fn validate(&self) -> Result<(), DecodeError> {
+            check(self.extra_data.len(), 32, "extra_data")?;
+            self.transactions.validate()
+        }
+    }
+    impl Validate for ExecutionPayloadV2 {
+        fn validate(&self) -> Result<(), DecodeError> {
+            self.payload_inner.validate()?;
+            self.withdrawals.validate()
+        }
+    }
+    impl Validate for ExecutionPayloadV3 {
+        fn validate(&self) -> Result<(), DecodeError> {
+            self.payload_inner.validate()
+        }
+    }
+    impl Validate for ExecutionPayloadV4 {
+        fn validate(&self) -> Result<(), DecodeError> {
+            self.payload_inner.validate()?;
+            self.block_access_list.validate()
+        }
+    }
+
+    // All bounded fields here are SSZ variable-size values. Their encoding is unchanged.
+    pub(crate) mod encode {
+        use super::*;
+        pub(crate) const fn is_ssz_fixed_len() -> bool {
+            false
+        }
+        pub(crate) const fn ssz_fixed_len() -> usize {
+            ssz::BYTES_PER_LENGTH_OFFSET
+        }
+        pub(crate) fn ssz_bytes_len<T: ssz::Encode>(value: &T) -> usize {
+            value.ssz_bytes_len()
+        }
+        pub(crate) fn ssz_append<T: ssz::Encode>(value: &T, buf: &mut Vec<u8>) {
+            value.ssz_append(buf);
+        }
+    }
+
+    pub(super) mod decode {
+        pub(crate) use super::encode::{is_ssz_fixed_len, ssz_fixed_len};
+        use super::*;
+        pub(crate) fn from_ssz_bytes<T: Decode + Validate>(bytes: &[u8]) -> Result<T, DecodeError> {
+            let value = T::from_ssz_bytes(bytes)?;
+            value.validate()?;
+            Ok(value)
+        }
+    }
+}
+
+impl From<PayloadAttributesBogota> for LegacyPayloadAttributes {
+    fn from(value: PayloadAttributesBogota) -> Self {
+        let (attributes, transactions) = value.into_parts();
+        Self::from(attributes).with_inclusion_list_transactions(transactions)
+    }
+}
+
+impl TryFrom<LegacyPayloadAttributes> for PayloadAttributesBogota {
+    type Error = PayloadAttributesConversionError;
+
+    fn try_from(mut value: LegacyPayloadAttributes) -> Result<Self, Self::Error> {
+        let inclusion_list_transactions = value
+            .inclusion_list_transactions
+            .take()
+            .ok_or(PayloadAttributesConversionError::MissingField("inclusion_list_transactions"))?;
+        let value = PayloadAttributesAmsterdam::try_from(value)?;
+        Ok(Self {
+            timestamp: value.timestamp,
+            prev_randao: value.prev_randao,
+            suggested_fee_recipient: value.suggested_fee_recipient,
+            withdrawals: value.withdrawals,
+            parent_beacon_block_root: value.parent_beacon_block_root,
+            slot_number: value.slot_number,
+            target_gas_limit: value.target_gas_limit,
+            inclusion_list_transactions,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +708,235 @@ mod tests {
 
         assert!(response.witness.is_none());
         assert_roundtrip(&response);
+    }
+
+    #[test]
+    fn bogota_status_has_flat_fields_and_optional_boolean() {
+        for satisfied in [None, Some(false), Some(true)] {
+            let response = PayloadStatusBogota {
+                status: PayloadStatusKind::Valid,
+                latest_valid_hash: Optional::none(),
+                validation_error: Optional::none(),
+                inclusion_list_satisfied: satisfied.into(),
+            };
+            let mut expected = vec![0, 13, 0, 0, 0, 13, 0, 0, 0, 13, 0, 0, 0];
+            if let Some(satisfied) = satisfied {
+                expected.push(u8::from(satisfied));
+            }
+            assert_eq!(response.as_ssz_bytes(), expected);
+            assert_eq!(PayloadStatusBogota::from_ssz_bytes(&expected).unwrap(), response);
+            let legacy: PayloadStatusV2 = response.clone().into();
+            assert_eq!(legacy.inclusion_list_satisfied, satisfied);
+            assert_eq!(PayloadStatusBogota::try_from(legacy).unwrap(), response);
+        }
+    }
+
+    #[test]
+    fn bogota_status_rejects_inclusion_result_for_non_valid_payloads() {
+        for status in
+            [PayloadStatusKind::Invalid, PayloadStatusKind::Syncing, PayloadStatusKind::Accepted]
+        {
+            for satisfied in [false, true] {
+                let response = PayloadStatusBogota {
+                    status,
+                    latest_valid_hash: Optional::none(),
+                    validation_error: Optional::none(),
+                    inclusion_list_satisfied: Optional::some(satisfied),
+                };
+                assert_eq!(
+                    PayloadStatusBogota::from_ssz_bytes(&response.as_ssz_bytes()),
+                    Err(ssz::DecodeError::BytesInvalid(
+                        "inclusion list result is only valid for VALID status".into(),
+                    )),
+                );
+                assert_eq!(
+                    PayloadStatusBogota::try_from(PayloadStatusV2::from(response)),
+                    Err(BogotaConversionError::InvalidInclusionListStatus),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bogota_status_rejects_invalid_tags_and_error_fields() {
+        let response = PayloadStatusBogota {
+            status: PayloadStatusKind::Valid,
+            latest_valid_hash: Optional::none(),
+            validation_error: Optional::some(
+                ValidationError::try_from(Bytes::from_static(b"bad")).unwrap(),
+            ),
+            inclusion_list_satisfied: Optional::none(),
+        };
+        assert_eq!(
+            PayloadStatusBogota::from_ssz_bytes(&response.as_ssz_bytes()),
+            Err(ssz::DecodeError::BytesInvalid(
+                "validation error is only valid for INVALID status".into(),
+            )),
+        );
+        let mut bytes = vec![4, 13, 0, 0, 0, 13, 0, 0, 0, 13, 0, 0, 0];
+        assert!(PayloadStatusBogota::from_ssz_bytes(&bytes).is_err());
+        bytes[0] = 0;
+        bytes.push(2);
+        assert!(PayloadStatusBogota::from_ssz_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn bogota_forkchoice_rejects_accepted_and_preserves_payload_id() {
+        for payload_id in [None, Some(PayloadId::new([0; 8]))] {
+            let response = ForkchoiceUpdateResponseBogota {
+                payload_status: PayloadStatusBogota {
+                    status: PayloadStatusKind::Valid,
+                    latest_valid_hash: Optional::none(),
+                    validation_error: Optional::none(),
+                    inclusion_list_satisfied: Optional::some(false),
+                },
+                payload_id: payload_id.into(),
+            };
+            assert_eq!(
+                ForkchoiceUpdateResponseBogota::from_ssz_bytes(&response.as_ssz_bytes()).unwrap(),
+                response
+            );
+            let legacy: ForkchoiceUpdatedResponseV2 = response.clone().into();
+            assert_eq!(ForkchoiceUpdateResponseBogota::try_from(legacy).unwrap(), response);
+        }
+        let response = ForkchoiceUpdateResponseBogota {
+            payload_status: PayloadStatusBogota {
+                status: PayloadStatusKind::Accepted,
+                latest_valid_hash: Optional::none(),
+                validation_error: Optional::none(),
+                inclusion_list_satisfied: Optional::none(),
+            },
+            payload_id: Optional::none(),
+        };
+        assert_eq!(
+            ForkchoiceUpdateResponseBogota::from_ssz_bytes(&response.as_ssz_bytes()),
+            Err(ssz::DecodeError::BytesInvalid(
+                "ACCEPTED is not valid in a forkchoice response".into()
+            ))
+        );
+        assert_eq!(
+            ForkchoiceUpdateResponseBogota::try_from(ForkchoiceUpdatedResponseV2::from(response)),
+            Err(BogotaConversionError::Status(ConversionError::AcceptedForkchoice))
+        );
+    }
+
+    #[test]
+    fn inclusion_list_response_is_bounded_single_field_container() {
+        assert_eq!(InclusionListResponse::default().as_ssz_bytes(), [4, 0, 0, 0]);
+        for lengths in [vec![8192], vec![4096, 4096]] {
+            let response = InclusionListResponse {
+                transactions: lengths.into_iter().map(|len| Bytes::from(vec![1; len])).collect(),
+            };
+            assert_eq!(
+                InclusionListResponse::from_ssz_bytes(&response.as_ssz_bytes()).unwrap(),
+                response
+            );
+        }
+        for transactions in [
+            vec![Bytes::new()],
+            vec![Bytes::from_static(&[3, 1])],
+            vec![Bytes::from(vec![1; 8193])],
+            vec![Bytes::from(vec![1; 4096]), Bytes::from(vec![1; 4097])],
+        ] {
+            let response = InclusionListResponse { transactions };
+            assert!(InclusionListResponse::from_ssz_bytes(&response.as_ssz_bytes()).is_err());
+        }
+        let response = InclusionListResponse { transactions: vec![Bytes::from_static(&[1, 2])] };
+        assert_eq!(response.as_ssz_bytes(), [4, 0, 0, 0, 4, 0, 0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn bogota_attributes_append_inclusion_list_and_preserve_parts() {
+        let attributes = PayloadAttributesBogota {
+            timestamp: 42,
+            slot_number: 10,
+            target_gas_limit: 30_000_000,
+            inclusion_list_transactions: vec![Bytes::from_static(&[1, 2])],
+            ..Default::default()
+        };
+        let bytes = attributes.as_ssz_bytes();
+        assert_eq!(&bytes[60..64], &116u32.to_le_bytes());
+        assert_eq!(&bytes[112..116], &116u32.to_le_bytes());
+        assert_eq!(PayloadAttributesBogota::from_ssz_bytes(&bytes).unwrap(), attributes);
+        let (amsterdam, transactions) = attributes.clone().into_parts();
+        assert_eq!(amsterdam.timestamp, attributes.timestamp);
+        assert_eq!(amsterdam.slot_number, attributes.slot_number);
+        assert_eq!(amsterdam.target_gas_limit, attributes.target_gas_limit);
+        assert_eq!(transactions, attributes.inclusion_list_transactions);
+        let request = ForkchoiceUpdateBogota {
+            forkchoice_state: ForkchoiceState::default(),
+            payload_attributes: Optional::some(attributes),
+            custody_columns: Optional::some(B128::with_last_byte(1)),
+        };
+        assert_eq!(
+            ForkchoiceUpdateBogota::from_ssz_bytes(&request.as_ssz_bytes()).unwrap(),
+            request
+        );
+    }
+
+    fn check_bogota_decode<T>(bytes: &[u8])
+    where
+        T: Decode + Encode + PartialEq + core::fmt::Debug,
+    {
+        if let Ok(value) = T::from_ssz_bytes(bytes) {
+            assert_eq!(T::from_ssz_bytes(&value.as_ssz_bytes()).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn bogota_decoders_handle_mutated_wire_inputs() {
+        let seeds = [
+            PayloadAttributesBogota::default().as_ssz_bytes(),
+            ForkchoiceUpdateBogota {
+                forkchoice_state: ForkchoiceState::default(),
+                payload_attributes: Optional::some(PayloadAttributesBogota::default()),
+                custody_columns: Optional::none(),
+            }
+            .as_ssz_bytes(),
+            PayloadStatusBogota {
+                status: PayloadStatusKind::Valid,
+                latest_valid_hash: Optional::none(),
+                validation_error: Optional::none(),
+                inclusion_list_satisfied: Optional::some(false),
+            }
+            .as_ssz_bytes(),
+            InclusionListResponse { transactions: vec![Bytes::from_static(&[1, 2])] }
+                .as_ssz_bytes(),
+        ];
+        for seed in &seeds {
+            for len in 0..=seed.len() {
+                let bytes = &seed[..len];
+                check_bogota_decode::<PayloadAttributesBogota>(bytes);
+                check_bogota_decode::<ForkchoiceUpdateBogota>(bytes);
+                check_bogota_decode::<PayloadStatusBogota>(bytes);
+                check_bogota_decode::<ForkchoiceUpdateResponseBogota>(bytes);
+                check_bogota_decode::<InclusionListResponse>(bytes);
+            }
+            for index in 0..seed.len() {
+                for byte in [0, 1, 2, 3, 4, 127, 128, 255] {
+                    let mut bytes = seed.clone();
+                    bytes[index] = byte;
+                    check_bogota_decode::<PayloadAttributesBogota>(&bytes);
+                    check_bogota_decode::<ForkchoiceUpdateBogota>(&bytes);
+                    check_bogota_decode::<PayloadStatusBogota>(&bytes);
+                    check_bogota_decode::<ForkchoiceUpdateResponseBogota>(&bytes);
+                    check_bogota_decode::<InclusionListResponse>(&bytes);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bogota_attributes_preserve_build_inclusion_list() {
+        let attributes = PayloadAttributesBogota {
+            inclusion_list_transactions: vec![Bytes::from_static(&[1, 2])],
+            ..Default::default()
+        };
+        let legacy = LegacyPayloadAttributes::from(attributes.clone());
+        assert_eq!(
+            legacy.inclusion_list_transactions,
+            Some(attributes.inclusion_list_transactions.clone())
+        );
+        assert_eq!(PayloadAttributesBogota::try_from(legacy).unwrap(), attributes);
     }
 }
