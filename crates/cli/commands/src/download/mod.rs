@@ -1114,7 +1114,7 @@ mod tests {
     use super::*;
     use clap::{Args, Parser};
     use extract::CompressionFormat;
-    use manifest::{ComponentManifest, SingleArchive};
+    use manifest::{ComponentManifest, OutputFileChecksum, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
@@ -1545,6 +1545,15 @@ mod tests {
         let manifest_path = dir.path().join("manifest.json");
         let mut manifest = manifest_with_archive_only_components();
         manifest.chain_id = 42431;
+        for component in manifest.components.values_mut() {
+            if let ComponentManifest::Single(archive) = component {
+                archive.output_files.push(OutputFileChecksum {
+                    path: archive.file.clone(),
+                    size: 1,
+                    blake3: blake3::hash(b"x").to_hex().to_string(),
+                });
+            }
+        }
         fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         let manifest_url = format!("file://{}", manifest_path.display());
         let target = dir.path().join("download");
