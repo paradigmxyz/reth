@@ -13,24 +13,28 @@ use reth_tracing::tracing::warn;
 use std::task::{Context, Poll};
 
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
-#[derive(Debug, Clone, Copy)]
-pub struct EthereumBackfill {
-    // Whether the backfill snap syncs, decided once at launch.
-    snap: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EthereumBackfill {
+    /// The staged pipeline, which every node runs unless snap sync is opted into.
+    Pipeline,
+    /// Snap sync, on chains with block access lists.
+    Snap,
 }
 
 impl EthereumBackfill {
-    /// Creates the builder for `config`'s `--snap.v2` setting. Snap pivots need block access
+    /// Picks the backfill for `config`'s `--snap.v2` setting. Snap pivots need block access
     /// lists, so a chain that never schedules Amsterdam keeps the staged pipeline.
     pub fn new<ChainSpec: EthereumHardforks>(config: &NodeConfig<ChainSpec>) -> Self {
-        let snap_v2 = config.network.snap_v2;
-        let snap = snap_v2 &&
-            config.chain.ethereum_fork_activation(EthereumHardfork::Amsterdam) !=
-                ForkCondition::Never;
-        if snap_v2 && !snap {
-            warn!(target: "sync::snap", "This chain has no block access lists, so --snap.v2 keeps the staged pipeline");
+        if !config.network.snap_v2 {
+            return Self::Pipeline
         }
-        Self { snap }
+        if config.chain.ethereum_fork_activation(EthereumHardfork::Amsterdam) ==
+            ForkCondition::Never
+        {
+            warn!(target: "sync::snap", "This chain has no block access lists, so --snap.v2 keeps the staged pipeline");
+            return Self::Pipeline
+        }
+        Self::Snap
     }
 }
 
@@ -44,25 +48,27 @@ where
     fn build(self, ctx: BackfillContext<N, C>) -> eyre::Result<Self::Backfill> {
         // Genesis has stored the storage settings by now, so the layout check covers a fresh
         // database too.
-        ctx.provider_factory().database_provider_ro()?.ensure_sync_mode(self.snap)?;
-        if !self.snap {
-            return PipelineBackfill.build(ctx).map(EthereumBackfillSync::Pipeline)
+        ctx.provider_factory().database_provider_ro()?.ensure_sync_mode(self == Self::Snap)?;
+        match self {
+            Self::Pipeline => PipelineBackfill.build(ctx).map(EthereumBackfillSync::Pipeline),
+            Self::Snap => {
+                let client = ctx.client().clone();
+                let provider_factory = ctx.provider_factory().clone();
+                let runtime = ctx.runtime().clone();
+                Ok(EthereumBackfillSync::Snap(Box::new(SnapBackfillSync::new(
+                    ctx.into_pipeline(),
+                    client,
+                    provider_factory,
+                    runtime,
+                ))))
+            }
         }
-        let client = ctx.client().clone();
-        let provider_factory = ctx.provider_factory().clone();
-        let runtime = ctx.runtime().clone();
-        Ok(EthereumBackfillSync::Snap(Box::new(SnapBackfillSync::new(
-            ctx.into_pipeline(),
-            client,
-            provider_factory,
-            runtime,
-        ))))
     }
 
     fn recover(&mut self, provider_factory: &ProviderFactory<N>) -> eyre::Result<()> {
         SnapHandoff::new(provider_factory.clone()).resume_interrupted_publish()?;
         // The snap layout is checked in `build`, after genesis initializes it.
-        if !self.snap {
+        if *self == Self::Pipeline {
             provider_factory.database_provider_ro()?.ensure_sync_mode(false)?;
         }
         Ok(())
