@@ -600,7 +600,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
         let mut manifest = fetch_manifest_from_source(&manifest_source).await?;
-        if !self.env.datadir.datadir.is_some() ||
+        if self.env.datadir.datadir.as_ref().is_none() ||
             (self.manifest_url.is_none() && self.manifest_path.is_none())
         {
             self.validate_manifest_chain(&manifest)?;
