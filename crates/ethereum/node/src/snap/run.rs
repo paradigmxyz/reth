@@ -17,7 +17,7 @@ use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
 };
 use reth_tasks::Runtime;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use std::{pin::pin, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -175,7 +175,17 @@ where
                 run.await
             }
         };
-        outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))
+        match outcome {
+            Ok(outcome) => Ok(outcome),
+            Err(error) if error.is_fatal() => Err(PipelineError::Internal(RethError::other(error))),
+            // A failed sync waits for the next head, and committed progress lets the next bootstrap
+            // resume.
+            Err(error) => {
+                warn!(target: "sync::snap", %error, "Snap sync failed, retrying once forkchoice moves");
+                let _ = self.stop.run_until_cancelled(targets.changed()).await;
+                Ok(SnapBootstrapOutcome::Stopped)
+            }
+        }
     }
 
     // Rebuilds the trie at the pivot of `write`'s attempt, then hands the state off. The rebuild
