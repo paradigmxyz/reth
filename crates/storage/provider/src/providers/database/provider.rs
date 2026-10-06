@@ -739,6 +739,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
                 let merged_hashed_state =
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
+                timings.merge_hashed_state += start.elapsed();
                 if !merged_hashed_state.is_empty() {
                     self.write_hashed_state(&merged_hashed_state)?;
                 }
@@ -749,6 +750,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
                 let merged_trie =
                     Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
+                timings.merge_trie_updates += start.elapsed();
                 if !merged_trie.is_empty() {
                     self.write_trie_updates_sorted(&merged_trie)?;
                 }
