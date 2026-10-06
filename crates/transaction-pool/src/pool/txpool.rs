@@ -5484,7 +5484,7 @@ mod tests {
         // tx0: nonce 0, cheap — will go straight to pending
         let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
         // tx1: nonce 1, very expensive — cumulative cost (tx0 + tx1) will exceed balance
-        let tx1 = tx0.next().inc_limit().with_value(U256::from(on_chain_balance));
+        let tx1 = tx0.next().inc_limit().with_value(on_chain_balance);
         // tx2: nonce 2
         let tx2 = tx1.next().inc_limit().with_value(U256::ZERO);
 
@@ -5582,7 +5582,7 @@ mod tests {
         // tx0: nonce 0, cheap
         let tx0 = MockTransaction::eip1559().with_sender(sender).set_gas_price(100).inc_limit();
         // tx1: nonce 1, very expensive — will exceed balance
-        let tx1 = tx0.next().inc_limit().with_value(U256::from(low_balance));
+        let tx1 = tx0.next().inc_limit().with_value(low_balance);
         // tx2: nonce 2
         let tx2 = tx1.next().inc_limit().with_value(U256::ZERO);
         // tx3: nonce 3

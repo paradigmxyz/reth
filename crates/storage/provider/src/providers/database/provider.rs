@@ -2713,7 +2713,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                     let mut storage = storage_revert
                         .into_iter()
-                        .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
+                        .map(|(k, v)| (B256::from(k), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
@@ -3854,7 +3854,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = B256::from(storage_key.to_be_bytes());
+                        let key = B256::from(*storage_key);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
