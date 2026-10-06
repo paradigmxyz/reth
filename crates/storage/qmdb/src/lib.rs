@@ -16,7 +16,7 @@ use commonware_storage::{
     merkle::Location,
     mmr::{self, journaled::Config as MmrConfig},
     qmdb::{
-        any::operation::update::Unordered,
+        any::unordered::fixed::Update as Unordered,
         current::{batch::MerkleizedBatch, unordered::fixed::Db as UnorderedFixedDb, FixedConfig},
     },
     translator::EightCap,
@@ -647,7 +647,7 @@ impl QmdbStage {
                     );
                 }
 
-                let mut storages = BTreeMap::new();
+                let mut storages = BTreeMap::<_, HashedStorage>::new();
                 for (block_address, storage_change) in &storage_changes {
                     let address = block_address.address();
                     let hashed_address = keccak256(address);
