@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
-    table::{DupSort, Table, TableRow},
+    table::{Compress, DupSort, Table, TableRow},
     DatabaseError,
 };
 
@@ -103,6 +103,27 @@ pub trait DbDupCursorRO<T: DupSort> {
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
+
+    /// Seeks as [`Self::seek_by_key_subkey`] and projects the compressed value.
+    ///
+    /// The projection is called once for a found value and never for a missing key/subkey range.
+    /// The cursor remains positioned at the found entry, including when the projection fails.
+    /// Implementations may borrow database bytes without decoding the full value; the default
+    /// decodes and recompresses it. The projection must understand the table's value encoding and
+    /// cannot retain a reference to its bytes. It is responsible for validating any fields it uses.
+    fn seek_by_key_subkey_with<R>(
+        &mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+        project: impl FnOnce(&[u8]) -> Result<R, DatabaseError>,
+    ) -> Result<Option<R>, DatabaseError>
+    where
+        Self: Sized,
+    {
+        self.seek_by_key_subkey(key, subkey)?
+            .map(|value| project(value.compress().as_ref()))
+            .transpose()
+    }
 }
 
 /// Read write cursor over table.

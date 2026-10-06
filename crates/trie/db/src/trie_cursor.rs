@@ -1,7 +1,7 @@
 use alloy_primitives::B256;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    table::{DupSort, Key, Table, Value},
+    table::{Decompress, DupSort, Encode, Key, Table, Value},
     tables::{self, PackedAccountsTrie, PackedStoragesTrie},
     transaction::DbTx,
     DatabaseError,
@@ -42,7 +42,7 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 /// Needed because [`StorageTrieEntry`] and [`PackedStorageTrieEntry`] are separate structs
 /// with different field types, but `DatabaseStorageTrieCursor` must access `.nibbles()` and
 /// `.node()` generically through `A::StorageValue`.
-pub trait StorageTrieEntryLike: Sized {
+pub trait StorageTrieEntryLike: Sized + Decompress {
     /// The subkey type.
     type SubKey: Clone;
 
@@ -57,6 +57,17 @@ pub trait StorageTrieEntryLike: Sized {
 
     /// Construct a new entry from a subkey and node.
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self;
+
+    /// Tests the exact subkey of a compressed entry without requiring the branch node.
+    ///
+    /// The default works for arbitrary encodings. Implementations with fixed-width subkey
+    /// prefixes can compare those bytes directly, including the encoded nibble length.
+    fn encoded_nibbles_match(value: &[u8], nibbles: &Self::SubKey) -> Result<bool, DatabaseError>
+    where
+        Self::SubKey: PartialEq,
+    {
+        Ok(Self::decompress(value)?.nibbles() == nibbles)
+    }
 }
 
 impl StorageTrieEntryLike for StorageTrieEntry {
@@ -76,6 +87,11 @@ impl StorageTrieEntryLike for StorageTrieEntry {
 
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
         Self { nibbles, node }
+    }
+
+    fn encoded_nibbles_match(value: &[u8], nibbles: &Self::SubKey) -> Result<bool, DatabaseError> {
+        let encoded = nibbles.clone().encode();
+        Ok(value.get(..encoded.len()).ok_or(DatabaseError::Decode)? == encoded)
     }
 }
 
@@ -114,6 +130,11 @@ impl StorageTrieEntryLike for PackedStorageTrieEntry {
 
     fn new(nibbles: Self::SubKey, node: BranchNodeCompact) -> Self {
         Self { nibbles, node }
+    }
+
+    fn encoded_nibbles_match(value: &[u8], nibbles: &Self::SubKey) -> Result<bool, DatabaseError> {
+        let encoded = nibbles.clone().encode();
+        Ok(value.get(..encoded.len()).ok_or(DatabaseError::Decode)? == encoded)
     }
 }
 
@@ -286,12 +307,12 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+            // Only the exact subkey is needed before replacing or deleting a node.
+            if self.cursor.seek_by_key_subkey_with(
+                self.hashed_address,
+                nibbles.clone(),
+                |value| A::StorageValue::encoded_nibbles_match(value, &nibbles),
+            )? == Some(true)
             {
                 self.cursor.delete_current()?;
             }
@@ -369,8 +390,9 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::hex_literal::hex;
-    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_db_api::{cursor::DbCursorRW, table::Compress, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_account_trie_order() {
@@ -435,5 +457,115 @@ mod tests {
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
         });
+    }
+
+    #[test]
+    fn storage_updates_preserve_legacy_rows() {
+        check_storage_update_rows::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn storage_updates_preserve_packed_rows() {
+        check_storage_update_rows::<PackedKeyAdapter>();
+    }
+
+    fn check_storage_update_rows<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let mut expected = BTreeMap::new();
+        for round in 0..18_u8 {
+            let before = expected.clone();
+            let provider = factory.provider_rw().unwrap();
+            for account in 1..=3 {
+                let address = B256::repeat_byte(account);
+                let mut updates = StorageTrieUpdatesSorted::default();
+                // Empty paths are deliberately ignored, including deletion requests.
+                updates.storage_nodes.push((Nibbles::default(), None));
+                let paths = (0..64_u8).map(|id| Nibbles::unpack([id])).chain(
+                    [vec![8], vec![8, 0], vec![8, 0, 0], vec![15; 63], vec![15; 64], vec![15]]
+                        .into_iter()
+                        .map(|path| Nibbles::from_nibbles(&path)),
+                );
+                for (index, path) in paths.enumerate() {
+                    let id = index as u8;
+                    let node = if id % 4 == 1 && round % 2 == 1 {
+                        None
+                    } else {
+                        // One quarter of paths retain identical values across every batch.
+                        let value = if id.is_multiple_of(4) { id } else { id.wrapping_add(round) };
+                        let mask = if value % 2 == 0 { 1 } else { 3 };
+                        Some(BranchNodeCompact::new(
+                            3,
+                            3,
+                            mask,
+                            vec![B256::repeat_byte(value); if mask == 1 { 1 } else { 2 }],
+                            (value.is_multiple_of(3)).then_some(B256::repeat_byte(account)),
+                        ))
+                    };
+                    if let Some(node) = &node {
+                        expected.insert((address, path), node.clone());
+                    } else {
+                        expected.remove(&(address, path));
+                    }
+                    updates.storage_nodes.push((path, node));
+                }
+                // Deleting an absent, prefix-adjacent key must not delete its neighbor.
+                updates.storage_nodes.push((Nibbles::from_nibbles([8, 0, 1]), None));
+                updates.storage_nodes.sort_by_key(|(path, _)| *path);
+                let cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+                let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, address);
+                assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 71);
+                // Reapplying the batch must retain counts and exact rows.
+                assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 71);
+            }
+            if round % 5 == 4 {
+                drop(provider);
+                expected = before;
+            } else {
+                provider.commit().unwrap();
+            }
+
+            let reopened = factory.provider_rw().unwrap();
+            let mut cursor = reopened.tx_ref().cursor_dup_read::<A::StorageTrieTable>().unwrap();
+            let rows = cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(rows.len(), expected.len(), "round {round}: duplicate subkeys");
+            let actual = rows
+                .into_iter()
+                .map(|(address, entry)| {
+                    ((address, A::subkey_to_nibbles(entry.nibbles())), entry.node().clone())
+                })
+                .collect::<BTreeMap<_, _>>();
+            assert_eq!(actual, expected, "round {round}");
+        }
+    }
+
+    #[test]
+    fn encoded_storage_subkeys_preserve_length() {
+        check_encoded_subkeys::<LegacyKeyAdapter>();
+        check_encoded_subkeys::<PackedKeyAdapter>();
+    }
+
+    fn check_encoded_subkeys<A: TrieTableAdapter>() {
+        let paths = [vec![], vec![0], vec![0, 0], vec![1], vec![1, 0], vec![15; 63], vec![15; 64]];
+        for path in &paths {
+            let subkey = A::StorageSubKey::from(Nibbles::from_nibbles(path));
+            let value = A::StorageValue::new(
+                subkey.clone(),
+                BranchNodeCompact::new(1, 1, 1, vec![B256::ZERO], Some(B256::ZERO)),
+            )
+            .compress();
+            for other in &paths {
+                let other_key = A::StorageSubKey::from(Nibbles::from_nibbles(other));
+                assert_eq!(
+                    A::StorageValue::encoded_nibbles_match(value.as_ref(), &other_key).unwrap(),
+                    path == other,
+                );
+            }
+            for len in 0..subkey.clone().encode().as_ref().len() {
+                assert!(matches!(
+                    A::StorageValue::encoded_nibbles_match(&value.as_ref()[..len], &subkey),
+                    Err(DatabaseError::Decode),
+                ));
+            }
+        }
     }
 }

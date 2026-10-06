@@ -244,6 +244,19 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
 
         Ok(DupWalker::<'_, T, Self> { cursor: self, start })
     }
+
+    fn seek_by_key_subkey_with<R>(
+        &mut self,
+        key: T::Key,
+        subkey: T::SubKey,
+        project: impl FnOnce(&[u8]) -> Result<R, DatabaseError>,
+    ) -> Result<Option<R>, DatabaseError> {
+        self.inner
+            .get_both_range::<Cow<'_, [u8]>>(key.encode().as_ref(), subkey.encode().as_ref())
+            .map_err(|e| DatabaseError::Read(e.into()))?
+            .map(|value| project(value.as_ref()))
+            .transpose()
+    }
 }
 
 impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
@@ -466,7 +479,76 @@ mod tests {
         }
     }
 
-    // Test-only screen: keep production cursor/API behavior unchanged until measured.
+    #[test]
+    fn projected_seek_preserves_range_and_cursor_position() {
+        let db = create_test_db();
+        let key = BlockNumberAddress((100, Address::repeat_byte(1)));
+        let values = [2_u8, 4, 6]
+            .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i) });
+        let tx = db.tx_mut().unwrap();
+        let mut cursor = tx.cursor_dup_write::<StorageChangeSets>().unwrap();
+        for value in values {
+            cursor.upsert(key, &value).unwrap();
+        }
+        for i in 0..=7 {
+            let expected = values.iter().find(|value| value.key >= B256::with_last_byte(i));
+            assert_eq!(
+                cursor
+                    .seek_by_key_subkey_with(key, B256::with_last_byte(i), |bytes| Ok(
+                        StorageEntry::decompress(bytes)?
+                    ))
+                    .unwrap(),
+                expected.copied(),
+            );
+            if let Some(value) = expected {
+                assert_eq!(cursor.current().unwrap(), Some((key, *value)));
+            }
+        }
+        assert_eq!(
+            cursor
+                .seek_by_key_subkey_with::<()>(
+                    BlockNumberAddress((101, Address::repeat_byte(1))),
+                    B256::ZERO,
+                    |_| panic!("projection must not run for a missing key"),
+                )
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            cursor
+                .seek_by_key_subkey_with::<()>(key, B256::with_last_byte(7), |_| {
+                    panic!("projection must not run beyond the last subkey")
+                })
+                .unwrap(),
+            None,
+        );
+        assert!(matches!(
+            cursor
+                .seek_by_key_subkey_with::<()>(key, values[1].key, |_| Err(DatabaseError::Decode)),
+            Err(DatabaseError::Decode),
+        ));
+        assert_eq!(cursor.current().unwrap(), Some((key, values[1])));
+        cursor.delete_current().unwrap();
+        drop(cursor);
+        tx.commit().unwrap();
+
+        let read = db.tx().unwrap();
+        let mut cursor = read.cursor_dup_read::<StorageChangeSets>().unwrap();
+        assert_eq!(
+            cursor
+                .seek_by_key_subkey_with(key, values[1].key, |bytes| Ok(StorageEntry::decompress(
+                    bytes
+                )?))
+                .unwrap(),
+            Some(values[2]),
+        );
+        assert_eq!(
+            cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap(),
+            vec![(key, values[0]), (key, values[2])],
+        );
+    }
+
+    // Compare the public projection API against decoding the complete stored node.
     #[test]
     #[ignore = "paired MDBX storage-trie update timing screen"]
     fn test_storage_trie_seek_without_decode_screen() {
@@ -490,7 +572,10 @@ mod tests {
                     // Include prefix-related subkeys and misses on either side of a row.
                     let mut keys: Vec<Vec<u8>> = (0..duplicates)
                         .map(|i| {
-                            (0..8).rev().map(|shift| ((i * 2 >> (shift * 4)) & 15) as u8).collect()
+                            (0..8)
+                                .rev()
+                                .map(|shift| (((i * 2) >> (shift * 4)) & 15) as u8)
+                                .collect()
                         })
                         .collect();
                     keys.extend([vec![1], vec![1, 0], vec![1, 0, 0], vec![15]]);
@@ -501,7 +586,9 @@ mod tests {
                             let address = B256::repeat_byte(account);
                             for (index, key) in keys.iter().enumerate() {
                                 let subkey = T::SubKey::from(key.clone());
-                                let value = if round > 0 && (index + round as usize) % 11 == 0 {
+                                let value = if round > 0 &&
+                                    (index + round as usize).is_multiple_of(11)
+                                {
                                     None
                                 } else {
                                     // Use the actual trie table codec, varying branch width and
@@ -539,15 +626,16 @@ mod tests {
                         let started = Instant::now();
                         for (address, subkey, value) in black_box(batch) {
                             let found = if raw_seek {
-                                let encoded = subkey.clone().encode();
                                 cursor
-                                    .inner
-                                    .get_both_range::<Cow<'_, [u8]>>(
-                                        address.encode().as_ref(),
-                                        encoded.as_ref(),
-                                    )
+                                    .seek_by_key_subkey_with(*address, subkey.clone(), |bytes| {
+                                        let encoded = subkey.clone().encode();
+                                        Ok(bytes
+                                            .get(..encoded.as_ref().len())
+                                            .ok_or(DatabaseError::Decode)? ==
+                                            encoded.as_ref())
+                                    })
                                     .unwrap()
-                                    .is_some_and(|bytes| bytes.starts_with(encoded.as_ref()))
+                                    .unwrap_or(false)
                             } else {
                                 cursor
                                     .seek_by_key_subkey(*address, subkey.clone())
@@ -578,15 +666,17 @@ mod tests {
                             }
                         }
                         let read = db.tx().unwrap();
-                        let actual = read
+                        let rows = read
                             .cursor_dup_read::<T>()
                             .unwrap()
                             .walk(None)
                             .unwrap()
-                            .map(|row| {
-                                let (address, value) = row.unwrap();
-                                ((address, value.get_subkey()), value)
-                            })
+                            .collect::<Result<Vec<_>, _>>()
+                            .unwrap();
+                        assert_eq!(rows.len(), expected.len());
+                        let actual = rows
+                            .into_iter()
+                            .map(|(address, value)| ((address, value.get_subkey()), value))
                             .collect::<BTreeMap<_, _>>();
                         assert_eq!(actual, expected);
                         if round > 0 {
