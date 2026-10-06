@@ -12,6 +12,7 @@ members = [
     "bin/reth-bb/",
     "bin/reth/",
     "crates/storage/rpc-provider/",
+    "crates/storage/qmdb/",
     "crates/chain-state/",
     "crates/chainspec/",
     "crates/cli/cli/",
@@ -412,6 +413,7 @@ reth-stages-types = { path = "crates/stages/types", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
+reth-qmdb = { path = "crates/storage/qmdb" }
 reth-storage-errors = { path = "crates/storage/errors", default-features = false }
 reth-storage-overlay = { path = "crates/storage/storage-overlay" }
 reth-tasks = { path = "crates/tasks" }

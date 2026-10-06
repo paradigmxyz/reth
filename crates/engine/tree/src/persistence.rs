@@ -1,6 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -12,6 +13,7 @@ use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_tasks::spawn_os_thread;
 use std::{
+    fmt,
     sync::{
         mpsc::{Receiver, SendError, Sender},
         Arc,
@@ -40,7 +42,6 @@ pub struct PersistenceResult {
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking I/O operations in an endless loop.
-#[derive(Debug)]
 pub struct PersistenceService<N>
 where
     N: ProviderNodeTypes,
@@ -61,6 +62,8 @@ where
     /// Pending safe block number to be committed with the next block save.
     /// This avoids triggering a separate fsync for each safe block update.
     pending_safe_block: Option<u64>,
+    save_blocks_hook: Option<SaveBlocksHook<N::Primitives>>,
+    remove_blocks_hook: Option<RemoveBlocksHook>,
 }
 
 impl<N> PersistenceService<N>
@@ -82,6 +85,8 @@ where
             sync_metrics_tx,
             pending_finalized_block: None,
             pending_safe_block: None,
+            save_blocks_hook: None,
+            remove_blocks_hook: None,
         }
     }
 }
@@ -154,6 +159,10 @@ where
         };
         provider_rw.commit()?;
 
+        if let Some(hook) = &self.remove_blocks_hook {
+            hook(new_tip_num)?;
+        }
+
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
         Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: None })
@@ -210,6 +219,9 @@ where
             }
         }
 
+        if let Some(hook) = &self.save_blocks_hook {
+            hook(input.persist_rest_blocks())?;
+        }
         provider_rw.commit()?;
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
@@ -312,12 +324,27 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     where
         N: ProviderNodeTypes,
     {
+        Self::spawn_service_with_hooks(provider_factory, pruner, sync_metrics_tx, None, None)
+    }
+
+    /// Spawns persistence with hooks for a custom durable state store.
+    pub fn spawn_service_with_hooks<N>(
+        provider_factory: ProviderFactory<N>,
+        pruner: PrunerWithFactory<ProviderFactory<N>>,
+        sync_metrics_tx: MetricEventsSender,
+        save_blocks_hook: Option<SaveBlocksHook<N::Primitives>>,
+        remove_blocks_hook: Option<RemoveBlocksHook>,
+    ) -> PersistenceHandle<N::Primitives>
+    where
+        N: ProviderNodeTypes,
+    {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
 
         // spawn the persistence service
         let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx)
+                .with_hooks(save_blocks_hook, remove_blocks_hook);
         let join_handle = spawn_os_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
@@ -385,6 +412,32 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
+    }
+}
+
+/// Runs before canonical blocks are committed to the primary database.
+pub type SaveBlocksHook<N> =
+    Arc<dyn Fn(&[ExecutedBlock<N>]) -> Result<(), ProviderError> + Send + Sync>;
+
+/// Runs after a canonical unwind is committed to the primary database.
+pub type RemoveBlocksHook = Arc<dyn Fn(u64) -> Result<(), ProviderError> + Send + Sync>;
+
+impl<N: ProviderNodeTypes> fmt::Debug for PersistenceService<N> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("PersistenceService").finish_non_exhaustive()
+    }
+}
+
+impl<N: ProviderNodeTypes> PersistenceService<N> {
+    /// Installs hooks for a custom durable state store.
+    pub fn with_hooks(
+        mut self,
+        save_blocks_hook: Option<SaveBlocksHook<N::Primitives>>,
+        remove_blocks_hook: Option<RemoveBlocksHook>,
+    ) -> Self {
+        self.save_blocks_hook = save_blocks_hook;
+        self.remove_blocks_hook = remove_blocks_hook;
+        self
     }
 }
 
