@@ -42,20 +42,43 @@ jobs:
               }
             }'
 
-  # Re-audits each push to a non-draft, same-repo PR that opted in with a Cyclops label.
+  # Re-audits each push to a non-draft, same-repo PR that has a Cyclops label or Cyclops review.
   publish-push:
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.action == 'synchronize' &&
       !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (
-        contains(github.event.pull_request.labels.*.name, 'cyclops') ||
-        contains(github.event.pull_request.labels.*.name, 'agentic-audit')
-      )
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     steps:
+      - name: Check opt-in
+        id: opt-in
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'cyclops') || contains(github.event.pull_request.labels.*.name, 'agentic-audit') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$LABELED" == "true" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 258930814 is tempoxyz-bot, which posts Cyclops reviews.
+          reviewed=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq '.[] | select(.user.id == 258930814 and ((.body // "") | test("^(<!-- cyclops:review [^\\r\\n]* -->\\r?\\n)?\\s*:eye: \\*\\*Cyclops Review\\*\\*"))) | .id')
+          if [[ -n "$reviewed" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish event
+        if: steps.opt-in.outputs.publish == 'true'
         env:
           HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
           HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
