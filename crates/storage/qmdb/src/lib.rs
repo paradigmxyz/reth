@@ -10,11 +10,12 @@ use alloy_primitives::{
     keccak256, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
 };
 use commonware_cryptography::{sha256, Sha256};
-use commonware_runtime::{buffer, tokio, BufferPooler, Runner as _, ThreadPooler};
+use commonware_parallel::Rayon;
+use commonware_runtime::{buffer, tokio, BufferPooler, Runner as _};
 use commonware_storage::{
     journal::contiguous::fixed::Config as JournalConfig,
-    merkle::Location,
-    mmr::{self, journaled::Config as MmrConfig},
+    merkle::{full::Config as MmrConfig, Location},
+    mmr,
     qmdb::{
         any::unordered::fixed::Update as Unordered,
         current::{batch::MerkleizedBatch, unordered::fixed::Db as UnorderedFixedDb, FixedConfig},
@@ -46,6 +47,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     num::NonZeroUsize,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex},
     thread::{self, JoinHandle},
@@ -67,12 +69,16 @@ const QMDB_STAGE_BATCH_BLOCKS: u64 = 1_000;
 // Commonware MMR operations can exceed the platform default thread stack on long chains.
 const QMDB_ACTOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 
+/// Fixed-width, tagged account or storage key used by the flat commitment.
 pub type QmdbKey = FixedBytes<KEY_BYTES>;
+/// Fixed-width, tagged account or storage value used by the flat commitment.
 pub type QmdbValue = FixedBytes<VALUE_BYTES>;
 type QmdbLocation = Location<mmr::Family>;
-type QmdbDb<E> = UnorderedFixedDb<mmr::Family, E, QmdbKey, QmdbValue, Sha256, EightCap, CHUNK_SIZE>;
-type QmdbBatch =
-    Arc<MerkleizedBatch<mmr::Family, sha256::Digest, Unordered<QmdbKey, QmdbValue>, CHUNK_SIZE>>;
+type NativeQmdbDb<E> =
+    UnorderedFixedDb<mmr::Family, E, QmdbKey, QmdbValue, Sha256, EightCap, CHUNK_SIZE, Rayon>;
+type QmdbBatch = Arc<
+    MerkleizedBatch<mmr::Family, sha256::Digest, Unordered<QmdbKey, QmdbValue>, CHUNK_SIZE, Rayon>,
+>;
 
 /// Stage ID used by the staged pipeline integration.
 pub const QMDB_STAGE_ID: StageId = StageId::Other("QmdbStateRoot");
@@ -191,6 +197,9 @@ pub enum QmdbError {
     /// `QMDb` returned malformed account bytes.
     #[error("invalid account value in QMDb")]
     InvalidAccountValue,
+    /// The fixed account encoding cannot commit chain-specific extensions.
+    #[error("QMDb does not support account extensions")]
+    UnsupportedAccountExtension,
     /// `QMDb` returned malformed storage bytes.
     #[error("invalid storage value in QMDb")]
     InvalidStorageValue,
@@ -531,11 +540,7 @@ pub fn genesis_hashed_state(genesis: &Genesis) -> HashedPostState {
         let bytecode_hash = account.code.as_ref().map(keccak256);
         accounts.insert(
             hashed_address,
-            Some(Account {
-                nonce: account.nonce.unwrap_or_default(),
-                balance: account.balance,
-                bytecode_hash,
-            }),
+            Some(Account::new(account.nonce.unwrap_or_default(), account.balance, bytecode_hash)),
         );
 
         if let Some(storage) = &account.storage {
@@ -741,7 +746,7 @@ fn current_account<Provider: AccountReader>(
 ) -> Result<Option<Account>, QmdbError> {
     overrides
         .get(&address)
-        .copied()
+        .cloned()
         .map(Ok)
         .unwrap_or_else(|| provider.basic_account(&address).map_err(QmdbError::provider))
 }
@@ -1218,7 +1223,7 @@ impl QmdbCommitJournal {
         let complete = body.len() / JOURNAL_RECORD_BYTES;
         let trailing = body.len() % JOURNAL_RECORD_BYTES;
         let mut records = Vec::with_capacity(complete);
-        for chunk in body[..complete * JOURNAL_RECORD_BYTES].chunks_exact(JOURNAL_RECORD_BYTES) {
+        for chunk in body[..complete * JOURNAL_RECORD_BYTES].as_chunks::<JOURNAL_RECORD_BYTES>().0 {
             records.push(decode_journal_record(&path, chunk)?);
         }
 
@@ -1350,7 +1355,7 @@ fn run_actor(
         .with_worker_threads(config.worker_threads.max(1));
     tokio::Runner::new(runtime_config).start(|context| async move {
         let qmdb_config = create_commonware_config(&context, &config)?;
-        let mut db = QmdbDb::init(context, qmdb_config).await.map_err(commonware_error)?;
+        let mut db = QmdbDb::init(context, qmdb_config).await?;
         let mut journal = QmdbCommitJournal::open(config.journal_path())?;
         let mut speculative = SpeculativeState::default();
         reconcile_journal(&mut db, &mut journal).await?;
@@ -1359,6 +1364,9 @@ fn run_actor(
         while let Ok(command) = command_rx.recv() {
             if !handle_actor_command(command, &mut db, &mut journal, &mut speculative).await? {
                 break;
+            }
+            if db.inner.is_none() {
+                return Err(QmdbError::ActorClosed);
             }
         }
 
@@ -1486,7 +1494,7 @@ async fn preview_root<E: commonware_storage::Context>(
     };
     let mut desired = Vec::new();
     for (address, account) in &hashed_state.accounts {
-        desired.push((account_key(address), account.as_ref().map(encode_account)));
+        desired.push((account_key(address), account.as_ref().map(encode_account).transpose()?));
     }
     for (address, storage) in &hashed_state.storages {
         for (slot, value) in &storage.storage {
@@ -1516,19 +1524,18 @@ async fn preview_root<E: commonware_storage::Context>(
 }
 
 fn create_commonware_config(
-    context: &(impl BufferPooler + ThreadPooler),
+    context: &impl BufferPooler,
     config: &QmdbConfig,
-) -> Result<FixedConfig<EightCap>, QmdbError> {
+) -> Result<FixedConfig<EightCap, Rayon>, QmdbError> {
     let partition_prefix = &config.partition_prefix;
     let page_cache = buffer::paged::CacheRef::from_pooler(context, NZU16!(2048), NZUsize!(10));
-    let thread_pool = context
-        .create_thread_pool(
-            NonZeroUsize::new(config.worker_threads.max(1))
-                .expect("worker thread count is forced non-zero"),
-        )
-        .map_err(|error| {
-            QmdbError::Commonware(format!("failed to create QMDB merkle thread pool: {error}"))
-        })?;
+    let strategy = Rayon::new(
+        NonZeroUsize::new(config.worker_threads.max(1))
+            .expect("worker thread count is forced non-zero"),
+    )
+    .map_err(|error| {
+        QmdbError::Commonware(format!("failed to create QMDB merkle thread pool: {error}"))
+    })?;
 
     Ok(FixedConfig {
         merkle_config: MmrConfig {
@@ -1536,17 +1543,22 @@ fn create_commonware_config(
             metadata_partition: format!("{partition_prefix}-mmr-metadata"),
             items_per_blob: NZU64!(4096),
             write_buffer: NZUsize!(4096),
-            thread_pool: Some(thread_pool),
+            replay_buffer: NZUsize!(65536),
+            strategy,
             page_cache: page_cache.clone(),
         },
         journal_config: JournalConfig {
             partition: format!("{partition_prefix}-log-journal"),
             items_per_blob: NZU64!(4096),
             write_buffer: NZUsize!(4096),
+            replay_buffer: NZUsize!(65536),
             page_cache,
         },
         grafted_metadata_partition: format!("{partition_prefix}-grafted-mmr-metadata"),
         translator: EightCap,
+        init_cache_size: Some(NZUsize!(1024)),
+        init_buffer: NZUsize!(65536),
+        init_concurrency: (),
     })
 }
 
@@ -1625,12 +1637,12 @@ where
     let root = digest_to_b256(merkleized.root());
     let apply_started = Instant::now();
     if mode != UpdateMode::Overlay {
-        db.apply_batch(merkleized).await.map_err(commonware_error)?;
+        db.apply_batch(merkleized).await?;
     }
     let apply_duration = apply_started.elapsed();
     let sync_started = Instant::now();
     if mode == UpdateMode::ApplyAndSync {
-        db.sync().await.map_err(commonware_error)?;
+        db.sync().await?;
     }
     let sync_duration = sync_started.elapsed();
     debug!(
@@ -1688,7 +1700,7 @@ where
         pending.push(block_commit);
     }
 
-    db.sync().await.map_err(commonware_error)?;
+    db.sync().await?;
     if let Err(err) = journal.append(&pending) {
         rewind_qmdb(db, rollback_size).await?;
         return Err(err);
@@ -1747,10 +1759,7 @@ where
         pending.push(block_commit);
     }
 
-    if let Err(err) = db.sync().await.map_err(commonware_error) {
-        rewind_qmdb(db, rollback_size).await?;
-        return Err(err);
-    }
+    db.sync().await?;
     if let Err(err) = journal.append(&pending) {
         rewind_qmdb(db, rollback_size).await?;
         return Err(err);
@@ -1842,15 +1851,15 @@ async fn rewind_qmdb<E>(db: &mut QmdbDb<E>, log_size: u64) -> Result<(), QmdbErr
 where
     E: commonware_storage::Context,
 {
-    db.rewind(QmdbLocation::new(log_size)).await.map_err(commonware_error)?;
-    db.sync().await.map_err(commonware_error)
+    db.rewind(QmdbLocation::new(log_size)).await?;
+    db.sync().await
 }
 
 async fn qmdb_log_size<E>(db: &QmdbDb<E>) -> u64
 where
     E: commonware_storage::Context,
 {
-    *db.bounds().await.end
+    *db.bounds().end
 }
 
 async fn collect_mutations<E>(
@@ -1868,7 +1877,7 @@ where
         let key = account_key(hashed_address);
         match account {
             Some(account) => {
-                desired.push((key, Some(encode_account(account))));
+                desired.push((key, Some(encode_account(account)?)));
             }
             None => {
                 desired.push((key, None));
@@ -1929,7 +1938,10 @@ fn storage_key(hashed_address: &B256, hashed_slot: &B256) -> QmdbKey {
     QmdbKey::new(key)
 }
 
-fn encode_account(account: &Account) -> QmdbValue {
+fn encode_account(account: &Account) -> Result<QmdbValue, QmdbError> {
+    if account.has_extension() {
+        return Err(QmdbError::UnsupportedAccountExtension);
+    }
     let mut value = [0; VALUE_BYTES];
     value[0] = ACCOUNT_TAG;
     value[1..9].copy_from_slice(&account.nonce.to_be_bytes());
@@ -1938,7 +1950,7 @@ fn encode_account(account: &Account) -> QmdbValue {
         value[41] = 1;
         value[42..74].copy_from_slice(bytecode_hash.as_slice());
     }
-    QmdbValue::new(value)
+    Ok(QmdbValue::new(value))
 }
 
 fn decode_account(value: QmdbValue) -> Result<Account, QmdbError> {
@@ -1952,7 +1964,7 @@ fn decode_account(value: QmdbValue) -> Result<Account, QmdbError> {
     let balance = U256::from_be_bytes(balance_bytes);
     let bytecode_hash = (bytes[41] == 1).then(|| B256::from_slice(&bytes[42..74]));
 
-    Ok(Account { nonce, balance, bytecode_hash })
+    Ok(Account::new(nonce, balance, bytecode_hash))
 }
 
 fn encode_storage(storage: U256) -> QmdbValue {
@@ -1983,6 +1995,55 @@ fn qmdb_mpt_unsupported(message: &'static str) -> ProviderError {
     ProviderError::other(QmdbError::MptUnsupported(message))
 }
 
+// Commonware consumes a database when applying, syncing or rewinding it. An I/O failure
+// invalidates that handle; close the actor rather than continuing with a partially updated view.
+struct QmdbDb<E: commonware_storage::Context> {
+    inner: Option<NativeQmdbDb<E>>,
+}
+
+impl<E: commonware_storage::Context> QmdbDb<E> {
+    async fn init(context: E, config: FixedConfig<EightCap, Rayon>) -> Result<Self, QmdbError>
+    where
+        E: commonware_runtime::Spawner,
+    {
+        let inner = NativeQmdbDb::init(context, config).await.map_err(commonware_error)?;
+        Ok(Self { inner: Some(inner) })
+    }
+
+    async fn apply_batch(&mut self, batch: QmdbBatch) -> Result<(), QmdbError> {
+        let db = self.inner.take().ok_or(QmdbError::ActorClosed)?;
+        let (db, _) = db.apply_batch(batch).await.map_err(commonware_error)?;
+        self.inner = Some(db);
+        Ok(())
+    }
+
+    async fn sync(&mut self) -> Result<(), QmdbError> {
+        let db = self.inner.take().ok_or(QmdbError::ActorClosed)?;
+        self.inner = Some(db.sync().await.map_err(commonware_error)?);
+        Ok(())
+    }
+
+    async fn rewind(&mut self, size: QmdbLocation) -> Result<(), QmdbError> {
+        let db = self.inner.take().ok_or(QmdbError::ActorClosed)?;
+        self.inner = Some(db.rewind(size).await.map_err(commonware_error)?);
+        Ok(())
+    }
+}
+
+impl<E: commonware_storage::Context> Deref for QmdbDb<E> {
+    type Target = NativeQmdbDb<E>;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().expect("actor must close after a consuming database operation fails")
+    }
+}
+
+impl<E: commonware_storage::Context> DerefMut for QmdbDb<E> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut().expect("actor must close after a consuming database operation fails")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2002,7 +2063,7 @@ mod tests {
         let slot_a = B256::with_last_byte(2);
         let slot_b = B256::with_last_byte(3);
 
-        let account = Account { nonce: 7, balance: U256::from(11), bytecode_hash: None };
+        let account = Account::new(7, U256::from(11), None);
         let state = HashedPostState::default()
             .with_accounts([(hashed_address, Some(account))])
             .with_storages([(
@@ -2013,7 +2074,10 @@ mod tests {
         let first = qmdb.commit_hashed_state(state.clone()).unwrap();
         assert_ne!(first.root, empty_root);
         assert_eq!(first.entries, 2);
-        assert_eq!(qmdb.account(hashed_address).unwrap(), Some(account));
+        assert_eq!(
+            qmdb.account(hashed_address).unwrap(),
+            Some(Account::new(7, U256::from(11), None))
+        );
         assert_eq!(qmdb.storage(hashed_address, slot_a).unwrap(), Some(U256::from(13)));
 
         let duplicate = qmdb.commit_hashed_state(state).unwrap();
@@ -2051,9 +2115,9 @@ mod tests {
 
         let hashed_address = B256::repeat_byte(0x11);
         let hashed_slot = B256::repeat_byte(0x22);
-        let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let account = Account::new(1, U256::from(100), None);
         let mutations = vec![
-            (account_key(&hashed_address), Some(encode_account(&account))),
+            (account_key(&hashed_address), Some(encode_account(&account).unwrap())),
             (storage_key(&hashed_address, &hashed_slot), Some(encode_storage(U256::from(200)))),
         ];
         let overlay = qmdb.overlay_mutations(mutations.clone()).unwrap();
@@ -2220,11 +2284,7 @@ mod tests {
     fn block_state(block: &reth_primitives_traits::SealedBlock<Block>) -> HashedPostState {
         let hashed_address = keccak256(block.beneficiary());
         let slot = keccak256(block.hash());
-        let account = Account {
-            nonce: block.number(),
-            balance: U256::from(block.gas_limit()),
-            bytecode_hash: None,
-        };
+        let account = Account::new(block.number(), U256::from(block.gas_limit()), None);
         HashedPostState::default().with_accounts([(hashed_address, Some(account))]).with_storages([
             (hashed_address, HashedStorage::from_iter([(slot, U256::from(block.timestamp()))])),
         ])
@@ -2238,10 +2298,8 @@ mod tests {
         let sender = keccak256([number.to_be_bytes(), 0u64.to_be_bytes()].concat());
         let receiver = keccak256([number.to_be_bytes(), 1u64.to_be_bytes()].concat());
         let slot = keccak256([number.to_be_bytes(), 2u64.to_be_bytes()].concat());
-        let sender_account =
-            Account { nonce: number, balance: U256::from(number * 3), bytecode_hash: None };
-        let receiver_account =
-            Account { nonce: 0, balance: U256::from(number * 7), bytecode_hash: None };
+        let sender_account = Account::new(number, U256::from(number * 3), None);
+        let receiver_account = Account::new(0, U256::from(number * 7), None);
 
         HashedPostState::default()
             .with_accounts([(sender, Some(sender_account)), (receiver, Some(receiver_account))])

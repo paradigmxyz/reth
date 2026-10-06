@@ -27,10 +27,11 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
 # commonware
-commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
-commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
-commonware-storage = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
-commonware-utils = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
+commonware-cryptography = "=2026.9.0"
+commonware-parallel = "=2026.9.0"
+commonware-runtime = "=2026.9.0"
+commonware-storage = "=2026.9.0"
+commonware-utils = "=2026.9.0"
 
 # async
 futures-util.workspace = true
