@@ -34,9 +34,9 @@ const HEADER_LOOKUP_RETRY: Duration = Duration::from_secs(1);
 // Returning without progress hands control back to the engine without a fatal error.
 const STOPPED: ControlFlow = ControlFlow::NoProgress { block_number: None };
 
-// Root mismatches one run tolerates before failing. A mismatch that repeats across fresh
-// attempts points at local state rather than peers, so restarting again would loop forever.
-const MAX_ROOT_MISMATCHES: u32 = 3;
+// Root mismatches retried before the run fails. Every range, list and bytecode is authenticated
+// against the pivot, so a mismatch is a local fault a fresh attempt rarely avoids.
+const ROOT_MISMATCH_RETRIES: u32 = 1;
 
 // Everything one spawned run needs, moved into its task.
 pub(super) struct SnapRun<N: ProviderNodeTypes, C> {
@@ -44,8 +44,8 @@ pub(super) struct SnapRun<N: ProviderNodeTypes, C> {
     factory: ProviderFactory<N>,
     runtime: Runtime,
     header_refresh: Duration,
-    // Root mismatches the run tolerates before failing.
-    max_root_mismatches: u32,
+    // Root mismatches retried before the run fails.
+    root_mismatch_retries: u32,
     // Cancelled when the backfill is dropped.
     stop: CancellationToken,
     // Latest finalized block the engine reported.
@@ -65,7 +65,7 @@ impl<N: ProviderNodeTypes, C> SnapRun<N, C> {
             factory,
             runtime,
             header_refresh: HEADER_REFRESH,
-            max_root_mismatches: MAX_ROOT_MISMATCHES,
+            root_mismatch_retries: ROOT_MISMATCH_RETRIES,
             stop,
             finalized,
         }
@@ -78,8 +78,8 @@ impl<N: ProviderNodeTypes, C> SnapRun<N, C> {
     }
 
     #[cfg(test)]
-    const fn with_max_root_mismatches(mut self, max_root_mismatches: u32) -> Self {
-        self.max_root_mismatches = max_root_mismatches;
+    const fn with_root_mismatch_retries(mut self, root_mismatch_retries: u32) -> Self {
+        self.root_mismatch_retries = root_mismatch_retries;
         self
     }
 }
@@ -124,9 +124,10 @@ where
                         Pass::Again => {}
                         Pass::RootMismatch => {
                             mismatches += 1;
-                            if mismatches >= self.max_root_mismatches {
+                            if mismatches > self.root_mismatch_retries {
                                 return Err(PipelineError::Internal(RethError::msg(format!(
-                                    "snap state root mismatched in {mismatches} attempts"
+                                    "snap state root mismatched {mismatches} times, last at block {}",
+                                    pivot.number
                                 ))))
                             }
                         }
@@ -796,7 +797,7 @@ pub(crate) mod tests {
         let (_targets, receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
-        let result = run.with_max_root_mismatches(1).bootstrap(&mut pipeline, receiver).await;
+        let result = run.with_root_mismatch_retries(0).bootstrap(&mut pipeline, receiver).await;
 
         assert!(matches!(result, Err(PipelineError::Internal(_))), "{result:?}");
         assert!(factory.provider().unwrap().active_snap_write().unwrap().is_none());
