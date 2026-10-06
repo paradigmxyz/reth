@@ -2,7 +2,7 @@ name: Cyclops audit
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
-    types: [labeled]
+    types: [labeled, synchronize, reopened, ready_for_review]
   issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
     types: [created]
 
@@ -39,6 +39,45 @@ jobs:
               "data": {
                 "pr_number": ${{ github.event.pull_request.number }},
                 "sha": "${{ github.event.pull_request.head.sha }}"
+              }
+            }'
+
+  # Cyclops runs push-only events only on PRs it already reviewed via label or comment.
+  publish-push:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action != 'labeled' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish event
+        env:
+          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
+          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
+          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
+        run: |
+          set -euo pipefail
+
+          [[ "$HAS_EVENTS_ARGS" == "true" ]] || { echo "::error::Missing EVENTS_ARGS secret"; exit 1; }
+          [[ "$HAS_EVENTS_KEY" == "true" ]] || { echo "::error::Missing EVENTS_KEY secret"; exit 1; }
+          [[ "$HAS_EVENTS_CERT" == "true" ]] || { echo "::error::Missing EVENTS_CERT secret"; exit 1; }
+
+          printf '%s' '${{ secrets.EVENTS_KEY }}' > "${RUNNER_TEMP}/key"
+          printf '%s' '${{ secrets.EVENTS_CERT }}' > "${RUNNER_TEMP}/cert"
+
+          # EVENTS_ARGS may contain additional curl arguments, not just a URL.
+          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
+            -H "Content-Type: application/json" \
+            --key "${RUNNER_TEMP}/key" \
+            --cert "${RUNNER_TEMP}/cert" \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "event": "pr_audit",
+              "data": {
+                "pr_number": ${{ github.event.pull_request.number }},
+                "sha": "${{ github.event.pull_request.head.sha }}",
+                "push_only": true
               }
             }'
 
