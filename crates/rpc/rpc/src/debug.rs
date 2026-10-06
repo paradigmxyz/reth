@@ -931,9 +931,11 @@ where
                     .map_err(Eth::Error::from_eth_err)?
                     .ok_or_else(|| {
                         EthApiError::InvalidParams(format!(
-                            "storage range of block {} is unavailable, state ranges are only \
-                             retained for recent blocks",
-                            block.number()
+                            "storage range of block {} is unavailable: the state of its parent \
+                             block {} is only retained for in-memory and recently persisted \
+                             blocks",
+                            block.number(),
+                            parent.number()
                         ))
                     })?;
 
@@ -1506,7 +1508,7 @@ where
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
-    /// Handler for `debug_storageRangeAt`
+    /// Handler for `debug_storageRangeAt`.
     async fn debug_storage_range_at(
         &self,
         block_id: BlockId,
@@ -1682,8 +1684,9 @@ fn merge_storage_range(
 /// Returns the storage slots a block replay left in an account's cache entry, keyed by hashed slot
 /// and paired with their preimage and value, and whether they are the account's entire storage.
 ///
-/// They are the entire storage once the replay destroyed the account or found it missing, since
-/// none of the account's persisted slots is visible past that point.
+/// They are the entire storage once the replay destroyed or created the account, or found it
+/// missing: the EVM reads every other slot of such an account as zero, so none of the account's
+/// persisted slots is visible past that point.
 fn replayed_storage(account: Option<&CacheAccount>) -> (BTreeMap<B256, (B256, U256)>, bool) {
     let Some(account) = account else { return (BTreeMap::new(), false) };
     let Some(plain_account) = &account.account else { return (BTreeMap::new(), true) };
@@ -1697,7 +1700,7 @@ fn replayed_storage(account: Option<&CacheAccount>) -> (BTreeMap<B256, (B256, U2
         })
         .collect();
 
-    (touched, account.status.was_destroyed())
+    (touched, account.status.is_storage_known())
 }
 
 #[cfg(test)]
@@ -2064,6 +2067,16 @@ mod tests {
     #[test]
     fn replayed_storage_of_recreated_account_hides_persisted_storage() {
         let account = cache_account_with_slot(7, 70, AccountStatus::DestroyedChanged);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), true)
+        );
+    }
+
+    #[test]
+    fn replayed_storage_of_created_account_hides_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::InMemoryChange);
 
         assert_eq!(
             replayed_storage(Some(&account)),
