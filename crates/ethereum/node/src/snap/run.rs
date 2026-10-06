@@ -4,7 +4,7 @@ use super::{
     context::NodeSnapContext,
     handoff::{HandoffOutcome, RebuildOutcome, SnapHandoff},
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_errors::RethError;
@@ -27,6 +27,9 @@ use tokio_util::sync::CancellationToken;
 // Ten slots keeps the head well inside the ~128 recent blocks peers serve state for, without
 // stopping the download every slot.
 const HEADER_REFRESH: Duration = Duration::from_secs(120);
+
+// Retry unresolved targets without flooding peers while the head remains unchanged.
+const HEADER_LOOKUP_RETRY: Duration = Duration::from_secs(1);
 
 // Returning without progress hands control back to the engine without a fatal error.
 const STOPPED: ControlFlow = ControlFlow::NoProgress { block_number: None };
@@ -247,12 +250,10 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
-        let mut target = *targets.borrow_and_update();
-        // A stale target never completes the header stage, so the stages run to the local head
-        // and the engine follows forkchoice from there.
-        if !self.is_ahead(target).await? {
-            target = self.local_head()?;
-        }
+        let Some((target, ahead)) = self.resolve_target(targets).await? else { return Ok(STOPPED) };
+        // A stale target never completes the header stage, so the stages run to the local
+        // head and the engine follows forkchoice from there.
+        let target = if ahead { target } else { self.local_head()? };
         let stages = pipeline.run_until(StageId::Finish, Some(PipelineTarget::Sync(target)));
         self.stop.run_until_cancelled(stages).await.unwrap_or(Ok(STOPPED))
     }
@@ -264,12 +265,18 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Pass, PipelineError> {
-        let target = *targets.borrow_and_update();
-        if !self.is_ahead(target).await? {
+        let Some((target, ahead)) = self.resolve_target(targets).await? else {
+            return Ok(Pass::Stopped)
+        };
+        if !ahead {
             debug!(target: "sync::snap", %target, "Forkchoice target is not above the local headers, skipping the header pass");
             return Ok(Pass::Done)
         }
-        let Some(headers) = self.sync_headers(pipeline, target).await else {
+        // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
+        // execute, so only the header stage runs. Finish the pass before retargeting: dropping it
+        // retains partially downloaded headers in the stage's ETL collectors.
+        let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
+        let Some(headers) = self.stop.run_until_cancelled(headers).await else {
             return Ok(Pass::Stopped)
         };
         if headers?.is_unwind() || targets.has_changed().unwrap_or(false) {
@@ -278,22 +285,24 @@ where
         Ok(Pass::Done)
     }
 
-    // Whether `target` is above the local headers. The header stage only finishes once it downloads
-    // the block after the local head, so a pass to a sibling or an older block never completes. A
-    // target no peer resolves counts as ahead.
-    async fn is_ahead(&self, target: B256) -> Result<bool, PipelineError> {
+    // Whether `target` is above the local headers, or `None` when no peer serves its header. The
+    // header stage only finishes once it downloads the block after the local head, so a pass to a
+    // sibling or an older block never completes.
+    async fn is_ahead(&self, target: B256) -> Result<Option<bool>, PipelineError> {
         let head = {
             let provider = self.factory.provider()?;
             if provider.block_number(target)?.is_some() {
-                return Ok(false)
+                return Ok(Some(false))
             }
             provider.last_block_number()?
         };
         let header = self.client.get_header(target.into()).await;
+        // A peer may answer with another block's header.
         Ok(header
             .ok()
             .and_then(|header| header.into_data())
-            .is_none_or(|header| header.number() > head))
+            .filter(|header| header.hash_slow() == target)
+            .map(|header| header.number() > head))
     }
 
     // Returns the hash of the highest local header.
@@ -303,24 +312,37 @@ where
         Ok(provider.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))?)
     }
 
-    // Runs the header stage to `target`, or returns `None` once the run is stopped. Snap needs
-    // canonical headers and their BAL commitments, but nothing below the pivot may execute, so
-    // only the header stage runs. Targets arriving meanwhile stay unseen on `targets` for the next
-    // pass.
-    async fn sync_headers(
-        &self,
-        pipeline: &mut Pipeline<N>,
-        target: B256,
-    ) -> Option<Result<ControlFlow, PipelineError>> {
-        let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
-        self.stop.run_until_cancelled(headers).await
-    }
-
     // Resolves once the refresh interval has passed and forkchoice has moved, or once the
     // backfill is gone.
     async fn refresh_due(&self, targets: &mut watch::Receiver<B256>) {
         tokio::time::sleep(self.header_refresh).await;
         let _ = targets.changed().await;
+    }
+
+    // Resolve the target before starting a pipeline pass, which cannot safely be retargeted with
+    // headers buffered. Only the peer lookup and retry delay are interrupted by forkchoice.
+    async fn resolve_target(
+        &self,
+        targets: &mut watch::Receiver<B256>,
+    ) -> Result<Option<(B256, bool)>, PipelineError> {
+        loop {
+            let target = *targets.borrow_and_update();
+            let ahead = tokio::select! {
+                biased;
+                () = self.stop.cancelled() => return Ok(None),
+                Ok(()) = targets.changed() => continue,
+                ahead = self.is_ahead(target) => ahead?,
+            };
+            if let Some(ahead) = ahead {
+                return Ok(Some((target, ahead)))
+            }
+            tokio::select! {
+                biased;
+                () = self.stop.cancelled() => return Ok(None),
+                Ok(()) = targets.changed() => {},
+                () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => {},
+            }
+        }
     }
 }
 
@@ -339,18 +361,18 @@ enum Pass {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::snap::{
         handoff::tests::{downloaded_attempt, PIVOT},
         tests::{
-            hashed_factory, headers_done, headers_reach, pipeline, pipeline_on, pipeline_with,
-            NEXT_TARGET, TARGET,
+            hashed_factory, headers_done, headers_reach, next_target, pipeline, pipeline_on,
+            pipeline_with, target,
         },
     };
     use alloy_consensus::Header;
     use alloy_eips::eip1898::BlockWithParent;
-    use futures::future::{ready, Ready};
+    use futures::future::{pending, ready, Either, Pending, Ready};
     use reth_consensus::ConsensusError;
     use reth_db::{tables, transaction::DbTxMut};
     use reth_eth_wire_types::snap::{
@@ -373,18 +395,37 @@ mod tests {
     };
     use reth_stages_api::test_utils::TestStage;
     use std::{
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
         task::{Context, Poll},
     };
 
-    // Serves `header` to every header request and fails snap requests like the noop client.
+    // Answers a header request with the requested one of `headers`, or with all of them when none
+    // matches, as a faulty peer would. Snap requests fail like the noop client's.
     #[derive(Clone, Debug)]
-    struct ServesHeader {
-        header: Header,
+    pub(crate) struct ServesHeaders {
+        headers: Vec<Header>,
         noop: NoopFullBlockClient,
+        empty_responses: Arc<AtomicUsize>,
+        pending_target: Option<B256>,
     }
 
-    impl DownloadClient for ServesHeader {
+    impl Default for ServesHeaders {
+        fn default() -> Self {
+            Self {
+                headers: (100..=101)
+                    .map(|number| Header { number, ..Default::default() })
+                    .collect(),
+                noop: NoopFullBlockClient::default(),
+                empty_responses: Arc::default(),
+                pending_target: None,
+            }
+        }
+    }
+
+    impl DownloadClient for ServesHeaders {
         fn report_bad_message(&self, _peer_id: PeerId) {}
 
         fn num_connected_peers(&self) -> usize {
@@ -392,20 +433,36 @@ mod tests {
         }
     }
 
-    impl HeadersClient for ServesHeader {
+    impl HeadersClient for ServesHeaders {
         type Header = Header;
-        type Output = Ready<PeerRequestResult<Vec<Header>>>;
+        type Output =
+            Either<Ready<PeerRequestResult<Vec<Header>>>, Pending<PeerRequestResult<Vec<Header>>>>;
 
         fn get_headers_with_priority(
             &self,
-            _request: HeadersRequest,
+            request: HeadersRequest,
             _priority: Priority,
         ) -> Self::Output {
-            ready(Ok(WithPeerId::new(PeerId::random(), vec![self.header.clone()])))
+            if self.pending_target.is_some_and(|hash| request.start == hash.into()) {
+                return Either::Right(pending())
+            }
+            if self
+                .empty_responses
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
+                .is_ok()
+            {
+                return Either::Left(ready(Ok(WithPeerId::new(PeerId::random(), vec![]))))
+            }
+            let requested = self
+                .headers
+                .iter()
+                .find(|header| request.start == header.hash_slow().into())
+                .map_or_else(|| self.headers.clone(), |header| vec![header.clone()]);
+            Either::Left(ready(Ok(WithPeerId::new(PeerId::random(), requested))))
         }
     }
 
-    impl SnapClient for ServesHeader {
+    impl SnapClient for ServesHeaders {
         type Output = <NoopFullBlockClient as SnapClient>::Output;
 
         fn get_account_range_with_priority(
@@ -496,10 +553,19 @@ mod tests {
     // A run over `factory` that refreshes headers as soon as forkchoice moves.
     fn snap_run(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> (SnapRun<MockNodeTypesWithDB, NoopFullBlockClient>, CancellationToken) {
+    ) -> (SnapRun<MockNodeTypesWithDB, ServesHeaders>, CancellationToken) {
+        snap_run_with(factory, ServesHeaders::default())
+    }
+
+    // A run over `factory` requesting from `client` that refreshes headers as soon as forkchoice
+    // moves.
+    fn snap_run_with<C>(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        client: C,
+    ) -> (SnapRun<MockNodeTypesWithDB, C>, CancellationToken) {
         let stop = CancellationToken::new();
         let run = SnapRun::new(
-            NoopFullBlockClient::default(),
+            client,
             factory.clone(),
             Runtime::test(),
             stop.clone(),
@@ -552,13 +618,13 @@ mod tests {
         let (pipeline, factory) = pipeline(
             TestStage::new(StageId::Headers).add_exec(headers_done(0)).add_exec(headers_done(1)),
         );
-        let (targets, receiver) = watch::channel(TARGET);
+        let (targets, receiver) = watch::channel(target());
         let (run, stop) = snap_run(&factory);
         let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
         headers_reach(&mut events, 0).await;
 
-        targets.send(NEXT_TARGET).unwrap();
+        targets.send(next_target()).unwrap();
 
         // The bootstrap stopped, headers caught up to the new target and a new bootstrap resumed.
         headers_reach(&mut events, 1).await;
@@ -598,14 +664,19 @@ mod tests {
             })
             .collect();
         insert_headers(&factory, &stored);
-        let (targets, receiver) = watch::channel(TARGET);
-        let (run, stop) = snap_run(&factory);
+        // Targets above the stored headers that peers serve, so each pass runs to completion.
+        let target = Header { number: 65, parent_hash: parent, ..Default::default() };
+        let next = Header { number: 66, parent_hash: target.hash_slow(), ..Default::default() };
+        let (target_hash, next_hash) = (target.hash_slow(), next.hash_slow());
+        let client = ServesHeaders { headers: vec![target, next], ..Default::default() };
+        let (targets, receiver) = watch::channel(target_hash);
+        let (run, stop) = snap_run_with(&factory, client);
         let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
 
         // Forkchoice moves while the first header pass is still downloading.
-        pipeline_tip.wait_for(|tip| *tip == TARGET).await.unwrap();
-        targets.send(NEXT_TARGET).unwrap();
+        pipeline_tip.wait_for(|tip| *tip == target_hash).await.unwrap();
+        targets.send(next_hash).unwrap();
         open.send(true).unwrap();
 
         tokio::time::timeout(Duration::from_secs(5), headers_reach(&mut events, 2))
@@ -625,7 +696,7 @@ mod tests {
                 .add_exec(Err(detached_head()))
                 .add_exec(headers_done(2)),
         );
-        let (_targets, receiver) = watch::channel(TARGET);
+        let (_targets, receiver) = watch::channel(target());
         let (run, stop) = snap_run(&factory);
         let mut events = pipeline.events();
         let run = tokio::spawn(run.run(pipeline, receiver));
@@ -645,25 +716,25 @@ mod tests {
         let pipeline_tip = tip.subscribe();
         let (mut pipeline, factory) =
             pipeline_with(TestStage::new(StageId::Finish).add_exec(headers_done(1)), tip);
-        let (targets, mut receiver) = watch::channel(TARGET);
+        let (targets, mut receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         // Forkchoice moved while the state was downloading.
-        targets.send(NEXT_TARGET).unwrap();
+        targets.send(next_target()).unwrap();
         run.finish(&mut pipeline, &mut receiver).await.unwrap();
 
-        assert_eq!(*pipeline_tip.borrow(), NEXT_TARGET);
+        assert_eq!(*pipeline_tip.borrow(), next_target());
     }
 
     #[tokio::test]
     async fn a_moved_target_syncs_headers_before_the_handoff() {
         let (mut pipeline, factory, write, pivot) =
             handoff_ready(TestStage::new(StageId::Headers).add_exec(headers_done(PIVOT)));
-        let (targets, mut receiver) = watch::channel(TARGET);
+        let (targets, mut receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         // Forkchoice moved while the trie was rebuilding.
-        targets.send(NEXT_TARGET).unwrap();
+        targets.send(next_target()).unwrap();
         let pass =
             run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
 
@@ -675,7 +746,7 @@ mod tests {
     async fn a_reorg_during_the_rebuild_syncs_headers_again_without_a_handoff() {
         let (mut pipeline, factory, write, pivot) =
             handoff_ready(TestStage::new(StageId::Headers).add_exec(Err(detached_head())));
-        let (_targets, mut receiver) = watch::channel(TARGET);
+        let (_targets, mut receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         let pass =
@@ -698,7 +769,7 @@ mod tests {
             )
             .unwrap();
         provider.commit().unwrap();
-        let (_targets, mut receiver) = watch::channel(TARGET);
+        let (_targets, mut receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         let pass =
@@ -722,7 +793,7 @@ mod tests {
             )
             .unwrap();
         provider.commit().unwrap();
-        let (_targets, receiver) = watch::channel(TARGET);
+        let (_targets, receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         let result = run.with_max_root_mismatches(1).bootstrap(&mut pipeline, receiver).await;
@@ -743,7 +814,7 @@ mod tests {
             .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(0)));
         let mut pipeline = pipeline_on(&factory, stages, watch::channel(B256::ZERO).0);
         insert_headers(&factory, &[SealedHeader::seal_slow(Header::default())]);
-        let (_targets, receiver) = watch::channel(TARGET);
+        let (_targets, receiver) = watch::channel(target());
         let (run, _stop) = snap_run(&factory);
 
         // The second header run is the staged pipeline finishing to the target.
@@ -781,11 +852,121 @@ mod tests {
         assert_eq!(*pipeline_tip.borrow(), head);
     }
 
+    #[tokio::test]
+    async fn a_header_other_than_the_target_leaves_it_unresolved() {
+        let factory = hashed_factory();
+        let genesis = Header::default();
+        insert_headers(&factory, &[SealedHeader::seal_slow(genesis.clone())]);
+        // The peer answers with the genesis header, which isn't the requested target.
+        let client = ServesHeaders { headers: vec![genesis], ..Default::default() };
+        let (run, _stop) = snap_run_with(&factory, client);
+
+        assert_eq!(run.is_ahead(target()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_new_target_replaces_an_unresolved_one_before_headers_start() {
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let (mut pipeline, factory) =
+            pipeline_with(TestStage::new(StageId::Headers).add_exec(headers_done(1)), tip);
+        let (targets, mut receiver) = watch::channel(B256::repeat_byte(0xff));
+        let (run, _stop) = snap_run(&factory);
+        let mut pass = pin!(run.catch_up_headers(&mut pipeline, &mut receiver));
+
+        assert!(futures::poll!(&mut pass).is_pending());
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+        targets.send(next_target()).unwrap();
+
+        let pass = tokio::time::timeout(Duration::from_secs(5), pass)
+            .await
+            .expect("the new target resolves without starting the old header pass");
+        assert_eq!(pass.unwrap(), Pass::Done);
+        assert_eq!(*pipeline_tip.borrow(), next_target());
+    }
+
+    #[tokio::test]
+    async fn a_new_target_replaces_an_unresolved_one_before_finishing() {
+        let factory = hashed_factory();
+        let stages = StageSetBuilder::default()
+            .add_stage(TestStage::new(StageId::Headers).add_exec(headers_done(1)))
+            .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(1)));
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let mut pipeline = pipeline_on(&factory, stages, tip);
+        let (targets, mut receiver) = watch::channel(B256::repeat_byte(0xff));
+        let (run, _stop) = snap_run(&factory);
+        let mut finished = pin!(run.finish(&mut pipeline, &mut receiver));
+
+        assert!(futures::poll!(&mut finished).is_pending());
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+        targets.send(next_target()).unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), finished)
+            .await
+            .expect("the new target resolves before the pipeline starts");
+        assert_ne!(result.unwrap(), STOPPED);
+        assert_eq!(*pipeline_tip.borrow(), next_target());
+    }
+
+    #[tokio::test]
+    async fn a_new_target_interrupts_a_pending_header_lookup() {
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let (mut pipeline, factory) =
+            pipeline_with(TestStage::new(StageId::Headers).add_exec(headers_done(1)), tip);
+        let (targets, mut receiver) = watch::channel(target());
+        let client = ServesHeaders { pending_target: Some(target()), ..Default::default() };
+        let (run, _stop) = snap_run_with(&factory, client);
+        let mut pass = pin!(run.catch_up_headers(&mut pipeline, &mut receiver));
+
+        assert!(futures::poll!(&mut pass).is_pending());
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+        targets.send(next_target()).unwrap();
+
+        let pass = tokio::time::timeout(Duration::from_secs(5), pass)
+            .await
+            .expect("forkchoice interrupts the pending peer request");
+        assert_eq!(pass.unwrap(), Pass::Done);
+        assert_eq!(*pipeline_tip.borrow(), next_target());
+    }
+
+    #[tokio::test]
+    async fn an_empty_response_retries_a_stale_target_without_starting_headers() {
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
+        let (run, _, mut receiver) = sibling_of_head(&factory);
+        run.client.empty_responses.store(1, Ordering::Relaxed);
+        let mut pass = pin!(run.catch_up_headers(&mut pipeline, &mut receiver));
+
+        assert!(futures::poll!(&mut pass).is_pending());
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+        let pass = tokio::time::timeout(Duration::from_secs(5), pass)
+            .await
+            .expect("the same target is retried without another forkchoice update");
+
+        assert_eq!(pass.unwrap(), Pass::Done);
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+    }
+
+    #[tokio::test]
+    async fn stopping_an_unresolved_target_leaves_headers_untouched() {
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
+        let (_targets, mut receiver) = watch::channel(target());
+        let client = ServesHeaders { pending_target: Some(target()), ..Default::default() };
+        let (run, stop) = snap_run_with(&factory, client);
+        let mut pass = pin!(run.catch_up_headers(&mut pipeline, &mut receiver));
+
+        assert!(futures::poll!(&mut pass).is_pending());
+        stop.cancel();
+
+        assert_eq!(pass.await.unwrap(), Pass::Stopped);
+        assert_eq!(*pipeline_tip.borrow(), B256::ZERO);
+    }
+
     // Headers through block 1 in `factory`, and a run whose forkchoice target is a sibling of
     // block 1 that peers serve. Returns the run, the local head's hash and the target receiver.
     fn sibling_of_head(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> (SnapRun<MockNodeTypesWithDB, ServesHeader>, B256, watch::Receiver<B256>) {
+    ) -> (SnapRun<MockNodeTypesWithDB, ServesHeaders>, B256, watch::Receiver<B256>) {
         let genesis = SealedHeader::seal_slow(Header::default());
         let head = SealedHeader::seal_slow(Header {
             number: 1,
@@ -796,14 +977,7 @@ mod tests {
         let sibling =
             Header { number: 1, parent_hash: genesis.hash(), gas_limit: 1, ..Default::default() };
         let receiver = watch::channel(sibling.hash_slow()).1;
-        let client = ServesHeader { header: sibling, noop: NoopFullBlockClient::default() };
-        let run = SnapRun::new(
-            client,
-            factory.clone(),
-            Runtime::test(),
-            CancellationToken::new(),
-            watch::channel(B256::ZERO).1,
-        );
-        (run, head.hash(), receiver)
+        let client = ServesHeaders { headers: vec![sibling], ..Default::default() };
+        (snap_run_with(factory, client).0, head.hash(), receiver)
     }
 }
