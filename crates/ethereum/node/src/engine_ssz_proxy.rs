@@ -1272,6 +1272,11 @@ fn decode_forkchoice_request(
     {
         check_ssz_bound(withdrawals.len(), 16, "withdrawals")?;
     }
+    if let Some(transactions) =
+        attrs.as_ref().and_then(|attrs| attrs.inclusion_list_transactions.as_ref())
+    {
+        check_transaction_list_bounds(transactions)?;
+    }
     Ok((state, attrs, custody))
 }
 
