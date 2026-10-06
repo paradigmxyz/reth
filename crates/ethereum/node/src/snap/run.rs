@@ -397,7 +397,7 @@ pub(crate) mod tests {
     use reth_stages_api::test_utils::TestStage;
     use std::{
         sync::{
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
             Arc, Mutex,
         },
         task::{Context, Poll},
@@ -409,7 +409,7 @@ pub(crate) mod tests {
     pub(crate) struct ServesHeaders {
         headers: Vec<Header>,
         noop: NoopFullBlockClient,
-        empty_responses: Arc<AtomicUsize>,
+        empty_response: Arc<AtomicBool>,
         pending_target: Option<B256>,
     }
 
@@ -420,7 +420,7 @@ pub(crate) mod tests {
                     .map(|number| Header { number, ..Default::default() })
                     .collect(),
                 noop: NoopFullBlockClient::default(),
-                empty_responses: Arc::default(),
+                empty_response: Arc::default(),
                 pending_target: None,
             }
         }
@@ -447,11 +447,7 @@ pub(crate) mod tests {
             if self.pending_target.is_some_and(|hash| request.start == hash.into()) {
                 return Either::Right(pending())
             }
-            if self
-                .empty_responses
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
-                .is_ok()
-            {
+            if self.empty_response.swap(false, Ordering::Relaxed) {
                 return Either::Left(ready(Ok(WithPeerId::new(PeerId::random(), vec![]))))
             }
             let requested = self
@@ -934,7 +930,7 @@ pub(crate) mod tests {
         let (tip, pipeline_tip) = watch::channel(B256::ZERO);
         let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
         let (run, _, mut receiver) = sibling_of_head(&factory);
-        run.client.empty_responses.store(1, Ordering::Relaxed);
+        run.client.empty_response.store(true, Ordering::Relaxed);
         let mut pass = pin!(run.catch_up_headers(&mut pipeline, &mut receiver));
 
         assert!(futures::poll!(&mut pass).is_pending());
