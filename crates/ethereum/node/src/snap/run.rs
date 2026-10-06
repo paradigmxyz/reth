@@ -28,12 +28,18 @@ const HEADER_REFRESH: Duration = Duration::from_secs(120);
 // Returning without progress hands control back to the engine without a fatal error.
 const STOPPED: ControlFlow = ControlFlow::NoProgress { block_number: None };
 
+// Root mismatches one run tolerates before failing. A mismatch that repeats across fresh
+// attempts points at local state rather than peers, so restarting again would loop forever.
+const MAX_ROOT_MISMATCHES: u32 = 3;
+
 // Everything one spawned run needs, moved into its task.
 pub(super) struct SnapRun<N: ProviderNodeTypes, C> {
     client: C,
     factory: ProviderFactory<N>,
     runtime: Runtime,
     header_refresh: Duration,
+    // Root mismatches the run tolerates before failing.
+    max_root_mismatches: u32,
     // Cancelled when the backfill is dropped.
     stop: CancellationToken,
     // Latest finalized block the engine reported.
@@ -48,12 +54,26 @@ impl<N: ProviderNodeTypes, C> SnapRun<N, C> {
         stop: CancellationToken,
         finalized: watch::Receiver<B256>,
     ) -> Self {
-        Self { client, factory, runtime, header_refresh: HEADER_REFRESH, stop, finalized }
+        Self {
+            client,
+            factory,
+            runtime,
+            header_refresh: HEADER_REFRESH,
+            max_root_mismatches: MAX_ROOT_MISMATCHES,
+            stop,
+            finalized,
+        }
     }
 
     #[cfg(test)]
     const fn with_header_refresh(mut self, header_refresh: Duration) -> Self {
         self.header_refresh = header_refresh;
+        self
+    }
+
+    #[cfg(test)]
+    const fn with_max_root_mismatches(mut self, max_root_mismatches: u32) -> Self {
+        self.max_root_mismatches = max_root_mismatches;
         self
     }
 }
@@ -80,10 +100,11 @@ where
         pipeline: &mut Pipeline<N>,
         mut targets: watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
+        let mut mismatches = 0;
         let verified = loop {
             match self.catch_up_headers(pipeline, &mut targets).await? {
                 Pass::Stopped => return Ok(STOPPED),
-                Pass::Again => continue,
+                Pass::Again | Pass::RootMismatch => continue,
                 Pass::Done => {}
             }
             match self.download(&mut targets).await? {
@@ -95,6 +116,14 @@ where
                     match self.rebuild_and_hand_off(pipeline, &mut targets, write, pivot).await? {
                         Pass::Stopped => return Ok(STOPPED),
                         Pass::Again => {}
+                        Pass::RootMismatch => {
+                            mismatches += 1;
+                            if mismatches >= self.max_root_mismatches {
+                                return Err(PipelineError::Internal(RethError::msg(format!(
+                                    "snap state root mismatched in {mismatches} attempts"
+                                ))))
+                            }
+                        }
                         Pass::Done => break Some(pivot),
                     }
                 }
@@ -157,7 +186,7 @@ where
     ) -> Result<Pass, PipelineError> {
         match self.with_handoff(move |handoff, stop| handoff.rebuild(write, stop)).await? {
             RebuildOutcome::Rebuilt => self.hand_off(pipeline, targets, write, pivot).await,
-            RebuildOutcome::RootMismatch => Ok(Pass::Again),
+            RebuildOutcome::RootMismatch => Ok(Pass::RootMismatch),
             RebuildOutcome::Stopped => Ok(Pass::Stopped),
         }
     }
@@ -181,7 +210,7 @@ where
                 info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before the handoff, restarting");
                 Pass::Again
             }
-            HandoffOutcome::RootMismatch => Pass::Again,
+            HandoffOutcome::RootMismatch => Pass::RootMismatch,
             HandoffOutcome::Stopped => Pass::Stopped,
         })
     }
@@ -253,9 +282,11 @@ where
 enum Pass {
     // The backfill stopped, so the run returns without progress.
     Stopped,
-    // Headers moved, or the pivot was reorged out or its root mismatched, so the run starts over
-    // from headers.
+    // Headers moved or the pivot was reorged out, so the run starts over from headers.
     Again,
+    // The rebuilt root differs from the pivot's header, so the attempt was abandoned and the run
+    // starts over from headers.
+    RootMismatch,
     // The pass finished, so the run moves on to its next step.
     Done,
 }
@@ -545,7 +576,30 @@ mod tests {
         let pass =
             run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
 
-        assert_eq!(pass, Pass::Again);
+        assert_eq!(pass, Pass::RootMismatch);
+        assert!(factory.provider().unwrap().active_snap_write().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn repeated_root_mismatches_fail_the_run() {
+        let (mut pipeline, factory, _, _) =
+            handoff_ready(TestStage::new(StageId::Headers).add_exec(headers_done(PIVOT)));
+        // State whose root differs from the one the pivot header commits to.
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                B256::repeat_byte(3),
+                Account { nonce: 1, ..Default::default() },
+            )
+            .unwrap();
+        provider.commit().unwrap();
+        let (_targets, receiver) = watch::channel(TARGET);
+        let (run, _stop) = snap_run(&factory);
+
+        let result = run.with_max_root_mismatches(1).bootstrap(&mut pipeline, receiver).await;
+
+        assert!(matches!(result, Err(PipelineError::Internal(_))), "{result:?}");
         assert!(factory.provider().unwrap().active_snap_write().unwrap().is_none());
     }
 
