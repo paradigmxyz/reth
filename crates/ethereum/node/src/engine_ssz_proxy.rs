@@ -1037,7 +1037,8 @@ impl PayloadDecodeError {
     fn into_response(self) -> HttpResponse {
         match self {
             Self::Ssz(error) => {
-                problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", Some(format!("{error:?}")))
+                debug!(target: "engine::ssz", ?error, "SSZ payload decoding failed");
+                problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None)
             }
             Self::InvalidTransaction(error) => problem_response(
                 STATUS_UNPROCESSABLE_ENTITY,
@@ -1307,6 +1308,46 @@ mod tests {
             parse_engine_path("/engine/v1/payloads/witness"),
             Some(EngineSszEndpoint::PayloadsWithWitness)
         );
+    }
+
+    #[tokio::test]
+    async fn payload_ssz_decode_errors_are_canned() {
+        for error in [
+            decode_new_payload_request(EngineSszFork::Paris, &[]).unwrap_err(),
+            check_ssz_bound(33, 32, "extra_data").unwrap_err().into(),
+        ] {
+            let response = error.into_response();
+            assert_eq!(response.status(), STATUS_BAD_REQUEST);
+            assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                problem,
+                serde_json::json!({ "type": "/engine-api/errors/ssz-decode-error" })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_transaction_errors_preserve_details() {
+        let error = calculate_versioned_hashes(&ExecutionPayload::V1(
+            alloy_rpc_types_engine::ExecutionPayloadV1 {
+                transactions: vec![Bytes::new()],
+                ..alloy_rpc_types_engine::ExecutionPayloadV1::from_block_unchecked(
+                    B256::ZERO,
+                    &reth_ethereum_primitives::Block::default(),
+                )
+            },
+        ))
+        .unwrap_err();
+        assert!(matches!(&error, PayloadDecodeError::InvalidTransaction(_)));
+        let response = error.into_response();
+        assert_eq!(response.status(), STATUS_UNPROCESSABLE_ENTITY);
+        assert_eq!(response.headers()[CONTENT_TYPE], PROBLEM_JSON);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let problem: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(problem["type"], "/engine-api/errors/invalid-body");
+        assert!(!problem["detail"].as_str().unwrap().is_empty());
     }
 
     #[test]
