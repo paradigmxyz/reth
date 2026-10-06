@@ -2135,6 +2135,33 @@ mod tests {
     }
 
     #[test]
+    fn previews_pending_children_without_changing_the_durable_head() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = QmdbState::open(QmdbConfig::new(directory.path())).unwrap();
+        let mut parent_hash = B256::ZERO;
+        state
+            .commit_block(
+                QmdbBlock { number: 0, hash: parent_hash, parent_hash },
+                HashedPostState::default(),
+            )
+            .unwrap();
+        let mut pending = Vec::new();
+        for number in 1..=5 {
+            let mutations = transaction_shaped_state(number);
+            let preview = state.preview(parent_hash, mutations.clone()).unwrap();
+            let block = QmdbBlock { number, hash: synthetic_block_hash(number), parent_hash };
+            state.remember(block, preview.root).unwrap();
+            pending.push((block, mutations, preview.root));
+            parent_hash = block.hash;
+        }
+        assert_eq!(state.head().unwrap().unwrap().number, 0);
+        for (block, mutations, expected_root) in pending {
+            let committed = state.commit_block(block, mutations).unwrap();
+            assert_eq!(committed.root, expected_root);
+        }
+    }
+
+    #[test]
     #[ignore = "100k QMDb debug-mode commit/reopen/rewind harness; run explicitly for long-chain validation"]
     fn commits_reopens_and_rewinds_100k_transaction_shaped_blocks() {
         commit_reopen_and_rewind_blocks(100_000, 1_000, 50_000);
