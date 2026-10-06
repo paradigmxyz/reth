@@ -1,27 +1,24 @@
 //! A minimal, inert `RLPx` satellite sub-protocol for tests that need a peer to negotiate an
 //! extra capability without any real protocol behavior.
 
-use alloy_primitives::{bytes::BytesMut, B256};
+use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
-    snap::GetAccountRangeMessage, Capability, EthVersion,
+    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol, Capability,
 };
 use reth_network::{
-    eth_requests::SOFT_RESPONSE_LIMIT,
-    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    test_utils::{PeerConfig, Testnet},
-    BlockDownloaderProvider,
+    config::rng_secret_key,
+    error::NetworkError,
+    protocol::{ConnectionHandler, IntoRlpxSubProtocol, OnNotSupported, ProtocolHandler},
+    NetworkConfig, NetworkManager, NetworkProtocols,
 };
 use reth_network_api::{Direction, PeerId};
-use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_provider::test_utils::MockEthProvider;
+use reth_tasks::Runtime;
 use std::{
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 /// A [`ProtocolHandler`] that negotiates `protocol` but never sends or expects any messages.
@@ -88,39 +85,58 @@ impl Stream for InertConnection {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn eth_snap_and_third_satellite_protocol_fails_fast_on_snap_request() {
-    reth_tracing::init_test_tracing();
+#[tokio::test]
+async fn snap_rejects_configured_extra_protocols() {
+    for snap_first in [false, true] {
+        let builder = NetworkConfig::builder(rng_secret_key(), Runtime::test());
+        let handler = InertProtocolHandler::new(Protocol::new(Capability::new_static("les", 1), 1));
+        let builder = if snap_first {
+            builder.with_snap(true).add_rlpx_sub_protocol(handler)
+        } else {
+            builder.add_rlpx_sub_protocol(handler).with_snap(true)
+        };
+        let result = NetworkManager::eth(builder.build(MockEthProvider::default())).await;
+        assert!(matches!(result, Err(NetworkError::SnapWithExtraProtocols)));
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "snap/2 does not support additional RLPx subprotocols; disable snap/2 or remove the additional protocols",
+        );
+    }
+}
 
-    // Snap is only wired up for the dedicated eth+snap/2 connection; a third negotiated
-    // capability forces the satellite multiplexer instead, which does not serve snap. A snap
-    // request over such a session must fail fast with a typed error rather than hang waiting for
-    // a response that will never come.
-    let les_protocol = Protocol::new(Capability::new_static("les", 1), 1);
-    let protocols = vec![EthVersion::Eth71.into(), Protocol::snap_2(), les_protocol.clone()];
+#[tokio::test]
+async fn snap_rejects_extra_protocols_in_custom_hello() {
+    let mut config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+        .with_snap(true)
+        .build(MockEthProvider::default());
+    config
+        .hello_message
+        .try_add_protocol(Protocol::new(Capability::new_static("les", 1), 1))
+        .unwrap();
+    assert!(
+        matches!(NetworkManager::eth(config).await, Err(NetworkError::SnapWithExtraProtocols),)
+    );
+}
 
-    let provider = Arc::new(MockEthProvider::default());
-    let peer = || PeerConfig::new(provider.clone()).with_protocols(protocols.clone());
-    let mut net = Testnet::from_configs([peer(), peer()]).await.with_request_handlers();
-    net.for_each_mut(|peer| {
-        peer.add_rlpx_sub_protocol(InertProtocolHandler::new(les_protocol.clone()))
-    });
-    let net = net.spawn();
-    net.connect_peers().await;
-    let fetch = net.peers()[0].network().fetch_client().await.unwrap();
-
-    let result = tokio::time::timeout(
-        Duration::from_secs(5),
-        fetch.get_account_range(GetAccountRangeMessage {
-            request_id: 51,
-            root_hash: B256::ZERO,
-            starting_hash: B256::ZERO,
-            limit_hash: B256::repeat_byte(0xff),
-            response_bytes: SOFT_RESPONSE_LIMIT as u64,
-        }),
-    )
-    .await
-    .expect("request should not hang");
-
-    assert_eq!(result.unwrap_err(), RequestError::UnsupportedCapability);
+#[tokio::test]
+async fn extra_protocol_registration_requires_snap_disabled() {
+    for snap_enabled in [false, true] {
+        let config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+            .listener_addr("127.0.0.1:0".parse().unwrap())
+            .disable_discovery()
+            .with_snap(snap_enabled)
+            .build(MockEthProvider::default());
+        let mut network = NetworkManager::eth(config).await.unwrap();
+        let handler = InertProtocolHandler::new(Protocol::new(Capability::new_static("les", 1), 1));
+        for result in [
+            network.add_rlpx_sub_protocol(handler.clone()),
+            network.handle().add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol()),
+        ] {
+            if snap_enabled {
+                assert!(matches!(result, Err(NetworkError::SnapWithExtraProtocols)));
+            } else {
+                result.unwrap();
+            }
+        }
+    }
 }

@@ -562,6 +562,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
     ///
     /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
+    /// Additional `RLPx` subprotocols are unsupported with snap/2; starting a network with both
+    /// configured returns [`NetworkError::SnapWithExtraProtocols`].
     pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
         self.snap_enabled = snap_enabled;
         self

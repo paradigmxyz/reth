@@ -66,6 +66,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
         discv5: Option<Discv5>,
         event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
         nat: Option<NatResolver>,
+        snap_enabled: bool,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -84,6 +85,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             discv5,
             event_sender,
             nat,
+            snap_enabled,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -222,6 +224,16 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     pub fn discv5(&self) -> Option<&Discv5> {
         self.inner.discv5.as_ref()
     }
+
+    /// Rejects additional `RLPx` protocols when the dedicated snap/2 transport is enabled.
+    pub(crate) fn ensure_rlpx_sub_protocol_supported(
+        &self,
+    ) -> Result<(), crate::error::NetworkError> {
+        if self.inner.snap_enabled {
+            return Err(crate::error::NetworkError::SnapWithExtraProtocols)
+        }
+        Ok(())
+    }
 }
 
 // === API Implementations ===
@@ -252,8 +264,13 @@ impl<N: NetworkPrimitives> NetworkEventListenerProvider for NetworkHandle<N> {
 }
 
 impl<N: NetworkPrimitives> NetworkProtocols for NetworkHandle<N> {
-    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol) {
-        self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol))
+    fn add_rlpx_sub_protocol(
+        &self,
+        protocol: RlpxSubProtocol,
+    ) -> Result<(), crate::error::NetworkError> {
+        self.ensure_rlpx_sub_protocol_supported()?;
+        self.send_message(NetworkHandleMessage::AddRlpxSubProtocol(protocol));
+        Ok(())
     }
 }
 
@@ -560,12 +577,19 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// The NAT resolver
     nat: Option<NatResolver>,
+    /// Whether snap/2 is advertised, excluding additional `RLPx` subprotocols.
+    snap_enabled: bool,
 }
 
 /// Provides access to modify the network's additional protocol handlers.
 pub trait NetworkProtocols: Send + Sync {
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
-    fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
+    ///
+    /// Returns [`crate::error::NetworkError::SnapWithExtraProtocols`] when snap/2 is enabled.
+    fn add_rlpx_sub_protocol(
+        &self,
+        protocol: RlpxSubProtocol,
+    ) -> Result<(), crate::error::NetworkError>;
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

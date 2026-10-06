@@ -337,8 +337,11 @@ where
     }
 
     /// Adds an additional protocol handler to the peer.
-    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        self.network.add_rlpx_sub_protocol(protocol);
+    pub fn add_rlpx_sub_protocol(
+        &mut self,
+        protocol: impl IntoRlpxSubProtocol,
+    ) -> Result<(), NetworkError> {
+        self.network.add_rlpx_sub_protocol(protocol)
     }
 
     /// Returns a handle to the peer's network.

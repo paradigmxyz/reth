@@ -42,7 +42,7 @@ use crate::{
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_chainspec::EnrForkIdEntry;
-use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::{Capability, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::MemoryBoundedSender;
 use reth_network_api::{
@@ -201,8 +201,15 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
-    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        self.swarm.add_rlpx_sub_protocol(protocol)
+    ///
+    /// Returns [`NetworkError::SnapWithExtraProtocols`] when snap/2 is enabled.
+    pub fn add_rlpx_sub_protocol(
+        &mut self,
+        protocol: impl IntoRlpxSubProtocol,
+    ) -> Result<(), NetworkError> {
+        self.handle.ensure_rlpx_sub_protocol_supported()?;
+        self.swarm.add_rlpx_sub_protocol(protocol);
+        Ok(())
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
@@ -234,6 +241,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
+    ///
+    /// Returns [`NetworkError::SnapWithExtraProtocols`] before opening sockets when snap/2 and
+    /// additional `RLPx` subprotocols are configured together.
     pub async fn new<C: BlockNumReader + 'static>(
         config: NetworkConfig<C, N>,
     ) -> Result<Self, NetworkError> {
@@ -263,6 +273,17 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             eth_max_message_size,
             required_block_hashes,
         } = config;
+
+        let snap_enabled =
+            hello_message.protocols.iter().any(|protocol| protocol.cap == Capability::snap_2());
+        if snap_enabled &&
+            (!extra_protocols.is_empty() ||
+                hello_message.protocols.iter().any(|protocol| {
+                    protocol.cap.name != "eth" && protocol.cap.name != "snap"
+                }))
+        {
+            return Err(NetworkError::SnapWithExtraProtocols)
+        }
 
         let peers_manager = PeersManager::new(peers_config);
         let peers_handle = peers_manager.handle();
@@ -348,6 +369,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             discv5,
             event_sender.clone(),
             nat,
+            snap_enabled,
         );
 
         // Spawn required block peer filter if configured
@@ -794,7 +816,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 let peer_ids = self.swarm.peers().peers_by_kind(kind);
                 let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
-            NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::AddRlpxSubProtocol(proto) => {
+                // The handle validates registration before enqueueing this message.
+                self.swarm.add_rlpx_sub_protocol(proto);
+            }
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
                 if let Some(ref tx_inner) = self.to_transactions_manager {
                     let _ = tx_inner.try_send(NetworkTransactionEvent::GetTransactionsHandle(tx));
