@@ -233,9 +233,24 @@ where
         self.identifiers.read().sender_id(addr)
     }
 
-    /// Returns the internal [`SenderId`]s for the given addresses.
+    /// Returns the internal [`SenderId`]s for the given addresses, allocating a new mapping for
+    /// every address that is not tracked yet.
     pub fn get_sender_ids(&self, addrs: impl IntoIterator<Item = Address>) -> Vec<SenderId> {
         self.identifiers.write().sender_ids_or_create(addrs)
+    }
+
+    /// Removes unused identifiers and returns the number removed.
+    ///
+    /// Keeps pooled senders, EIP-7702 authorities, identifiers required by
+    /// [`PoolConfig::enforce_tracked_nonce`], and identifiers accepted by `keep_external`.
+    ///
+    /// Callers allocating identifiers outside the pool must synchronize allocation and pruning
+    /// under their own lock, acquired before the pool lock. `keep_external` runs under the pool
+    /// and identifier write locks and must not call back into the pool.
+    pub fn prune_sender_identifiers(&self, keep_external: impl FnMut(&SenderId) -> bool) -> usize {
+        let mut pool = self.pool.write();
+        let mut identifiers = self.identifiers.write();
+        pool.retain_sender_identifiers(&mut identifiers, keep_external)
     }
 
     /// Returns all senders in the pool
@@ -538,15 +553,17 @@ where
         } = update;
         self.validator.on_new_head_block(new_tip);
 
-        let changed_senders = self.changed_senders(changed_accounts.into_iter());
-
-        // update the pool
-        let outcome = self.pool.write().on_canonical_state_change(
-            block_info,
-            mined_transactions,
-            changed_senders,
-            update_kind,
-        );
+        // Resolve senders under the pool lock so pruning cannot invalidate them before the update.
+        let outcome = {
+            let mut pool = self.pool.write();
+            let changed_senders = self.changed_senders(changed_accounts.into_iter());
+            pool.on_canonical_state_change(
+                block_info,
+                mined_transactions,
+                changed_senders,
+                update_kind,
+            )
+        };
 
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());
@@ -561,9 +578,12 @@ where
     ///
     /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
-        let changed_senders = self.changed_senders(accounts.into_iter());
-        let UpdateOutcome { promoted, discarded } =
-            self.pool.write().update_accounts(changed_senders);
+        let UpdateOutcome { promoted, discarded } = {
+            // Resolve the senders under the pool lock, see `Self::on_canonical_state_change`.
+            let mut pool = self.pool.write();
+            let changed_senders = self.changed_senders(accounts.into_iter());
+            pool.update_accounts(changed_senders)
+        };
 
         self.notify_on_transaction_updates(promoted, discarded);
     }
@@ -1736,7 +1756,7 @@ mod tests {
         identifier::SenderId,
         test_utils::{testing_pool, MockTransaction, TestPool, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, FullTransactionEvent, PoolConfig, SubPool, SubPoolLimit,
+        BlockInfo, FullTransactionEvent, PoolConfig, PoolTransaction, SubPool, SubPoolLimit,
         TransactionListenerKind, TransactionOrigin, TransactionPool, TransactionPoolExt,
         TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
@@ -2105,5 +2125,77 @@ mod tests {
         assert!(test_pool.get_highest_consecutive_transaction_by_sender(sender, 0).is_none());
         assert!(test_pool.remove_transactions_by_sender(sender).is_empty());
         assert_eq!(test_pool.sender_id(&sender), None);
+    }
+
+    fn valid_outcome(
+        transaction: MockTransaction,
+        authorities: Option<Vec<Address>>,
+    ) -> TransactionValidationOutcome<MockTransaction> {
+        TransactionValidationOutcome::Valid {
+            balance: U256::MAX,
+            state_nonce: 0,
+            bytecode_hash: None,
+            transaction: ValidTransaction::Valid(transaction),
+            propagate: true,
+            authorities,
+        }
+    }
+
+    #[test]
+    fn prune_sender_identifiers_keeps_senders_authorities_and_external_ids() {
+        let config = PoolConfig::default().with_max_inflight_delegated_slots(2);
+        let pool = TestPool::from(TestPoolBuilder::default().with_config(config));
+        let authority = Address::with_last_byte(3);
+        let mut hashes = Vec::new();
+        for sender in [Address::with_last_byte(1), Address::with_last_byte(2)] {
+            let tx = MockTransaction::eip7702().with_sender(sender);
+            hashes.push(*tx.hash());
+            pool.pool
+                .add_transactions(
+                    TransactionOrigin::External,
+                    [valid_outcome(tx, Some(vec![authority]))],
+                )
+                .pop()
+                .unwrap()
+                .unwrap();
+        }
+        let authority_id = pool.inner().sender_id(&authority).unwrap();
+        let rejected = Address::with_last_byte(4);
+        let rejected_authority = Address::with_last_byte(5);
+        let tx = MockTransaction::eip7702().with_sender(rejected).with_gas_limit(u64::MAX);
+        assert!(pool
+            .pool
+            .add_transactions(
+                TransactionOrigin::External,
+                [valid_outcome(tx, Some(vec![rejected_authority]))]
+            )
+            .pop()
+            .unwrap()
+            .is_err());
+        let external = Address::with_last_byte(6);
+        let external_id = pool.inner().get_sender_id(external);
+        let unused = Address::with_last_byte(7);
+        pool.inner().get_sender_id(unused);
+
+        assert_eq!(pool.inner().prune_sender_identifiers(|id| *id == external_id), 3);
+        for address in [rejected, rejected_authority, unused] {
+            assert_eq!(pool.inner().sender_id(&address), None);
+        }
+        assert_eq!(pool.inner().sender_id(&external), Some(external_id));
+        for sender in [Address::with_last_byte(1), Address::with_last_byte(2)] {
+            assert_eq!(pool.get_transactions_by_sender(sender).len(), 1);
+            assert!(pool.inner().sender_id(&sender).is_some());
+        }
+
+        // A shared authority survives until its last transaction is removed.
+        pool.remove_transactions(vec![hashes[0]]);
+        assert_eq!(pool.inner().prune_sender_identifiers(|id| *id == external_id), 1);
+        assert_eq!(pool.inner().sender_id(&authority), Some(authority_id));
+        pool.remove_transactions(vec![hashes[1]]);
+        assert_eq!(pool.inner().prune_sender_identifiers(|id| *id == external_id), 2);
+        assert_eq!(pool.inner().sender_id(&authority), None);
+        assert_eq!(pool.inner().prune_sender_identifiers(|_| false), 1);
+        assert!(pool.inner().identifiers.read().is_empty());
+        pool.inner().get_pool_data().assert_invariants();
     }
 }

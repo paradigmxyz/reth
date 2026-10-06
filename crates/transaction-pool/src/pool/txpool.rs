@@ -6,7 +6,7 @@ use crate::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
         PoolError, PoolErrorKind,
     },
-    identifier::{SenderId, TransactionId},
+    identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::{AllTransactionsMetrics, TxPoolMetrics},
     pool::{
         best::BestTransactions,
@@ -1387,6 +1387,28 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.basefee_pool.assert_invariants();
         self.queued_pool.assert_invariants();
         self.blob_pool.assert_invariants();
+    }
+
+    /// Retains identifiers referenced by the pool or `keep_external`.
+    pub(crate) fn retain_sender_identifiers(
+        &mut self,
+        identifiers: &mut SenderIdentifiers,
+        mut keep_external: impl FnMut(&SenderId) -> bool,
+    ) -> usize {
+        let all = &mut self.all_transactions;
+        let pruned = identifiers.retain(|id| {
+            let keep = all.tx_counter.contains_key(id) ||
+                all.auths.contains_key(id) ||
+                (self.config.enforce_tracked_nonce && all.sender_info.contains_key(id)) ||
+                keep_external(id);
+            if !keep {
+                all.sender_info.remove(id);
+            }
+            keep
+        });
+        self.metrics.sender_identifiers.set(identifiers.len() as f64);
+        self.metrics.pruned_sender_identifiers.increment(pruned as u64);
+        pruned
     }
 }
 
@@ -5622,5 +5644,49 @@ mod tests {
         assert_eq!(t1.id().nonce, 1, "expected nonce 1, got {}", t1.id().nonce);
         assert_eq!(t2.id().nonce, 2, "expected nonce 2, got {}", t2.id().nonce);
         assert_eq!(t3.id().nonce, 3, "expected nonce 3, got {}", t3.id().nonce);
+    }
+
+    #[test]
+    fn retain_sender_identifiers_preserves_tracked_nonce() {
+        for enforce_tracked_nonce in [false, true] {
+            let mut f = MockTransactionFactory::default();
+            let config = PoolConfig { enforce_tracked_nonce, ..Default::default() };
+            let mut pool = TxPool::new(MockOrdering::default(), config);
+            let tx = MockTransaction::eip1559();
+            let validated = f.validated(tx.clone());
+            let sender = validated.sender_id();
+            let hash = *validated.hash();
+            pool.add_transaction(validated, U256::MAX, 0, None).unwrap();
+            pool.on_canonical_state_change(
+                pool.block_info(),
+                vec![hash],
+                FxHashMap::from_iter([(sender, SenderInfo { state_nonce: 1, balance: U256::MAX })]),
+                PoolUpdateKind::Commit,
+            );
+            assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+            assert_eq!(
+                pool.retain_sender_identifiers(&mut f.ids, |_| false),
+                usize::from(!enforce_tracked_nonce)
+            );
+            assert_eq!(
+                pool.all_transactions.sender_info.contains_key(&sender),
+                enforce_tracked_nonce
+            );
+            assert_eq!(f.ids.address(&sender).is_some(), enforce_tracked_nonce);
+            let stale = f.validated(tx.rng_hash());
+            let result = pool.add_transaction(stale, U256::MAX, 0, None);
+            if enforce_tracked_nonce {
+                assert!(matches!(
+                    result.unwrap_err().kind,
+                    PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+                    ))
+                ));
+            } else {
+                result.unwrap();
+            }
+            pool.assert_invariants();
+        }
     }
 }
