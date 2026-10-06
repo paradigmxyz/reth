@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# reth keeps snap/2 opt-in, so the snap2 scenario enables it in Hive's launcher.
 # set -x
 
 cd hivetests/
@@ -6,6 +7,11 @@ cd hivetests/
 sim="${1}"
 limit="${2}"
 fixture_variant="${3:-}"
+
+if [[ "${sim}" == "devp2p" && "${limit}" == '^snap2$' ]]; then
+    sed -i 's/^\$reth node \$FLAGS$/& --snap.v2/' clients/reth/reth.sh
+    grep -Fxq '$reth node $FLAGS --snap.v2' clients/reth/reth.sh || exit 1
+fi
 
 if [[ "${fixture_variant}" == "osaka" && "${sim}" == *"eels"* && "${limit}" == *"tests/amsterdam"* ]]; then
     echo "osaka fixtures do not support amsterdam tests"
