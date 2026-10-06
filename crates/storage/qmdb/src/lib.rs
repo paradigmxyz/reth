@@ -10,16 +10,16 @@ use alloy_primitives::{
     keccak256, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
 };
 use commonware_cryptography::{sha256, Sha256};
-use commonware_runtime::{buffer, tokio, BufferPooler, Runner as _};
+use commonware_runtime::{buffer, tokio, BufferPooler, Runner as _, ThreadPooler};
 use commonware_storage::{
     journal::contiguous::fixed::Config as JournalConfig,
     merkle::Location,
     mmr::{self, journaled::Config as MmrConfig},
-    qmdb::current::{ordered::fixed::Db as OrderedFixedDb, FixedConfig},
+    qmdb::current::{unordered::fixed::Db as UnorderedFixedDb, FixedConfig},
     translator::EightCap,
 };
 use commonware_utils::{sequence::FixedBytes, NZUsize, NZU16, NZU64};
-use futures_util::{pin_mut, StreamExt};
+use futures_util::future::try_join_all;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_primitives_traits::{Account, AlloyBlockHeader, Bytecode};
 use reth_revm::db::BundleState;
@@ -38,13 +38,16 @@ use reth_trie_common::{
     MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex},
     thread::{self, JoinHandle},
+    time::Instant,
 };
+use tracing::debug;
 
 const KEY_BYTES: usize = 65;
 const VALUE_BYTES: usize = 74;
@@ -57,13 +60,13 @@ const JOURNAL_BODY_BYTES: usize = 120;
 const JOURNAL_CHECKSUM_BYTES: usize = 32;
 const JOURNAL_RECORD_BYTES: usize = JOURNAL_BODY_BYTES + JOURNAL_CHECKSUM_BYTES;
 const QMDB_STAGE_BATCH_BLOCKS: u64 = 1_000;
-// Commonware's ordered MMR operations can exceed the platform default thread stack on long chains.
+// Commonware MMR operations can exceed the platform default thread stack on long chains.
 const QMDB_ACTOR_STACK_SIZE: usize = 64 * 1024 * 1024;
 
-type QmdbKey = FixedBytes<KEY_BYTES>;
-type QmdbValue = FixedBytes<VALUE_BYTES>;
+pub type QmdbKey = FixedBytes<KEY_BYTES>;
+pub type QmdbValue = FixedBytes<VALUE_BYTES>;
 type QmdbLocation = Location<mmr::Family>;
-type QmdbDb<E> = OrderedFixedDb<mmr::Family, E, QmdbKey, QmdbValue, Sha256, EightCap, CHUNK_SIZE>;
+type QmdbDb<E> = UnorderedFixedDb<mmr::Family, E, QmdbKey, QmdbValue, Sha256, EightCap, CHUNK_SIZE>;
 
 /// Stage ID used by the staged pipeline integration.
 pub const QMDB_STAGE_ID: StageId = StageId::Other("QmdbStateRoot");
@@ -120,6 +123,17 @@ pub struct QmdbBlock {
     pub hash: B256,
     /// Parent block hash.
     pub parent_hash: B256,
+}
+
+/// Pre-encoded `QMDb` mutations for a block that has already had its root computed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QmdbBlockMutations {
+    /// Committed block.
+    pub block: QmdbBlock,
+    /// Expected `QMDb` root after applying `mutations` to the current durable head.
+    pub expected_root: B256,
+    /// Last-write-wins flat key/value mutations for this block.
+    pub mutations: Vec<(QmdbKey, Option<QmdbValue>)>,
 }
 
 /// Canonical head tracked by [`QmdbChain`].
@@ -316,6 +330,18 @@ impl QmdbState {
         self.request(|response| Command::Overlay { hashed_state, response })
     }
 
+    /// Computes the `QMDb` root for already encoded, last-write-wins flat mutations without
+    /// committing them.
+    ///
+    /// Callers must pass mutations filtered against the current durable `QMDb` state. Unlike
+    /// [`Self::overlay_root`], this path does not perform per-key reads to remove no-op writes.
+    pub fn overlay_mutations(
+        &self,
+        mutations: Vec<(QmdbKey, Option<QmdbValue>)>,
+    ) -> Result<QmdbCommit, QmdbError> {
+        self.request(|response| Command::OverlayMutations { mutations, response })
+    }
+
     /// Commits `hashed_state` to `QMDb` and returns the resulting root.
     ///
     /// This is a low-level state-store helper. Chain integrations should use
@@ -351,6 +377,25 @@ impl QmdbState {
         self.request(|response| Command::CommitBlocks { blocks, response })
     }
 
+    /// Commits already encoded block mutations and validates each resulting root.
+    pub fn commit_block_mutations(
+        &self,
+        block: QmdbBlock,
+        expected_root: B256,
+        mutations: Vec<(QmdbKey, Option<QmdbValue>)>,
+    ) -> Result<QmdbHead, QmdbError> {
+        self.commit_blocks_mutations(vec![QmdbBlockMutations { block, expected_root, mutations }])?
+            .ok_or(QmdbError::UnknownBlock { number: block.number })
+    }
+
+    /// Commits contiguous blocks from pre-encoded mutations and syncs the `QMDb` log once.
+    pub fn commit_blocks_mutations(
+        &self,
+        blocks: Vec<QmdbBlockMutations>,
+    ) -> Result<Option<QmdbHead>, QmdbError> {
+        self.request(|response| Command::CommitBlocksMutations { blocks, response })
+    }
+
     /// Rewinds `QMDb` and its durable block journal to `number`.
     ///
     /// Passing `0` keeps the journaled genesis commit if one exists. If no genesis commit exists,
@@ -377,7 +422,7 @@ impl QmdbState {
                 Ok(None)
             } else {
                 Err(QmdbError::CanonicalAheadOfQmdb { canonical_head, qmdb_head: 0 })
-            }
+            };
         };
 
         if qmdb_head.number > canonical_head {
@@ -391,7 +436,7 @@ impl QmdbState {
             return Err(QmdbError::CanonicalAheadOfQmdb {
                 canonical_head,
                 qmdb_head: qmdb_head.number,
-            })
+            });
         }
 
         let expected_hash = provider
@@ -403,7 +448,7 @@ impl QmdbState {
                 number: qmdb_head.number,
                 expected: expected_hash,
                 actual: qmdb_head.hash,
-            })
+            });
         }
 
         if qmdb_head.number != 0 {
@@ -417,7 +462,7 @@ impl QmdbState {
                     number: qmdb_head.number,
                     expected: expected_root,
                     actual: qmdb_head.root,
-                })
+                });
             }
         }
 
@@ -436,6 +481,11 @@ impl QmdbState {
         hashed_slot: B256,
     ) -> Result<Option<U256>, QmdbError> {
         self.request(|response| Command::Storage { hashed_address, hashed_slot, response })
+    }
+
+    /// Reads raw encoded `QMDb` values for `keys`.
+    pub fn get_many(&self, keys: Vec<QmdbKey>) -> Result<Vec<Option<QmdbValue>>, QmdbError> {
+        self.request(|response| Command::GetMany { keys, response })
     }
 
     fn request<T>(
@@ -512,7 +562,7 @@ impl QmdbStage {
     fn next_range(&self, input: ExecInput) -> Result<Option<(u64, u64)>, QmdbError> {
         let target = input.target();
         if target == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let checkpoint = input.checkpoint().block_number;
@@ -533,7 +583,7 @@ impl QmdbStage {
         }
 
         if next > target {
-            return Ok(None)
+            return Ok(None);
         }
 
         let batch_blocks = self.batch_blocks.max(1);
@@ -589,18 +639,6 @@ impl QmdbStage {
                     storage.storage.insert(keccak256(storage_change.key), current);
                 }
 
-                for (_, account_change) in &account_changes {
-                    if account_change.info.is_some() &&
-                        current_account(provider, &account_overrides, account_change.address)?
-                            .is_none()
-                    {
-                        storages
-                            .entry(keccak256(account_change.address))
-                            .or_insert_with(|| HashedStorage::new(true))
-                            .wiped = true;
-                    }
-                }
-
                 blocks.push((
                     QmdbBlock { number, hash: header.hash(), parent_hash: header.parent_hash() },
                     HashedPostState::default().with_accounts(accounts).with_storages(storages),
@@ -637,7 +675,7 @@ where
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let Some((from, to)) = self.next_range(input).map_err(qmdb_stage_error)? else {
-            return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())))
+            return Ok(ExecOutput::done(input.checkpoint().with_block_number(input.target())));
         };
 
         let blocks =
@@ -657,7 +695,7 @@ where
                     number: head.number,
                     expected,
                     actual: head.root,
-                }))
+                }));
             }
         }
 
@@ -790,7 +828,7 @@ impl<S: BytecodeReader> BytecodeReader for QmdbStateRootProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for QmdbStateRootProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
         self.inner.hashed_post_state(bundle_state)
     }
 }
@@ -953,6 +991,15 @@ impl<P: ChainSpecProvider> ChainSpecProvider for QmdbStateProviderFactory<P> {
 }
 
 impl<P: StateProviderFactory> StateProviderFactory for QmdbStateProviderFactory<P> {
+    type Primitives = P::Primitives;
+
+    fn state_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: reth_chain_state::ExecutedBlock<Self::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        self.inner.state_with_block_appended(parent_hash, block).map(|provider| self.wrap(provider))
+    }
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.inner.latest().map(|provider| self.wrap(provider))
     }
@@ -1062,6 +1109,10 @@ enum Command {
         blocks: Vec<(QmdbBlock, HashedPostState)>,
         response: mpsc::Sender<Result<Option<QmdbHead>, QmdbError>>,
     },
+    CommitBlocksMutations {
+        blocks: Vec<QmdbBlockMutations>,
+        response: mpsc::Sender<Result<Option<QmdbHead>, QmdbError>>,
+    },
     RewindToBlock {
         number: u64,
         response: mpsc::Sender<Result<Option<QmdbHead>, QmdbError>>,
@@ -1074,6 +1125,14 @@ enum Command {
         hashed_address: B256,
         hashed_slot: B256,
         response: mpsc::Sender<Result<Option<U256>, QmdbError>>,
+    },
+    OverlayMutations {
+        mutations: Vec<(QmdbKey, Option<QmdbValue>)>,
+        response: mpsc::Sender<Result<QmdbCommit, QmdbError>>,
+    },
+    GetMany {
+        keys: Vec<QmdbKey>,
+        response: mpsc::Sender<Result<Vec<Option<QmdbValue>>, QmdbError>>,
     },
     Shutdown,
 }
@@ -1255,55 +1314,15 @@ fn run_actor(
         .with_storage_directory(config.path.clone())
         .with_worker_threads(config.worker_threads.max(1));
     tokio::Runner::new(runtime_config).start(|context| async move {
-        let qmdb_config = create_commonware_config(&context, &config.partition_prefix);
+        let qmdb_config = create_commonware_config(&context, &config)?;
         let mut db = QmdbDb::init(context, qmdb_config).await.map_err(commonware_error)?;
         let mut journal = QmdbCommitJournal::open(config.journal_path())?;
         reconcile_journal(&mut db, &mut journal).await?;
         let _ = init_tx.send(Ok(()));
 
         while let Ok(command) = command_rx.recv() {
-            match command {
-                Command::Root(response) => {
-                    let _ = response.send(Ok(digest_to_b256(db.root())));
-                }
-                Command::Head(response) => {
-                    let _ = response.send(Ok(journal.head()));
-                }
-                Command::Overlay { hashed_state, response } => {
-                    let _ = response
-                        .send(update_root(&mut db, hashed_state, UpdateMode::Overlay).await);
-                }
-                Command::Commit { hashed_state, response } => {
-                    let result = if journal.head_record().is_some() {
-                        Err(QmdbError::JournaledState)
-                    } else {
-                        update_root(&mut db, hashed_state, UpdateMode::ApplyAndSync).await
-                    };
-                    let _ = response.send(result);
-                }
-                Command::CommitBlocks { blocks, response } => {
-                    let _ = response.send(commit_blocks(&mut db, &mut journal, blocks).await);
-                }
-                Command::RewindToBlock { number, response } => {
-                    let _ = response.send(rewind_to_block(&mut db, &mut journal, number).await);
-                }
-                Command::Account { hashed_address, response } => {
-                    let value = db
-                        .get(&account_key(&hashed_address))
-                        .await
-                        .map_err(commonware_error)
-                        .and_then(|value| value.map(decode_account).transpose());
-                    let _ = response.send(value);
-                }
-                Command::Storage { hashed_address, hashed_slot, response } => {
-                    let value = db
-                        .get(&storage_key(&hashed_address, &hashed_slot))
-                        .await
-                        .map_err(commonware_error)
-                        .and_then(|value| value.map(decode_storage).transpose());
-                    let _ = response.send(value);
-                }
-                Command::Shutdown => break,
+            if !handle_actor_command(command, &mut db, &mut journal).await? {
+                break;
             }
         }
 
@@ -1311,18 +1330,92 @@ fn run_actor(
     })
 }
 
+async fn handle_actor_command<E>(
+    command: Command,
+    db: &mut QmdbDb<E>,
+    journal: &mut QmdbCommitJournal,
+) -> Result<bool, QmdbError>
+where
+    E: commonware_storage::Context,
+{
+    match command {
+        Command::Root(response) => {
+            let _ = response.send(Ok(digest_to_b256(db.root())));
+        }
+        Command::Head(response) => {
+            let _ = response.send(Ok(journal.head()));
+        }
+        Command::Overlay { hashed_state, response } => {
+            let _ = response.send(update_root(db, hashed_state, UpdateMode::Overlay).await);
+        }
+        Command::Commit { hashed_state, response } => {
+            let result = if journal.head_record().is_some() {
+                Err(QmdbError::JournaledState)
+            } else {
+                update_root(db, hashed_state, UpdateMode::ApplyAndSync).await
+            };
+            let _ = response.send(result);
+        }
+        Command::CommitBlocks { blocks, response } => {
+            let _ = response.send(commit_blocks(db, journal, blocks).await);
+        }
+        Command::CommitBlocksMutations { blocks, response } => {
+            let _ = response.send(commit_blocks_mutations(db, journal, blocks).await);
+        }
+        Command::RewindToBlock { number, response } => {
+            let _ = response.send(rewind_to_block(db, journal, number).await);
+        }
+        Command::Account { hashed_address, response } => {
+            let value = db
+                .get(&account_key(&hashed_address))
+                .await
+                .map_err(commonware_error)
+                .and_then(|value| value.map(decode_account).transpose());
+            let _ = response.send(value);
+        }
+        Command::Storage { hashed_address, hashed_slot, response } => {
+            let value = db
+                .get(&storage_key(&hashed_address, &hashed_slot))
+                .await
+                .map_err(commonware_error)
+                .and_then(|value| value.map(decode_storage).transpose());
+            let _ = response.send(value);
+        }
+        Command::OverlayMutations { mutations, response } => {
+            let _ = response.send(update_mutations_root(db, mutations, UpdateMode::Overlay).await);
+        }
+        Command::GetMany { keys, response } => {
+            let values =
+                try_join_all(keys.iter().map(|key| db.get(key))).await.map_err(commonware_error);
+            let _ = response.send(values);
+        }
+        Command::Shutdown => return Ok(false),
+    }
+    Ok(true)
+}
+
 fn create_commonware_config(
-    context: &impl BufferPooler,
-    partition_prefix: &str,
-) -> FixedConfig<EightCap> {
+    context: &(impl BufferPooler + ThreadPooler),
+    config: &QmdbConfig,
+) -> Result<FixedConfig<EightCap>, QmdbError> {
+    let partition_prefix = &config.partition_prefix;
     let page_cache = buffer::paged::CacheRef::from_pooler(context, NZU16!(2048), NZUsize!(10));
-    FixedConfig {
+    let thread_pool = context
+        .create_thread_pool(
+            NonZeroUsize::new(config.worker_threads.max(1))
+                .expect("worker thread count is forced non-zero"),
+        )
+        .map_err(|error| {
+            QmdbError::Commonware(format!("failed to create QMDB merkle thread pool: {error}"))
+        })?;
+
+    Ok(FixedConfig {
         merkle_config: MmrConfig {
             journal_partition: format!("{partition_prefix}-mmr-journal"),
             metadata_partition: format!("{partition_prefix}-mmr-metadata"),
             items_per_blob: NZU64!(4096),
             write_buffer: NZUsize!(4096),
-            thread_pool: None,
+            thread_pool: Some(thread_pool),
             page_cache: page_cache.clone(),
         },
         journal_config: JournalConfig {
@@ -1333,7 +1426,7 @@ fn create_commonware_config(
         },
         grafted_metadata_partition: format!("{partition_prefix}-grafted-mmr-metadata"),
         translator: EightCap,
-    }
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1351,25 +1444,85 @@ async fn update_root<E>(
 where
     E: commonware_storage::Context,
 {
+    let started = Instant::now();
+    let collect_started = Instant::now();
     let mutations = collect_mutations(db, &hashed_state).await?;
+    let collect_duration = collect_started.elapsed();
     if mutations.is_empty() {
+        debug!(
+            target: "reth_qmdb",
+            ?mode,
+            collect_ms = collect_duration.as_secs_f64() * 1000.0,
+            total_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "QMDB root update had no state mutations"
+        );
+        return Ok(QmdbCommit { root: digest_to_b256(db.root()), entries: 0 });
+    }
+
+    let commit = update_mutations_root(db, mutations, mode).await?;
+    debug!(
+        target: "reth_qmdb",
+        ?mode,
+        entries = commit.entries,
+        collect_ms = collect_duration.as_secs_f64() * 1000.0,
+        total_ms = started.elapsed().as_secs_f64() * 1000.0,
+        "computed QMDB hashed-state root"
+    );
+    Ok(commit)
+}
+
+async fn update_mutations_root<E>(
+    db: &mut QmdbDb<E>,
+    mutations: Vec<(QmdbKey, Option<QmdbValue>)>,
+    mode: UpdateMode,
+) -> Result<QmdbCommit, QmdbError>
+where
+    E: commonware_storage::Context,
+{
+    let started = Instant::now();
+    if mutations.is_empty() {
+        debug!(
+            target: "reth_qmdb",
+            ?mode,
+            total_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "QMDB flat-mutation root had no state mutations"
+        );
         return Ok(QmdbCommit { root: digest_to_b256(db.root()), entries: 0 });
     }
 
     let entries = mutations.len();
+    let build_started = Instant::now();
     let mut batch = db.new_batch();
     for (key, value) in mutations {
         batch = batch.write(key, value);
     }
+    let build_duration = build_started.elapsed();
 
+    let merkleize_started = Instant::now();
     let merkleized = batch.merkleize(db, None).await.map_err(commonware_error)?;
+    let merkleize_duration = merkleize_started.elapsed();
     let root = digest_to_b256(merkleized.root());
+    let apply_started = Instant::now();
     if mode != UpdateMode::Overlay {
         db.apply_batch(merkleized).await.map_err(commonware_error)?;
     }
+    let apply_duration = apply_started.elapsed();
+    let sync_started = Instant::now();
     if mode == UpdateMode::ApplyAndSync {
         db.sync().await.map_err(commonware_error)?;
     }
+    let sync_duration = sync_started.elapsed();
+    debug!(
+        target: "reth_qmdb",
+        ?mode,
+        entries,
+        build_ms = build_duration.as_secs_f64() * 1000.0,
+        merkleize_ms = merkleize_duration.as_secs_f64() * 1000.0,
+        apply_ms = apply_duration.as_secs_f64() * 1000.0,
+        sync_ms = sync_duration.as_secs_f64() * 1000.0,
+        total_ms = started.elapsed().as_secs_f64() * 1000.0,
+        "computed QMDB flat-mutation root"
+    );
     Ok(QmdbCommit { root, entries })
 }
 
@@ -1423,6 +1576,68 @@ where
     Ok(journal.head())
 }
 
+async fn commit_blocks_mutations<E>(
+    db: &mut QmdbDb<E>,
+    journal: &mut QmdbCommitJournal,
+    blocks: Vec<QmdbBlockMutations>,
+) -> Result<Option<QmdbHead>, QmdbError>
+where
+    E: commonware_storage::Context,
+{
+    if blocks.is_empty() {
+        return Ok(journal.head());
+    }
+
+    let current_size = qmdb_log_size(db).await;
+    if journal.head_record().is_none() && current_size > INITIAL_LOG_SIZE {
+        return Err(QmdbError::UnanchoredState);
+    }
+
+    let rollback_size = journal.head_record().map_or(INITIAL_LOG_SIZE, |commit| commit.log_size);
+    let mut parent = journal.head();
+    let mut pending = Vec::with_capacity(blocks.len());
+
+    for QmdbBlockMutations { block, expected_root, mutations } in blocks {
+        if let Some(current) = parent {
+            if block.number != current.number + 1 || block.parent_hash != current.hash {
+                return Err(QmdbError::InvalidParent {
+                    expected: current.hash,
+                    got: block.parent_hash,
+                });
+            }
+        } else if block.number != 0 {
+            return Err(QmdbError::UnknownBlock { number: block.number.saturating_sub(1) });
+        }
+
+        let commit = update_mutations_root(db, mutations, UpdateMode::Apply).await?;
+        if commit.root != expected_root {
+            rewind_qmdb(db, rollback_size).await?;
+            return Err(QmdbError::CanonicalRootMismatch {
+                number: block.number,
+                expected: expected_root,
+                actual: commit.root,
+            });
+        }
+
+        let log_size = qmdb_log_size(db).await;
+        let block_commit =
+            QmdbBlockCommit { block, root: commit.root, log_size, entries: commit.entries as u64 };
+        parent = Some(block_commit.head());
+        pending.push(block_commit);
+    }
+
+    if let Err(err) = db.sync().await.map_err(commonware_error) {
+        rewind_qmdb(db, rollback_size).await?;
+        return Err(err);
+    }
+    if let Err(err) = journal.append(&pending) {
+        rewind_qmdb(db, rollback_size).await?;
+        return Err(err);
+    }
+
+    Ok(journal.head())
+}
+
 async fn rewind_to_block<E>(
     db: &mut QmdbDb<E>,
     journal: &mut QmdbCommitJournal,
@@ -1434,7 +1649,7 @@ where
     if number == 0 && journal.index_by_number(0).is_none() {
         rewind_qmdb(db, INITIAL_LOG_SIZE).await?;
         journal.truncate(0)?;
-        return Ok(None)
+        return Ok(None);
     }
 
     let Some(index) = journal.index_by_number(number) else {
@@ -1524,121 +1739,54 @@ async fn collect_mutations<E>(
 where
     E: commonware_storage::Context,
 {
-    let mut mutations = Vec::new();
+    let mut desired = Vec::new();
     let mut accounts: Vec<_> = hashed_state.accounts.iter().collect();
     accounts.sort_unstable_by_key(|(hashed_address, _)| **hashed_address);
 
-    let mut deleted_accounts = BTreeSet::new();
     for (hashed_address, account) in accounts {
         let key = account_key(hashed_address);
         match account {
             Some(account) => {
-                let value = encode_account(account);
-                if db.get(&key).await.map_err(commonware_error)? != Some(value.clone()) {
-                    mutations.push((key, Some(value)));
-                }
+                desired.push((key, Some(encode_account(account))));
             }
             None => {
-                deleted_accounts.insert(*hashed_address);
-                if db.get(&key).await.map_err(commonware_error)?.is_some() {
-                    mutations.push((key, None));
-                }
+                desired.push((key, None));
             }
         }
     }
 
-    let mut storage_addresses: BTreeSet<_> = hashed_state.storages.keys().copied().collect();
-    storage_addresses.extend(deleted_accounts.iter().copied());
+    let mut storage_addresses: Vec<_> = hashed_state.storages.keys().copied().collect();
+    storage_addresses.sort_unstable();
 
     for hashed_address in storage_addresses {
-        if deleted_accounts.contains(&hashed_address) {
-            collect_storage_wipe(db, &hashed_address, BTreeMap::new(), &mut mutations).await?;
-        } else if let Some(storage) = hashed_state.storages.get(&hashed_address) {
-            if storage.wiped {
-                let desired = nonzero_storage(&storage.storage);
-                collect_storage_wipe(db, &hashed_address, desired, &mut mutations).await?;
-            } else {
-                let desired = storage_slots(&storage.storage);
-                collect_storage_updates(db, &hashed_address, desired, &mut mutations).await?;
-            }
+        let storage = hashed_state
+            .storages
+            .get(&hashed_address)
+            .expect("storage address came from hashed state");
+        for (slot, value) in storage_slots(&storage.storage) {
+            let key = storage_key(&hashed_address, &slot);
+            let value = (!value.is_zero()).then(|| encode_storage(value));
+            desired.push((key, value));
         }
     }
 
-    Ok(mutations)
+    filter_noop_mutations(db, desired).await
 }
 
-async fn collect_storage_wipe<E>(
+async fn filter_noop_mutations<E>(
     db: &QmdbDb<E>,
-    hashed_address: &B256,
-    desired: BTreeMap<B256, U256>,
-    mutations: &mut Vec<(QmdbKey, Option<QmdbValue>)>,
-) -> Result<(), QmdbError>
+    desired: Vec<(QmdbKey, Option<QmdbValue>)>,
+) -> Result<Vec<(QmdbKey, Option<QmdbValue>)>, QmdbError>
 where
     E: commonware_storage::Context,
 {
-    let mut seen = BTreeSet::new();
-    let stream =
-        db.stream_range(storage_prefix_start(hashed_address)).await.map_err(commonware_error)?;
-    pin_mut!(stream);
-    while let Some(entry) = stream.next().await {
-        let (key, value) = entry.map_err(commonware_error)?;
-        if !is_storage_key_for(&key, hashed_address) {
-            break;
-        }
-
-        let slot = decode_storage_slot(&key)?;
-        if let Some(desired_value) = desired.get(&slot) {
-            seen.insert(slot);
-            let encoded = encode_storage(*desired_value);
-            if value != encoded {
-                mutations.push((key, Some(encoded)));
-            }
-        } else {
-            mutations.push((key, None));
-        }
-    }
-
-    for (slot, value) in desired {
-        if seen.contains(&slot) {
-            continue;
-        }
-        mutations.push((storage_key(hashed_address, &slot), Some(encode_storage(value))));
-    }
-
-    Ok(())
-}
-
-async fn collect_storage_updates<E>(
-    db: &QmdbDb<E>,
-    hashed_address: &B256,
-    desired: BTreeMap<B256, U256>,
-    mutations: &mut Vec<(QmdbKey, Option<QmdbValue>)>,
-) -> Result<(), QmdbError>
-where
-    E: commonware_storage::Context,
-{
-    for (slot, value) in desired {
-        let key = storage_key(hashed_address, &slot);
-        if value.is_zero() {
-            if db.get(&key).await.map_err(commonware_error)?.is_some() {
-                mutations.push((key, None));
-            }
-        } else {
-            let encoded = encode_storage(value);
-            if db.get(&key).await.map_err(commonware_error)? != Some(encoded.clone()) {
-                mutations.push((key, Some(encoded)));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn nonzero_storage(storage: &alloy_primitives::map::B256Map<U256>) -> BTreeMap<B256, U256> {
-    storage
-        .iter()
-        .filter(|(_, value)| !value.is_zero())
-        .map(|(slot, value)| (*slot, *value))
-        .collect()
+    let existing =
+        try_join_all(desired.iter().map(|(key, _)| db.get(key))).await.map_err(commonware_error)?;
+    Ok(desired
+        .into_iter()
+        .zip(existing)
+        .filter_map(|((key, value), existing)| (existing != value).then_some((key, value)))
+        .collect())
 }
 
 fn storage_slots(storage: &alloy_primitives::map::B256Map<U256>) -> BTreeMap<B256, U256> {
@@ -1652,29 +1800,12 @@ fn account_key(hashed_address: &B256) -> QmdbKey {
     QmdbKey::new(key)
 }
 
-fn storage_prefix_start(hashed_address: &B256) -> QmdbKey {
-    storage_key(hashed_address, &B256::ZERO)
-}
-
 fn storage_key(hashed_address: &B256, hashed_slot: &B256) -> QmdbKey {
     let mut key = [0; KEY_BYTES];
     key[0] = STORAGE_TAG;
     key[1..33].copy_from_slice(hashed_address.as_slice());
     key[33..65].copy_from_slice(hashed_slot.as_slice());
     QmdbKey::new(key)
-}
-
-fn is_storage_key_for(key: &QmdbKey, hashed_address: &B256) -> bool {
-    let bytes = key.as_ref();
-    bytes[0] == STORAGE_TAG && &bytes[1..33] == hashed_address.as_slice()
-}
-
-fn decode_storage_slot(key: &QmdbKey) -> Result<B256, QmdbError> {
-    let bytes = key.as_ref();
-    if bytes[0] != STORAGE_TAG {
-        return Err(QmdbError::InvalidStorageKey);
-    }
-    Ok(B256::from_slice(&bytes[33..65]))
 }
 
 fn encode_account(account: &Account) -> QmdbValue {
@@ -1742,7 +1873,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn commits_hashed_state_and_handles_storage_wipe() {
+    fn commits_hashed_state_and_treats_wipes_as_sparse_updates() {
         let tempdir = tempfile::tempdir().unwrap();
         let qmdb = QmdbState::open(QmdbConfig::new(tempdir.path())).unwrap();
         let empty_root = qmdb.root().unwrap();
@@ -1774,7 +1905,7 @@ mod tests {
         )]);
         let second = qmdb.commit_hashed_state(wiped).unwrap();
         assert_ne!(second.root, first.root);
-        assert_eq!(qmdb.storage(hashed_address, slot_a).unwrap(), None);
+        assert_eq!(qmdb.storage(hashed_address, slot_a).unwrap(), Some(U256::from(13)));
         assert_eq!(qmdb.storage(hashed_address, slot_b).unwrap(), Some(U256::from(17)));
 
         let wiped_to_empty = HashedPostState::default().with_storages([(
@@ -1784,7 +1915,51 @@ mod tests {
         let third = qmdb.commit_hashed_state(wiped_to_empty).unwrap();
         assert_ne!(third.root, second.root);
         assert_eq!(third.entries, 1);
+        assert_eq!(qmdb.storage(hashed_address, slot_a).unwrap(), Some(U256::from(13)));
         assert_eq!(qmdb.storage(hashed_address, slot_b).unwrap(), None);
+    }
+
+    #[test]
+    fn commits_cached_block_mutations_and_rewinds_on_root_mismatch() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let qmdb = QmdbState::open(QmdbConfig::new(tempdir.path())).unwrap();
+        let genesis = qmdb
+            .commit_block(
+                QmdbBlock { number: 0, hash: B256::with_last_byte(1), parent_hash: B256::ZERO },
+                HashedPostState::default(),
+            )
+            .unwrap();
+
+        let hashed_address = B256::repeat_byte(0x11);
+        let hashed_slot = B256::repeat_byte(0x22);
+        let account = Account { nonce: 1, balance: U256::from(100), bytecode_hash: None };
+        let mutations = vec![
+            (account_key(&hashed_address), Some(encode_account(&account))),
+            (storage_key(&hashed_address, &hashed_slot), Some(encode_storage(U256::from(200)))),
+        ];
+        let overlay = qmdb.overlay_mutations(mutations.clone()).unwrap();
+        let block =
+            QmdbBlock { number: 1, hash: B256::with_last_byte(2), parent_hash: genesis.hash };
+        let head = qmdb.commit_block_mutations(block, overlay.root, mutations).unwrap();
+
+        assert_eq!(head.root, overlay.root);
+        assert_eq!(qmdb.head().unwrap(), Some(head));
+        assert_eq!(qmdb.account(hashed_address).unwrap(), Some(account));
+        assert_eq!(qmdb.storage(hashed_address, hashed_slot).unwrap(), Some(U256::from(200)));
+
+        let bad_mutations = vec![(
+            storage_key(&hashed_address, &hashed_slot),
+            Some(encode_storage(U256::from(201))),
+        )];
+        let bad_block =
+            QmdbBlock { number: 2, hash: B256::with_last_byte(3), parent_hash: head.hash };
+        let error = qmdb
+            .commit_block_mutations(bad_block, B256::repeat_byte(0xff), bad_mutations)
+            .unwrap_err();
+        assert!(matches!(error, QmdbError::CanonicalRootMismatch { .. }));
+        assert_eq!(qmdb.head().unwrap(), Some(head));
+        assert_eq!(qmdb.root().unwrap(), head.root);
+        assert_eq!(qmdb.storage(hashed_address, hashed_slot).unwrap(), Some(U256::from(200)));
     }
 
     #[test]
@@ -1792,10 +1967,8 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = QmdbConfig::new(tempdir.path()).with_partition_prefix("holesky");
         let qmdb = QmdbState::open(config.clone()).unwrap();
-        let block1 =
-            decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/1.rlp"));
-        let block2 =
-            decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/2.rlp"));
+        let block1 = decode_holesky_block(include_str!("../test-data/holesky/1.rlp"));
+        let block2 = decode_holesky_block(include_str!("../test-data/holesky/2.rlp"));
 
         assert_eq!(block2.parent_hash(), block1.hash());
 

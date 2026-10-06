@@ -14,9 +14,10 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-chain-state.workspace = true
 reth-primitives-traits.workspace = true
 reth-stages-api.workspace = true
-reth-storage-api = { workspace = true, features = ["std"] }
+reth-storage-api = { workspace = true, features = ["std", "chain-state"] }
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
@@ -26,10 +27,10 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
 # commonware
-commonware-cryptography = "=2026.4.0"
-commonware-runtime = "=2026.4.0"
-commonware-storage = "=2026.4.0"
-commonware-utils = "=2026.4.0"
+commonware-cryptography = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
+commonware-runtime = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
+commonware-storage = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
+commonware-utils = { git = "https://github.com/commonwarexyz/monorepo", rev = "2a7dd423f0a241276a5a38db8cc3d05f11de0c03" }
 
 # async
 futures-util.workspace = true
