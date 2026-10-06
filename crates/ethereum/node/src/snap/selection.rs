@@ -83,7 +83,7 @@ pub enum EthereumBackfillSync<N: ProviderNodeTypes, C> {
 impl<N, C> BackfillSync for EthereumBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     fn on_action(&mut self, action: BackfillAction) {
         match self {
