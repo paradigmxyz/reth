@@ -1,7 +1,7 @@
 //! Picks the engine's backfill at launch: the staged pipeline, or snap sync with `--snap.v2`.
 
 use super::{SnapBackfillSync, SnapHandoff};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_node_builder::{
@@ -10,10 +10,7 @@ use reth_node_builder::{
 };
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_tracing::tracing::warn;
-use std::{
-    task::{Context, Poll},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::task::{Context, Poll};
 
 /// Builds the Ethereum node's backfill: the staged pipeline, or snap sync with `--snap.v2`.
 #[derive(Debug, Clone, Copy)]
@@ -24,13 +21,14 @@ pub struct EthereumBackfill {
 
 impl EthereumBackfill {
     /// Creates the builder for `config`'s `--snap.v2` setting. Snap pivots need block access
-    /// lists, so a chain where Amsterdam isn't active keeps the staged pipeline.
+    /// lists, so a chain that never schedules Amsterdam keeps the staged pipeline.
     pub fn new<ChainSpec: EthereumHardforks>(config: &NodeConfig<ChainSpec>) -> Self {
         let snap_v2 = config.network.snap_v2;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        let snap = snap_v2 && config.chain.is_amsterdam_active_at_timestamp(now);
+        let snap = snap_v2 &&
+            config.chain.ethereum_fork_activation(EthereumHardfork::Amsterdam) !=
+                ForkCondition::Never;
         if snap_v2 && !snap {
-            warn!(target: "sync::snap", "Amsterdam isn't active on this chain, so --snap.v2 keeps the staged pipeline");
+            warn!(target: "sync::snap", "This chain has no block access lists, so --snap.v2 keeps the staged pipeline");
         }
         Self { snap }
     }
@@ -181,15 +179,11 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_without_active_amsterdam_keeps_the_staged_pipeline() {
-        let unscheduled = ChainSpecBuilder::mainnet().build();
-        let scheduled = ChainSpecBuilder::mainnet().with_amsterdam_at(u64::MAX).build();
-        for chain_spec in [unscheduled, scheduled] {
-            let factory = factory(chain_spec);
+    fn a_chain_without_amsterdam_keeps_the_staged_pipeline() {
+        let factory = factory(ChainSpecBuilder::mainnet().build());
 
-            recover(true, &factory).unwrap();
-            assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Pipeline(_)));
-        }
+        recover(true, &factory).unwrap();
+        assert!(matches!(build(true, factory).unwrap(), EthereumBackfillSync::Pipeline(_)));
     }
 
     #[test]
