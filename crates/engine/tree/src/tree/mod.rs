@@ -2216,9 +2216,9 @@ where
         self.send_event(EngineApiEvent::BackfillAction(action));
     }
 
-    // Forwards `finalized` to the backfill if it follows finality and the block is known.
+    // Forwards `finalized` to the backfill unless the forkchoice leaves it unset.
     fn forward_finalized(&self, finalized: B256) {
-        if self.config.backfill_follows_finalized() && !finalized.is_zero() {
+        if !finalized.is_zero() {
             self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(
                 finalized,
             )));

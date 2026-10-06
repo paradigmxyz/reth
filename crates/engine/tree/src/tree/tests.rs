@@ -752,8 +752,7 @@ fn backfill_action_waits_while_payload_build_is_active() {
 
 #[test]
 fn forkchoice_notifies_active_backfill_of_a_new_head() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     harness.tree.backfill_sync_state = BackfillSyncState::Active;
     let head = B256::repeat_byte(0x42);
     let finalized = B256::repeat_byte(0x41);
@@ -974,8 +973,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
 
 #[test]
 fn a_backfill_starts_with_the_latest_finalized_block() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     let finalized = B256::repeat_byte(0x41);
     let state = ForkchoiceState {
         head_block_hash: B256::repeat_byte(0x42),
