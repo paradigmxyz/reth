@@ -83,7 +83,6 @@ reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
 reth-downloaders.workspace = true
 reth-eth-wire-types.workspace = true
-reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
