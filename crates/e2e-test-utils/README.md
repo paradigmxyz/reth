@@ -79,6 +79,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Put a raw transaction into the pool | `node.rpc.inject_tx(raw)` |
 | **Producing blocks** | |
 | Mine given transactions and get their receipts | `node.mine(txs)`, which fails if the block misses one of them or includes another pool transaction; `mine_including(txs)` allows other pool transactions |
+| Mine signed transactions, e.g. of a custom transaction type, that must all succeed | `node.mine_signed(txs)`, which encodes them, mines them like `mine` and fails if one reverted |
 | Mine transactions that are already in the pool, e.g. sent through a provider | `node.mine_pooled(hashes)`, with the checks of `mine` and an error for a hash that is not in the pool |
 | Produce blocks from the pool | `advance_block()`, `advance_blocks(n)`; `advance_block_synced()` also waits for the pool to process the block |
 | Produce blocks until a transaction is included | `advance_until_receipt(hash)` |
