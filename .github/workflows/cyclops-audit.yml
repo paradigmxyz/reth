@@ -2,7 +2,7 @@ name: Cyclops audit
 
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
-    types: [labeled, synchronize, reopened, ready_for_review]
+    types: [labeled, opened, synchronize, reopened, ready_for_review]
   issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
     types: [created]
 
@@ -42,7 +42,7 @@ jobs:
               }
             }'
 
-  # Cyclops runs push-only events only on PRs it already reviewed via label or comment.
+  # Audits every non-draft, same-repo PR on open and on each push.
   publish-push:
     if: >-
       github.event_name == 'pull_request_target' &&
@@ -76,8 +76,7 @@ jobs:
               "event": "pr_audit",
               "data": {
                 "pr_number": ${{ github.event.pull_request.number }},
-                "sha": "${{ github.event.pull_request.head.sha }}",
-                "push_only": true
+                "sha": "${{ github.event.pull_request.head.sha }}"
               }
             }'
 
