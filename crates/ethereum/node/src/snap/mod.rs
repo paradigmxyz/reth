@@ -24,7 +24,7 @@ use futures::FutureExt;
 use reth_chainspec::EthChainSpec;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use reth_errors::RethError;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, DatabaseProviderFactory, MetadataProvider,
     ProviderFactory, ProviderResult, StageCheckpointReader,
@@ -73,7 +73,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
 impl<N, C> SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     // Spawns a run if a target is queued and the pipeline is free.
     fn try_spawn(&mut self) -> Option<BackfillEvent> {
@@ -156,7 +156,7 @@ where
 impl<N, C> BackfillSync for SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     fn on_action(&mut self, action: BackfillAction) {
         match action {

@@ -4,11 +4,12 @@ use super::{
     context::NodeSnapContext,
     handoff::{HandoffOutcome, RebuildOutcome, SnapHandoff},
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_errors::RethError;
-use reth_network_p2p::snap::client::SnapClient;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
+use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_snap_sync::{SnapBootstrap, SnapBootstrapOutcome, SnapWrite};
 use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
@@ -81,7 +82,7 @@ impl<N: ProviderNodeTypes, C> SnapRun<N, C> {
 impl<N, C> SnapRun<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     // Hands the pipeline back with the result, so the backfill can run it again.
     pub(super) async fn run(
@@ -246,7 +247,12 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Pass, PipelineError> {
-        let Some(headers) = self.sync_headers(pipeline, targets).await else {
+        let target = *targets.borrow_and_update();
+        if !self.is_ahead(target).await? {
+            debug!(target: "sync::snap", %target, "Forkchoice target is not above the local headers, skipping the header pass");
+            return Ok(Pass::Done)
+        }
+        let Some(headers) = self.sync_headers(pipeline, target).await else {
             return Ok(Pass::Stopped)
         };
         if headers?.is_unwind() || targets.has_changed().unwrap_or(false) {
@@ -255,16 +261,33 @@ where
         Ok(Pass::Done)
     }
 
-    // Runs the header stage to the latest target, or returns `None` once the run is stopped.
-    // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
-    // execute, so only the header stage runs. Targets arriving meanwhile stay unseen on `targets`
-    // for the next pass.
+    // Whether `target` is above the local headers. The header stage only finishes once it downloads
+    // the block after the local head, so a pass to a sibling or an older block never completes. A
+    // target no peer resolves counts as ahead.
+    async fn is_ahead(&self, target: B256) -> Result<bool, PipelineError> {
+        let head = {
+            let provider = self.factory.provider()?;
+            if provider.block_number(target)?.is_some() {
+                return Ok(false)
+            }
+            provider.last_block_number()?
+        };
+        let header = self.client.get_header(target.into()).await;
+        Ok(header
+            .ok()
+            .and_then(|header| header.into_data())
+            .is_none_or(|header| header.number() > head))
+    }
+
+    // Runs the header stage to `target`, or returns `None` once the run is stopped. Snap needs
+    // canonical headers and their BAL commitments, but nothing below the pivot may execute, so
+    // only the header stage runs. Targets arriving meanwhile stay unseen on `targets` for the next
+    // pass.
     async fn sync_headers(
         &self,
         pipeline: &mut Pipeline<N>,
-        targets: &mut watch::Receiver<B256>,
+        target: B256,
     ) -> Option<Result<ControlFlow, PipelineError>> {
-        let target = *targets.borrow_and_update();
         let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
         self.stop.run_until_cancelled(headers).await
     }
@@ -303,9 +326,18 @@ mod tests {
     };
     use alloy_consensus::Header;
     use alloy_eips::eip1898::BlockWithParent;
+    use futures::future::{ready, Ready};
     use reth_consensus::ConsensusError;
     use reth_db::{tables, transaction::DbTxMut};
-    use reth_network_p2p::NoopFullBlockClient;
+    use reth_eth_wire_types::snap::{
+        GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+        GetStorageRangesMessage,
+    };
+    use reth_network_p2p::{
+        download::DownloadClient, error::PeerRequestResult, headers::client::HeadersRequest,
+        priority::Priority, NoopFullBlockClient,
+    };
+    use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::{Account, SealedHeader};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
@@ -320,6 +352,78 @@ mod tests {
         sync::{Arc, Mutex},
         task::{Context, Poll},
     };
+
+    // Serves `header` to every header request and fails snap requests like the noop client.
+    #[derive(Clone, Debug)]
+    struct ServesHeader {
+        header: Header,
+        noop: NoopFullBlockClient,
+    }
+
+    impl DownloadClient for ServesHeader {
+        fn report_bad_message(&self, _peer_id: PeerId) {}
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl HeadersClient for ServesHeader {
+        type Header = Header;
+        type Output = Ready<PeerRequestResult<Vec<Header>>>;
+
+        fn get_headers_with_priority(
+            &self,
+            _request: HeadersRequest,
+            _priority: Priority,
+        ) -> Self::Output {
+            ready(Ok(WithPeerId::new(PeerId::random(), vec![self.header.clone()])))
+        }
+    }
+
+    impl SnapClient for ServesHeader {
+        type Output = <NoopFullBlockClient as SnapClient>::Output;
+
+        fn get_account_range_with_priority(
+            &self,
+            request: GetAccountRangeMessage,
+            priority: Priority,
+        ) -> Self::Output {
+            self.noop.get_account_range_with_priority(request, priority)
+        }
+
+        fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
+            self.noop.get_storage_ranges(request)
+        }
+
+        fn get_storage_ranges_with_priority(
+            &self,
+            request: GetStorageRangesMessage,
+            priority: Priority,
+        ) -> Self::Output {
+            self.noop.get_storage_ranges_with_priority(request, priority)
+        }
+
+        fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
+            self.noop.get_byte_codes(request)
+        }
+
+        fn get_byte_codes_with_priority(
+            &self,
+            request: GetByteCodesMessage,
+            priority: Priority,
+        ) -> Self::Output {
+            self.noop.get_byte_codes_with_priority(request, priority)
+        }
+
+        fn get_block_access_lists_with_priority(
+            &self,
+            request: GetBlockAccessListsMessage,
+            priority: Priority,
+        ) -> Self::Output {
+            self.noop.get_block_access_lists_with_priority(request, priority)
+        }
+    }
 
     // A header stage that waits for `gate`, then records whether a snap attempt exists at each
     // pass.
@@ -623,5 +727,31 @@ mod tests {
 
         assert_ne!(result, STOPPED);
         assert!(factory.provider().unwrap().snap_attempt().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_sibling_of_the_local_head_skips_the_header_pass() {
+        // A header stage with no outputs, so running it fails the test.
+        let (mut pipeline, factory) =
+            pipeline_with(TestStage::new(StageId::Headers), watch::channel(B256::ZERO).0);
+        let genesis = SealedHeader::seal_slow(Header::default());
+        let head = Header { number: 1, parent_hash: genesis.hash(), ..Default::default() };
+        insert_headers(&factory, &[genesis.clone(), SealedHeader::seal_slow(head)]);
+        // The header stage never completes a pass to a block at or below the local head.
+        let sibling =
+            Header { number: 1, parent_hash: genesis.hash(), gas_limit: 1, ..Default::default() };
+        let (_targets, mut receiver) = watch::channel(sibling.hash_slow());
+        let client = ServesHeader { header: sibling, noop: NoopFullBlockClient::default() };
+        let run = SnapRun::new(
+            client,
+            factory,
+            Runtime::test(),
+            CancellationToken::new(),
+            watch::channel(B256::ZERO).1,
+        );
+
+        let pass = run.catch_up_headers(&mut pipeline, &mut receiver).await.unwrap();
+
+        assert_eq!(pass, Pass::Done);
     }
 }
