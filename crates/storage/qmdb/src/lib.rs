@@ -34,8 +34,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
+    HashedStorage, MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -522,7 +523,6 @@ pub fn genesis_hashed_state(genesis: &Genesis) -> HashedPostState {
             storages.insert(
                 hashed_address,
                 HashedStorage::from_iter(
-                    false,
                     storage
                         .iter()
                         .map(|(slot, value)| (keccak256(slot), U256::from_be_bytes(value.0))),
@@ -632,8 +632,7 @@ impl QmdbStage {
                 for (block_address, storage_change) in &storage_changes {
                     let address = block_address.address();
                     let hashed_address = keccak256(address);
-                    let storage =
-                        storages.entry(hashed_address).or_insert_with(|| HashedStorage::new(false));
+                    let storage = storages.entry(hashed_address).or_default();
                     let current =
                         current_storage(provider, &storage_overrides, address, storage_change.key)?;
                     storage.storage.insert(keccak256(storage_change.key), current);
@@ -862,6 +861,13 @@ impl<S> StorageRootProvider for QmdbStateRootProvider<S> {
 }
 
 impl<S> StateProofProvider for QmdbStateRootProvider<S> {
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Err(qmdb_mpt_unsupported("QMDb state multiproofs are not MPT-compatible"))
+    }
     fn proof(
         &self,
         _input: TrieInput,
@@ -1886,7 +1892,7 @@ mod tests {
             .with_accounts([(hashed_address, Some(account))])
             .with_storages([(
                 hashed_address,
-                HashedStorage::from_iter(false, [(slot_a, U256::from(13))]),
+                HashedStorage::from_iter([(slot_a, U256::from(13))]),
             )]);
 
         let first = qmdb.commit_hashed_state(state.clone()).unwrap();
@@ -1901,17 +1907,15 @@ mod tests {
 
         let wiped = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(true, [(slot_b, U256::from(17))]),
+            HashedStorage::from_iter([(slot_b, U256::from(17))]),
         )]);
         let second = qmdb.commit_hashed_state(wiped).unwrap();
         assert_ne!(second.root, first.root);
         assert_eq!(qmdb.storage(hashed_address, slot_a).unwrap(), Some(U256::from(13)));
         assert_eq!(qmdb.storage(hashed_address, slot_b).unwrap(), Some(U256::from(17)));
 
-        let wiped_to_empty = HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(true, [(slot_b, U256::ZERO)]),
-        )]);
+        let wiped_to_empty = HashedPostState::default()
+            .with_storages([(hashed_address, HashedStorage::from_iter([(slot_b, U256::ZERO)]))]);
         let third = qmdb.commit_hashed_state(wiped_to_empty).unwrap();
         assert_ne!(third.root, second.root);
         assert_eq!(third.entries, 1);
@@ -1967,8 +1971,10 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let config = QmdbConfig::new(tempdir.path()).with_partition_prefix("holesky");
         let qmdb = QmdbState::open(config.clone()).unwrap();
-        let block1 = decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/1.rlp"));
-        let block2 = decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/2.rlp"));
+        let block1 =
+            decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/1.rlp"));
+        let block2 =
+            decode_holesky_block(include_str!("../../../engine/tree/test-data/holesky/2.rlp"));
 
         assert_eq!(block2.parent_hash(), block1.hash());
 
@@ -2078,10 +2084,7 @@ mod tests {
             bytecode_hash: None,
         };
         HashedPostState::default().with_accounts([(hashed_address, Some(account))]).with_storages([
-            (
-                hashed_address,
-                HashedStorage::from_iter(false, [(slot, U256::from(block.timestamp()))]),
-            ),
+            (hashed_address, HashedStorage::from_iter([(slot, U256::from(block.timestamp()))])),
         ])
     }
 
@@ -2102,7 +2105,7 @@ mod tests {
             .with_accounts([(sender, Some(sender_account)), (receiver, Some(receiver_account))])
             .with_storages([(
                 receiver,
-                HashedStorage::from_iter(false, [(slot, U256::from(number * 11))]),
+                HashedStorage::from_iter([(slot, U256::from(number * 11))]),
             )])
     }
 }
