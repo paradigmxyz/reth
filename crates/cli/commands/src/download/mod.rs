@@ -651,12 +651,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             tx.commit()?;
         }
 
-        let start_command = if self.env.chain.chain().id() == manifest.chain_id {
-            startup_node_command::<C>(self.env.chain.as_ref())
+        if self.env.chain.chain().id() == manifest.chain_id {
+            let start_command = startup_node_command::<C>(self.env.chain.as_ref());
+            info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
         } else {
-            format!("{} node --chain <chain-or-chainspec>", current_binary_name())
-        };
-        info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
+            info!(target: "reth::cli", "Snapshot download complete.");
+        }
 
         Ok(())
     }
