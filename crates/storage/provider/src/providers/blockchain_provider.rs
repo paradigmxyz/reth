@@ -30,12 +30,12 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
+    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
+    StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
+use reth_storage_overlay::{OverlayStateProvider, OwnedProvider};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -157,23 +157,27 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
+    ///
+    /// Rejects snapshots containing unverified snap state.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
+    ) -> ProviderResult<StateProviderBox> {
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
             provider,
             self.database.overlay_manager().overlay_builder(block_hash),
-        ))
+        )))
     }
 
     /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
@@ -189,11 +193,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         };
 
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Some(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder_for_state(matched),
-        );
-        state_provider_factory.database_provider_ro().map(Some)
+        )))
     }
 
     /// Returns a cursor-backed state view for a retained canonical state root.
@@ -202,6 +207,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         state_root: B256,
     ) -> ProviderResult<Option<HistoricalStateRangeProvider<N>>> {
         let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
         let Some(finish) = provider.get_stage_checkpoint(StageId::Finish)? else { return Ok(None) };
         let oldest = finish.block_number.saturating_sub(SNAPSHOT_STATE_RETENTION - 1);
         let mut block_hash = None;
@@ -213,14 +219,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 break
             }
         }
-        drop(provider);
-
         let Some(block_hash) = block_hash else { return Ok(None) };
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        Ok(Some(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder(block_hash),
-        );
-        state_provider_factory.database_provider_ro().map(Some)
+        )))
     }
 }
 
@@ -243,12 +246,18 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
     /// Resolves a retained canonical state root into a pinned range view, preferring a still
     /// in-memory block over the persisted-history fallback.
     fn state_range_provider(&self, state_root: B256) -> ProviderResult<Option<StateRangeView>> {
-        let provider = match self.block_state_range_provider(state_root)? {
-            Some(provider) => Some(provider),
-            None => self.historical_state_range_provider(state_root)?,
-        };
-        Ok(provider
-            .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView))
+        let provider =
+            self.block_state_range_provider(state_root).and_then(|provider| match provider {
+                Some(provider) => Ok(Some(provider)),
+                None => self.historical_state_range_provider(state_root),
+            });
+        match provider {
+            Ok(provider) => Ok(provider
+                .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView)),
+            // Snap downloads into the canonical tables before its trie is ready to serve.
+            Err(ProviderError::UnverifiedSnapState { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -749,11 +758,12 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         parent_hash: BlockHash,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -796,29 +806,27 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        self.state_provider_from_database(provider.into_database_provider(), hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        self.state_provider_from_database(provider.into_database_provider(), block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.state_provider_for_state(state)
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
-        } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+            return self.state_provider_for_state(state)
+        }
+        match self.history_by_block_hash(hash) {
+            Ok(state) => Ok(state),
+            Err(error @ ProviderError::UnverifiedSnapState { .. }) => Err(error),
+            Err(_) => {
+                self.pending_state_by_hash(hash)?.ok_or(ProviderError::StateForHashNotFound(hash))
+            }
         }
     }
 
@@ -1054,7 +1062,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 #[cfg(test)]
 #[allow(clippy::clone_on_copy)]
 mod tests {
-    use super::SNAPSHOT_STATE_RETENTION;
+    use super::*;
     use crate::{
         providers::BlockchainProvider,
         test_utils::{
@@ -1073,7 +1081,7 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -1086,9 +1094,10 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, StorageSettings, StorageSettingsCache, TransactionVariant,
         TransactionsProvider,
     };
     use reth_testing_utils::generators::{
@@ -3560,6 +3569,128 @@ mod tests {
             .expect("account must have storage");
         assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_snap_state_is_unavailable_to_public_readers() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let address = Address::repeat_byte(1);
+        let account = Account { balance: U256::from(42), ..Default::default() };
+        let slot = StorageEntry { key: B256::repeat_byte(2), value: U256::from(7) };
+
+        // Already-open snapshots must keep serving their original state after snap starts.
+        let before = provider.latest()?;
+        let before_range = provider.state_range_provider(genesis.state_root())?.unwrap();
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(3)),
+            B256::repeat_byte(4),
+        );
+        for abandoned in [false, true] {
+            if abandoned {
+                attempt.abandon();
+            }
+            let writer = factory.provider_rw()?;
+            writer.write_snap_attempt(&attempt)?;
+            writer.insert_account_for_hashing([(address, Some(account.clone()))])?;
+            writer.insert_storage_for_hashing([(address, [slot])])?;
+            writer.commit()?;
+
+            // Internal download and verification access remains available while Finish stays put.
+            let raw = factory.provider()?;
+            assert_eq!(raw.basic_account(&address)?, Some(account.clone()));
+            assert_eq!(raw.get_stage_checkpoint(StageId::Finish)?.unwrap().block_number, 0);
+            for state in [
+                factory.latest(),
+                provider.latest(),
+                provider.pending(),
+                provider.history_by_block_number(0),
+                provider.history_by_block_hash(genesis.hash()),
+                provider.state_by_block_hash(genesis.hash()),
+                provider.state_by_block_number_or_tag(BlockNumberOrTag::Latest),
+                provider.state_provider_from_database(factory.provider()?, genesis.hash()),
+            ] {
+                assert!(matches!(state, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+            }
+            // Refuse the view before an account response can hash downloaded contract storage.
+            assert!(provider.state_range_provider(genesis.state_root())?.is_none());
+        }
+        assert_eq!(before.basic_account(&address)?, None);
+        assert!(before_range
+            .account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?
+            .items
+            .is_empty());
+
+        attempt.verify();
+        let writer = factory.provider_rw()?;
+        writer.write_snap_attempt(&attempt)?;
+        writer.commit()?;
+
+        for state in [factory.latest()?, provider.latest()?, provider.history_by_block_number(0)?] {
+            assert_eq!(state.basic_account(&address)?, Some(account.clone()));
+            assert_eq!(state.storage(address, slot.key)?, Some(slot.value));
+        }
+        let range = provider.state_range_provider(genesis.state_root())?.unwrap();
+        assert_eq!(
+            range.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?.items,
+            vec![(keccak256(address), account)],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_snap_state_cannot_be_used_under_an_in_memory_overlay() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let mut rng = generators::rng();
+        let mut block = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        block.header.state_root = B256::repeat_byte(1);
+        let block = block.seal_slow().try_recover()?;
+        let block_hash = block.hash();
+        let block = ExecutedBlock {
+            recovered_block: Arc::new(block),
+            execution_output: BlockExecutionOutput::default().into(),
+            ..Default::default()
+        };
+        provider.database.overlay_manager().insert_block(block.clone());
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![block.clone()] });
+        provider.canonical_in_memory_state.set_pending_block(block.clone());
+        assert!(provider.latest().is_ok());
+        assert!(provider.state_range_provider(block.recovered_block().state_root())?.is_some());
+
+        let writer = factory.provider_rw()?;
+        writer.write_snap_attempt(&SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(2)),
+            B256::repeat_byte(3),
+        ))?;
+        writer.commit()?;
+
+        for state in [
+            provider.latest(),
+            provider.state_by_block_hash(block_hash),
+            provider.pending(),
+            provider.state_with_block_appended(genesis.hash(), block.clone()),
+        ] {
+            assert!(matches!(state, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        }
+        for state in [provider.maybe_pending(), provider.pending_state_by_hash(block_hash)] {
+            assert!(matches!(state, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        }
+        assert!(provider.state_range_provider(block.recovered_block().state_root())?.is_none());
         Ok(())
     }
 }

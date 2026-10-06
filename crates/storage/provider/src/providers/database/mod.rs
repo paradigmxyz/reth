@@ -457,11 +457,15 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }
 
-    /// State provider for latest block
+    /// State provider for the latest block.
+    ///
+    /// Returns [`ProviderError::UnverifiedSnapState`] while snap is populating the state tables.
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
+        let provider = self.database_provider_ro()?;
+        provider.ensure_snap_state_verified()?;
+        Ok(Box::new(LatestStateProvider::new(provider)))
     }
 
     /// Asserts that the static files and database are consistent. If not,
