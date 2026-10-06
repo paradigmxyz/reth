@@ -134,7 +134,7 @@ where
                     return Ok(SnapBootstrapOutcome::BeforeBlockAccessLists)
                 }
                 Resolved::Waiting => {
-                    info!(target: "sync::snap", head, "Waiting for a block access list to anchor snap sync");
+                    info!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
                     Step::Wait
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
