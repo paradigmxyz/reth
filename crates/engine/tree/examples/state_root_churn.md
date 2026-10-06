@@ -44,8 +44,9 @@ At the default rate, the first 200,000 sampled accounts and their 600,000 slots 
 blocks reveal all hot keys. Each subsequent block selects `(1 - churn) * 100000` distinct hot accounts
 uniformly, then selects the remaining accounts from outside this set, requiring their account and all
 three slot paths to be unrevealed. Cold keys may be reused after they have been pruned. At the default rate, blocks
-update exactly 100,000 accounts and 300,000 slots; the optional update count scales both at 1:3. After each root, the next block's keys are selected and prefetched through a separate invocation of
-that same production state-root task, before the current block's persistence-triggered prune.
+update exactly 100,000 accounts and 300,000 slots; the optional update count scales both at 1:3. The next block's keys are selected before the current root. After that root completes, missing
+next-block witnesses are prefetched through a separate invocation of the same production task,
+before the current block's persistence-triggered prune.
 Only keys with missing witnesses enter this warm-only invocation, which must preserve the root
 and emit no persistence updates. The prewarm task refreshes the revealed paths without marking nodes dirty. Already-hot keys
 retain their normal modification epochs and the configured eviction probability bound. Ancestors and storage roots receive the same access epoch. Consumption of a prefetched key in the next block must have zero missing account/slot witnesses,
@@ -103,3 +104,13 @@ an upper failing rate and a lower passing rate with short runs, then validate th
 1000 measured blocks. A passing rate requires zero full-cycle deadline misses, bounded partial
 persistence lag, no memory-guard stop, and all final database checks. This is a measured interval,
 not an exact hardware limit or a guarantee over an infinite run.
+
+For the throughput sweep, a bounded fixture producer constructs block N+1's hashed inputs while
+block N runs. Next-block keys are selected before the current root; cold candidates cannot be
+current-block targets because those were already revealed by the previous prewarm. Proofs are
+still fetched only after the current root. The producer only reads immutable corpus entries and
+never accesses the trie. It uses the same parallel value construction as before; exactly one next
+block can be buffered. `prepare_ms` records producer time, and any late input still counts against
+fixed arrivals. This prevents serialized synthetic value generation from setting the apparent
+state-root capacity. Input preparation still consumes host CPU and memory, so the reported limit
+includes that contention.

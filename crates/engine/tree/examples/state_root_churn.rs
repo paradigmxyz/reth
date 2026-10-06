@@ -313,7 +313,7 @@ fn run(
     output: &Path,
 ) -> Result<()> {
     let hot = account_updates * 2;
-    let entries = read_corpus(corpus)?;
+    let entries = Arc::new(read_corpus(corpus)?);
     ensure!(entries.len() > hot + account_updates, "corpus too small");
     let db = reth_db::open_db(Path::new(datadir).join("db"), DatabaseArguments::default())?;
     let base = {
@@ -391,6 +391,41 @@ fn run(
     let mut last_epoch = vec![0_u64; entries.len()];
     let mut next_selection = Vec::new();
     let mut prewarmed = B256Set::default();
+    // Generate the next fixture alongside current-block service, without borrowing the trie.
+    let (prepare_tx, prepare_rx) = mpsc::sync_channel::<(u64, Vec<usize>)>(1);
+    let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+    let fixture_entries = entries.clone();
+    let prepare = thread::spawn(move || -> Result<()> {
+        for (epoch, selected) in prepare_rx {
+            let start = Instant::now();
+            let prepared: Vec<_> = selected
+                .par_iter()
+                .map(|&index| {
+                    let entry = &fixture_entries[index];
+                    let mut account = entry.account;
+                    account.nonce = account.nonce.checked_add(epoch).unwrap();
+                    let storage = HashedStorage {
+                        storage: entry
+                            .slots
+                            .iter()
+                            .map(|s| (*s, slot_value(entry.address, *s, epoch)))
+                            .collect(),
+                    };
+                    (entry.address, account, storage)
+                })
+                .collect();
+            let mut state = HashedPostState::default();
+            state.accounts.reserve(selected.len());
+            state.storages.reserve(selected.len());
+            for (address, account, storage) in prepared {
+                state.accounts.insert(address, Some(account));
+                state.storages.insert(address, storage);
+            }
+            ready_tx.send((state, start.elapsed().as_secs_f64() * 1000.))?;
+        }
+        Ok(())
+    });
+    prepare_tx.send((base + 1, (0..account_updates).collect()))?;
     // Two initialization blocks reveal every hot key. They are not timed as workload blocks.
     for block in 0..blocks + warmup + 2 {
         if block == 2 {
@@ -398,40 +433,28 @@ fn run(
         }
         let measured = block >= warmup + 2;
         let arrival = arrival_start + period * block.saturating_sub(2) as u32;
-        let start = Instant::now();
         let epoch = base + block as u64 + 1;
         let selected = if block < 2 {
             (block * account_updates..(block + 1) * account_updates).collect::<Vec<_>>()
         } else {
             std::mem::take(&mut next_selection)
         };
-        // Prepare the fixture before arrival in parallel so synthetic input generation does not
-        // limit the measured state-root service. Witness checks only borrow the preserved trie.
+        let (state, prepare_ms) = ready_rx.recv()?;
+        // Audit consumption independently of the input generator and without mutating the trie.
         let prepared: Vec<_> = selected
             .par_iter()
             .map(|&index| {
                 let entry = &entries[index];
-                let account_missing = !trie.is_account_revealed(entry.address);
-                let slots_missing =
-                    entry.slots.map(|slot| !trie.check_valid_storage_witness(entry.address, slot));
-                let mut account = entry.account;
-                account.nonce = account.nonce.checked_add(epoch).unwrap();
-                let storage = HashedStorage {
-                    storage: entry
-                        .slots
-                        .iter()
-                        .map(|s| (*s, slot_value(entry.address, *s, epoch)))
-                        .collect(),
-                };
-                (index, account_missing, slots_missing, account, storage)
+                (
+                    index,
+                    !trie.is_account_revealed(entry.address),
+                    entry.slots.map(|slot| !trie.check_valid_storage_witness(entry.address, slot)),
+                )
             })
             .collect();
-        let mut state = HashedPostState::default();
-        state.accounts.reserve(account_updates);
-        state.storages.reserve(account_updates);
         let mut account_misses = 0;
         let mut slot_misses = 0;
-        for (index, account_missing, slots_missing, account, storage) in prepared {
+        for (index, account_missing, slots_missing) in prepared {
             last_epoch[index] = epoch;
             let entry = &entries[index];
             ensure!(
@@ -455,15 +478,12 @@ fn run(
                     }
                 }
             }
-            state.accounts.insert(entry.address, Some(account));
-            state.storages.insert(entry.address, storage);
         }
         ensure!(
             state.accounts.len() == account_updates && state.storages.len() == account_updates,
             "duplicate update keys"
         );
         prewarmed.clear();
-        let prepare_ms = start.elapsed().as_secs_f64() * 1000.;
         let input_late_ms = if block >= 2 {
             Instant::now().saturating_duration_since(arrival).as_secs_f64() * 1000.
         } else {
@@ -491,6 +511,36 @@ fn run(
             prune_cutoff = Some(partial + 1);
         }
         let cleanup_ms = cleanup_start.elapsed().as_secs_f64() * 1000.;
+        let lookahead_start = Instant::now();
+        if block + 1 < blocks + warmup + 2 {
+            if block == 0 {
+                next_selection = (account_updates..account_updates * 2).collect();
+            } else {
+                next_selection =
+                    sample(&mut rng, hot, account_updates * (100 - churn) / 100).into_vec();
+                let mut attempts = 0;
+                while next_selection.len() < account_updates {
+                    let index = cold_position;
+                    cold_position += 1;
+                    if cold_position == entries.len() {
+                        cold_position = hot;
+                    }
+                    attempts += 1;
+                    ensure!(attempts <= entries.len() - hot, "cold corpus exhausted");
+                    let entry = &entries[index];
+                    if !trie.is_account_revealed(entry.address) &&
+                        entry
+                            .slots
+                            .iter()
+                            .all(|slot| !trie.check_valid_storage_witness(entry.address, *slot))
+                    {
+                        next_selection.push(index);
+                    }
+                }
+            }
+            prepare_tx.send((epoch + 1, next_selection.clone()))?;
+        }
+        let lookahead_ms = lookahead_start.elapsed().as_secs_f64() * 1000.;
         let root_start = Instant::now();
         let (outcome, next_trie) =
             compute(runtime, factory.clone(), trie, root, epoch, state, Default::default())?;
@@ -519,27 +569,6 @@ fn run(
         let mut prewarm_accounts = 0;
         let mut prewarm_slots = 0;
         if block >= 1 && block + 1 < blocks + warmup + 2 {
-            next_selection =
-                sample(&mut rng, hot, account_updates * (100 - churn) / 100).into_vec();
-            let mut attempts = 0;
-            while next_selection.len() < account_updates {
-                let index = cold_position;
-                cold_position += 1;
-                if cold_position == entries.len() {
-                    cold_position = hot;
-                }
-                attempts += 1;
-                ensure!(attempts <= entries.len() - hot, "cold corpus exhausted");
-                let entry = &entries[index];
-                if !trie.is_account_revealed(entry.address) &&
-                    entry
-                        .slots
-                        .iter()
-                        .all(|slot| !trie.check_valid_storage_witness(entry.address, *slot))
-                {
-                    next_selection.push(index);
-                }
-            }
             let prepared: Vec<_> = next_selection
                 .par_iter()
                 .map(|&index| {
@@ -591,7 +620,7 @@ fn run(
                 trie = next_trie;
             }
         }
-        let prewarm_ms = prewarm_start.elapsed().as_secs_f64() * 1000.;
+        let prewarm_ms = lookahead_ms + prewarm_start.elapsed().as_secs_f64() * 1000.;
         let mut prune_ms = 0.;
         let mut hot_account_evictions = 0;
         let mut hot_slot_evictions = 0;
@@ -654,6 +683,8 @@ fn run(
             eprintln!("block={block} root_ms={root_ms:.1} deadline_ms={deadline_ms:.1} partial_lag={} retained={}", epoch-partial, trie.retained_storage_tries_count());
         }
     }
+    drop(prepare_tx);
+    prepare.join().unwrap()?;
     // No more blocks will use this cache. Release it before the final full drain, which needs
     // extra working memory to merge the remaining masked updates.
     drop(trie);
