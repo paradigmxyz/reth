@@ -390,6 +390,7 @@ fn run(
     let mut evicted_slots = B256Set::default();
     let mut last_epoch = vec![0_u64; entries.len()];
     let mut next_selection = Vec::new();
+    let mut prewarmed = B256Set::default();
     // Two initialization blocks reveal every hot key. They are not timed as workload blocks.
     for block in 0..blocks + warmup + 2 {
         if block == 2 {
@@ -433,6 +434,11 @@ fn run(
         for (index, account_missing, slots_missing, account, storage) in prepared {
             last_epoch[index] = epoch;
             let entry = &entries[index];
+            ensure!(
+                !prewarmed.contains(&entry.address) ||
+                    (!account_missing && slots_missing.iter().all(|missing| !missing)),
+                "previous block prewarming did not survive pruning"
+            );
             if account_missing {
                 account_misses += 1;
                 if block >= 2 && index < hot {
@@ -456,10 +462,7 @@ fn run(
             state.accounts.len() == account_updates && state.storages.len() == account_updates,
             "duplicate update keys"
         );
-        ensure!(
-            block < 2 || (account_misses == 0 && slot_misses == 0),
-            "previous block prewarming did not survive pruning"
-        );
+        prewarmed.clear();
         let prepare_ms = start.elapsed().as_secs_f64() * 1000.;
         let input_late_ms = if block >= 2 {
             Instant::now().saturating_duration_since(arrival).as_secs_f64() * 1000.
@@ -541,26 +544,26 @@ fn run(
                 .par_iter()
                 .map(|&index| {
                     let entry = &entries[index];
-                    (
-                        entry.address,
-                        entry.slots.map(ProofV2Target::new).to_vec(),
-                        usize::from(!trie.is_account_revealed(entry.address)),
-                        entry
-                            .slots
-                            .iter()
-                            .filter(|slot| !trie.check_valid_storage_witness(entry.address, **slot))
-                            .count(),
-                    )
+                    let account_missing = usize::from(!trie.is_account_revealed(entry.address));
+                    let slots_missing = entry
+                        .slots
+                        .iter()
+                        .filter(|slot| !trie.check_valid_storage_witness(entry.address, **slot))
+                        .count();
+                    let slots = if account_missing != 0 || slots_missing != 0 {
+                        entry.slots.map(ProofV2Target::new).to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    (entry.address, slots, account_missing, slots_missing)
                 })
                 .collect();
             let mut targets = MultiProofTargetsV2::default();
-            let mut retained = MultiProofTargetsV2::default();
             for (address, slots, account_missing, slots_missing) in prepared {
                 // Storage targets implicitly request their account path as well.
                 if account_missing != 0 || slots_missing != 0 {
                     targets.storage_targets.insert(address, slots);
-                } else {
-                    retained.storage_targets.insert(address, slots);
+                    prewarmed.insert(address);
                 }
                 prewarm_accounts += account_missing;
                 prewarm_slots += slots_missing;
@@ -587,8 +590,6 @@ fn run(
                 );
                 trie = next_trie;
             }
-            // Already revealed next-block keys only need retention refreshed, not proof work.
-            trie.record_accesses(&retained, TrieNodeEpoch::new(epoch));
         }
         let prewarm_ms = prewarm_start.elapsed().as_secs_f64() * 1000.;
         let mut prune_ms = 0.;

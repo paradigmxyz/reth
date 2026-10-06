@@ -47,10 +47,10 @@ three slot paths to be unrevealed. Cold keys may be reused after they have been 
 update exactly 100,000 accounts and 300,000 slots; the optional update count scales both at 1:3. After each root, the next block's keys are selected and prefetched through a separate invocation of
 that same production state-root task, before the current block's persistence-triggered prune.
 Only keys with missing witnesses enter this warm-only invocation, which must preserve the root
-and emit no persistence updates. Already revealed next-block keys receive an access-epoch refresh
-directly through the same sparse-trie API, without resubmitting them as touched updates. Both paths
-refresh retention without marking nodes dirty. Ancestors and storage roots receive the same access epoch. Consumption in the next
-block must have zero missing account/slot witnesses, including across pruning.
+and emit no persistence updates. The prewarm task refreshes the revealed paths without marking nodes dirty. Already-hot keys
+retain their normal modification epochs and the configured eviction probability bound. Ancestors and storage roots receive the same access epoch. Consumption of a prefetched key in the next block must have zero missing account/slot witnesses,
+including across pruning. Rare hot keys pruned after lookahead selection are counted as ordinary
+consumption misses and handled by the current block's task.
 
 Churn is measured before this prewarming, not at consumption. The warm phase is serialized after
 the current root and charged to the current one-second interval; it can overlap background
@@ -72,8 +72,9 @@ and `input_late_ms` explicitly records any time the generator misses that arriva
 Input value construction and witness auditing use parallel reads of the preserved trie. This keeps
 the synthetic fixture generator from becoming the bottleneck at higher churn; the production root
 task, persistence, pruning, selected keys, and generated values are unchanged.
-`root_ms + prewarm_ms + cleanup_ms + prune_ms` measures the isolated state/persistence service work, excluding
-synthetic-input generation and witness auditing. Warmup and measurement are both paced. Fixed arrival
+`root_ms + prewarm_ms + cleanup_ms + prune_ms` measures recurring work after arrival, including
+lookahead selection and prefetch target preparation. Current-block value construction occurs before
+arrival when possible; any resulting lateness is included in the scheduled completion times. Warmup and measurement are both paced. Fixed arrival
 timestamps do not slide forward when work falls behind. Deadline elapsed time includes any generator lateness and post-root pruning audits, making it a
 conservative end-to-end harness measure. Arrival times are never reset at the warmup boundary. `saves.csv`
 includes actual commit time and final drain. `metrics.csv` records per-block distributions of the
