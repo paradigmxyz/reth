@@ -9,7 +9,9 @@ use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_errors::RethError;
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
-use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
+use reth_provider::{
+    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ProviderError, ProviderFactory,
+};
 use reth_snap_sync::{SnapBootstrap, SnapBootstrapOutcome, SnapWrite};
 use reth_stages::{
     ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId,
@@ -235,8 +237,13 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
-        let target = PipelineTarget::Sync(*targets.borrow_and_update());
-        let stages = pipeline.run_until(StageId::Finish, Some(target));
+        let mut target = *targets.borrow_and_update();
+        // A stale target never completes the header stage, so the stages run to the local head
+        // and the engine follows forkchoice from there.
+        if !self.is_ahead(target).await? {
+            target = self.local_head()?;
+        }
+        let stages = pipeline.run_until(StageId::Finish, Some(PipelineTarget::Sync(target)));
         self.stop.run_until_cancelled(stages).await.unwrap_or(Ok(STOPPED))
     }
 
@@ -277,6 +284,13 @@ where
             .ok()
             .and_then(|header| header.into_data())
             .is_none_or(|header| header.number() > head))
+    }
+
+    // Returns the hash of the highest local header.
+    fn local_head(&self) -> Result<B256, PipelineError> {
+        let provider = self.factory.provider()?;
+        let number = provider.last_block_number()?;
+        Ok(provider.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))?)
     }
 
     // Runs the header stage to `target`, or returns `None` once the run is stopped. Snap needs
@@ -734,24 +748,52 @@ mod tests {
         // A header stage with no outputs, so running it fails the test.
         let (mut pipeline, factory) =
             pipeline_with(TestStage::new(StageId::Headers), watch::channel(B256::ZERO).0);
-        let genesis = SealedHeader::seal_slow(Header::default());
-        let head = Header { number: 1, parent_hash: genesis.hash(), ..Default::default() };
-        insert_headers(&factory, &[genesis.clone(), SealedHeader::seal_slow(head)]);
-        // The header stage never completes a pass to a block at or below the local head.
-        let sibling =
-            Header { number: 1, parent_hash: genesis.hash(), gas_limit: 1, ..Default::default() };
-        let (_targets, mut receiver) = watch::channel(sibling.hash_slow());
-        let client = ServesHeader { header: sibling, noop: NoopFullBlockClient::default() };
-        let run = SnapRun::new(
-            client,
-            factory,
-            Runtime::test(),
-            CancellationToken::new(),
-            watch::channel(B256::ZERO).1,
-        );
+        let (run, _, mut receiver) = sibling_of_head(&factory);
 
         let pass = run.catch_up_headers(&mut pipeline, &mut receiver).await.unwrap();
 
         assert_eq!(pass, Pass::Done);
+    }
+
+    #[tokio::test]
+    async fn a_sibling_of_the_local_head_finishes_to_the_local_head() {
+        let factory = hashed_factory();
+        let stages = StageSetBuilder::default()
+            .add_stage(TestStage::new(StageId::Headers).add_exec(headers_done(1)))
+            .add_stage(TestStage::new(StageId::Finish).add_exec(headers_done(1)));
+        let (tip, pipeline_tip) = watch::channel(B256::ZERO);
+        let mut pipeline = pipeline_on(&factory, stages, tip);
+        let (run, head, mut receiver) = sibling_of_head(&factory);
+
+        let result = run.finish(&mut pipeline, &mut receiver).await.unwrap();
+
+        assert_ne!(result, STOPPED);
+        assert_eq!(*pipeline_tip.borrow(), head);
+    }
+
+    // Headers through block 1 in `factory`, and a run whose forkchoice target is a sibling of
+    // block 1 that peers serve. Returns the run, the local head's hash and the target receiver.
+    fn sibling_of_head(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ) -> (SnapRun<MockNodeTypesWithDB, ServesHeader>, B256, watch::Receiver<B256>) {
+        let genesis = SealedHeader::seal_slow(Header::default());
+        let head = SealedHeader::seal_slow(Header {
+            number: 1,
+            parent_hash: genesis.hash(),
+            ..Default::default()
+        });
+        insert_headers(factory, &[genesis.clone(), head.clone()]);
+        let sibling =
+            Header { number: 1, parent_hash: genesis.hash(), gas_limit: 1, ..Default::default() };
+        let receiver = watch::channel(sibling.hash_slow()).1;
+        let client = ServesHeader { header: sibling, noop: NoopFullBlockClient::default() };
+        let run = SnapRun::new(
+            client,
+            factory.clone(),
+            Runtime::test(),
+            CancellationToken::new(),
+            watch::channel(B256::ZERO).1,
+        );
+        (run, head.hash(), receiver)
     }
 }
