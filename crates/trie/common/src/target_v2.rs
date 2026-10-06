@@ -148,7 +148,7 @@ impl MultiProofTargetsV2 {
                     continue
                 }
 
-                let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+                let hashed_slot = keccak256(B256::from(key));
                 storage_slots.push(ProofV2Target::from(hashed_slot));
             }
 

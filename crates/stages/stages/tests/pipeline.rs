@@ -302,7 +302,7 @@ async fn run_pipeline_forward_and_unwind(
                 max_priority_fee_per_gas: 0,
                 to: TxKind::Call(CONTRACT_ADDRESS),
                 value: U256::ZERO,
-                input: Bytes::from(INCREMENT_SELECTOR.to_vec()),
+                input: INCREMENT_SELECTOR.into(),
                 ..Default::default()
             }),
         );

@@ -292,10 +292,9 @@ mod tests {
 
             // force the pipeline to be "done" after `pipeline_done_after` blocks
             let pipeline = TestPipelineBuilder::new()
-                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                    checkpoint: StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),
-                    done: true,
-                })]))
+                .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput::done(
+                    StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),
+                ))]))
                 .build(chain_spec);
 
             let pipeline_sync = PipelineSync::new(pipeline, Runtime::test());

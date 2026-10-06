@@ -88,7 +88,7 @@ mod tests {
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie_common::{HashedStorage, KeccakKeyHasher};
     use revm::{
-        database::{states::bundle_state::BundleRetention, CacheDB, EmptyDB, State},
+        database::{states::bundle_state::BundleRetention, InMemoryDB, State},
         state::{AccountInfo, Bytecode},
     };
     use std::{collections::BTreeMap, sync::Arc};
@@ -236,7 +236,7 @@ mod tests {
     // Final state as a flat map: accounts, and non-zero slots by hashed address and slot.
     type FlatState = (BTreeMap<B256, Account>, BTreeMap<(B256, B256), U256>);
 
-    fn flatten(db: &CacheDB<EmptyDB>) -> FlatState {
+    fn flatten(db: &InMemoryDB) -> FlatState {
         let mut state = FlatState::default();
         for (address, account) in &db.cache.accounts {
             let hashed_address = keccak256(address);
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn flat_state_excludes_zero_slots_and_deleted_account_storage() {
-        let mut db = CacheDB::<EmptyDB>::default();
+        let mut db = InMemoryDB::default();
         for address in [ACCOUNT, SENDER] {
             db.insert_account_info(address, AccountInfo::from_balance(U256::ONE));
             db.insert_account_storage(address, U256::ONE, U256::from(5)).unwrap();
@@ -306,7 +306,7 @@ mod tests {
         );
     }
 
-    fn insert(db: &mut CacheDB<EmptyDB>, address: Address, nonce: u64, code: Bytes) {
+    fn insert(db: &mut InMemoryDB, address: Address, nonce: u64, code: Bytes) {
         let code = Bytecode::new_raw(code);
         let info = AccountInfo {
             nonce,
@@ -339,7 +339,7 @@ mod tests {
         let contract = Address::repeat_byte(0xc0);
         let beneficiary = Address::repeat_byte(0xbe);
 
-        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+        let mut db = InMemoryDB::default();
         insert(&mut db, BEACON_ROOTS_ADDRESS, 1, BEACON_ROOTS_CODE.clone());
         insert(&mut db, HISTORY_STORAGE_ADDRESS, 1, HISTORY_STORAGE_CODE.clone());
         insert(

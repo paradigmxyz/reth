@@ -196,11 +196,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
     /// Creates a [`TreeConfig`] from all node arguments that affect the engine tree.
     pub fn tree_config(&self) -> TreeConfig {
-        self.engine
-            .tree_config()
-            .with_skip_state_root(self.debug.skip_state_root)
-            // Snap anchors its pivot to the finalized block, the staged pipeline ignores it.
-            .with_backfill_follows_finalized(self.network.snap_v2)
+        self.engine.tree_config().with_skip_state_root(self.debug.skip_state_root)
     }
 
     /// Sets --dev mode for the node.
@@ -654,14 +650,5 @@ mod tests {
 
         let config = config.with_debug(DebugArgs { skip_state_root: true, ..Default::default() });
         assert!(config.tree_config().skip_state_root());
-    }
-
-    #[test]
-    fn tree_config_follows_finalized_with_snap_v2() {
-        let config = NodeConfig::default();
-        assert!(!config.tree_config().backfill_follows_finalized());
-
-        let config = config.with_network(NetworkArgs { snap_v2: true, ..Default::default() });
-        assert!(config.tree_config().backfill_follows_finalized());
     }
 }

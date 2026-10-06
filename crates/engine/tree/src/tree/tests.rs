@@ -406,6 +406,21 @@ impl TestHarness {
 
         self.provider.extend_blocks(block_data);
     }
+
+    // Consumes the latest finalized block, which the tree forwards ahead of every backfill start.
+    fn expect_finalized_forwarded(&mut self) {
+        let finalized =
+            self.tree.state.forkchoice_state_tracker.latest_state().unwrap().finalized_block_hash;
+        let event = self.from_tree_rx.try_recv().unwrap();
+        assert!(
+            matches!(
+                event,
+                EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash))
+                    if hash == finalized
+            ),
+            "expected finalized update, got {event:#?}"
+        );
+    }
 }
 
 /// Simplified test metrics for validation calls
@@ -742,6 +757,7 @@ fn backfill_action_waits_while_payload_build_is_active() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let EngineApiEvent::BackfillAction(emitted_action) =
         test_harness.from_tree_rx.try_recv().unwrap()
     else {
@@ -752,8 +768,7 @@ fn backfill_action_waits_while_payload_build_is_active() {
 
 #[test]
 fn forkchoice_notifies_active_backfill_of_a_new_head() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     harness.tree.backfill_sync_state = BackfillSyncState::Active;
     let head = B256::repeat_byte(0x42);
     let finalized = B256::repeat_byte(0x41);
@@ -854,6 +869,7 @@ fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
@@ -918,6 +934,7 @@ fn deferred_backfill_uses_latest_sync_target() {
 
     test_harness.tree.advance_persistence().unwrap();
 
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(BackfillAction::Start(target)) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
@@ -965,6 +982,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
@@ -974,8 +992,7 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
 
 #[test]
 fn a_backfill_starts_with_the_latest_finalized_block() {
-    let config = TreeConfig::default().with_backfill_follows_finalized(true);
-    let mut harness = TestHarness::with_config(MAINNET.clone(), config);
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     let finalized = B256::repeat_byte(0x41);
     let state = ForkchoiceState {
         head_block_hash: B256::repeat_byte(0x42),
@@ -3426,6 +3443,9 @@ async fn assert_post_backfill_recheck_uses_threshold(
     });
     let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
+    if expect_backfill {
+        test_harness.expect_finalized_forwarded();
+    }
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target))

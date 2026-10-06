@@ -123,6 +123,9 @@ where
     /// Peers that do not serve the state, or headers not downloaded yet, wait for the context to
     /// report progress instead of failing the run.
     pub async fn run(&mut self) -> Result<SnapBootstrapOutcome, SnapSyncError> {
+        // Waits recur every few seconds, so only the first for a reason logs at info until a pass
+        // makes progress.
+        let mut announced = None;
         loop {
             if self.cancel.is_cancelled() {
                 return Ok(SnapBootstrapOutcome::Stopped)
@@ -134,14 +137,22 @@ where
                     return Ok(SnapBootstrapOutcome::BeforeBlockAccessLists)
                 }
                 Resolved::Waiting => {
-                    info!(target: "sync::snap", head, "Waiting for a block access list to anchor snap sync");
+                    if announced.replace(Wait::Pivot) == Some(Wait::Pivot) {
+                        debug!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
+                    } else {
+                        info!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
+                    }
                     Step::Wait
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
                     Ok(step) => step,
                     // The network fails snap requests at once while no connected peer serves them.
                     Err(SnapSyncError::Request(RequestError::UnsupportedCapability)) => {
-                        info!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        if announced.replace(Wait::SnapPeer) == Some(Wait::SnapPeer) {
+                            debug!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        } else {
+                            info!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        }
                         Step::Wait
                     }
                     Err(error) if error.is_transient() => {
@@ -168,7 +179,7 @@ where
                     info!(target: "sync::snap", ?pivot, "Snap state handed to the trie rebuild");
                     return Ok(SnapBootstrapOutcome::TrieRebuild { write, pivot })
                 }
-                Step::Continue => {}
+                Step::Continue => announced = None,
                 Step::Wait => {
                     if !self.wait(head).await {
                         return Ok(SnapBootstrapOutcome::Stopped)
@@ -205,6 +216,10 @@ where
         session.select(&provider, head, self.context.finalized())?;
         let Some((generation, _)) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
+            // Once the staged pipeline executes past genesis, the node stays on it. The first
+            // header pass may stop at the finalized block, so if block access lists
+            // activated between it and the head, the node full syncs. That window is
+            // narrow and accepted.
             return match provider.sealed_header(head)? {
                 Some(header) if header.block_access_list_hash().is_none() => {
                     Ok(Resolved::BeforeBlockAccessLists)
@@ -573,6 +588,13 @@ enum Step {
     Restart,
     // The run was cancelled; committed progress stays for the next one.
     Stop,
+}
+
+// Why a run waits, so a repeated wait logs at debug.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    Pivot,
+    SnapPeer,
 }
 
 #[cfg(test)]

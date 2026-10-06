@@ -26,7 +26,7 @@ use futures::FutureExt;
 use reth_chainspec::EthChainSpec;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use reth_errors::RethError;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, DatabaseProviderFactory, MetadataProvider,
     ProviderFactory, ProviderResult, StageCheckpointReader,
@@ -75,7 +75,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
 impl<N, C> SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     // Spawns a run if a target is queued and the pipeline is free.
     fn try_spawn(&mut self) -> Option<BackfillEvent> {
@@ -86,6 +86,13 @@ where
         // Once snap state is verified, or the node was not synced by snap, the staged pipeline
         // backfills alone, including unwinds.
         let event = match (self.needs_snap(), target) {
+            // The engine waits for every start to finish, so an unusable target fails the run
+            // instead of being dropped.
+            (_, PipelineTarget::Sync(hash)) if hash.is_zero() => {
+                BackfillEvent::Finished(Err(PipelineError::Internal(RethError::msg(
+                    "snap backfill cannot sync to the zero hash",
+                ))))
+            }
             (Err(error), _) => {
                 BackfillEvent::Finished(Err(PipelineError::Internal(RethError::other(error))))
             }
@@ -158,14 +165,12 @@ where
 impl<N, C> BackfillSync for SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
 {
     fn on_action(&mut self, action: BackfillAction) {
         match action {
-            // The zero hash is never a usable target.
-            BackfillAction::Start(PipelineTarget::Sync(hash)) |
-            BackfillAction::UpdateTarget(hash) |
-            BackfillAction::UpdateFinalized(hash)
+            // The zero hash never moves a target or anchors a pivot.
+            BackfillAction::UpdateTarget(hash) | BackfillAction::UpdateFinalized(hash)
                 if hash.is_zero() => {}
             BackfillAction::Start(target) => self.pending_target = Some(target),
             BackfillAction::UpdateTarget(hash) => {
@@ -220,8 +225,9 @@ enum SnapBackfillState<N: ProviderNodeTypes> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snap::run::tests::ServesHeaders;
+    use alloy_consensus::Header;
     use futures::{future::poll_fn, Stream, StreamExt};
-    use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{
             create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
@@ -239,10 +245,7 @@ mod tests {
     use reth_static_file::StaticFileProducer;
     use std::task::Waker;
 
-    pub(super) const TARGET: B256 = B256::repeat_byte(1);
-    pub(super) const NEXT_TARGET: B256 = B256::repeat_byte(2);
-
-    type TestBackfill = SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient>;
+    type TestBackfill = SnapBackfillSync<MockNodeTypesWithDB, ServesHeaders>;
 
     type TestProvider =
         <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW;
@@ -251,12 +254,8 @@ mod tests {
     fn backfill(headers: TestStage) -> (TestBackfill, impl Stream<Item = PipelineEvent> + Unpin) {
         let (pipeline, factory) = pipeline(headers);
         let events = pipeline.events();
-        let backfill = SnapBackfillSync::new(
-            pipeline,
-            NoopFullBlockClient::default(),
-            factory,
-            Runtime::test(),
-        );
+        let backfill =
+            SnapBackfillSync::new(pipeline, ServesHeaders::default(), factory, Runtime::test());
         (backfill, events)
     }
 
@@ -327,6 +326,14 @@ mod tests {
         panic!("the pipeline stopped before headers reached {block}")
     }
 
+    pub(super) fn target() -> B256 {
+        Header { number: 100, ..Default::default() }.hash_slow()
+    }
+
+    pub(super) fn next_target() -> B256 {
+        Header { number: 101, ..Default::default() }.hash_slow()
+    }
+
     #[tokio::test]
     async fn executed_state_backfills_with_the_staged_pipeline() {
         let headers = TestStage::new(StageId::Headers).add_exec(headers_done(5));
@@ -336,13 +343,13 @@ mod tests {
         provider.commit().unwrap();
         let mut backfill = SnapBackfillSync::new(
             pipeline,
-            NoopFullBlockClient::default(),
+            ServesHeaders::default(),
             factory.clone(),
             Runtime::test(),
         );
 
         // Executed state has nothing for snap to download, so the pipeline runs alone.
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(target())));
         assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Started(_))));
         assert!(matches!(backfill.state, SnapBackfillState::Staged(_)));
         assert!(matches!(poll_fn(|cx| backfill.poll(cx)).await, BackfillEvent::Finished(Ok(_))));
@@ -360,18 +367,19 @@ mod tests {
         // Only the provider factory decides eligibility, so the pipeline's own database is unused.
         let (pipeline, _) = pipeline(TestStage::new(StageId::Headers));
         let backfill =
-            TestBackfill::new(pipeline, NoopFullBlockClient::default(), factory, Runtime::test());
+            TestBackfill::new(pipeline, ServesHeaders::default(), factory, Runtime::test());
 
         assert!(backfill.needs_snap().unwrap());
     }
 
     #[test]
-    fn the_zero_hash_is_not_a_usable_target() {
+    fn a_zero_hash_target_fails_without_starting_a_run() {
         let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::ZERO)));
 
-        assert!(poll_once(&mut backfill).is_pending());
+        assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Finished(Err(_)))));
+        assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 
     #[test]
@@ -379,10 +387,10 @@ mod tests {
         let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
         let finalized = backfill.finalized.subscribe();
 
-        backfill.on_action(BackfillAction::UpdateFinalized(TARGET));
+        backfill.on_action(BackfillAction::UpdateFinalized(target()));
         backfill.on_action(BackfillAction::UpdateFinalized(B256::ZERO));
 
-        assert_eq!(*finalized.borrow(), TARGET);
+        assert_eq!(*finalized.borrow(), target());
         assert!(poll_once(&mut backfill).is_pending());
     }
 
@@ -390,7 +398,7 @@ mod tests {
     fn a_target_update_while_idle_starts_nothing() {
         let (mut backfill, _events) = backfill(TestStage::new(StageId::Headers));
 
-        backfill.on_action(BackfillAction::UpdateTarget(TARGET));
+        backfill.on_action(BackfillAction::UpdateTarget(target()));
 
         assert!(poll_once(&mut backfill).is_pending());
         assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
@@ -401,10 +409,10 @@ mod tests {
         let (mut backfill, mut events) =
             backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
 
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(target())));
         assert!(matches!(
             poll_once(&mut backfill),
-            Poll::Ready(BackfillEvent::Started(PipelineTarget::Sync(TARGET)))
+            Poll::Ready(BackfillEvent::Started(PipelineTarget::Sync(hash))) if hash == target()
         ));
         headers_reach(&mut events, 0).await;
 
@@ -414,14 +422,14 @@ mod tests {
         let mut observer = targets.subscribe();
         backfill.on_action(BackfillAction::UpdateTarget(B256::ZERO));
         assert!(!observer.has_changed().unwrap());
-        backfill.on_action(BackfillAction::UpdateTarget(NEXT_TARGET));
-        backfill.on_action(BackfillAction::UpdateTarget(NEXT_TARGET));
+        backfill.on_action(BackfillAction::UpdateTarget(next_target()));
+        backfill.on_action(BackfillAction::UpdateTarget(next_target()));
 
         assert!(observer.has_changed().unwrap());
-        assert_eq!(*observer.borrow_and_update(), NEXT_TARGET);
+        assert_eq!(*observer.borrow_and_update(), next_target());
         assert!(!observer.has_changed().unwrap());
         // A second start cannot run beside the active one.
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(NEXT_TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(next_target())));
         assert!(poll_once(&mut backfill).is_pending());
     }
 
@@ -429,7 +437,7 @@ mod tests {
     async fn a_dropped_backfill_stops_its_run_and_releases_the_pipeline() {
         let (mut backfill, mut events) =
             backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(target())));
         assert!(poll_once(&mut backfill).is_ready());
         headers_reach(&mut events, 0).await;
 
@@ -448,7 +456,7 @@ mod tests {
     async fn node_shutdown_keeps_committed_progress() {
         let (mut backfill, mut events) =
             backfill(TestStage::new(StageId::Headers).add_exec(headers_done(0)));
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(target())));
         assert!(poll_once(&mut backfill).is_ready());
         headers_reach(&mut events, 0).await;
 
@@ -463,7 +471,7 @@ mod tests {
     async fn a_failed_run_returns_the_pipeline() {
         let (mut backfill, _events) =
             backfill(TestStage::new(StageId::Headers).add_exec(Err(StageError::ChannelClosed)));
-        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(target())));
         assert!(poll_once(&mut backfill).is_ready());
 
         assert!(matches!(poll_fn(|cx| backfill.poll(cx)).await, BackfillEvent::Finished(Err(_))));

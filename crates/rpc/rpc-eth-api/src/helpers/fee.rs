@@ -3,7 +3,7 @@
 use super::LoadBlock;
 use crate::FromEthApiError;
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7840::BlobParams;
+use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::{Future, StreamExt};
@@ -346,7 +346,7 @@ where
                         .provider()
                         .latest_header()
                         .map_err(Self::Error::from_eth_err)?
-                        .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                        .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
                     let pending_base_fee = self
                         .provider()
                         .chain_spec()
@@ -414,7 +414,7 @@ where
                 .provider()
                 .latest_header()
                 .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+                .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
             Ok(self
                 .provider()
                 .chain_spec()
