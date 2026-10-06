@@ -18,6 +18,9 @@
 //!
 //! [`DownloadDefaults`] defines the discovery endpoints and default help text used when the command
 //! needs to discover a manifest instead of consuming an explicit source.
+//! The manifest chain ID is checked when the selected chain determines the source, default data
+//! directory, or pre-Merge pruning settings. Explicit sources and data directories do not require
+//! a matching chain when component selection is independent of its hardforks.
 //!
 //! ## Selection and planning
 //!
@@ -626,11 +629,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
         let mut manifest = fetch_manifest_from_source(&manifest_source).await?;
-        eyre::ensure!(
-            manifest.chain_id == chain_id,
-            "Snapshot chain ID {} does not match selected chain ID {chain_id}",
-            manifest.chain_id
-        );
+        if !self.env.datadir.datadir.is_some() ||
+            (self.manifest_url.is_none() && self.manifest_path.is_none())
+        {
+            self.validate_manifest_chain(&manifest)?;
+        }
         manifest.base_url = Some(resolve_manifest_base_url(&manifest, &manifest_source)?);
 
         info!(target: "reth::cli",
@@ -677,7 +680,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             tx.commit()?;
         }
 
-        let start_command = startup_node_command::<C>(self.env.chain.as_ref());
+        let start_command = if self.env.chain.chain().id() == manifest.chain_id {
+            startup_node_command::<C>(self.env.chain.as_ref())
+        } else {
+            format!("{} node --chain <chain-or-chainspec>", current_binary_name())
+        };
         info!(target: "reth::cli", "Snapshot download complete. Run `{}` to start syncing.", start_command);
 
         Ok(())
@@ -705,7 +712,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         if self.full {
             return Ok(ResolvedComponents {
-                selections: self.full_preset_selections(manifest),
+                selections: self.full_preset_selections(manifest)?,
                 preset: Some(SelectionPreset::Full),
             });
         }
@@ -801,7 +808,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         // Interactive TUI
         let minimal_preset = self.minimal_preset_selections(manifest);
-        let full_preset = self.full_preset_selections(manifest);
+        let full_preset = self.full_preset_selections(manifest)?;
         let SelectorOutput { selections, preset } =
             run_selector(manifest.clone(), &minimal_preset, &full_preset)?;
         let selected =
@@ -822,8 +829,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
     fn full_preset_selections(
         &self,
         manifest: &SnapshotManifest,
-    ) -> BTreeMap<SnapshotComponentType, ComponentSelection> {
-        self.pruning_preset_selections(manifest, SelectionPreset::Full)
+    ) -> Result<BTreeMap<SnapshotComponentType, ComponentSelection>> {
+        if DefaultPruningValues::get_global().full_bodies_history_use_pre_merge {
+            self.validate_manifest_chain(manifest)?;
+        }
+        Ok(self.pruning_preset_selections(manifest, SelectionPreset::Full))
     }
 
     /// Builds component selections from the configured pruning preset.
@@ -922,6 +932,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 discover_manifest_url(chain_id).await
             }
         }
+    }
+
+    fn validate_manifest_chain(&self, manifest: &SnapshotManifest) -> Result<()> {
+        let chain_id = self.env.chain.chain().id();
+        eyre::ensure!(
+            manifest.chain_id == chain_id,
+            "Snapshot chain ID {} does not match selected chain ID {chain_id}",
+            manifest.chain_id
+        );
+        Ok(())
     }
 }
 
@@ -1576,5 +1596,83 @@ mod tests {
     #[test]
     fn download_command_uses_binary_name() {
         assert_eq!(download_command_for_binary("tempo"), "tempo download");
+    }
+
+    #[tokio::test]
+    async fn test_download_explicit_source_and_datadir_allow_other_chains() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("manifest.json");
+        let mut manifest = manifest_with_archive_only_components();
+        manifest.chain_id = 42431;
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let manifest_url = format!("file://{}", manifest_path.display());
+        let target = dir.path().join("download");
+
+        for source in ["--manifest-url", "--manifest-path"] {
+            let location = if source == "--manifest-url" {
+                manifest_url.as_str()
+            } else {
+                manifest_path.to_str().unwrap()
+            };
+            for selection in ["--archive", "--minimal", "--non-interactive", "--with-txs"] {
+                let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+                    "reth",
+                    source,
+                    location,
+                    "--datadir",
+                    target.to_str().unwrap(),
+                    selection,
+                ])
+                .args;
+                let (plan, prepared) = args.plan().await.unwrap();
+                assert_eq!(plan.chain_id, 42431);
+                assert_eq!(prepared.manifest.chain_id, 42431);
+                assert_eq!(prepared.data_dir, target);
+                assert!(!target.exists());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_chain_derived_datadir_rejects_other_chains() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("manifest.json");
+        let mut manifest = manifest_with_archive_only_components();
+        manifest.chain_id = 42431;
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        for datadir in [vec![], vec!["--datadir", "default"]] {
+            let mut cli_args =
+                vec!["reth", "--manifest-path", manifest_path.to_str().unwrap(), "--archive"];
+            cli_args.extend(datadir);
+            let args =
+                CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from(cli_args)
+                    .args;
+            assert_eq!(
+                args.plan().await.unwrap_err().to_string(),
+                "Snapshot chain ID 42431 does not match selected chain ID 1"
+            );
+        }
+    }
+
+    #[test]
+    fn test_download_full_chain_derived_pruning_rejects_other_chains() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--datadir",
+            "download",
+            "--manifest-url",
+            "https://example.com/manifest.json",
+            "--full",
+        ])
+        .args;
+        let mut manifest = manifest_with_archive_only_components();
+        manifest.chain_id = 42431;
+        assert_eq!(
+            args.full_preset_selections(&manifest).unwrap_err().to_string(),
+            "Snapshot chain ID 42431 does not match selected chain ID 1"
+        );
+        manifest.chain_id = 1;
+        assert!(args.full_preset_selections(&manifest).is_ok());
     }
 }
