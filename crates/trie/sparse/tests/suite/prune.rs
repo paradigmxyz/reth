@@ -352,3 +352,34 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
         "old large subtrie should be blinded"
     );
 }
+
+/// Access refreshes retention across subtrie boundaries without producing persistence updates.
+pub(super) fn test_prune_retains_accessed_paths<T: SparseTrie>(new_trie: fn() -> T) {
+    for prefix in [0, 2, 8] {
+        let keys: Vec<_> = (0_u64..1024)
+            .map(|i| {
+                let mut key = alloy_primitives::keccak256(i.to_be_bytes());
+                key.0[..prefix].fill(0);
+                key
+            })
+            .collect();
+        let harness = SuiteTestHarness::new(keys.iter().map(|k| (*k, U256::from(1))).collect());
+        let mut trie = harness.init_trie_fully_revealed(false, new_trie);
+        trie.set_state_trie_updates(true);
+        let target = Nibbles::unpack(keys[0]);
+        // The root has only been revealed, not hashed or changed.
+        trie.record_access(&target, epoch(20));
+        trie.record_access(&target, epoch(10));
+        assert_eq!(trie.root_epoch(), Some(epoch(20)));
+        assert_eq!(trie.root(epoch(20)), harness.original_root());
+        assert!(trie.take_state_trie_updates().is_empty());
+        trie.prune(epoch(20));
+        assert!(trie.get_leaf_value(&target).is_some());
+        assert!(keys[1..].iter().any(|k| trie.get_leaf_value(&Nibbles::unpack(k)).is_none()));
+        assert_eq!(trie.root(epoch(20)), harness.original_root());
+        trie.prune(epoch(21));
+        assert!(trie.get_leaf_value(&target).is_none());
+        assert_eq!(trie.root(epoch(21)), harness.original_root());
+        assert!(trie.take_state_trie_updates().is_empty());
+    }
+}

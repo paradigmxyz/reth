@@ -8,7 +8,7 @@ use either::Either;
 use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
+    DecodedMultiProof, MultiProof, MultiProofTargetsV2, Nibbles, ProofTrieNodeV2,
 };
 #[cfg(feature = "std")]
 use tracing::debug;
@@ -520,7 +520,27 @@ where
         self.storage.tries.len() + self.storage.cleared_tries.len()
     }
 
-    /// Prunes account and storage trie nodes last modified before `prune_before`.
+    /// Records prewarm accesses after all modified tries have been hashed.
+    /// Refreshing retention does not change values, cached hashes, or persisted updates.
+    pub fn record_accesses(&mut self, targets: &MultiProofTargetsV2, epoch: TrieNodeEpoch) {
+        if let Some(trie) = self.state.as_revealed_mut() {
+            for target in &targets.account_targets {
+                trie.record_access(&target.key_nibbles, epoch);
+            }
+            for address in targets.storage_targets.keys() {
+                trie.record_access(&Nibbles::unpack(address), epoch);
+            }
+        }
+        for (address, slots) in &targets.storage_targets {
+            if let Some(trie) = self.storage_trie_mut(address) {
+                for slot in slots {
+                    trie.record_access(&slot.key_nibbles, epoch);
+                }
+            }
+        }
+    }
+
+    /// Prunes account and storage trie nodes last modified or accessed before `prune_before`.
     ///
     /// Storage tries whose root epochs predate the cutoff are fully evicted.
     ///
@@ -528,7 +548,7 @@ where
     ///
     /// Modified account and storage tries must already have computed hashes via `root()` /
     /// `storage_root()` for their current state. Unmodified storage roots revealed only by
-    /// prewarming are treated as epoch zero.
+    /// prewarming remain epoch zero unless their accesses have been recorded.
     #[cfg(feature = "std")]
     #[instrument(
         level = "debug",

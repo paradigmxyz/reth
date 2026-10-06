@@ -188,6 +188,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
+    /// Successful prewarm accesses whose retention epochs are refreshed after hashing.
+    prewarmed_targets: MultiProofTargetsV2,
     /// Proof batches dispatched to workers and not yet received.
     in_flight_proof_batches: usize,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
@@ -277,6 +279,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
+            prewarmed_targets: Default::default(),
             in_flight_proof_batches: 0,
             storage: Default::default(),
             storage_to_drop: Default::default(),
@@ -509,6 +512,7 @@ where
             }
         };
 
+        self.trie.record_accesses(&self.prewarmed_targets, self.new_epoch);
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
@@ -641,12 +645,18 @@ where
         skip_all
     )]
     fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
+        self.prewarmed_targets.account_targets.extend_from_slice(&targets.account_targets);
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
             self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
         }
 
         for (address, slots) in targets.storage_targets {
+            self.prewarmed_targets
+                .storage_targets
+                .entry(address)
+                .or_default()
+                .extend_from_slice(&slots);
             if !slots.is_empty() {
                 // Look up outer map once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();
@@ -1792,6 +1802,49 @@ mod tests {
             panic!("payload is out with a job")
         };
         work.trie.root(TrieNodeEpoch::new(1)).expect("storage trie must be revealed")
+    }
+
+    #[test]
+    fn prewarming_refreshes_retention_without_updates() {
+        let runtime = Runtime::test();
+        let mut trie = SparseStateTrie::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::revealed_empty())
+            .with_state_trie_updates(true);
+        let address = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let mut initial = HashedPostState::default();
+        initial.accounts.insert(address, Some(Account::default()));
+        initial.storages.entry(address).or_default().storage.insert(slot, U256::from(42));
+        let (mut task, tx, _guard) = test_task(&runtime, trie);
+        tx.send(StateRootMessage::HashedStateUpdate(initial)).unwrap();
+        tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(tx);
+        let root = task.run().unwrap().state_root;
+        (trie, _) = task.into_trie_for_reuse();
+
+        let (mut task, tx, _guard) = test_task(&runtime, trie);
+        task.parent_state_root = root;
+        task.new_epoch = TrieNodeEpoch::new(20);
+        tx.send(StateRootMessage::PrefetchProofs(MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(address)],
+            storage_targets: B256Map::from_iter([(address, vec![ProofV2Target::new(slot)])]),
+        }))
+        .unwrap();
+        tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+        drop(tx);
+        let outcome = task.run().unwrap();
+        assert_eq!(outcome.state_root, root);
+        assert!(outcome.state_trie_updates.as_ref().is_none_or(|u| u.is_empty()));
+        let (mut trie, _) = task.into_trie_for_reuse();
+        trie.prune(TrieNodeEpoch::new(20));
+        assert!(trie.is_account_revealed(address));
+        assert!(trie.check_valid_storage_witness(address, slot));
+        assert_eq!(trie.root(TrieNodeEpoch::new(20)).unwrap(), root);
+        trie.prune(TrieNodeEpoch::new(21));
+        assert!(trie.storage_trie_ref(&address).is_none());
+        assert_eq!(trie.root(TrieNodeEpoch::new(21)).unwrap(), root);
+        drain_sparse_trie_tasks(&runtime);
     }
 
     #[test]

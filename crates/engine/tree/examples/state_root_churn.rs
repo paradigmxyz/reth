@@ -29,7 +29,7 @@ use reth_tasks::{RayonConfig, Runtime, RuntimeBuilder, RuntimeConfig, TokioConfi
 use reth_trie::{
     proof_v3::ProofCalculator,
     state_trie_cursor::{StateTrieCursor, StateTrieCursorFactory},
-    HashedPostState, HashedStorage, Nibbles, StateTrieNode,
+    HashedPostState, HashedStorage, MultiProofTargetsV2, Nibbles, ProofV2Target, StateTrieNode,
 };
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofWorkerHandle},
@@ -54,8 +54,6 @@ mod task;
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-const HOT: usize = 200_000;
-const UPDATES: usize = 100_000;
 type Trie = SparseStateTrie<ArenaParallelSparseTrie, ArenaParallelSparseTrie>;
 type Factory = ProviderFactory<MockNodeTypesWithDB<reth_db::DatabaseEnv>>;
 
@@ -68,7 +66,7 @@ struct Entry {
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    ensure!(args.len() >= 4, "sample DATADIR CORPUS COUNT | run DATADIR CORPUS CHURN BLOCKS WARMUP MASK OUTPUT [PERIOD_MS [PERSISTENCE_THRESHOLD [CACHE_GIB]]]");
+    ensure!(args.len() >= 4, "sample DATADIR CORPUS COUNT | run DATADIR CORPUS CHURN BLOCKS WARMUP MASK OUTPUT [PERIOD_MS [PERSISTENCE_THRESHOLD [CACHE_GIB [ACCOUNT_account_updates]]]]");
     if args[0] == "sample" {
         return sample_mainnet(&args[1], &args[2], args[3].parse()?);
     }
@@ -80,6 +78,11 @@ fn main() -> Result<()> {
     let period = Duration::from_millis(args.get(8).map_or(Ok(1000), |s| s.parse())?);
     let persistence_threshold = args.get(9).map_or(Ok(mask + 10), |s| s.parse())?;
     let cache_gib: usize = args.get(10).map_or(Ok(12), |s| s.parse())?;
+    let account_updates: usize = args.get(11).map_or(Ok(100_000), |s| s.parse())?;
+    ensure!(
+        account_updates > 0 && account_updates % 20 == 0,
+        "account updates must be a positive multiple of 20"
+    );
     ensure!(
         churn <= 50 && mask > 0 && blocks > 0 && persistence_threshold >= 5 && cache_gib > 0,
         "invalid experiment parameters"
@@ -113,6 +116,7 @@ fn main() -> Result<()> {
         mask,
         persistence_threshold,
         cache_gib,
+        account_updates,
         period,
         Path::new(&args[7]),
     );
@@ -238,6 +242,7 @@ fn compute(
     root: B256,
     epoch: u64,
     state: HashedPostState,
+    prefetch: MultiProofTargetsV2,
 ) -> Result<(StateRootComputeOutcome, Trie)> {
     let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
     let (_cancel_tx, cancel_rx) = crossbeam_channel::bounded(0);
@@ -259,6 +264,7 @@ fn compute(
         TrieNodeEpoch::new(epoch),
         80,
     );
+    updates_tx.send(StateRootMessage::PrefetchProofs(prefetch))?;
     updates_tx.send(StateRootMessage::HashedStateUpdate(state))?;
     updates_tx.send(StateRootMessage::FinishedStateUpdates)?;
     drop(updates_tx);
@@ -302,11 +308,13 @@ fn run(
     mask: u64,
     persistence_threshold: u64,
     cache_gib: usize,
+    account_updates: usize,
     period: Duration,
     output: &Path,
 ) -> Result<()> {
+    let hot = account_updates * 2;
     let entries = read_corpus(corpus)?;
-    ensure!(entries.len() > HOT + UPDATES, "corpus too small");
+    ensure!(entries.len() > hot + account_updates, "corpus too small");
     let db = reth_db::open_db(Path::new(datadir).join("db"), DatabaseArguments::default())?;
     let base = {
         let tx = db.tx()?;
@@ -369,7 +377,7 @@ fn run(
         Ok(())
     });
     let mut log = BufWriter::new(File::create(output.join("blocks.csv"))?);
-    writeln!(log, "block,measured,root_ms,prepare_ms,input_late_ms,cleanup_ms,prune_ms,root_ready_ms,deadline_ms,account_misses,slot_misses,hot_account_evictions,hot_slot_evictions,pending_blocks,partial_lag,retained_storages")?;
+    writeln!(log, "block,measured,root_ms,prepare_ms,input_late_ms,cleanup_ms,prune_ms,root_ready_ms,deadline_ms,account_misses,slot_misses,hot_account_evictions,hot_slot_evictions,pending_blocks,partial_lag,retained_storages,prewarm_ms,prewarm_accounts,prewarm_slots,prune_cutoff")?;
     let mut metric_log = BufWriter::new(File::create(output.join("metrics.csv"))?);
     writeln!(metric_log, "block,metric,count,sum,p50,p90,p99,max")?;
     let mut rng = StdRng::seed_from_u64(7012026);
@@ -377,10 +385,11 @@ fn run(
     let mut partial = base;
     let mut saving = false;
     let mut arrival_start = Instant::now();
-    let mut cold_position = HOT;
+    let mut cold_position = hot;
     let mut ever_evicted = B256Set::default();
     let mut evicted_slots = B256Set::default();
     let mut last_epoch = vec![0_u64; entries.len()];
+    let mut next_selection = Vec::new();
     // Two initialization blocks reveal every hot key. They are not timed as workload blocks.
     for block in 0..blocks + warmup + 2 {
         if block == 2 {
@@ -390,33 +399,11 @@ fn run(
         let arrival = arrival_start + period * block.saturating_sub(2) as u32;
         let start = Instant::now();
         let epoch = base + block as u64 + 1;
-        let mut selected = if block < 2 {
-            (block * UPDATES..(block + 1) * UPDATES).collect::<Vec<_>>()
+        let selected = if block < 2 {
+            (block * account_updates..(block + 1) * account_updates).collect::<Vec<_>>()
         } else {
-            sample(&mut rng, HOT, UPDATES * (100 - churn) / 100).into_vec()
+            std::mem::take(&mut next_selection)
         };
-        let mut attempts = 0;
-        while selected.len() < UPDATES {
-            let index = cold_position;
-            cold_position += 1;
-            if cold_position == entries.len() {
-                cold_position = HOT;
-            }
-            attempts += 1;
-            ensure!(
-                attempts <= entries.len() - HOT,
-                "cold corpus exhausted; enlarge corpus or decrease retention"
-            );
-            let entry = &entries[index];
-            if !trie.is_account_revealed(entry.address) &&
-                entry
-                    .slots
-                    .iter()
-                    .all(|slot| !trie.check_valid_storage_witness(entry.address, *slot))
-            {
-                selected.push(index);
-            }
-        }
         // Prepare the fixture before arrival in parallel so synthetic input generation does not
         // limit the measured state-root service. Witness checks only borrow the preserved trie.
         let prepared: Vec<_> = selected
@@ -439,8 +426,8 @@ fn run(
             })
             .collect();
         let mut state = HashedPostState::default();
-        state.accounts.reserve(UPDATES);
-        state.storages.reserve(UPDATES);
+        state.accounts.reserve(account_updates);
+        state.storages.reserve(account_updates);
         let mut account_misses = 0;
         let mut slot_misses = 0;
         for (index, account_missing, slots_missing, account, storage) in prepared {
@@ -448,14 +435,14 @@ fn run(
             let entry = &entries[index];
             if account_missing {
                 account_misses += 1;
-                if block >= 2 && index < HOT {
+                if block >= 2 && index < hot {
                     ever_evicted.insert(entry.address);
                 }
             }
             for (slot, missing) in entry.slots.into_iter().zip(slots_missing) {
                 if missing {
                     slot_misses += 1;
-                    if block >= 2 && index < HOT {
+                    if block >= 2 && index < hot {
                         evicted_slots.insert(alloy_primitives::keccak256(
                             [entry.address.as_slice(), slot.as_slice()].concat(),
                         ));
@@ -466,8 +453,12 @@ fn run(
             state.storages.insert(entry.address, storage);
         }
         ensure!(
-            state.accounts.len() == UPDATES && state.storages.len() == UPDATES,
+            state.accounts.len() == account_updates && state.storages.len() == account_updates,
             "duplicate update keys"
+        );
+        ensure!(
+            block < 2 || (account_misses == 0 && slot_misses == 0),
+            "previous block prewarming did not survive pruning"
         );
         let prepare_ms = start.elapsed().as_secs_f64() * 1000.;
         let input_late_ms = if block >= 2 {
@@ -498,7 +489,8 @@ fn run(
         }
         let cleanup_ms = cleanup_start.elapsed().as_secs_f64() * 1000.;
         let root_start = Instant::now();
-        let (outcome, next_trie) = compute(runtime, factory.clone(), trie, root, epoch, state)?;
+        let (outcome, next_trie) =
+            compute(runtime, factory.clone(), trie, root, epoch, state, Default::default())?;
         let root_ms = root_start.elapsed().as_secs_f64() * 1000.;
         let root_ready_ms = if measured { arrival.elapsed().as_secs_f64() * 1000. } else { 0. };
         root = outcome.state_root;
@@ -520,11 +512,78 @@ fn run(
             ExecutedBlock::new(Arc::new(recovered), Default::default(), Default::default());
         executed.state_trie_updates = outcome.state_trie_updates;
         pending.push_back(executed);
+        let prewarm_start = Instant::now();
+        let mut prewarm_accounts = 0;
+        let mut prewarm_slots = 0;
+        if block >= 1 && block + 1 < blocks + warmup + 2 {
+            next_selection =
+                sample(&mut rng, hot, account_updates * (100 - churn) / 100).into_vec();
+            let mut attempts = 0;
+            while next_selection.len() < account_updates {
+                let index = cold_position;
+                cold_position += 1;
+                if cold_position == entries.len() {
+                    cold_position = hot;
+                }
+                attempts += 1;
+                ensure!(attempts <= entries.len() - hot, "cold corpus exhausted");
+                let entry = &entries[index];
+                if !trie.is_account_revealed(entry.address) &&
+                    entry
+                        .slots
+                        .iter()
+                        .all(|slot| !trie.check_valid_storage_witness(entry.address, *slot))
+                {
+                    next_selection.push(index);
+                }
+            }
+            let prepared: Vec<_> = next_selection
+                .par_iter()
+                .map(|&index| {
+                    let entry = &entries[index];
+                    (
+                        entry.address,
+                        ProofV2Target::new(entry.address),
+                        entry.slots.map(ProofV2Target::new).to_vec(),
+                        usize::from(!trie.is_account_revealed(entry.address)),
+                        entry
+                            .slots
+                            .iter()
+                            .filter(|slot| !trie.check_valid_storage_witness(entry.address, **slot))
+                            .count(),
+                    )
+                })
+                .collect();
+            let mut targets = MultiProofTargetsV2::default();
+            targets.account_targets.reserve(account_updates);
+            targets.storage_targets.reserve(account_updates);
+            for (address, account, slots, account_missing, slots_missing) in prepared {
+                // Refresh all next-block accesses, including already revealed hot keys.
+                targets.account_targets.push(account);
+                targets.storage_targets.insert(address, slots);
+                prewarm_accounts += account_missing;
+                prewarm_slots += slots_missing;
+            }
+            ensure!(
+                prewarm_accounts >= account_updates * churn / 100 &&
+                    prewarm_slots >= account_updates * 3 * churn / 100,
+                "cold selection missed churn target"
+            );
+            let (warmed, next_trie) =
+                compute(runtime, factory.clone(), trie, root, epoch, Default::default(), targets)?;
+            ensure!(warmed.state_root == root, "prewarming changed the root");
+            ensure!(
+                warmed.state_trie_updates.as_ref().is_none_or(|u| u.is_empty()),
+                "prewarming generated persistence updates"
+            );
+            trie = next_trie;
+        }
+        let prewarm_ms = prewarm_start.elapsed().as_secs_f64() * 1000.;
         let mut prune_ms = 0.;
         let mut hot_account_evictions = 0;
         let mut hot_slot_evictions = 0;
         if let Some(cutoff) = prune_cutoff {
-            let before: Vec<_> = entries[..HOT]
+            let before: Vec<_> = entries[..hot]
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| last_epoch[*i] < cutoff || *i % 200 == block % 200)
@@ -575,7 +634,7 @@ fn run(
             saving = true;
         }
         let deadline_ms = if measured { arrival.elapsed().as_secs_f64() * 1000. } else { 0. };
-        writeln!(log, "{block},{measured},{root_ms},{prepare_ms},{input_late_ms},{cleanup_ms},{prune_ms},{root_ready_ms},{deadline_ms},{account_misses},{slot_misses},{hot_account_evictions},{hot_slot_evictions},{},{},{}", epoch - db_tip, epoch - partial, trie.retained_storage_tries_count())?;
+        writeln!(log, "{block},{measured},{root_ms},{prepare_ms},{input_late_ms},{cleanup_ms},{prune_ms},{root_ready_ms},{deadline_ms},{account_misses},{slot_misses},{hot_account_evictions},{hot_slot_evictions},{},{},{},{prewarm_ms},{prewarm_accounts},{prewarm_slots},{}", epoch - db_tip, epoch - partial, trie.retained_storage_tries_count(), prune_cutoff.unwrap_or(0))?;
         log.flush()?;
         collect_metrics(snapshotter, &mut metric_log, block)?;
         if block % 10 == 0 {
@@ -649,17 +708,24 @@ fn run(
         .with_accounts_trie(empty.clone())
         .with_default_storage_trie(empty)
         .with_state_trie_updates(true);
-    let (check, _) =
-        compute(runtime, factory.clone(), fresh, root, parent.number + 1, check_state)?;
+    let (check, _) = compute(
+        runtime,
+        factory.clone(),
+        fresh,
+        root,
+        parent.number + 1,
+        check_state,
+        Default::default(),
+    )?;
     ensure!(check.state_root == root, "fresh trie disagrees with persisted proofs");
     eprintln!(
         "verified persisted values and fresh proofs for {checked} accounts and {} slots",
         checked * 3
     );
     let mut summary = File::create(output.join("result.txt"))?;
-    writeln!(summary, "churn={churn}\nmask={mask}\npersistence_threshold={persistence_threshold}\ncache_gib={cache_gib}\nblocks={blocks}\nwarmup={warmup}\nhot_accounts={HOT}\nhot_slots={}\nunique_hot_accounts_pruned={}\nunique_hot_slots_pruned={}\ndrain_secs={drain_secs}\nfinal_root={root}\nfinal_block={}\npersisted_root_verified=true\nverified_accounts={checked}\nfresh_trie_verified=true", HOT*3, ever_evicted.len(), evicted_slots.len(), parent.number)?;
-    ensure!(ever_evicted.len() * 1000 < HOT, "premature hot account pruning exceeded 0.1%");
-    ensure!(evicted_slots.len() * 1000 < HOT * 3, "premature hot slot pruning exceeded 0.1%");
+    writeln!(summary, "churn={churn}\nmask={mask}\npersistence_threshold={persistence_threshold}\ncache_gib={cache_gib}\nblocks={blocks}\nwarmup={warmup}\naccount_updates={account_updates}\nhot_accounts={hot}\nhot_slots={}\nunique_hot_accounts_pruned={}\nunique_hot_slots_pruned={}\ndrain_secs={drain_secs}\nfinal_root={root}\nfinal_block={}\npersisted_root_verified=true\nverified_accounts={checked}\nfresh_trie_verified=true", hot*3, ever_evicted.len(), evicted_slots.len(), parent.number)?;
+    ensure!(ever_evicted.len() * 1000 < hot, "premature hot account pruning exceeded 0.1%");
+    ensure!(evicted_slots.len() * 1000 < hot * 3, "premature hot slot pruning exceeded 0.1%");
     Ok(())
 }
 

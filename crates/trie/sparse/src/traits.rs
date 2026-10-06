@@ -13,10 +13,10 @@ use reth_trie_common::{
     BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
 };
 
-/// Modification epoch assigned to cached sparse trie nodes.
+/// Retention epoch assigned to cached sparse trie nodes.
 ///
 /// Epochs must increase monotonically. Nodes materialized from the parent state without being
-/// modified use [`Self::UNMODIFIED`].
+/// modified or explicitly accessed use [`Self::UNMODIFIED`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TrieNodeEpoch(u64);
 
@@ -24,7 +24,7 @@ impl TrieNodeEpoch {
     /// Epoch assigned to nodes materialized from the parent state without being modified.
     pub const UNMODIFIED: Self = Self(0);
 
-    /// Creates a new node modification epoch.
+    /// Creates a new node retention epoch.
     pub const fn new(epoch: u64) -> Self {
         Self(epoch)
     }
@@ -142,7 +142,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Returns true if the root node is cached and does not need any recomputation.
     fn is_root_cached(&self) -> bool;
 
-    /// Returns the root's modification epoch when it is clean, or `None` when it is dirty.
+    /// Returns the root's retention epoch when it is clean, or `None` when it is dirty.
     fn root_epoch(&self) -> Option<TrieNodeEpoch>;
 
     /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
@@ -195,6 +195,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
 
+    /// Records access to a revealed path and its ancestors without changing values or hashes.
+    /// Modified nodes must already have been hashed. An unmodified revealed root may be cached.
+    fn record_access(&mut self, full_path: &Nibbles, epoch: TrieNodeEpoch);
+
     /// Returns a reference to the current sparse trie updates.
     ///
     /// If no updates have been made/recorded, returns an empty update set.
@@ -216,7 +220,7 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
 
-    /// Collapses nodes last modified before `prune_before` into hash stubs.
+    /// Collapses nodes last modified or accessed before `prune_before` into hash stubs.
     ///
     /// # Preconditions
     ///

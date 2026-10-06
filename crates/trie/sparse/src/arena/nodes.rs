@@ -20,7 +20,7 @@ pub(super) enum ArenaSparseNodeState {
     Cached {
         /// The cached RLP-encoded representation of the node.
         rlp_node: RlpNode,
-        /// The newest tracked modification epoch for this node or its descendants.
+        /// The newest tracked modification or access epoch for this node or its descendants.
         epoch: TrieNodeEpoch,
     },
     /// The node has been modified and its RLP encoding needs recomputation.

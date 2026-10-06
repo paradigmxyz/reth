@@ -1315,6 +1315,40 @@ impl ArenaParallelSparseTrie {
         }
     }
 
+    /// Refreshes the whole accessible path, including roots used for subtree eviction.
+    fn record_access_in_arena(
+        arena: &mut NodeArena,
+        mut current: Index,
+        path: &Nibbles,
+        mut offset: usize,
+        epoch: TrieNodeEpoch,
+    ) {
+        loop {
+            if let ArenaSparseNode::Subtrie(subtrie) = &mut arena[current] {
+                Self::record_access_in_arena(&mut subtrie.arena, subtrie.root, path, offset, epoch);
+                return
+            }
+            if let ArenaSparseNodeState::Cached { epoch: retained, .. } = arena[current].state_mut()
+            {
+                *retained = (*retained).max(epoch);
+            }
+            let ArenaSparseNode::Branch(branch) = &arena[current] else { return };
+            let end = offset + branch.short_key.len();
+            if path.len() <= end || path.slice(offset..end) != branch.short_key {
+                return
+            }
+            let Some(child) = BranchChildIdx::new(branch.state_mask, path.get_unchecked(end))
+            else {
+                return
+            };
+            let ArenaSparseNodeBranchChild::Revealed(index) = &branch.children[child] else {
+                return
+            };
+            current = *index;
+            offset = end + 1;
+        }
+    }
+
     /// Encodes a leaf node's RLP and pushes it onto `rlp_node_buf`.
     ///
     /// If the leaf is already cached, its existing `RlpNode` is reused.
@@ -2517,6 +2551,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         Self::find_leaf_in_arena(&self.upper_arena, self.root, full_path, 0, expected_value)
+    }
+
+    fn record_access(&mut self, full_path: &Nibbles, epoch: TrieNodeEpoch) {
+        assert!(self.root_epoch().is_some(), "record access after hashing modified nodes");
+        if !self.is_root_cached() {
+            self.root(epoch);
+        }
+        Self::record_access_in_arena(&mut self.upper_arena, self.root, full_path, 0, epoch);
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {

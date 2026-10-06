@@ -288,6 +288,7 @@ sparse_trie_tests! {
 
     // prune
     test_prune_retains_recent_leaves,
+    test_prune_retains_accessed_paths,
     test_prune_retains_structurally_modified_branch,
     test_prune_reduces_node_count,
     test_prune_then_update_and_recompute_root,
