@@ -286,13 +286,14 @@ where
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .as_ref()
-                .is_some_and(|e| *e.nibbles() == nibbles)
+            // Avoid rewriting an identical node; seeking already decoded the stored value.
+            if let Some(existing) =
+                self.cursor.seek_by_key_subkey(self.hashed_address, nibbles.clone())? &&
+                *existing.nibbles() == nibbles
             {
+                if maybe_updated.as_ref().is_some_and(|node| existing.node() == node) {
+                    continue;
+                }
                 self.cursor.delete_current()?;
             }
 
@@ -371,6 +372,7 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_account_trie_order() {
@@ -435,5 +437,76 @@ mod tests {
             let mut cursor = trie_factory.storage_trie_cursor(hashed_address).unwrap();
             assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
         });
+    }
+
+    #[test]
+    fn storage_updates_preserve_legacy_rows() {
+        check_storage_update_rows::<LegacyKeyAdapter>();
+    }
+
+    #[test]
+    fn storage_updates_preserve_packed_rows() {
+        check_storage_update_rows::<PackedKeyAdapter>();
+    }
+
+    fn check_storage_update_rows<A: TrieTableAdapter>() {
+        let factory = create_test_provider_factory();
+        let mut expected = BTreeMap::new();
+        for round in 0..18_u8 {
+            let before = expected.clone();
+            let provider = factory.provider_rw().unwrap();
+            for account in 1..=3 {
+                let address = B256::repeat_byte(account);
+                let mut updates = StorageTrieUpdatesSorted::default();
+                // Empty paths are deliberately ignored, including deletion requests.
+                updates.storage_nodes.push((Nibbles::default(), None));
+                for id in 0..64_u8 {
+                    let path = Nibbles::unpack([id]);
+                    let node = if id % 4 == 1 && round % 2 == 1 {
+                        None
+                    } else {
+                        // One quarter of paths retain identical values across every batch.
+                        let value = if id % 4 == 0 { id } else { id.wrapping_add(round) };
+                        let mask = if value % 2 == 0 { 1 } else { 3 };
+                        Some(BranchNodeCompact::new(
+                            3,
+                            3,
+                            mask,
+                            vec![B256::repeat_byte(value); if mask == 1 { 1 } else { 2 }],
+                            (value % 3 == 0).then_some(B256::repeat_byte(account)),
+                        ))
+                    };
+                    if let Some(node) = &node {
+                        expected.insert((address, path), node.clone());
+                    } else {
+                        expected.remove(&(address, path));
+                    }
+                    updates.storage_nodes.push((path, node));
+                }
+                let cursor = provider.tx_ref().cursor_dup_write::<A::StorageTrieTable>().unwrap();
+                let mut cursor = DatabaseStorageTrieCursor::<_, A>::new(cursor, address);
+                assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 64);
+                // Reapplying the batch must retain counts and exact rows.
+                assert_eq!(cursor.write_storage_trie_updates_sorted(&updates).unwrap(), 64);
+            }
+            if round % 5 == 4 {
+                drop(provider);
+                expected = before;
+            } else {
+                provider.commit().unwrap();
+            }
+
+            let reopened = factory.provider_rw().unwrap();
+            let mut cursor = reopened.tx_ref().cursor_dup_read::<A::StorageTrieTable>().unwrap();
+            let actual = cursor
+                .walk(None)
+                .unwrap()
+                .map(|row| {
+                    let (address, entry) = row.unwrap();
+                    ((address, A::subkey_to_nibbles(entry.nibbles())), entry.node().clone())
+                })
+                .collect::<BTreeMap<_, _>>();
+            assert_eq!(actual, expected, "round {round}");
+        }
     }
 }
