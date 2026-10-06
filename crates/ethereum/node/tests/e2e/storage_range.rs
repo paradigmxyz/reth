@@ -9,7 +9,8 @@ use alloy_rpc_types_eth::TransactionRequest;
 use eyre::eyre;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    receipt::PendingTransactionExt, test_chain_spec_builder, test_genesis, E2ETestSetupExt,
+    receipt::PendingTransactionExt, test_chain_spec_builder, test_genesis, wallet::Wallet,
+    E2ETestSetupExt,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_api::HashedStorageRangeResult;
@@ -324,6 +325,59 @@ async fn storage_range_at_hides_storage_of_destroyed_account() -> eyre::Result<(
     // After it, the account and its storage are gone.
     let range = storage_range_at(&provider, block_hash, 1, contract, Bytes::new(), 100).await?;
     assert_eq!(range, HashedStorageRangeResult::default());
+
+    Ok(())
+}
+
+/// Creating a contract at an address that already holds storage leaves it with the constructor's
+/// writes only: the EVM reads every other slot of the new account as zero. Only a genesis
+/// allocation can set up such a creation target, an account with storage but no code or nonce.
+#[tokio::test]
+async fn storage_range_at_hides_prestate_storage_of_created_account() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // The signer's first transaction creates the contract, which fixes its address up front.
+    let signer = Wallet::default().inner;
+    let contract = signer.address().create(0);
+    let mut genesis = test_genesis();
+    genesis.alloc.insert(contract, GenesisAccount::default().with_storage(Some(seeded_storage())));
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
+
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(signer.clone());
+
+    let slot = B256::from(U256::from(0xaa));
+    let value = B256::from(U256::from(0x11));
+    let create = TransactionRequest::default()
+        .with_from(signer.address())
+        .with_nonce(0)
+        .with_gas_limit(100_000)
+        .with_max_fee_per_gas(MAX_FEE_PER_GAS)
+        .with_max_priority_fee_per_gas(MAX_PRIORITY_FEE_PER_GAS)
+        // PUSH1 0x11, PUSH1 0xaa, SSTORE, STOP: store one slot and deploy no runtime code.
+        .with_input(bytes!("601160aa5500"))
+        .with_kind(TxKind::Create);
+    let pending = provider.send_transaction(create).await?;
+    node.advance_block().await?;
+    let receipt = pending.successful_receipt().await?;
+    assert_eq!(receipt.contract_address, Some(contract));
+    let (block_hash, transaction_count) = latest_block(&provider).await?;
+    assert_eq!(transaction_count, 1);
+
+    // The creating transaction runs on the allocated storage.
+    let seeded = seeded_storage()
+        .into_iter()
+        .map(|(slot, value)| (keccak256(slot), value))
+        .collect::<BTreeMap<_, _>>();
+    let range = storage_range_at(&provider, block_hash, 0, contract, Bytes::new(), 100).await?;
+    assert_eq!(values(&range), seeded);
+
+    // After it, only the constructor's write is left.
+    let range = storage_range_at(&provider, block_hash, 1, contract, Bytes::new(), 100).await?;
+    assert_eq!(range.next_key, None);
+    assert_eq!(values(&range), BTreeMap::from([(keccak256(slot), value)]));
+    assert_eq!(range.storage[&keccak256(slot)].key, Some(slot));
 
     Ok(())
 }
