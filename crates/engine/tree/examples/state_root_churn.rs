@@ -543,7 +543,6 @@ fn run(
                     let entry = &entries[index];
                     (
                         entry.address,
-                        ProofV2Target::new(entry.address),
                         entry.slots.map(ProofV2Target::new).to_vec(),
                         usize::from(!trie.is_account_revealed(entry.address)),
                         entry
@@ -555,12 +554,14 @@ fn run(
                 })
                 .collect();
             let mut targets = MultiProofTargetsV2::default();
-            targets.account_targets.reserve(account_updates);
-            targets.storage_targets.reserve(account_updates);
-            for (address, account, slots, account_missing, slots_missing) in prepared {
-                // Refresh all next-block accesses, including already revealed hot keys.
-                targets.account_targets.push(account);
-                targets.storage_targets.insert(address, slots);
+            let mut retained = MultiProofTargetsV2::default();
+            for (address, slots, account_missing, slots_missing) in prepared {
+                // Storage targets implicitly request their account path as well.
+                if account_missing != 0 || slots_missing != 0 {
+                    targets.storage_targets.insert(address, slots);
+                } else {
+                    retained.storage_targets.insert(address, slots);
+                }
                 prewarm_accounts += account_missing;
                 prewarm_slots += slots_missing;
             }
@@ -569,14 +570,25 @@ fn run(
                     prewarm_slots >= account_updates * 3 * churn / 100,
                 "cold selection missed churn target"
             );
-            let (warmed, next_trie) =
-                compute(runtime, factory.clone(), trie, root, epoch, Default::default(), targets)?;
-            ensure!(warmed.state_root == root, "prewarming changed the root");
-            ensure!(
-                warmed.state_trie_updates.as_ref().is_none_or(|u| u.is_empty()),
-                "prewarming generated persistence updates"
-            );
-            trie = next_trie;
+            if !targets.storage_targets.is_empty() {
+                let (warmed, next_trie) = compute(
+                    runtime,
+                    factory.clone(),
+                    trie,
+                    root,
+                    epoch,
+                    Default::default(),
+                    targets,
+                )?;
+                ensure!(warmed.state_root == root, "prewarming changed the root");
+                ensure!(
+                    warmed.state_trie_updates.as_ref().is_none_or(|u| u.is_empty()),
+                    "prewarming generated persistence updates"
+                );
+                trie = next_trie;
+            }
+            // Already revealed next-block keys only need retention refreshed, not proof work.
+            trie.record_accesses(&retained, TrieNodeEpoch::new(epoch));
         }
         let prewarm_ms = prewarm_start.elapsed().as_secs_f64() * 1000.;
         let mut prune_ms = 0.;

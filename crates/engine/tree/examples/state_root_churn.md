@@ -46,9 +46,10 @@ uniformly, then selects the remaining accounts from outside this set, requiring 
 three slot paths to be unrevealed. Cold keys may be reused after they have been pruned. At the default rate, blocks
 update exactly 100,000 accounts and 300,000 slots; the optional update count scales both at 1:3. After each root, the next block's keys are selected and prefetched through a separate invocation of
 that same production state-root task, before the current block's persistence-triggered prune.
-This warm-only invocation must preserve the root and emit no persistence updates. It refreshes
-retention epochs for all next-block targets, including already revealed paths, without marking
-nodes dirty. Ancestors and storage roots receive the same access epoch. Consumption in the next
+Only keys with missing witnesses enter this warm-only invocation, which must preserve the root
+and emit no persistence updates. Already revealed next-block keys receive an access-epoch refresh
+directly through the same sparse-trie API, without resubmitting them as touched updates. Both paths
+refresh retention without marking nodes dirty. Ancestors and storage roots receive the same access epoch. Consumption in the next
 block must have zero missing account/slot witnesses, including across pruning.
 
 Churn is measured before this prewarming, not at consumption. The warm phase is serialized after
