@@ -4,7 +4,7 @@ use crate::testsuite::{Action, Environment};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -281,19 +281,15 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Validate required fields
-            let target_node =
-                self.target_node.ok_or_else(|| eyre::eyre!("Target node not specified"))?;
-            let source_node =
-                self.source_node.ok_or_else(|| eyre::eyre!("Source node not specified"))?;
+            let target_node = self.target_node.ok_or_eyre("Target node not specified")?;
+            let source_node = self.source_node.ok_or_eyre("Source node not specified")?;
 
             // Determine block numbers to send
             let block_numbers = if let Some(custom_numbers) = &self.custom_block_numbers {
                 custom_numbers.clone()
             } else {
-                let start =
-                    self.start_block.ok_or_else(|| eyre::eyre!("Start block not specified"))?;
-                let count =
-                    self.total_blocks.ok_or_else(|| eyre::eyre!("Total blocks not specified"))?;
+                let start = self.start_block.ok_or_eyre("Start block not specified")?;
+                let count = self.total_blocks.ok_or_eyre("Total blocks not specified")?;
 
                 if self.reverse_order {
                     // Send blocks in reverse order (e.g., for count=2, start=1: [2, 1])

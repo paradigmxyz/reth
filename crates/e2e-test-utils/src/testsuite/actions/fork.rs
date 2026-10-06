@@ -6,7 +6,7 @@ use crate::testsuite::{
 };
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -219,9 +219,8 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let current_block_info = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+            let current_block_info =
+                env.current_block_info().ok_or_eyre("No current block information available")?;
 
             // verify that the current tip is at or ahead of the fork base
             if current_block_info.number < self.fork_base_number {

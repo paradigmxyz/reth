@@ -13,7 +13,7 @@ use crate::{
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{ensure, eyre, WrapErr};
+use eyre::{ensure, OptionExt, WrapErr};
 use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
 use reth_db::{init_db, mdbx::DatabaseArguments, test_utils::TempDatabase};
@@ -706,8 +706,8 @@ async fn restate_forkchoice<N: NodeBuilderHelper>(node: &NodeHelperType<N>) -> e
     let hash = |tag| -> eyre::Result<Option<B256>> {
         Ok(provider.sealed_header_by_number_or_tag(tag)?.map(|header| header.hash()))
     };
-    let head = hash(BlockNumberOrTag::Latest)?
-        .ok_or_else(|| eyre!("the restarted node has no latest block"))?;
+    let head =
+        hash(BlockNumberOrTag::Latest)?.ok_or_eyre("the restarted node has no latest block")?;
     // A zero hash leaves the safe or finalized block unset if the node did not persist one.
     let state = ForkchoiceState {
         head_block_hash: head,

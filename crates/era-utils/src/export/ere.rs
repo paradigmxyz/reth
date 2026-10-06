@@ -5,7 +5,7 @@ use crate::Ere;
 use alloy_consensus::{BlockHeader, TxType};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
-use eyre::{eyre, Result};
+use eyre::{eyre, OptionExt, Result};
 use reth_era::{
     common::file_ops::{EraFileFormat, EraFileId, StreamWriter},
     e2s::types::Header,
@@ -125,7 +125,7 @@ fn file_id<H: BlockHeader, B, R>(
     blocks: &[ExportBlock<H, B, R>],
 ) -> Result<EreId> {
     let last_block_hash =
-        blocks.last().ok_or_else(|| eyre!("cannot build ERE file id from empty block range"))?;
+        blocks.last().ok_or_eyre("cannot build ERE file id from empty block range")?;
     let file_hash = super::short_hash(last_block_hash.block_hash);
     let id = EreId::new(network, blocks[0].header.number(), blocks.len() as u32)
         .with_hash(file_hash)

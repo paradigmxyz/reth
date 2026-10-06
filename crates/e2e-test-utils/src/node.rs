@@ -20,7 +20,7 @@ use alloy_rpc_types_engine::{
     PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{bail, ensure, eyre, Ok, WrapErr};
+use eyre::{bail, ensure, eyre, Ok, OptionExt, WrapErr};
 use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
@@ -200,7 +200,7 @@ where
             .inner
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or_else(|| eyre!("latest block not found"))?;
+            .ok_or_eyre("latest block not found")?;
 
         if latest_header.number() == 0 {
             return Ok(ForkchoiceState::same_hash(latest_header.hash()));
@@ -212,13 +212,13 @@ where
                 .inner
                 .provider
                 .sealed_header_by_number_or_tag(BlockNumberOrTag::Safe)?
-                .ok_or_else(|| eyre!("safe block not found"))?
+                .ok_or_eyre("safe block not found")?
                 .hash(),
             finalized_block_hash: self
                 .inner
                 .provider
                 .sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized)?
-                .ok_or_else(|| eyre!("finalized block not found"))?
+                .ok_or_eyre("finalized block not found")?
                 .hash(),
         })
     }
@@ -236,7 +236,7 @@ where
             .inner
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or_else(|| eyre!("latest block not found"))?;
+            .ok_or_eyre("latest block not found")?;
         ensure!(
             timestamp > latest.timestamp(),
             "next payload timestamp {timestamp} must be greater than the latest block timestamp {}",
@@ -460,7 +460,7 @@ where
             .inner
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or_else(|| eyre!("latest block not found"))?;
+            .ok_or_eyre("latest block not found")?;
         self.wait_for_pool_head(head.hash()).await?;
 
         let wait = async {
@@ -1169,7 +1169,7 @@ where
             .inner
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or_else(|| eyre!("latest block not found"))?;
+            .ok_or_eyre("latest block not found")?;
         ensure!(
             latest.hash() == hash,
             "block {hash} is a canonical ancestor of the head {}, which the engine does not move \
@@ -1331,9 +1331,7 @@ where
     /// It automatically includes the beacon engine handle for direct consensus engine interaction
     /// and read-only access to the node's database.
     pub fn to_node_client(&self) -> eyre::Result<crate::testsuite::NodeClient<Payload>> {
-        let rpc = self
-            .rpc_client()
-            .ok_or_else(|| eyre::eyre!("Failed to create HTTP RPC client for node"))?;
+        let rpc = self.rpc_client().ok_or_eyre("Failed to create HTTP RPC client for node")?;
         let auth = self.auth_server_handle();
         let url = self.rpc_url();
         let beacon_handle = self.inner.add_ons_handle.beacon_engine_handle.clone();
@@ -1356,8 +1354,7 @@ where
         &self,
         request: TestingBuildBlockRequestV1,
     ) -> eyre::Result<ExecutionPayloadEnvelopeV5> {
-        let client =
-            self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
+        let client = self.rpc_client().ok_or_eyre("HTTP RPC client not available")?;
 
         let res: ExecutionPayloadEnvelopeV5 =
             client.request("testing_buildBlockV1", request.into_params()).await?;
@@ -1448,8 +1445,7 @@ async fn wait_for_committed_chain<N: NodePrimitives>(
 ) -> eyre::Result<Arc<Chain<N>>> {
     let wait = async {
         loop {
-            let notification =
-                stream.next().await.ok_or_else(|| eyre!("canonical state stream closed"))?;
+            let notification = stream.next().await.ok_or_eyre("canonical state stream closed")?;
             let committed = notification.committed();
             if committed.blocks().get(&block_number).is_some_and(|block| block.hash() == block_hash)
             {
@@ -1473,15 +1469,14 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
         }
     })
     .await;
-    if released.is_err() {
-        bail!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
+    ensure!(
+        released.is_ok(),
+        "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
              the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
              of `inner.provider`, before stopping it"
-        )
-    }
-    let database = Arc::into_inner(database)
-        .ok_or_else(|| eyre!("the database of the stopped node is still in use"))?;
+    );
+    let database =
+        Arc::into_inner(database).ok_or_eyre("the database of the stopped node is still in use")?;
     // Unlike dropping the temporary database, this keeps the datadir.
     drop(database.into_inner_db());
 

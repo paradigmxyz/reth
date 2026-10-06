@@ -2,7 +2,7 @@
 
 use crate::testsuite::{Action, Environment};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::EngineTypes;
@@ -372,9 +372,8 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let current_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+            let current_block =
+                env.current_block_info().ok_or_eyre("No current block information available")?;
 
             if current_block.number != self.expected_block_number {
                 return Err(eyre::eyre!(

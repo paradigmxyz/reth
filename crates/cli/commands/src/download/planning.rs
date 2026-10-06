@@ -249,12 +249,11 @@ pub(crate) fn collect_planned_archives(
         }
 
         for archive in snapshot_archives {
-            if archive.output_files.is_empty() {
-                eyre::bail!(
-                    "Invalid modular manifest: {} is missing plain output checksum metadata",
-                    archive.file_name
-                );
-            }
+            eyre::ensure!(
+                !archive.output_files.is_empty(),
+                "Invalid modular manifest: {} is missing plain output checksum metadata",
+                archive.file_name
+            );
 
             archives.push(PlannedArchive { ty: *ty, component: component.clone(), archive });
         }

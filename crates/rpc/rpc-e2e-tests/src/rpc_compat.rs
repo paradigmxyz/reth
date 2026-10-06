@@ -1,6 +1,6 @@
 //! RPC compatibility test actions for testing RPC methods against execution-apis test data.
 
-use eyre::{eyre, Result};
+use eyre::{eyre, OptionExt, Result};
 use futures_util::future::BoxFuture;
 use jsonrpsee::core::client::ClientT;
 use reth_e2e_test_utils::testsuite::{
@@ -77,10 +77,9 @@ impl RunRpcCompatTests {
             }
         }
 
-        let request_str =
-            request_line.ok_or_else(|| eyre!("No request found in test file (>> marker)"))?;
+        let request_str = request_line.ok_or_eyre("No request found in test file (>> marker)")?;
         let response_str =
-            response_line.ok_or_else(|| eyre!("No response found in test file (<< marker)"))?;
+            response_line.ok_or_eyre("No response found in test file (<< marker)")?;
 
         // Parse request
         let request: Value = serde_json::from_str(request_str)
@@ -103,8 +102,8 @@ impl RunRpcCompatTests {
             match (actual, expected) {
                 // Number comparison: handle different representations
                 (Value::Number(a), Value::Number(b)) => {
-                    let a_f64 = a.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
-                    let b_f64 = b.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
+                    let a_f64 = a.as_f64().ok_or_eyre("Invalid number")?;
+                    let b_f64 = b.as_f64().ok_or_eyre("Invalid number")?;
                     // Use a reasonable epsilon for floating point comparison
                     const EPSILON: f64 = 1e-10;
                     if (a_f64 - b_f64).abs() > EPSILON {
@@ -166,7 +165,7 @@ impl RunRpcCompatTests {
             .request
             .get("method")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| eyre!("Request missing method field"))?;
+            .ok_or_eyre("Request missing method field")?;
 
         let params = test_case.request.get("params").cloned().unwrap_or(Value::Array(vec![]));
 
@@ -369,7 +368,7 @@ where
                 .fcu_json_path
                 .as_ref()
                 .map(Path::new)
-                .ok_or_else(|| eyre!("FCU JSON path is required"))?;
+                .ok_or_eyre("FCU JSON path is required")?;
 
             let fcu_state = reth_e2e_test_utils::setup_import::load_forkchoice_state(fcu_path)?;
 

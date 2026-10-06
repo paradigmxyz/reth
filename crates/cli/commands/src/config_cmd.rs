@@ -1,7 +1,7 @@
 //! CLI command to show configs.
 
 use clap::Parser;
-use eyre::{bail, WrapErr};
+use eyre::{bail, ensure, WrapErr};
 use reth_config::Config;
 use std::path::PathBuf;
 /// `reth config` command
@@ -28,9 +28,7 @@ impl Command {
                     bail!("No config file provided. Use --config <FILE> or pass --default");
                 }
             };
-            if !path.exists() {
-                bail!("Config file does not exist: {}", path.display());
-            }
+            ensure!(path.exists(), "Config file does not exist: {}", path.display());
             Config::from_path(path)
                 .wrap_err_with(|| format!("Could not load config file: {}", path.display()))?
         };

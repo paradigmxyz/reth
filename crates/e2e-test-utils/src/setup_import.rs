@@ -6,7 +6,7 @@ use crate::{
     wallet::Wallet,
     NodeHelperType,
 };
-use eyre::WrapErr;
+use eyre::{OptionExt, WrapErr};
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig, ImportResult};
 use reth_config::Config;
@@ -146,15 +146,15 @@ pub fn load_forkchoice_state(path: &Path) -> eyre::Result<alloy_rpc_types_engine
     Ok(alloy_rpc_types_engine::ForkchoiceState {
         head_block_hash: state["headBlockHash"]
             .as_str()
-            .ok_or_else(|| eyre::eyre!("missing headBlockHash"))?
+            .ok_or_eyre("missing headBlockHash")?
             .parse()?,
         safe_block_hash: state["safeBlockHash"]
             .as_str()
-            .ok_or_else(|| eyre::eyre!("missing safeBlockHash"))?
+            .ok_or_eyre("missing safeBlockHash")?
             .parse()?,
         finalized_block_hash: state["finalizedBlockHash"]
             .as_str()
-            .ok_or_else(|| eyre::eyre!("missing finalizedBlockHash"))?
+            .ok_or_eyre("missing finalizedBlockHash")?
             .parse()?,
     })
 }

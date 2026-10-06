@@ -140,9 +140,12 @@ where
     .await?
     .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
 
-    if healthy_chain_id.to::<u64>() != chain_id {
-        eyre::bail!("Invalid chain ID. Expected {}, got {}", chain_id, healthy_chain_id);
-    }
+    eyre::ensure!(
+        healthy_chain_id.to::<u64>() == chain_id,
+        "Invalid chain ID. Expected {}, got {}",
+        chain_id,
+        healthy_chain_id
+    );
 
     Ok(Some(client))
 }

@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use eyre::OptionExt;
 use std::{
     fmt::Debug,
     future::{poll_fn, Future},
@@ -286,7 +287,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let genesis = provider_factory
         .block_by_hash(genesis_hash)?
-        .ok_or_else(|| eyre::eyre!("genesis block not found"))?
+        .ok_or_eyre("genesis block not found")?
         .seal_slow()
         .try_recover()?;
 

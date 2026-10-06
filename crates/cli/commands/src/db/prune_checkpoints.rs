@@ -1,6 +1,7 @@
 //! `reth db prune-checkpoints` command for viewing and setting prune checkpoint values.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use eyre::OptionExt;
 use reth_db_common::DbTool;
 use reth_provider::{providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
@@ -166,12 +167,10 @@ impl Command {
         let prune_mode = match args.mode {
             PruneModeArg::Full => PruneMode::Full,
             PruneModeArg::Distance => PruneMode::Distance(
-                args.mode_value
-                    .ok_or_else(|| eyre::eyre!("--mode-value is required for distance mode"))?,
+                args.mode_value.ok_or_eyre("--mode-value is required for distance mode")?,
             ),
             PruneModeArg::Before => PruneMode::Before(
-                args.mode_value
-                    .ok_or_else(|| eyre::eyre!("--mode-value is required for before mode"))?,
+                args.mode_value.ok_or_eyre("--mode-value is required for before mode")?,
             ),
         };
 

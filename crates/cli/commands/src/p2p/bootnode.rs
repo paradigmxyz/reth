@@ -189,9 +189,10 @@ impl Command {
                 let first_ip = fixed_external_ip(first)?;
                 let second_ip = fixed_external_ip(second)?;
 
-                if first_ip.is_ipv4() == second_ip.is_ipv4() {
-                    eyre::bail!("repeated --nat requires one IPv4 and one IPv6 extip:<IP> value");
-                }
+                eyre::ensure!(
+                    first_ip.is_ipv4() != second_ip.is_ipv4(),
+                    "repeated --nat requires one IPv4 and one IPv6 extip:<IP> value"
+                );
 
                 // discv4 binds a single socket, so its resolver must use the `--addr` family.
                 let primary_ip =

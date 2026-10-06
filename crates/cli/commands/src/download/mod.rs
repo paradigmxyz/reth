@@ -917,17 +917,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             Some(url) => Ok(url.clone()),
             None => {
                 let defaults = DownloadDefaults::get_global();
-                if defaults.mainnet_only_discovery() && chain_id != MAINNET.chain.id() {
-                    eyre::bail!(
-                        "Snapshots are only auto-discovered for Ethereum mainnet.\n\n\
+                eyre::ensure!(
+                    !defaults.mainnet_only_discovery() || chain_id == MAINNET.chain.id(),
+                    "Snapshots are only auto-discovered for Ethereum mainnet.\n\n\
                          Chain {chain_id} requires an explicit source:\n\
                          \t--manifest-url <URL>\n\
                          \t--manifest-path <PATH>\n\
                          \t-u <SNAPSHOT-URL>\n\n\
                          Use --list to inspect snapshots exposed by {}.",
-                        defaults.snapshot_source_url(),
-                    );
-                }
+                    defaults.snapshot_source_url(),
+                );
 
                 discover_manifest_url(chain_id).await
             }
