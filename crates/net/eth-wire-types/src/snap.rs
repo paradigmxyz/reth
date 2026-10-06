@@ -564,7 +564,7 @@ impl Decodable for SlimAccountBody {
         if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
-        Ok(Self(TrieAccount { nonce, balance, storage_root, code_hash }))
+        Ok(Self(TrieAccount::new(nonce, balance, storage_root, code_hash)))
     }
 }
 
@@ -573,12 +573,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SlimAccountBody {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let storage_root = if u.arbitrary()? { u.arbitrary()? } else { EMPTY_ROOT_HASH };
         let code_hash = if u.arbitrary()? { u.arbitrary()? } else { KECCAK256_EMPTY };
-        Ok(Self(TrieAccount {
-            nonce: u.arbitrary()?,
-            balance: u.arbitrary()?,
-            storage_root,
-            code_hash,
-        }))
+        Ok(Self(TrieAccount::new(u.arbitrary()?, u.arbitrary()?, storage_root, code_hash)))
     }
 }
 
@@ -918,7 +913,7 @@ mod tests {
     }
 
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
-        TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash }
+        TrieAccount::new(7, U256::from(42), storage_root, code_hash)
     }
 
     #[test]
@@ -1043,7 +1038,7 @@ mod tests {
 
     #[test]
     fn storage_data_rejects_trailing_bytes() {
-        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::from(1));
+        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::ONE);
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());

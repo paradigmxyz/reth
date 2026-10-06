@@ -37,7 +37,7 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             beneficiary: Address::ZERO,
             receipts_root: alloy_consensus::constants::EMPTY_RECEIPTS,
             logs_bloom: Default::default(),
-            difficulty: U256::from(1), // Will be overridden for post-merge
+            difficulty: U256::ONE, // Will be overridden for post-merge
             // Use the same state root as parent for now (empty state changes)
             state_root: if i == 1 {
                 genesis_header.state_root()
@@ -177,9 +177,9 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock<Block>], path: &Path) -> std::i
 pub fn create_fcu_json(tip: &SealedBlock<Block>) -> serde_json::Value {
     serde_json::json!({
         "params": [{
-            "headBlockHash": format!("0x{:x}", tip.hash()),
-            "safeBlockHash": format!("0x{:x}", tip.hash()),
-            "finalizedBlockHash": format!("0x{:x}", tip.hash()),
+            "headBlockHash": format!("{:#x}", tip.hash()),
+            "safeBlockHash": format!("{:#x}", tip.hash()),
+            "finalizedBlockHash": format!("{:#x}", tip.hash()),
         }]
     })
 }

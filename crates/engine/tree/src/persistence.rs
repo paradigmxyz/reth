@@ -428,7 +428,7 @@ impl Drop for ServiceGuard {
 mod tests {
     use super::*;
     use alloy_eips::NumHash;
-    use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U256};
+    use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
@@ -663,7 +663,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let provider_factory = create_test_provider_factory();
-        let tracked_addr = alloy_primitives::Address::from([0xBE; 20]);
+        let tracked_addr = Address::repeat_byte(0xBE);
 
         // Phase 1: Establish baseline history for blocks 0..20.
         let rocksdb = provider_factory.rocksdb_provider();

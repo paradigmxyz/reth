@@ -1,5 +1,4 @@
-use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant};
-use alloy_eips::eip7594::BlobTransactionSidecarVariant;
+use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
@@ -32,10 +31,7 @@ where
 
     /// Retrieves an Ethereum transaction envelope by its hash, including its blob sidecar if the
     /// transaction is still pooled.
-    pub async fn envelope_by_hash(
-        &self,
-        hash: B256,
-    ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
+    pub async fn envelope_by_hash(&self, hash: B256) -> eyre::Result<TxEnvelope> {
         self.decoded_transaction_by_hash(hash).await
     }
 

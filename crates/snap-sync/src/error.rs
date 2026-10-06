@@ -1,7 +1,9 @@
 //! Failures raised while assembling a snap state generation.
 
 use alloy_primitives::B256;
-use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
+use reth_downloaders::snap::{
+    InvalidAccountRange, InvalidBlockAccessListRequest, InvalidStorageRangeRequest,
+};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -15,6 +17,9 @@ pub enum SnapSyncError {
     /// A request for state failed.
     #[error(transparent)]
     Request(#[from] RequestError),
+    /// An account range was requested with its origin past its limit.
+    #[error(transparent)]
+    AccountRangeRequest(#[from] InvalidAccountRange),
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
@@ -170,6 +175,12 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Scheduled accounts remain to be fetched again at the pivot.
+    #[error("{accounts} accounts remain to be fetched again at the pivot")]
+    PendingRepairs {
+        /// Number of accounts still scheduled.
+        accounts: usize,
+    },
     /// Account ranges remain to be downloaded.
     #[error("accounts from {next} are not downloaded yet")]
     IncompleteAccounts {
@@ -182,6 +193,14 @@ pub enum SnapSyncError {
     /// Work stopped because its session was cancelled.
     #[error("snap synchronization was cancelled")]
     Cancelled,
+    /// A reorg was recovered to a pivot below the last block both branches share.
+    #[error("pivot {target} is below reorg ancestor {ancestor}")]
+    PivotBelowAncestor {
+        /// Last block both branches share.
+        ancestor: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
 }
 
 impl SnapSyncError {
@@ -193,6 +212,16 @@ impl SnapSyncError {
         match self {
             Self::Request(error) => !error.is_channel_closed(),
             Self::MissingHeader { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether retrying can't help: storage failed, the node's storage layout or on-disk records
+    /// don't support snap, or the network is gone.
+    pub const fn is_fatal(&self) -> bool {
+        match self {
+            Self::Provider(_) | Self::UnsupportedStorage | Self::UnsupportedRecord { .. } => true,
+            Self::Request(error) => error.is_channel_closed(),
             _ => false,
         }
     }

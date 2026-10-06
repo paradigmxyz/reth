@@ -1,22 +1,22 @@
 //! Example tests using the test suite framework.
 
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec,
+    eth_payload_attributes, test_chain_spec,
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
-            expect_fcu_valid, Action, AssertChainTip, AssertMineBlock, BlockReference,
-            CaptureBlock, CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock,
-            MakeCanonical, ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
+            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
+            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
     },
-    E2ETestSetupExt,
+    E2ETestSetupBuilder, E2ETestSetupExt,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -58,32 +58,6 @@ async fn test_apply_with_import() -> Result<()> {
     // Make the imported chain canonical first
     let mut make_canonical = MakeCanonical::new();
     make_canonical.execute(&mut env).await?;
-
-    // Imported blocks are already readable from the database while the engine may still be
-    // syncing. Wait for the engine to accept the imported head before building on top of it.
-    let head = test_blocks.last().expect("imported blocks").hash();
-    let engine = env.node_clients[0].engine.http_client();
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let response =
-                reth_rpc_api::clients::EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-                    &engine,
-                    ForkchoiceState {
-                        head_block_hash: head,
-                        safe_block_hash: head,
-                        finalized_block_hash: B256::ZERO,
-                    },
-                    None,
-                )
-                .await?;
-            if response.payload_status.status != PayloadStatusEnum::Syncing {
-                return expect_fcu_valid(&response, "imported head");
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .map_err(|_| eyre::eyre!("Timeout waiting for engine to accept imported head"))??;
 
     // Update block info again after making canonical
     let mut update_block_info_2 = UpdateBlockInfo::default();
@@ -315,6 +289,30 @@ async fn test_setup_builder_with_storage_v2() -> Result<()> {
         let provider = node.inner.provider.database_provider_ro()?;
         assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_attributes_generator() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let fee_recipient = Address::with_last_byte(0x42);
+    let attributes_chain_spec = chain_spec.clone();
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new_with_attributes_generator(
+        1,
+        chain_spec,
+        move |timestamp| PayloadAttributes {
+            suggested_fee_recipient: fee_recipient,
+            ..eth_payload_attributes(&attributes_chain_spec, timestamp)
+        },
+    )
+    .build_single()
+    .await?;
+
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().header().beneficiary, fee_recipient);
 
     Ok(())
 }

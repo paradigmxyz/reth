@@ -150,9 +150,17 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         let offset_pos = self.row as usize * self.jar.columns + column;
         let value_offset = self.reader.offset(offset_pos)? as usize;
 
-        // The data file can contain appended rows beyond this jar's header snapshot.
-        // The terminal offset bounds the last column even while a writer is appending.
+        // A value ends where the next one starts. After the last value, the final offset marks the
+        // end of the committed data, which is not the end of the data file while a writer appends
+        // rows it has not committed yet.
         let next_value_offset = self.reader.offset(offset_pos + 1)? as usize;
+
+        // Offsets read through a stale mmap while a writer truncates the files, e.g. a concurrent
+        // prune, can be out of order or past the mapped data. Slicing with them would panic.
+        if next_value_offset < value_offset || next_value_offset > self.reader.size() {
+            return Err(NippyJarError::InconsistentState)
+        }
+
         let column_offset_range = value_offset..next_value_offset;
 
         if let Some(compression) = self.jar.compressor() {

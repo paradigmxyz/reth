@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::BlockId;
-use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
+use alloy_eips::{BlockId, BlockNumHash};
+use alloy_evm::block::calc::{base_block_reward, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -18,7 +18,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -28,7 +28,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
@@ -164,6 +164,9 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
@@ -305,17 +308,12 @@ where
     /// - the genesis block is not mined, so no block rewards are given
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    fn calculate_base_block_reward<H: BlockHeader>(
-        &self,
-        header: &H,
-    ) -> Result<Option<u128>, Eth::Error> {
-        let chain_spec = self.provider().chain_spec();
-
-        if header.number() == 0 || chain_spec.is_paris_active_at_block(header.number()) {
-            return Ok(None)
+    fn calculate_base_block_reward<H: BlockHeader>(&self, header: &H) -> Option<u128> {
+        if header.number() == 0 {
+            return None
         }
 
-        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+        base_block_reward(self.provider().chain_spec(), header.number())
     }
 
     /// Extracts the reward traces for the given block:
@@ -331,30 +329,29 @@ where
         let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
         let mut traces = Vec::with_capacity(ommers_cnt + 1);
 
+        let block = BlockNumHash::new(header.number(), block_hash);
         let block_reward = block_reward(base_block_reward, ommers_cnt);
-        traces.push(reward_trace(
-            block_hash,
-            header,
+        traces.push(
             RewardAction {
                 author: header.beneficiary(),
                 reward_type: RewardType::Block,
                 value: U256::from(block_reward),
-            },
-        ));
+            }
+            .into_localized_trace(block),
+        );
 
         let Some(ommers) = ommers else { return traces };
 
         for uncle in ommers {
             let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
-            traces.push(reward_trace(
-                block_hash,
-                header,
+            traces.push(
                 RewardAction {
                     author: uncle.beneficiary(),
                     reward_type: RewardType::Uncle,
                     value: U256::from(uncle_reward),
-                },
-            ));
+                }
+                .into_localized_trace(block),
+            );
         }
         traces
     }
@@ -475,7 +472,7 @@ where
                 let (block, traces) = block_replay?;
                 let reward_traces = if include_reward_traces {
                     if let Some(base_block_reward) =
-                        self.calculate_base_block_reward(block.header())?
+                        self.calculate_base_block_reward(block.header())
                     {
                         self.extract_reward_traces(
                             block.header(),
@@ -548,7 +545,7 @@ where
             .map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let Some(traces) = traces.as_mut() &&
-            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),
@@ -872,34 +869,13 @@ pub struct BlockStorageAccess {
     pub transactions: Vec<TransactionStorageAccess>,
 }
 
-/// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
-/// beneficiary.
-fn reward_trace<H: BlockHeader>(
-    block_hash: BlockHash,
-    header: &H,
-    reward: RewardAction,
-) -> LocalizedTransactionTrace {
-    LocalizedTransactionTrace {
-        block_hash: Some(block_hash),
-        block_number: Some(header.number()),
-        transaction_hash: None,
-        transaction_position: None,
-        trace: TransactionTrace {
-            trace_address: vec![],
-            subtraces: 0,
-            action: Action::Reward(reward),
-            error: None,
-            result: None,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::EthApiBuilder;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
+    use alloy_primitives::bytes;
     use alloy_rpc_types_eth::TransactionRequest;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
@@ -923,8 +899,7 @@ mod tests {
         // Return NUMBER as a 32-byte word.
         provider.add_account(
             target,
-            ExtendedAccount::new(0, U256::ZERO)
-                .with_bytecode("4360005260206000f3".parse().unwrap()),
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("4360005260206000f3")),
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
@@ -946,7 +921,7 @@ mod tests {
         let pending = api.trace_call_many(calls, Some(BlockId::pending())).await.unwrap();
         assert_eq!(omitted, latest);
         assert_ne!(omitted, pending);
-        assert_eq!(U256::from_be_slice(&omitted[0].output), U256::from(1));
+        assert_eq!(U256::from_be_slice(&omitted[0].output), U256::ONE);
         assert_eq!(U256::from_be_slice(&pending[0].output), U256::from(2));
 
         let module = api.into_rpc();
@@ -1026,7 +1001,7 @@ mod tests {
             TxLegacy {
                 gas_limit: 500_000,
                 to: TxKind::Call(Address::with_last_byte(0x42)),
-                value: U256::from(1),
+                value: U256::ONE,
                 ..Default::default()
             }
             .into(),
@@ -1146,7 +1121,7 @@ mod tests {
             TxLegacy {
                 gas_limit: 21_000,
                 to: TxKind::Call(Address::with_last_byte(0x42)),
-                value: U256::from(1),
+                value: U256::ONE,
                 ..Default::default()
             }
             .into(),
@@ -1266,23 +1241,8 @@ mod tests {
     }
 
     fn localized_reward_trace(block_number: u64) -> LocalizedTransactionTrace {
-        LocalizedTransactionTrace {
-            block_hash: Some(B256::ZERO),
-            block_number: Some(block_number),
-            transaction_hash: None,
-            transaction_position: None,
-            trace: TransactionTrace {
-                trace_address: vec![],
-                subtraces: 0,
-                action: Action::Reward(RewardAction {
-                    author: Address::ZERO,
-                    reward_type: RewardType::Block,
-                    value: U256::ZERO,
-                }),
-                error: None,
-                result: None,
-            },
-        }
+        RewardAction { author: Address::ZERO, reward_type: RewardType::Block, value: U256::ZERO }
+            .into_localized_trace(BlockNumHash::new(block_number, B256::ZERO))
     }
 
     fn trace_order(traces: &[LocalizedTransactionTrace]) -> Vec<(u64, Option<u64>, bool)> {
@@ -1318,7 +1278,7 @@ mod tests {
     async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
         use crate::EthApiBuilder;
         use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{hex, Signature, TxKind};
+        use alloy_primitives::{Signature, TxKind};
         use reth_chain_state::CanonStateNotification;
         use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
         use reth_evm_ethereum::EthEvmConfig;
@@ -1334,9 +1294,8 @@ mod tests {
         let child = Address::with_last_byte(0x43);
         // Increment slot zero, CALLCODE the child, then return the incremented value.
         let root_code: Bytes =
-            hex!("60005460010160005560006000600060006000604361fffff25060005460005260206000f3")
-                .into();
-        let child_code: Bytes = hex!("60025000").into();
+            bytes!("60005460010160005560006000600060006000604361fffff25060005460005260206000f3");
+        let child_code: Bytes = bytes!("60025000");
         provider.add_account(
             target,
             ExtendedAccount::new(0, U256::ZERO).with_bytecode(root_code.clone()),

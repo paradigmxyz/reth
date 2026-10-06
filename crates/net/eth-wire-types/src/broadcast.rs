@@ -169,18 +169,14 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     buf: &mut &[u8],
     memory_budget: usize,
 ) -> alloy_rlp::Result<Vec<T>> {
-    let header = Header::decode(buf)?;
-    if !header.list {
-        return Err(alloy_rlp::Error::UnexpectedString);
+    let Header { list, payload_length } = Header::decode(buf)?;
+    if !list {
+        return Err(alloy_rlp::Error::UnexpectedString)
     }
-    if buf.len() < header.payload_length {
-        return Err(alloy_rlp::Error::InputTooShort);
-    }
+    // Payload length checked by Header::decode.
+    let (mut payload, rest) = buf.split_at(payload_length);
 
-    let (payload, rest) = buf.split_at(header.payload_length);
-    let mut payload = payload;
-
-    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(header.payload_length));
+    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(payload_length));
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
@@ -279,9 +275,7 @@ impl<T: Encodable + ?Sized> Encodable for LazyEncoded<T> {
 
 impl<T: Encodable + ?Sized> LazyEncoded<T> {
     fn encode_uncached(&self) -> Bytes {
-        let mut out = Vec::with_capacity(self.value.length());
-        self.value.encode(&mut out);
-        out.into()
+        alloy_rlp::encode(&self.value).into()
     }
 }
 
@@ -315,23 +309,13 @@ pub type LazyEncodedTransaction = LazyEncoded<dyn BroadcastPoolTransaction>;
 /// pool transaction references directly and cache each transaction's encoded bytes across per-peer
 /// messages. Queued messages retain the pool-backed value and the shared cached bytes until they
 /// are sent.
-#[derive(Clone, Debug, Deref)]
+#[derive(Clone, Debug, Deref, RlpEncodableWrapper)]
 pub struct BroadcastPoolTransactions(pub Vec<LazyEncodedTransaction>);
 
 impl BroadcastPoolTransactions {
     /// Returns an iterator over the transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
         self.0.iter().map(TxHashRef::tx_hash)
-    }
-}
-
-impl Encodable for BroadcastPoolTransactions {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.0.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.0.length()
     }
 }
 
@@ -378,9 +362,7 @@ impl NewPooledTransactionHashes {
                     EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70 | EthVersion::Eth71
                 )
             }
-            Self::Eth72(_) => {
-                matches!(version, EthVersion::Eth72)
-            }
+            Self::Eth72(_) => version.is_eth72(),
         }
     }
 
@@ -755,10 +737,7 @@ impl Decodable for NewPooledTransactionHashes68 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
@@ -771,10 +750,8 @@ impl Decodable for NewPooledTransactionHashes68 {
 
         ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
-        let msg = Self { types, sizes, hashes };
-
         *buf = rest;
-        Ok(msg)
+        Ok(Self { types, sizes, hashes })
     }
 }
 
@@ -944,10 +921,7 @@ impl Decodable for NewPooledTransactionHashes72 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {
@@ -973,7 +947,6 @@ impl Decodable for NewPooledTransactionHashes72 {
         ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
         *buf = rest;
-
         Ok(Self { types, sizes, hashes, cell_mask })
     }
 }
@@ -1082,7 +1055,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{hex, Bytes, Signature, U256};
+    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1214,6 +1187,25 @@ mod tests {
     }
 
     #[test]
+    fn decode_error_preserves_payload_position() {
+        let encoded = [0xc1, 0x80, 0xaa];
+
+        let mut input = encoded.as_slice();
+        assert!(
+            decode_list_with_memory_budget::<TransactionSigned>(&mut input, usize::MAX).is_err()
+        );
+        assert_eq!(input, &encoded[1..]);
+
+        let mut input = encoded.as_slice();
+        assert!(NewPooledTransactionHashes68::decode(&mut input).is_err());
+        assert_eq!(input, &encoded[1..]);
+
+        let mut input = encoded.as_slice();
+        assert!(NewPooledTransactionHashes72::decode(&mut input).is_err());
+        assert_eq!(input, &encoded[1..]);
+    }
+
+    #[test]
     fn can_return_latest_block() {
         let mut blocks = NewBlockHashes(vec![BlockHashNumber { hash: B256::random(), number: 0 }]);
         let latest = blocks.latest().unwrap();
@@ -1237,10 +1229,7 @@ mod tests {
                     types: vec![0x00],
                     sizes: vec![0x00],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
+                        B256::ZERO,
                     ],
                 },
                 &hex!(
@@ -1252,14 +1241,8 @@ mod tests {
                     types: vec![0x00, 0x00],
                     sizes: vec![0x00, 0x00],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
+                        B256::ZERO,
+                        B256::ZERO,
                     ],
                 },
                 &hex!(
@@ -1271,10 +1254,7 @@ mod tests {
                     types: vec![0x02],
                     sizes: vec![0xb6],
                     hashes: vec![
-                        B256::from_str(
-                            "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
-                        )
-                        .unwrap(),
+                        b256!("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"),
                     ],
                 },
                 &hex!(
@@ -1286,14 +1266,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                        )
-                        .unwrap(),
+                        B256::repeat_byte(0xff),
+                        B256::repeat_byte(0xff),
                     ],
                 },
                 &hex!(
@@ -1305,14 +1279,8 @@ mod tests {
                     types: vec![0xff, 0xff],
                     sizes: vec![0xffffffff, 0xffffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                        )
-                        .unwrap(),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
+                        b256!("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"),
                     ],
                 },
                 &hex!(
@@ -1324,14 +1292,8 @@ mod tests {
                     types: vec![0x10, 0x10],
                     sizes: vec![0xdeadc0de, 0xdeadc0de],
                     hashes: vec![
-                        B256::from_str(
-                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                        )
-                        .unwrap(),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
+                        b256!("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"),
                     ],
                 },
                 &hex!(
@@ -1343,14 +1305,8 @@ mod tests {
                     types: vec![0x6f, 0x6f],
                     sizes: vec![0x7fffffff, 0x7fffffff],
                     hashes: vec![
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000002",
-                        )
-                        .unwrap(),
-                        B256::from_str(
-                            "0x0000000000000000000000000000000000000000000000000000000000000002",
-                        )
-                        .unwrap(),
+                        B256::with_last_byte(2),
+                        B256::with_last_byte(2),
                     ],
                 },
                 &hex!(

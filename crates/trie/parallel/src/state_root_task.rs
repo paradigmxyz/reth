@@ -2,7 +2,7 @@
 //!
 //! The "state-root task" is the background multiproof and sparse-trie pipeline that computes
 //! state roots incrementally while a block executes. This module holds its boundary types:
-//! the input messages, the [`StateRootSink`](crate::state_root_task::StateRootSink) and
+//! the input messages, the [`StateRootSink`] and
 //! stream views that feed it, and the handles
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
@@ -182,6 +182,7 @@ impl StateRootHandle {
             cancel_guard: Some(self.cancel_guard),
             state_root_rx: self.state_root_rx.take(),
             hashed_state_rx: self.hashed_state_rx.take(),
+            on_payload_built: None,
         }
     }
 }
@@ -212,6 +213,8 @@ pub struct PayloadStateRootHandle {
     state_root_rx:
         Option<std::sync::mpsc::Receiver<Result<StateRootComputeOutcome, StateRootTaskError>>>,
     hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
+    /// Returns retained state to the engine once the completed block's identity is known.
+    on_payload_built: Option<Box<dyn FnOnce(B256, B256) + Send>>,
 }
 
 impl fmt::Debug for PayloadStateRootHandle {
@@ -239,7 +242,31 @@ impl PayloadStateRootHandle {
         >,
         hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
-        Self { name, hook, cancel_guard: None, state_root_rx: Some(state_root_rx), hashed_state_rx }
+        Self {
+            name,
+            hook,
+            cancel_guard: None,
+            state_root_rx: Some(state_root_rx),
+            hashed_state_rx,
+            on_payload_built: None,
+        }
+    }
+
+    /// Attaches a callback receiving the completed payload's block hash and state root.
+    ///
+    /// The callback must verify that any retained state matches the returned payload.
+    pub fn with_on_payload_built(
+        mut self,
+        callback: impl FnOnce(B256, B256) + Send + 'static,
+    ) -> Self {
+        self.on_payload_built = Some(Box::new(callback));
+        self
+    }
+
+    /// Takes the callback to invoke after a successful build, before returning its payload.
+    /// Aborted, cancelled, or failed builds must drop the callback without invoking it.
+    pub fn take_on_payload_built(&mut self) -> Option<Box<dyn FnOnce(B256, B256) + Send>> {
+        self.on_payload_built.take()
     }
 
     /// Returns the task name used in logs.
@@ -549,7 +576,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.info.nonce = 1;
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -571,7 +598,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.selfdestruct();
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -592,7 +619,7 @@ mod tests {
         let address = Address::repeat_byte(0x05);
         let mut account = Account::default();
         // Pre-state: the account exists and holds a balance.
-        account.info.balance = U256::from(1);
+        account.info.balance = U256::ONE;
         account.set_current_info_as_original();
         // This block drains it. Not selfdestructed: an ordinary value transfer out.
         account.mark_touch();
@@ -643,7 +670,7 @@ mod tests {
         };
 
         let address = Address::repeat_byte(0x07);
-        let pre = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let pre = AccountInfo { balance: U256::ONE, ..Default::default() };
 
         // The EvmState the state hook observes: a funded account drained to empty.
         let mut account = Account::from(pre.clone());

@@ -406,15 +406,7 @@ where
 
         state_init.insert(
             *address,
-            (
-                None,
-                Some(Account {
-                    nonce: account.nonce.unwrap_or_default(),
-                    balance: account.balance,
-                    bytecode_hash,
-                }),
-                storage,
-            ),
+            (None, Some(Account { bytecode_hash, ..Account::from(account) }), storage),
         );
     }
     let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
@@ -994,11 +986,7 @@ fn write_account_to_db<TX: DbTxMut>(
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
 
@@ -1082,11 +1070,7 @@ where
         None
     };
 
-    let account = Account {
-        nonce: genesis_account.nonce.unwrap_or_default(),
-        balance: genesis_account.balance,
-        bytecode_hash,
-    };
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
 
     let hashed_address = keccak256(address);
     let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
@@ -1344,7 +1328,7 @@ mod tests {
         assert_eq!(
             accounts,
             vec![
-                (Address::with_last_byte(1), U256::from(1)),
+                (Address::with_last_byte(1), U256::ONE),
                 (Address::with_last_byte(2), U256::from(2))
             ]
         );
@@ -1600,7 +1584,7 @@ mod tests {
                 alloc: BTreeMap::from([
                     (
                         address_with_balance,
-                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                        GenesisAccount { balance: U256::ONE, ..Default::default() },
                     ),
                     (
                         address_with_storage,

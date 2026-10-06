@@ -4,6 +4,8 @@
 //! `SnapClient` request encoding, `RLPx` session transport, `EthRequestHandler`/
 //! `StateRangeProviderFactory` serving, and response decoding.
 
+#![allow(clippy::clone_on_copy)]
+
 use alloy_consensus::{
     constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
     Header,
@@ -159,7 +161,7 @@ fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>,
 /// A valid RLP-encoded EIP-7928 block access list for `address`, with its commitment hash.
 fn valid_bal(address: Address) -> (Bytes, B256) {
     let mut change = AccountChanges::new(address);
-    change.balance_changes.push(BalanceChange::new(BlockAccessIndex::PRE_EXECUTION, U256::from(1)));
+    change.balance_changes.push(BalanceChange::new(BlockAccessIndex::PRE_EXECUTION, U256::ONE));
     let bal = vec![change];
 
     let mut buf = Vec::new();
@@ -181,7 +183,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     let provider_rw = factory.provider_rw().unwrap();
     provider_rw
         .insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )
         .unwrap();
     provider_rw.commit().unwrap();
@@ -193,7 +195,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
     let mut expected: Vec<_> =
-        accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+        accounts.iter().map(|(address, account)| (keccak256(address), account.clone())).collect();
     expected.sort_by_key(|(hash, _)| *hash);
 
     let response = fetch
@@ -236,7 +238,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     assert_boundary_proof(
         state_root,
         *last_hash,
-        Some(alloy_rlp::encode(last_account.into_trie_account(EMPTY_ROOT_HASH))),
+        Some(alloy_rlp::encode(last_account.clone().into_trie_account(EMPTY_ROOT_HASH))),
         &proof,
     );
 }
@@ -255,7 +257,7 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
     let provider_rw = factory.provider_rw().unwrap();
     provider_rw
         .insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )
         .unwrap();
     provider_rw.commit().unwrap();
@@ -267,7 +269,7 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
     let fetch = net.peers()[0].network().fetch_client().await.unwrap();
 
     let mut expected: Vec<_> =
-        accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+        accounts.iter().map(|(address, account)| (keccak256(address), account.clone())).collect();
     expected.sort_by_key(|(hash, _)| *hash);
 
     // Each account costs a fixed 160 bytes. A budget below that admits only account A, since the
@@ -301,7 +303,7 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
     assert_boundary_proof(
         state_root,
         expected[0].0,
-        Some(alloy_rlp::encode(expected[0].1.into_trie_account(EMPTY_ROOT_HASH))),
+        Some(alloy_rlp::encode(expected[0].1.clone().into_trie_account(EMPTY_ROOT_HASH))),
         &proof,
     );
 }
@@ -312,7 +314,7 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
+    let account = Account { nonce: 1, balance: U256::ONE, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..6u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -382,7 +384,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
+    let account = Account { nonce: 1, balance: U256::ONE, ..Default::default() };
     let slots: Vec<StorageEntry> = (0..4u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -409,7 +411,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
     // A window strictly between the 2nd- and 3rd-lowest hashes contains no slots; the response
     // must still return the first slot past it, proven with a boundary proof (non-zero origin
     // always requires one).
-    let origin = B256::from(U256::from_be_bytes(expected[1].0 .0) + U256::from(1));
+    let origin = B256::from(U256::from_be_bytes(expected[1].0 .0) + U256::ONE);
     let limit = origin;
     let response = fetch
         .get_storage_ranges(GetStorageRangesMessage {
@@ -449,7 +451,7 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 
     let factory = genesis_provider_factory();
     let (address_a, account_a) =
-        (Address::random(), Account { nonce: 1, balance: U256::from(1), ..Default::default() });
+        (Address::random(), Account { nonce: 1, balance: U256::ONE, ..Default::default() });
     let (address_b, account_b) =
         (Address::random(), Account { nonce: 2, balance: U256::from(2), ..Default::default() });
     // 2 slots for A (fits fully in the byte budget below), 5 for B (doesn't).
@@ -563,7 +565,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .insert_account_for_hashing([(expired_account.0, Some(expired_account.1))])
+            .insert_account_for_hashing([(expired_account.0, Some(expired_account.1.clone()))])
             .unwrap();
         provider_rw.commit().unwrap();
     }
@@ -575,7 +577,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
-            .insert_account_for_hashing([(retained_account.0, Some(retained_account.1))])
+            .insert_account_for_hashing([(retained_account.0, Some(retained_account.1.clone()))])
             .unwrap();
         provider_rw.commit().unwrap();
     }
@@ -648,7 +650,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
     assert_boundary_proof(
         retained_root,
         *last_hash,
-        Some(alloy_rlp::encode(last_account.into_trie_account(EMPTY_ROOT_HASH))),
+        Some(alloy_rlp::encode(last_account.clone().into_trie_account(EMPTY_ROOT_HASH))),
         &proof,
     );
 

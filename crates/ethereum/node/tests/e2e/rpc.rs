@@ -1,7 +1,7 @@
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
     ext::DebugApi, network::TransactionBuilder, Provider, ProviderBuilder, SendableTx,
 };
@@ -17,17 +17,18 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::{
     error::EthRpcErrorCode,
     state::{AccountOverride, StateOverride},
-    TransactionRequest,
+    AccessListResult, TransactionRequest,
 };
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork};
+use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt, NodeHelperType,
+    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
+    NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -66,7 +67,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     use reth_primitives_traits::SignedTransaction;
     use reth_transaction_pool::test_utils::TransactionGenerator;
 
-    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
     let client = node.rpc_client().unwrap();
@@ -133,7 +134,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
             .await?;
         let provider = node.rpc_provider_with_wallet(wallet.signer(0));
         let first = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(1)))
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::ONE))
             .await?;
         let second = provider
             .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
@@ -149,17 +150,11 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
         let hashes = [*first.tx_hash(), receipt.transaction_hash];
         let mut expected = Vec::new();
         if prewarm {
-            tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                loop {
-                    let (_, bal) =
-                        cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
-                    if bal.is_some() {
-                        return Ok::<_, eyre::Report>(());
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
+            poll_until(format!("prewarmed block access list of block {block_hash}"), || async {
+                let (_, bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+                Ok(bal.is_some().then_some(()))
             })
-            .await??;
+            .await?;
         } else {
             assert!(cache
                 .get_recovered_block_and_maybe_bal(block_hash)
@@ -279,8 +274,7 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     node.advance_block().await?;
     let _ = GasWaster::deploy_builder(&provider, U256::from(5)).send().await?;
     let _ = GasWaster::deploy_builder(&provider, U256::from(7)).send().await?;
-    node.advance_block().await?;
-    node.advance_block().await?;
+    node.advance_blocks(2).await?;
 
     let client = node.inner.rpc_server_handle().ws_client().await.unwrap();
     let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
@@ -337,7 +331,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
-    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let pre_amsterdam_hash = *pre_amsterdam.tx_hash();
     node.advance_block().await?;
     pre_amsterdam.successful_receipt().await?;
@@ -369,7 +363,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     assert_eq!(frame.state_gas_used, None);
     assert_eq!(frame.gas_refund, None);
 
-    let amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
+    let amsterdam = GasWaster::deploy_builder(&provider, U256::ONE).send().await?;
     let amsterdam_hash = *amsterdam.tx_hash();
     node.advance_block().await?;
     amsterdam.successful_receipt().await?;
@@ -780,7 +774,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
 
     let self_send_gas = provider
         .estimate_gas(
-            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::from(1)),
+            TransactionRequest::default().with_from(from).with_to(from).with_value(U256::ONE),
         )
         .await?;
     assert_eq!(self_send_gas, 12_000);
@@ -795,7 +789,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(existing_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert_eq!(value_existing_gas, 21_000);
@@ -813,7 +807,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
             TransactionRequest::default()
                 .with_from(from)
                 .with_to(fresh_recipient)
-                .with_value(U256::from(1)),
+                .with_value(U256::ONE),
         )
         .await?;
     assert!(value_fresh_gas > 21_000);
@@ -824,10 +818,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
     let mut overrides = StateOverride::default();
     overrides.insert(
         gas_gate,
-        AccountOverride {
-            code: Some("0x5a610fa010600957fe5b00".parse::<Bytes>()?),
-            ..Default::default()
-        },
+        AccountOverride { code: Some(bytes!("0x5a610fa010600957fe5b00")), ..Default::default() },
     );
     let gated_tx = TransactionRequest::default().with_from(from).with_to(gas_gate);
     let gated_gas = provider.estimate_gas(gated_tx.clone()).overrides(overrides.clone()).await?;
@@ -892,7 +883,6 @@ async fn test_eth_config() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
     use alloy_consensus::Header;
-    use alloy_primitives::hex;
     use reth_chainspec::{
         sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
         SEPOLIA,
@@ -924,14 +914,14 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
         let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
         if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
             assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("268956b6")));
+            assert_eq!(config.current.fork_id, bytes!("268956b6"));
             let next = config.next.unwrap();
             assert_eq!(next.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(next.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(next.fork_id, bytes!("6c1d9423"));
             assert_eq!(config.last.unwrap(), next);
         } else {
             assert_eq!(config.current.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
-            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(config.current.fork_id, bytes!("6c1d9423"));
             assert!(config.next.is_none());
             assert!(config.last.is_none());
         }
@@ -1056,6 +1046,219 @@ async fn test_admin_node_info_discv5_enr_uses_nat_extip_when_discv4_is_disabled(
     assert_eq!(admin_enr.udp4(), Some(discv5_port));
     assert_eq!(info.ip, IpAddr::V4(external_ip));
     assert_eq!(info.ports.discovery, discv5_port);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_advance_until_receipt() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let payloads = node.advance_blocks(2).await?;
+    assert_eq!(payloads.iter().map(|payload| payload.block().number).collect::<Vec<_>>(), [1, 2]);
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
+    let hash = node.rpc.inject_tx(raw_tx).await?;
+    let receipt = node.advance_until_receipt(hash).await?;
+    assert!(receipt.status());
+    assert_eq!(receipt.block_number, Some(3));
+
+    // The transaction is already included, so the chain does not advance.
+    assert_eq!(node.advance_until_receipt(hash).await?, receipt);
+    assert_eq!(node.rpc_provider().get_block_number().await?, 3);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_advance_while_send_raw_transaction_sync() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
+
+    // The request only returns once the transaction is mined.
+    let receipt = node.advance_while(provider.send_raw_transaction_sync(&raw_tx)).await??;
+    assert_eq!(receipt.transaction_hash, keccak256(&raw_tx));
+    assert!(receipt.status());
+    assert_eq!(node.rpc.transaction_receipt(receipt.transaction_hash).await?, Some(receipt));
+
+    Ok(())
+}
+
+/// Before Amsterdam `eth_call` ignores the EIP-7825 transaction gas cap. With Amsterdam's EIP-8037
+/// it caps execution gas, so a call that runs out of execution gas fails like the transaction
+/// would.
+#[tokio::test]
+async fn eth_call_caps_execution_gas_under_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Loops `CALLDATALOAD(0)` times, about 26 gas each, then returns 1.
+    let burner = Address::with_last_byte(0x42);
+    let overrides = StateOverride::from_iter([(
+        burner,
+        AccountOverride::default()
+            .with_code(bytes!("6000355b6001900380600357600160005260206000f3")),
+    )]);
+    let call = |iterations: u64| {
+        TransactionRequest::default()
+            .to(burner)
+            .gas_limit(29_000_000)
+            .input(Bytes::from(U256::from(iterations).to_be_bytes::<32>()).into())
+    };
+
+    for fork in [EthereumHardfork::Osaka, EthereumHardfork::Amsterdam] {
+        let (node, _) = EthereumNode::test_setup_for(fork).build_single().await?;
+        let provider = node.rpc_provider();
+
+        let ok: Bytes =
+            provider.raw_request("eth_call".into(), (call(10_000), "latest", &overrides)).await?;
+        assert_eq!(U256::from_be_slice(&ok), U256::ONE, "{fork}");
+
+        // About 26M gas of execution, above the 16,777,216 cap.
+        let call_result = provider
+            .raw_request::<_, Bytes>("eth_call".into(), (call(1_000_000), "latest", &overrides))
+            .await;
+        let access_list: AccessListResult = provider
+            .raw_request("eth_createAccessList".into(), (call(1_000_000), "latest", &overrides))
+            .await?;
+        if fork == EthereumHardfork::Amsterdam {
+            let err = call_result.unwrap_err().to_string();
+            assert!(err.contains("out of gas"), "{err}");
+            assert_eq!(access_list.gas_used, U256::from(16_777_216));
+            assert!(access_list.error.is_some());
+        } else {
+            assert_eq!(U256::from_be_slice(&call_result?), U256::ONE);
+            assert!(access_list.gas_used > U256::from(26_000_000));
+            assert!(access_list.error.is_none());
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_test_account_tx_builder() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    let mut account = wallet.account(0).with_gas_limit(100_000);
+
+    // Init code returning the runtime `PUSH0 CALLDATALOAD PUSH0 SSTORE STOP`, which stores the
+    // first calldata word at slot 0.
+    let runtime = bytes!("5f355f5500");
+    let init_code = bytes!("645f355f55005f526005601bf3");
+
+    let contract = account.next_contract_address();
+    let deploy = node.rpc.inject_tx(account.deploy(init_code).await).await?;
+    let receipt = node.advance_until_receipt(deploy).await?;
+    assert!(receipt.status());
+    assert_eq!(receipt.contract_address, Some(contract));
+    assert_eq!(provider.get_code_at(contract).await?, runtime);
+
+    let value = U256::from(0x42);
+    let recipient = Address::with_last_byte(0x77);
+    let call = node.rpc.inject_tx(account.call(contract, B256::from(value)).await).await?;
+    let transfer = node.rpc.inject_tx(account.transfer(recipient, U256::from(7)).await).await?;
+    let receipt = node.advance_until_receipt(transfer).await?;
+    assert!(receipt.status());
+    let call_receipt = node.rpc.transaction_receipt(call).await?.expect("call is included");
+    assert!(call_receipt.status());
+    assert_eq!(call_receipt.block_number, receipt.block_number);
+
+    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, value);
+    assert_eq!(provider.get_balance(recipient).await?, U256::from(7));
+    assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
+    assert_eq!(account.nonce(), 3);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mine() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let mut account = wallet.account(0);
+    let recipient = Address::with_last_byte(0x77);
+
+    // Leaves canonical notifications in the stream that `mine` has to skip.
+    node.advance_blocks(2).await?;
+
+    // The receipts are in the order of the given transactions, not in block order.
+    let first = account.transfer(recipient, U256::ONE).await;
+    let second = account.transfer(recipient, U256::from(2)).await;
+    let mined = node.mine([second.clone(), first.clone()]).await?.ensure_success()?;
+    assert_eq!(mined.block().number, 3);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [keccak256(&second), keccak256(&first)]
+    );
+    assert_eq!(mined.chain.range(), 3..=3);
+    assert_eq!(
+        mined.chain.execution_outcome().account(&recipient).flatten().map(|acc| acc.balance),
+        Some(U256::from(3))
+    );
+
+    // Other pool transactions must not ride along, and the block is not imported if they do.
+    let stray = node.rpc.inject_tx(account.transfer(recipient, U256::from(3)).await).await?;
+    assert_eq!(
+        node.mine([]).await.unwrap_err().to_string(),
+        format!(
+            "block 4 does not include the expected transactions: missing [], unexpected pool \
+             transactions [{stray:?}]"
+        )
+    );
+    let mined = node.mine_including([]).await?;
+    assert_eq!(mined.block().number, 4);
+    assert_eq!(mined.chain.transaction_hashes().copied().collect::<Vec<_>>(), [stray]);
+
+    // A transaction the block can not include, here because of a nonce gap, is missing.
+    let nonce = account.nonce() + 1;
+    let gapped = account.transfer(recipient, U256::from(4)).nonce(nonce).await;
+    assert_eq!(
+        node.mine([gapped.clone()]).await.unwrap_err().to_string(),
+        format!(
+            "block 5 does not include the expected transactions: missing [{:?}], unexpected pool \
+             transactions []",
+            keccak256(&gapped)
+        )
+    );
+
+    // Transactions that reached the pool by other means are mined by hash, with the same checks.
+    assert_eq!(
+        node.mine_pooled([B256::ZERO]).await.unwrap_err().to_string(),
+        format!("transaction {} is not in the pool", B256::ZERO)
+    );
+    let provider = node.rpc_provider_with_wallet(wallet.signer(1));
+    let first = *provider
+        .send_transaction(TransactionRequest::default().to(recipient).value(U256::from(5)))
+        .await?
+        .tx_hash();
+    let second = *provider
+        .send_transaction(TransactionRequest::default().to(recipient).value(U256::from(6)))
+        .await?
+        .tx_hash();
+    assert_eq!(
+        node.mine_pooled([second]).await.unwrap_err().to_string(),
+        format!(
+            "block 5 does not include the expected transactions: missing [], unexpected pool \
+             transactions [{first:?}]"
+        )
+    );
+    let mined = node.mine_pooled([second, first]).await?.ensure_success()?;
+    assert_eq!(mined.block().number, 5);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [second, first]
+    );
 
     Ok(())
 }

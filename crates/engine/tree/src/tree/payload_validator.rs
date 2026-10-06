@@ -128,7 +128,6 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -165,7 +164,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
-use revm::state::bal::Bal as RevmBal;
+use revm::state::{bal::Bal as RevmBal, AccountInfo};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -767,10 +766,12 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
+        let parent_span = Span::current();
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
+                    parent: parent_span,
                     "hashed_post_state",
                 )
                 .entered();
@@ -1605,7 +1606,7 @@ where
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from BundleState (final state changes)
-        let accounts_changed = output.state.state.len();
+        let accounts_changed = output.state.len();
         let accounts_deleted =
             output.state.state.values().filter(|acc| acc.was_destroyed()).count();
         let storage_slots_changed =
@@ -1622,12 +1623,9 @@ where
 
         // Helper: check if account represents a new contract deployment
         let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-            let had_no_code_before = acc
-                .original_info
-                .as_ref()
-                .map(|info| info.code_hash == KECCAK_EMPTY)
-                .unwrap_or(true);
+            let has_code_now = acc.info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
+            let had_no_code_before =
+                acc.original_info.as_ref().is_none_or(AccountInfo::is_empty_code_hash);
             has_code_now && had_no_code_before
         };
 
@@ -1644,9 +1642,7 @@ where
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
-            .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
-            })
+            .filter_map(|hash| output.state.contracts.get(hash).map(|bytecode| bytecode.len()))
             .sum();
 
         // Total time spent fetching state during execution
@@ -1672,12 +1668,10 @@ where
                     .original_info
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
-                    .map(|bytecode| bytecode.is_eip7702())
-                    .unwrap_or(false);
+                    .is_some_and(|bytecode| bytecode.is_eip7702());
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+                let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);
 
                 original_was_eip7702 && code_now_empty
             })
