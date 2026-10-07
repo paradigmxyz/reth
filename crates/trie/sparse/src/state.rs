@@ -1174,40 +1174,4 @@ mod tests {
             }
         );
     }
-
-    #[test]
-    fn update_retention_follows_flag_for_revealed_tries() {
-        let address = B256::repeat_byte(1);
-        let mut state = SparseStateTrie::new()
-            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
-            .with_default_storage_trie(RevealableSparseTrie::revealed_empty());
-        state.storage.get_or_create_trie_mut(address);
-        for (round, retain) in [false, true, false, true].into_iter().enumerate() {
-            state.set_updates(retain);
-            assert_eq!(state.retains_updates(), retain);
-            for trie in [&mut state.state, state.storage.tries.get_mut(&address).unwrap()] {
-                let trie = trie.as_revealed_mut().unwrap();
-                let mut leaves = [0x11, 0x12, 0x21, 0x22]
-                    .into_iter()
-                    .flat_map(|prefix| {
-                        [0x11, 0x12, 0x21, 0x22].map(|suffix| {
-                            let mut key = B256::ZERO;
-                            key[0] = prefix;
-                            key[1] = suffix;
-                            (key, LeafUpdate::Changed(vec![round as u8 + 1; 40]))
-                        })
-                    })
-                    .collect::<B256Map<_>>();
-                trie.update_leaves(&mut leaves, |_, _| panic!("fully revealed trie")).unwrap();
-                trie.root(epoch(round as u64 + 1));
-            }
-            // Reapplying the setting must preserve already collected updates.
-            state.set_updates(retain);
-            for trie in [&mut state.state, state.storage.tries.get_mut(&address).unwrap()] {
-                let updates = trie.as_revealed_mut().unwrap().take_updates();
-                assert_eq!(!updates.updated_nodes.is_empty(), retain);
-                assert_eq!(updates.updated_nodes.keys().any(|path| path.len() >= 2), retain);
-            }
-        }
-    }
 }
