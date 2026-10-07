@@ -8,7 +8,10 @@
 
 use alloy_consensus::{transaction::TxHashRef, Transaction, TxReceipt};
 use alloy_evm::{block::BlockExecutor, Evm};
-use alloy_primitives::{map::AddressMap, Address, B256, U256};
+use alloy_primitives::{
+    map::{AddressMap, HashMap},
+    Address, B256, U256,
+};
 use metrics::Counter;
 use parking_lot::Mutex;
 use reth_evm::{ConfigureEvm, HaltReasonFor, SpecFor, TxExecutionResultFor};
@@ -22,7 +25,7 @@ use revm::{
     Database, Inspector,
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -60,6 +63,11 @@ impl<DB> RecordingDatabase<DB> {
     pub(super) fn reset(&mut self) {
         self.reads = ReadSet::default();
         self.after_execution.store(false, Ordering::Relaxed);
+    }
+
+    pub(super) fn set_recording(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        self.reset();
     }
 
     pub(super) fn take_reads(&mut self) -> ReadSet {
@@ -241,36 +249,56 @@ impl<H> PrewarmResult<H> {
 /// Bounded, non-waiting, payload-local handoff between prewarm workers and serial execution.
 #[derive(Debug)]
 pub(crate) struct PrewarmResults<H> {
-    ready: Mutex<BTreeMap<usize, PrewarmResult<H>>>,
+    ready: Mutex<ReadyResults<H>>,
     pub(crate) metrics: HandoffMetrics,
 }
 
 impl<H> Default for PrewarmResults<H> {
     fn default() -> Self {
-        Self { ready: Mutex::default(), metrics: HandoffMetrics::default() }
+        Self {
+            ready: Mutex::new(ReadyResults {
+                next: 0,
+                slots: std::iter::repeat_with(|| None).take(MAX_READY_RESULTS).collect(),
+            }),
+            metrics: HandoffMetrics::default(),
+        }
     }
 }
 
 impl<H> PrewarmResults<H> {
+    pub(super) const fn within_window(index: usize, next: usize) -> bool {
+        index >= next && index.saturating_sub(next) < MAX_READY_RESULTS
+    }
+
     pub(super) fn publish(&self, index: usize, next: usize, result: PrewarmResult<H>) {
-        if index < next ||
-            index.saturating_sub(next) >= MAX_READY_RESULTS ||
-            result.reads.overflowed
-        {
+        if !Self::within_window(index, next) || result.reads.overflowed {
             return
         }
         let mut ready = self.ready.lock();
-        ready.retain(|index, _| *index >= next);
-        if ready.len() < MAX_READY_RESULTS {
-            ready.insert(index, result);
+        if Self::within_window(index, next.max(ready.next)) {
+            ready.slots[index % MAX_READY_RESULTS] = Some((index, result));
         }
     }
 
     pub(crate) fn take(&self, index: usize) -> Option<PrewarmResult<H>> {
         let mut ready = self.ready.lock();
-        ready.retain(|ready_index, _| *ready_index >= index);
-        ready.remove(&index)
+        if index < ready.next {
+            return None
+        }
+        ready.next = index.saturating_add(1);
+        let slot = &mut ready.slots[index % MAX_READY_RESULTS];
+        if slot.as_ref().is_some_and(|(ready_index, _)| *ready_index == index) {
+            slot.take().map(|(_, result)| result)
+        } else {
+            None
+        }
     }
+}
+
+#[derive(Debug)]
+struct ReadyResults<H> {
+    next: usize,
+    slots: Vec<Option<(usize, PrewarmResult<H>)>>,
 }
 
 /// Counters for validated handoffs and ordinary-execution fallbacks.
@@ -537,13 +565,52 @@ mod tests {
         for index in 0..=MAX_READY_RESULTS {
             results.publish(index, 0, speculate(database(), tx(1)));
         }
-        assert_eq!(results.ready.lock().len(), MAX_READY_RESULTS);
+        assert_eq!(results.ready.lock().slots.iter().flatten().count(), MAX_READY_RESULTS);
         assert!(results.take(1).is_some());
         assert!(results.take(1).is_none());
         assert!(results.take(0).is_none());
         assert!(results.take(MAX_READY_RESULTS).is_none());
         results.publish(0, 1, speculate(database(), tx(1)));
         assert!(results.take(0).is_none());
+    }
+
+    #[test]
+    fn ready_results_wrap_without_consuming_stale_slots() {
+        let results = PrewarmResults::default();
+        results.publish(0, 0, speculate(database(), tx(1)));
+        assert!(results.take(MAX_READY_RESULTS).is_none());
+        results.publish(0, 0, speculate(database(), tx(1)));
+        assert!(results.take(0).is_none());
+        results.publish(MAX_READY_RESULTS + 1, MAX_READY_RESULTS + 1, speculate(database(), tx(1)));
+        assert!(results.take(MAX_READY_RESULTS + 1).is_some());
+        assert!(results.take(MAX_READY_RESULTS + 1).is_none());
+        // Publishing with the main loop's next index must not invalidate a ready current result.
+        results.publish(MAX_READY_RESULTS + 2, MAX_READY_RESULTS + 2, speculate(database(), tx(1)));
+        results.publish(MAX_READY_RESULTS + 3, MAX_READY_RESULTS + 3, speculate(database(), tx(1)));
+        assert!(results.take(MAX_READY_RESULTS + 2).is_some());
+    }
+
+    #[test]
+    fn borrowed_proof_hints_preserve_execution_state() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0x01, 0x60, 0x00, 0x55, 0x00]);
+        let candidate = speculate(parent, tx(1));
+        let original_state = candidate.result.state.clone();
+        let (targets, count) =
+            reth_trie_common::MultiProofTargetsV2::from_state_ref(&candidate.result.state);
+        assert_eq!(count, 1);
+        assert_eq!(
+            targets.storage_targets[&alloy_primitives::keccak256(CONTRACT)][0].key(),
+            alloy_primitives::keccak256(B256::ZERO)
+        );
+        assert_eq!(candidate.result.state, original_state);
+        let (owned, owned_count) =
+            reth_trie_common::MultiProofTargetsV2::from_state(original_state);
+        assert_eq!(count, owned_count);
+        assert_eq!(
+            targets.account_targets.iter().map(|target| target.key()).collect::<Vec<_>>(),
+            owned.account_targets.iter().map(|target| target.key()).collect::<Vec<_>>()
+        );
     }
 
     fn recovered(transaction: &TxEnv) -> Recovered<TransactionSigned> {

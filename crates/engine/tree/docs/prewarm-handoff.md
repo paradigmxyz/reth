@@ -13,8 +13,9 @@ already-ready results, checks the block's remaining gas, verifies every recorded
 uses the ordinary block executor to commit state and build receipts. A missing result, conflict,
 provider error, oversized read set, or failed speculation falls back to normal serial execution.
 System calls and other pre/post-execution changes stay on the existing canonical path.
-Transactions with later sender nonces or funding dependencies fail strict parent-state speculation:
-they are neither reused nor retried with permissive cache-only warming in this prototype.
+Transactions with later sender nonces or funding dependencies can fail strict parent-state
+speculation. They are retried with permissive cache-only warming, and those results are never
+published for reuse. Transactions outside the bounded lookahead also use cache-only warming.
 
 An account loaded only after the outermost execution frame returns can be identified as the
 beneficiary's fee-only access. Its reward delta is rebased onto the current balance, avoiding a

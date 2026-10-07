@@ -31,7 +31,8 @@ use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
-    execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, HaltReasonFor, RecoveredTx, SpecFor,
+    execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, FromRecoveredTx, HaltReasonFor,
+    RecoveredTx, SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -169,7 +170,9 @@ where
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| {
+                        (ctx.evm_for_ctx(ctx.prewarm_results.is_some()), None)
+                    });
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -231,12 +234,6 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
-            else {
-                return;
-            };
-
             if ctx.should_stop() {
                 return;
             }
@@ -248,11 +245,44 @@ where
 
             let start = Instant::now();
 
-            evm.db_mut().reset();
-            evm.inspector_mut().reset();
-
+            let reusable = ctx.prewarm_results.is_some() &&
+                PrewarmResults::<HaltReasonFor<Evm>>::within_window(
+                    index,
+                    ctx.executed_tx_index.load(Ordering::Relaxed),
+                );
+            let (primary, cache_only) = worker.get_or_init::<PrewarmEvmState<Evm>>(|| {
+                (ctx.evm_for_ctx(ctx.prewarm_results.is_some()), None)
+            });
             let (tx_env, tx) = tx.into_parts();
-            let mut res = match evm.transact(tx_env) {
+            let execution = {
+                let slot = if reusable || ctx.prewarm_results.is_none() {
+                    primary
+                } else {
+                    &mut *cache_only
+                };
+                if slot.is_none() {
+                    *slot = ctx.evm_for_ctx(reusable);
+                }
+                let Some(evm) = slot.as_mut() else { return };
+                evm.db_mut().set_recording(reusable);
+                evm.inspector_mut().reset();
+                evm.transact(tx_env).map(|res| (res, reusable.then(|| evm.db_mut().take_reads())))
+            };
+            let execution = match execution {
+                Err(_) if reusable && !ctx.should_stop() => {
+                    // A later nonce or funding dependency can fail against parent state. Keep
+                    // cache-only warming, but never publish a permissively executed result.
+                    ctx.metrics.transaction_errors.increment(1);
+                    if cache_only.is_none() {
+                        *cache_only = ctx.evm_for_ctx(false);
+                    }
+                    let Some(evm) = cache_only.as_mut() else { return };
+                    evm.transact(TxEnvFor::<Evm>::from_recovered_tx(tx.tx(), *tx.signer()))
+                        .map(|res| (res, None))
+                }
+                result => result,
+            };
+            let (res, reads) = match execution {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -273,20 +303,16 @@ where
             }
 
             if index > 0 && (ctx.prewarm_results.is_none() || state_root_hint_stream.is_some()) {
-                let state = if ctx.prewarm_results.is_some() {
-                    res.state.clone()
-                } else {
-                    std::mem::take(&mut res.state)
-                };
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state_ref(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
                 }
             }
 
-            if let Some(results) = &ctx.prewarm_results {
-                let reads = evm.db_mut().take_reads();
+            if let Some(reads) = reads &&
+                let Some(results) = &ctx.prewarm_results
+            {
                 results.publish(
                     index,
                     ctx.executed_tx_index.load(Ordering::Relaxed),
@@ -609,9 +635,12 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<
+type WorkerEvm<Evm> = Option<
     EvmFor<Evm, RecordingDatabase<StateProviderDatabase<EvmStateProviderBox>>, HandoffInspector>,
 >;
+
+/// Primary EVM plus a lazily initialized permissive cache-only fallback.
+type PrewarmEvmState<Evm> = (WorkerEvm<Evm>, WorkerEvm<Evm>);
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -629,7 +658,7 @@ where
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+    fn evm_for_ctx(&self, reusable: bool) -> WorkerEvm<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
             Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {
@@ -654,25 +683,25 @@ where
         let state_provider = RecordingDatabase::new(
             StateProviderDatabase::new(state_provider),
             self.env.evm_env.block_env.beneficiary(),
-            self.prewarm_results.is_some(),
+            reusable,
         );
 
         let mut evm_env = self.env.evm_env.clone();
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = self.prewarm_results.is_none();
+        evm_env.cfg_env.disable_nonce_check = !reusable;
 
         // disable the balance check so that transactions from senders who were funded by earlier
         // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = self.prewarm_results.is_none();
+        evm_env.cfg_env.disable_balance_check = !reusable;
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
         let inspector = state_provider.inspector();
         let mut evm =
             self.evm_config.evm_with_env_and_inspector(state_provider, evm_env, inspector);
-        evm.set_inspector_enabled(self.prewarm_results.is_some());
+        evm.set_inspector_enabled(reusable);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -982,7 +1011,7 @@ mod tests {
     #[test]
     fn pool_worker_publishes_only_strict_ready_results() {
         reth_tracing::init_test_tracing();
-        for nonce in [0, 1] {
+        for (nonce, index, reusable) in [(0, 0, true), (1, 0, false), (0, 128, false)] {
             let runtime = Runtime::test();
             let results = Arc::new(PrewarmResults::default());
             let provider = create_test_provider_factory();
@@ -1037,10 +1066,24 @@ mod tests {
                 )),
             };
             runtime.prewarming_pool().in_place_scope(|scope| {
-                scope.spawn(|_| PrewarmCacheTask::transact_worker(&ctx, 0, tx, None));
+                scope.spawn(|_| PrewarmCacheTask::transact_worker(&ctx, index, tx, None));
             });
-            let candidate = results.take(0);
-            if nonce == 0 {
+            assert!(
+                ctx.saved_cache
+                    .as_ref()
+                    .unwrap()
+                    .cache()
+                    .get_or_try_insert_account_with(Address::repeat_byte(3), || Err::<
+                        Option<Account>,
+                        _,
+                    >(
+                        ()
+                    ))
+                    .is_ok(),
+                "recipient was not cache-warmed"
+            );
+            let candidate = results.take(index);
+            if reusable {
                 let mut canonical = StateProviderDatabase::new(
                     ctx.provider.database_provider_ro().unwrap().into_evm_state_provider(),
                 );
