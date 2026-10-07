@@ -46,12 +46,14 @@ where
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
+/// The returned changesets restore the trie from the state after `range.end()` to the state before
+/// `range.start()`, retaining paths changed within the range even when their endpoint values match.
+/// An empty range returns empty changesets.
+///
 /// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
 ///
 /// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
-/// strictly increasing block number. Consecutive available blocks are reverted together, preserving
-/// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
-/// transient nodes are retained.
+/// strictly increasing block number. It may omit blocks without affecting the result's correctness.
 ///
 /// # Errors
 ///
@@ -60,7 +62,7 @@ where
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
-    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
+    forward_updates: &[(BlockNumber, &TrieUpdatesSorted)],
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
@@ -104,20 +106,19 @@ where
             forward_updates,
             (end_block + 1)..=db_tip_block,
             &mut overlay,
-            &mut None,
+            None,
         )?;
     }
 
-    let mut reverts = Some(TrieUpdatesSorted::default());
+    let mut reverts = TrieUpdatesSorted::default();
     rewind_trie_range(
         provider,
         state_trie_provider,
         forward_updates,
         range,
         &mut overlay,
-        &mut reverts,
+        Some(&mut reverts),
     )?;
-    let reverts = reverts.expect("revert collection is enabled");
 
     debug!(
         target: "trie::changesets",
@@ -135,10 +136,10 @@ where
 fn rewind_trie_range<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
-    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
+    forward_updates: &[(BlockNumber, &TrieUpdatesSorted)],
     blocks: RangeInclusive<BlockNumber>,
     overlay: &mut TrieInputSorted,
-    reverts: &mut Option<TrieUpdatesSorted>,
+    mut reverts: Option<&mut TrieUpdatesSorted>,
 ) -> Result<(), ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
@@ -163,20 +164,13 @@ where
             }
         }
 
-        // If binary_search_by_key doesn't find the block then:
-        // * start stays equal to end, so the segment covers just that one block.
-        // * segment_range stays 0..0, making the forward-update iterator empty.
-        // * The code reconstructs that block’s trie reverts from its state changesets and the
-        //   current overlay.
-        // * merge_iter receives only those calculated reverts.
-
         // Collect reverts for the segment and use them to generate the trie reverts for the
         // segment.
         let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
         let prefixes = segment_state_reverts.construct_prefix_sets().freeze();
         Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&segment_state_reverts);
 
-        let segment_trie_reverts = StateRoot::new(
+        let mut segment_trie_reverts = StateRoot::new(
             InMemoryTrieCursorFactory::new(state_trie_provider, overlay.nodes.as_ref()),
             HashedPostStateCursorFactory::new(state_trie_provider, overlay.state.as_ref()),
         )
@@ -186,27 +180,19 @@ where
         .1
         .into_sorted();
 
-        // Merging segment_trie_reverts into segment_trie_forward is a semi-hacky way to handle a
-        // particular edge-case:
-        // * Block 5: node N is absent
-        // * Block 6: node N is created
-        // * Block 8: node N is deleted
-        //
-        // In this case if we request reverts for 6..=8 then N wouldn't appear in them, because it
-        // did not undergo any change during the range (started absent, ended absent).
-        //
-        // By merging in the forward trie updates we incorporate N's most recent update which is a
-        // deletion in block 8, therefore deleting it in the reverts as well.
-        //
-        // N will appear in segment_trie_reverts in all other cases; segment_trie_forward only
-        // surfaces updates in this one case.
-        let segment_trie_forward =
-            forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
-        let segment_trie_reverts =
-            TrieUpdatesSorted::merge_iter(once(&segment_trie_reverts).chain(segment_trie_forward));
+        // A node created and deleted inside the segment has no net endpoint change, but its
+        // deletion must be retained to revert a trie persisted partway through the segment.
+        // Forward updates supply these transient paths; calculated before-values take precedence.
+        if !segment_range.is_empty() {
+            let segment_trie_forward =
+                forward_updates[segment_range].iter().rev().map(|(_, updates)| *updates);
+            segment_trie_reverts = TrieUpdatesSorted::merge_iter(
+                once(&segment_trie_reverts).chain(segment_trie_forward),
+            );
+        }
 
         Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_trie_reverts);
-        if let Some(reverts) = reverts {
+        if let Some(reverts) = reverts.as_deref_mut() {
             reverts.extend_ref_and_sort(&segment_trie_reverts);
         }
 

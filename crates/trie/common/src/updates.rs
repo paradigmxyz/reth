@@ -595,7 +595,7 @@ impl TrieUpdatesSorted {
         self.storage_tries.clear();
     }
 
-    /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
+    /// Batch-merge sorted trie updates, with earlier inputs taking precedence for duplicate keys.
     ///
     /// For small batches, uses `extend_ref_and_sort` loop.
     /// For large batches, uses k-way merge for O(n log k) complexity.
@@ -608,7 +608,8 @@ impl TrieUpdatesSorted {
         }
     }
 
-    /// Batch-merge sorted trie updates from a slice. Slice is **newest to oldest**.
+    /// Batch-merge sorted trie updates from a slice, with earlier inputs taking precedence for
+    /// duplicate keys.
     ///
     /// This variant takes a slice reference directly, avoiding iterator collection overhead.
     /// For small batches, uses `extend_ref_and_sort` loop.
@@ -626,7 +627,7 @@ impl TrieUpdatesSorted {
         }
 
         if k < THRESHOLD {
-            // Small k: extend loop, oldest-to-newest so newer overrides older.
+            // Small k: extend in reverse priority order so earlier inputs override later ones.
             let mut iter = items.iter().rev();
             let mut acc = iter.next().expect("k > 0").as_ref().clone();
             for next in iter {
@@ -638,10 +639,8 @@ impl TrieUpdatesSorted {
         Self::merge_iter(items.iter().map(AsRef::as_ref))
     }
 
-    /// Batch-merge sorted trie updates yielded **newest to oldest**, using a k-way merge.
-    ///
-    /// Traverses the iterator separately for account and storage nodes without collecting its
-    /// inputs. The iterator is cloned for the account-node traversal.
+    /// Merges sorted trie updates, with earlier inputs taking precedence for duplicate account and
+    /// storage node keys.
     pub fn merge_iter<'a>(items: impl Iterator<Item = &'a Self> + Clone) -> Self {
         let account_nodes =
             kway_merge_sorted(items.clone().map(|item| item.account_nodes.as_slice()));

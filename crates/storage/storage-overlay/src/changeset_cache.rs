@@ -286,13 +286,6 @@ impl ChangesetCache {
         let end_block = *range.end();
         let timer = Instant::now();
 
-        if !range.is_empty() && end_block > finish.number {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: end_block,
-                available: 0..=finish.number,
-            });
-        }
-
         debug!(
             target: "trie::changeset_cache",
             start_block,
@@ -302,7 +295,7 @@ impl ChangesetCache {
             "Starting get_or_compute_range"
         );
 
-        if start_block > end_block {
+        if range.is_empty() {
             debug!(
                 target: "trie::changeset_cache",
                 start_block,
@@ -310,6 +303,13 @@ impl ChangesetCache {
                 "Empty changeset range requested"
             );
             return Ok(Arc::new(TrieUpdatesSorted::default()))
+        }
+
+        if end_block > finish.number {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: end_block,
+                available: 0..=finish.number,
+            });
         }
 
         let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
@@ -418,6 +418,10 @@ impl ChangesetCache {
             })
             .collect::<Vec<_>>();
         forward_updates.reverse();
+        let forward_update_refs = forward_updates
+            .iter()
+            .map(|(block, updates)| (*block, updates.as_ref()))
+            .collect::<Vec<_>>();
 
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
@@ -428,7 +432,7 @@ impl ChangesetCache {
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
             &state_trie_provider,
-            &forward_updates,
+            &forward_update_refs,
             start_block..=end_block,
             finish.number,
         )?);
@@ -988,7 +992,7 @@ mod tests {
             let result = reth_trie_db::compute_range_trie_changesets(
                 &*provider,
                 &state_trie_provider,
-                &[(3, Arc::clone(&base_nodes))],
+                &[(3, base_nodes.as_ref())],
                 range,
                 3,
             )
@@ -1071,7 +1075,7 @@ mod tests {
         let mut merged = second.clone();
         merged.extend_ref_and_sort(&first);
         assert_eq!(result, merged);
-        let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
+        let forward = [(1, &second), (2, &first)];
         assert_eq!(
             reth_trie_db::compute_range_trie_changesets(
                 &*provider,
