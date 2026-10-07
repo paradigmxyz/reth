@@ -113,7 +113,7 @@ impl LazyTrieData {
 
     /// Creates a pending [`LazyTrieData`] and its producer without spawning a task.
     ///
-    /// The caller must arrange for [`LazyTrieDataProducer::compute_and_publish`] to run before or
+    /// The caller must arrange for `LazyTrieDataProducer::compute_and_publish` to run before or
     /// concurrently with access to the handle. Access blocks until publication; dropping the
     /// producer without publishing leaves access blocked indefinitely.
     #[cfg(feature = "std")]
