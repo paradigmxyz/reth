@@ -68,14 +68,26 @@ impl SparseStateTrie {
     }
 }
 
-impl<A, S> SparseStateTrie<A, S> {
+impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
-    pub const fn set_updates(&mut self, retain_updates: bool) {
+    ///
+    /// Applies to existing and subsequently revealed tries. Disabling retention discards updates.
+    pub fn set_updates(&mut self, retain_updates: bool) {
         self.retain_updates = retain_updates;
+        if let Some(trie) = self.state.as_revealed_mut() {
+            trie.set_updates(retain_updates);
+        }
+        for trie in
+            self.storage.tries.values_mut().chain(core::iter::once(&mut self.storage.default_trie))
+        {
+            if let Some(trie) = trie.as_revealed_mut() {
+                trie.set_updates(retain_updates);
+            }
+        }
     }
 
     /// Set the retention of branch node updates and deletions.
-    pub const fn with_updates(mut self, retain_updates: bool) -> Self {
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
         self.set_updates(retain_updates);
         self
     }
@@ -86,7 +98,10 @@ impl<A, S> SparseStateTrie<A, S> {
     }
 
     /// Set the accounts trie to the given `RevealableSparseTrie`.
-    pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
+    pub fn set_accounts_trie(&mut self, mut trie: RevealableSparseTrie<A>) {
+        if let Some(revealed) = trie.as_revealed_mut() {
+            revealed.set_updates(self.retain_updates);
+        }
         self.state = trie;
     }
 
@@ -98,7 +113,10 @@ impl<A, S> SparseStateTrie<A, S> {
 
     /// Set the default trie which will be cloned when creating new storage
     /// [`RevealableSparseTrie`]s.
-    pub fn set_default_storage_trie(&mut self, trie: RevealableSparseTrie<S>) {
+    pub fn set_default_storage_trie(&mut self, mut trie: RevealableSparseTrie<S>) {
+        if let Some(revealed) = trie.as_revealed_mut() {
+            revealed.set_updates(self.retain_updates);
+        }
         self.storage.default_trie = trie;
     }
 
@@ -1148,5 +1166,35 @@ mod tests {
                 removed_nodes: HashSet::default()
             }
         );
+    }
+
+    #[test]
+    fn update_retention_follows_flag_for_revealed_tries() {
+        let address = B256::repeat_byte(1);
+        let mut state = SparseStateTrie::new()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::revealed_empty());
+        state.storage.get_or_create_trie_mut(address);
+        for (round, retain) in [true, false, true].into_iter().enumerate() {
+            state.set_updates(retain);
+            assert_eq!(state.retains_updates(), retain);
+            for trie in [&mut state.state, state.storage.tries.get_mut(&address).unwrap()] {
+                let trie = trie.as_revealed_mut().unwrap();
+                let mut leaves = B256Map::from_iter([
+                    (B256::repeat_byte(0x11), LeafUpdate::Changed(vec![round as u8 + 1; 40])),
+                    (B256::repeat_byte(0x22), LeafUpdate::Changed(vec![round as u8 + 2; 40])),
+                ]);
+                trie.update_leaves(&mut leaves, |_, _| panic!("fully revealed trie")).unwrap();
+                trie.root(epoch(round as u64 + 1));
+            }
+            // Reapplying the setting must preserve already collected updates.
+            state.set_updates(retain);
+            for trie in [&mut state.state, state.storage.tries.get_mut(&address).unwrap()] {
+                assert_eq!(
+                    !trie.as_revealed_mut().unwrap().take_updates().updated_nodes.is_empty(),
+                    retain
+                );
+            }
+        }
     }
 }

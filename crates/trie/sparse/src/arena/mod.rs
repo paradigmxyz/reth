@@ -2150,10 +2150,21 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_updates(&mut self, retain_updates: bool) {
-        if retain_updates {
-            self.buffers.updates.get_or_insert_with(SparseTrieUpdates::default).clear();
-        } else {
-            self.buffers.updates = None;
+        let updates = core::iter::once(&mut self.buffers.updates).chain(
+            self.upper_arena.iter_mut().filter_map(|(_, node)| {
+                if let ArenaSparseNode::Subtrie(subtrie) = node {
+                    Some(&mut subtrie.buffers.updates)
+                } else {
+                    None
+                }
+            }),
+        );
+        for updates in updates {
+            if retain_updates {
+                updates.get_or_insert_with(SparseTrieUpdates::default);
+            } else {
+                *updates = None;
+            }
         }
     }
 
