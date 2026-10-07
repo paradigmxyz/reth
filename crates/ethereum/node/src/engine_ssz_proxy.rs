@@ -1858,7 +1858,8 @@ mod tests {
 
     #[tokio::test]
     async fn built_payload_witness_route_validation() {
-        let handle = EngineSszProxyHandle::with_engine_api(reth_node_builder::rpc::NoopEngineApi);
+        let handle =
+            EngineSszProxyHandle::with_engine_api(reth_node_builder::rpc::NoopEngineApi::default());
         let path = "/engine/v1/payloads/0x0123456789abcdef/witness";
         for (method, path, fork, status, error) in [
             ("GET", path, Some("amsterdam"), 404, "method-not-found"),
