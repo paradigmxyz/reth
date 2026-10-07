@@ -48,7 +48,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     proof_v2,
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -1241,7 +1241,7 @@ mod tests {
                 )
                 .unwrap();
             let storage = storage_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
-            assert_eq!(storage.root(), Some(reth_trie::EMPTY_ROOT_HASH));
+            assert_eq!(storage.root, Some(reth_trie::EMPTY_ROOT_HASH));
 
             handle
                 .dispatch_account_multiproof(AccountMultiproofInput {
