@@ -17,6 +17,7 @@ mod restart;
 mod rpc;
 mod selfdestruct;
 mod simulate;
+mod storage_range;
 mod utils;
 
 const fn main() {}

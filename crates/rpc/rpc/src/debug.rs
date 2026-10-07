@@ -2,7 +2,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -25,7 +25,7 @@ use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
-use reth_rpc_api::DebugApiServer;
+use reth_rpc_api::{DebugApiServer, HashedStorageEntry, HashedStorageRangeResult};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -35,8 +35,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
-    StorageRootProvider, TransactionVariant,
+    RangeLimits, RangeResponse, ReceiptProviderIdExt, StateProviderBox, StateProviderFactory,
+    StateRangeProviderFactory, StateRootProvider, StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -44,10 +44,16 @@ use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
     HashedStorage,
 };
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
+use revm::{
+    database::states::{bundle_state::BundleRetention, CacheAccount},
+    Database, DatabaseCommit,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -865,6 +871,100 @@ where
             })
             .await
     }
+
+    /// Returns a page of `address`'s storage in hashed key order, as of the state the transaction
+    /// at `tx_index` of the given block runs on.
+    ///
+    /// The parent block's persisted storage is merged with the slots the replay touched, which is
+    /// also where the returned key preimages come from. A page holds at most
+    /// `STORAGE_RANGE_MAX_RESULTS` slots.
+    pub async fn debug_storage_range_at(
+        &self,
+        block_id: BlockId,
+        tx_index: usize,
+        address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> Result<HashedStorageRangeResult, Eth::Error> {
+        if key_start.len() > 32 {
+            return Err(EthApiError::InvalidParams(format!(
+                "key start must be at most 32 bytes, got {}",
+                key_start.len()
+            ))
+            .into())
+        }
+
+        // geth takes a trie path prefix here, which addresses the first hashed key it prefixes.
+        let mut start_key = B256::ZERO;
+        start_key[..key_start.len()].copy_from_slice(&key_start);
+        let max_result =
+            usize::try_from(max_result).unwrap_or(usize::MAX).min(STORAGE_RANGE_MAX_RESULTS);
+
+        let block = self
+            .eth_api()
+            .recovered_block(block_id)
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        // The range is read from the parent state, which does not exist for the genesis block.
+        if block.number() == 0 {
+            return Err(EthApiError::GenesisNotTraceable.into())
+        }
+        let transaction_count = block.transaction_count();
+        if tx_index > transaction_count {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {tx_index} out of bounds for block with {transaction_count} transactions"
+            ))
+            .into())
+        }
+
+        let parent_hash = block.parent_hash();
+        self.eth_api()
+            .spawn_with_state_at_block(parent_hash, move |eth_api, mut db| {
+                let parent = eth_api
+                    .provider()
+                    .header(parent_hash)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(parent_hash.into()))?;
+                let range = eth_api
+                    .provider()
+                    .state_range_provider(parent.state_root())
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or_else(|| {
+                        EthApiError::InvalidParams(format!(
+                            "storage range of block {} is unavailable: the state of its parent \
+                             block {} is only retained for in-memory and recently persisted \
+                             blocks",
+                            block.number(),
+                            parent.number()
+                        ))
+                    })?;
+
+                // The replay cache is what yields the touched slots and their preimages, so the
+                // state is positioned by execution rather than by attaching the block's BAL.
+                eth_api.replay_block_until(&mut db, &block, tx_index, None)?;
+
+                let (touched, wiped) = replayed_storage(db.cache.accounts.get(&address));
+                if wiped {
+                    return Ok(merge_storage_range(Vec::new(), touched, start_key, max_result))
+                }
+
+                // See `merge_storage_range` for why this many slots are enough.
+                let max_slots = max_result.saturating_add(1).saturating_add(touched.len());
+                let persisted = range
+                    .storage_range(
+                        keccak256(address),
+                        start_key,
+                        B256::repeat_byte(0xff),
+                        RangeLimits::items(max_slots),
+                    )
+                    .map_err(Eth::Error::from_eth_err)?
+                    .map(|RangeResponse { items, .. }| items)
+                    .unwrap_or_default();
+
+                Ok(merge_storage_range(persisted, touched, start_key, max_result))
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -1408,15 +1508,26 @@ where
         Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
+    /// Handler for `debug_storageRangeAt`.
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        block_id: BlockId,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: Bytes,
+        max_result: u64,
+    ) -> RpcResult<HashedStorageRangeResult> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_storage_range_at(
+            self,
+            block_id,
+            tx_idx,
+            contract_address,
+            key_start,
+            max_result,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn debug_trace_bad_block(
@@ -1522,21 +1633,98 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+/// Maximum number of storage slots a single `debug_storageRangeAt` call returns.
+///
+/// A capped page still reports where to resume via `nextKey`.
+const STORAGE_RANGE_MAX_RESULTS: usize = 4096;
+
+/// Builds a `debug_storageRangeAt` page from an account's persisted storage and the slots a
+/// block replay touched.
+///
+/// `persisted` holds the account's slots from `start_key` on, in hashed key order. Unless that
+/// covers the rest of the account's storage, it has to hold at least
+/// `max_result + 1 + touched.len()` entries: one past the page to learn where to resume, plus one
+/// per touched slot, since each of them removes at most one persisted entry from the page.
+///
+/// `touched` maps hashed slots to their preimage and current value. It shadows `persisted`, and
+/// a zero value removes the slot.
+fn merge_storage_range(
+    persisted: Vec<(B256, U256)>,
+    touched: BTreeMap<B256, (B256, U256)>,
+    start_key: B256,
+    max_result: usize,
+) -> HashedStorageRangeResult {
+    let mut slots = persisted
+        .into_iter()
+        .map(|(hashed_slot, value)| (hashed_slot, (None, value)))
+        .collect::<BTreeMap<_, _>>();
+    for (hashed_slot, (slot, value)) in touched {
+        if hashed_slot < start_key {
+            continue
+        }
+        if value.is_zero() {
+            slots.remove(&hashed_slot);
+        } else {
+            slots.insert(hashed_slot, (Some(slot), value));
+        }
+    }
+
+    let mut result = HashedStorageRangeResult::default();
+    for (hashed_slot, (slot, value)) in slots {
+        if result.storage.len() == max_result {
+            result.next_key = Some(hashed_slot);
+            break
+        }
+        result.storage.insert(hashed_slot, HashedStorageEntry { key: slot, value: value.into() });
+    }
+
+    result
+}
+
+/// Returns the storage slots a block replay left in an account's cache entry, keyed by hashed slot
+/// and paired with their preimage and value, and whether they are the account's entire storage.
+///
+/// They are the entire storage once the replay destroyed or created the account, or found it
+/// missing: the EVM reads every other slot of such an account as zero, so none of the account's
+/// persisted slots is visible past that point.
+fn replayed_storage(account: Option<&CacheAccount>) -> (BTreeMap<B256, (B256, U256)>, bool) {
+    let Some(account) = account else { return (BTreeMap::new(), false) };
+    let Some(plain_account) = &account.account else { return (BTreeMap::new(), true) };
+
+    let touched = plain_account
+        .storage
+        .iter()
+        .map(|(slot, value)| {
+            let slot = B256::from(*slot);
+            (keccak256(slot), (slot, *value))
+        })
+        .collect();
+
+    (touched, account.status.is_storage_known())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
-    use alloy_primitives::{keccak256, U256};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{Signature, TxKind};
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_primitives_traits::{RecoveredBlock, SignerRecoverable, StorageEntry};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, ExtendedAccount, MockEthProvider, NoopProvider,
+    };
     use reth_rpc_eth_api::EthApiServer;
+    use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
-        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
+        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState, PlainAccount},
         state::AccountInfo as RevmAccountInfo,
     };
 
@@ -1576,6 +1764,100 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), -32001);
+    }
+
+    #[tokio::test]
+    async fn storage_range_at_rejects_oversized_key_start() {
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::mainnet(),
+        )
+        .build();
+        let debug_api = DebugApi::new(
+            eth_api,
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+
+        let err = debug_api
+            .debug_storage_range_at(
+                BlockId::latest(),
+                0,
+                Address::ZERO,
+                Bytes::from(vec![0; 33]),
+                1,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, EthApiError::InvalidParams(_)));
+    }
+
+    #[tokio::test]
+    async fn storage_range_at_requires_range_view_for_destroyed_account() {
+        // The mock provider has no range view unless a range is pushed to it.
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // CALLER, SELFDESTRUCT.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode("33ff".parse().unwrap()),
+        );
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy { gas_limit: 100_000, to: TxKind::Call(target), ..Default::default() }.into(),
+            Signature::test_signature(),
+        );
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000_000)));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let debug_api = DebugApi::new(
+            eth_api,
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+
+        // Replaying the call destroys `target`, which alone would yield an empty page.
+        let err = debug_api
+            .debug_storage_range_at(block_hash.into(), 1, target, Bytes::new(), 1)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
     }
 
     #[test]
@@ -1618,5 +1900,197 @@ mod tests {
 
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+
+    fn hashed_key(byte: u8) -> B256 {
+        B256::with_last_byte(byte)
+    }
+
+    fn storage_entry(key: Option<B256>, value: u64) -> HashedStorageEntry {
+        HashedStorageEntry { key, value: B256::from(U256::from(value)) }
+    }
+
+    #[test]
+    fn merge_storage_range_returns_persisted_slots_without_preimages() {
+        let persisted = vec![(hashed_key(1), U256::from(10)), (hashed_key(2), U256::from(20))];
+
+        let result = merge_storage_range(persisted, BTreeMap::new(), B256::ZERO, 10);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult {
+                storage: BTreeMap::from([
+                    (hashed_key(1), storage_entry(None, 10)),
+                    (hashed_key(2), storage_entry(None, 20)),
+                ]),
+                next_key: None,
+            }
+        );
+    }
+
+    #[test]
+    fn merge_storage_range_reports_next_key_when_page_is_full() {
+        let persisted = vec![
+            (hashed_key(1), U256::from(10)),
+            (hashed_key(2), U256::from(20)),
+            (hashed_key(3), U256::from(30)),
+        ];
+
+        let result = merge_storage_range(persisted, BTreeMap::new(), B256::ZERO, 2);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult {
+                storage: BTreeMap::from([
+                    (hashed_key(1), storage_entry(None, 10)),
+                    (hashed_key(2), storage_entry(None, 20)),
+                ]),
+                next_key: Some(hashed_key(3)),
+            }
+        );
+    }
+
+    #[test]
+    fn merge_storage_range_with_zero_max_result_only_reports_next_key() {
+        let persisted = vec![(hashed_key(1), U256::from(10))];
+
+        let result = merge_storage_range(persisted, BTreeMap::new(), B256::ZERO, 0);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult { storage: BTreeMap::new(), next_key: Some(hashed_key(1)) }
+        );
+    }
+
+    #[test]
+    fn merge_storage_range_applies_touched_slots() {
+        let persisted = vec![
+            (hashed_key(1), U256::from(10)),
+            (hashed_key(3), U256::from(30)),
+            (hashed_key(5), U256::from(50)),
+        ];
+        let touched = BTreeMap::from([
+            // A slot that only exists in the replay.
+            (hashed_key(2), (B256::with_last_byte(0xa2), U256::from(22))),
+            // A slot the replay overwrote.
+            (hashed_key(3), (B256::with_last_byte(0xa3), U256::from(33))),
+            // A slot the replay cleared.
+            (hashed_key(5), (B256::with_last_byte(0xa5), U256::ZERO)),
+            // A slot the replay read as empty.
+            (hashed_key(7), (B256::with_last_byte(0xa7), U256::ZERO)),
+        ]);
+
+        let result = merge_storage_range(persisted, touched, B256::ZERO, 10);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult {
+                storage: BTreeMap::from([
+                    (hashed_key(1), storage_entry(None, 10)),
+                    (hashed_key(2), storage_entry(Some(B256::with_last_byte(0xa2)), 22)),
+                    (hashed_key(3), storage_entry(Some(B256::with_last_byte(0xa3)), 33)),
+                ]),
+                next_key: None,
+            }
+        );
+    }
+
+    #[test]
+    fn merge_storage_range_ignores_touched_slots_before_start() {
+        let persisted = vec![(hashed_key(4), U256::from(40))];
+        let touched = BTreeMap::from([
+            (hashed_key(2), (B256::with_last_byte(0xa2), U256::from(22))),
+            (hashed_key(4), (B256::with_last_byte(0xa4), U256::from(44))),
+        ]);
+
+        let result = merge_storage_range(persisted, touched, hashed_key(3), 10);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult {
+                storage: BTreeMap::from([(
+                    hashed_key(4),
+                    storage_entry(Some(B256::with_last_byte(0xa4)), 44)
+                )]),
+                next_key: None,
+            }
+        );
+    }
+
+    #[test]
+    fn merge_storage_range_stays_full_when_touched_slots_clear_persisted_ones() {
+        // A page of 2 with 1 touched slot reads 2 + 1 + 1 persisted entries.
+        let persisted = vec![
+            (hashed_key(1), U256::from(10)),
+            (hashed_key(2), U256::from(20)),
+            (hashed_key(3), U256::from(30)),
+            (hashed_key(4), U256::from(40)),
+        ];
+        let touched = BTreeMap::from([(hashed_key(1), (B256::with_last_byte(0xa1), U256::ZERO))]);
+
+        let result = merge_storage_range(persisted, touched, B256::ZERO, 2);
+
+        assert_eq!(
+            result,
+            HashedStorageRangeResult {
+                storage: BTreeMap::from([
+                    (hashed_key(2), storage_entry(None, 20)),
+                    (hashed_key(3), storage_entry(None, 30)),
+                ]),
+                next_key: Some(hashed_key(4)),
+            }
+        );
+    }
+
+    fn cache_account_with_slot(slot: u64, value: u64, status: AccountStatus) -> CacheAccount {
+        let storage = std::iter::once((U256::from(slot), U256::from(value))).collect();
+        CacheAccount { account: Some(PlainAccount::new_empty_with_storage(storage)), status }
+    }
+
+    fn replayed_slot(slot: u64, value: u64) -> (B256, (B256, U256)) {
+        let slot = B256::from(U256::from(slot));
+        (keccak256(slot), (slot, U256::from(value)))
+    }
+
+    #[test]
+    fn replayed_storage_without_cache_entry_keeps_persisted_storage() {
+        assert_eq!(replayed_storage(None), (BTreeMap::new(), false));
+    }
+
+    #[test]
+    fn replayed_storage_of_destroyed_account_is_empty_and_wiped() {
+        let account = CacheAccount { account: None, status: AccountStatus::Destroyed };
+
+        assert_eq!(replayed_storage(Some(&account)), (BTreeMap::new(), true));
+    }
+
+    #[test]
+    fn replayed_storage_of_recreated_account_hides_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::DestroyedChanged);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), true)
+        );
+    }
+
+    #[test]
+    fn replayed_storage_of_created_account_hides_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::InMemoryChange);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), true)
+        );
+    }
+
+    #[test]
+    fn replayed_storage_of_loaded_account_keeps_persisted_storage() {
+        let account = cache_account_with_slot(7, 70, AccountStatus::Loaded);
+
+        assert_eq!(
+            replayed_storage(Some(&account)),
+            (BTreeMap::from([replayed_slot(7, 70)]), false)
+        );
     }
 }
