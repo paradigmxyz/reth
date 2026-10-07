@@ -2044,6 +2044,7 @@ mod tests {
             let provider = MockEthProvider::default().with_genesis_block();
             provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
             let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+                .set_block_gas_limit(30_000_000)
                 .with_max_tx_input_bytes(2_000_000)
                 .build(InMemoryBlobStore::default());
             let mut rules = EvmTransactionValidationGasRules {
