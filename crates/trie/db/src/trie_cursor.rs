@@ -17,8 +17,9 @@ use std::marker::PhantomData;
 /// Trait abstracting nibble encoding for trie keys.
 ///
 /// Allows the same cursor implementation to work with both legacy (65-byte) and
-/// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
-/// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
+/// packed (33-byte) nibble encodings. [`DatabaseTrieCursorFactory`] fixes the encoding through
+/// its adapter type parameter. Callers must choose an adapter matching the database's storage
+/// settings; [`crate::with_adapter!`] provides runtime dispatch between the adapter types.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
