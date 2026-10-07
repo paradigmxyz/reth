@@ -4,7 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, session::BlockRangeInfo};
+use crate::{message::BlockRequest, metrics::SnapRequestMetrics, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -22,6 +22,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use reth_primitives_traits::FastInstant;
 use std::{
     collections::{HashMap, VecDeque},
     ops::RangeInclusive,
@@ -38,7 +39,7 @@ type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 type InflightReceiptsRequest<R> = Request<(), PeerRequestResult<ReceiptsResponse<R>>>;
 type InflightBlockAccessListsRequest = Request<(), PeerRequestResult<BlockAccessLists>>;
-type InflightSnapRequest = Request<(), PeerRequestResult<SnapResponse>>;
+type InflightSnapRequest = Request<FastInstant, PeerRequestResult<SnapResponse>>;
 
 /// Maximum number of concurrent Snap requests to one peer.
 const MAX_INFLIGHT_SNAP_REQUESTS: usize = 4;
@@ -73,6 +74,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Outbound Snap request concurrency and latency.
+    snap_metrics: SnapRequestMetrics,
 }
 
 // === impl StateSyncer ===
@@ -92,6 +95,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            snap_metrics: Default::default(),
         }
     }
 
@@ -142,7 +146,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
         if let Some(requests) = self.inflight_snap_requests.remove(peer) {
+            self.snap_metrics.requests_inflight.decrement(requests.len() as f64);
+            self.snap_metrics.requests_failed_total.increment(requests.len() as u64);
             for req in requests {
+                self.snap_metrics
+                    .response_duration_seconds
+                    .record(req.request.elapsed().as_secs_f64());
                 let _ = req.response.send(Err(RequestError::ConnectionDropped));
             }
         }
@@ -354,8 +363,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 BlockRequest::GetReceipts(GetReceipts(request))
             }
             DownloadRequest::GetSnap { request, response, .. } => {
-                let inflight = Request { request: (), response };
+                let inflight = Request { request: FastInstant::now(), response };
                 self.inflight_snap_requests.entry(peer_id).or_default().push_back(inflight);
+                self.snap_metrics.requests_inflight.increment(1.0);
+                self.snap_metrics.requests_sent_total.increment(1);
                 BlockRequest::GetSnap(Box::new(request))
             }
         }
@@ -514,6 +525,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         let resp = requests.pop_front()?;
         if requests.is_empty() {
             self.inflight_snap_requests.remove(&peer_id);
+        }
+        self.snap_metrics.requests_inflight.decrement(1.0);
+        self.snap_metrics.response_duration_seconds.record(resp.request.elapsed().as_secs_f64());
+        if res.is_err() {
+            self.snap_metrics.requests_failed_total.increment(1);
         }
         let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -2250,9 +2266,10 @@ mod tests {
         });
 
         let (tx, mut rx) = oneshot::channel();
-        fetcher
-            .inflight_snap_requests
-            .insert(peer_id, VecDeque::from([Request { request: (), response: tx }]));
+        fetcher.inflight_snap_requests.insert(
+            peer_id,
+            VecDeque::from([Request { request: FastInstant::now(), response: tx }]),
+        );
         fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetSnap { inflight: 1 };
 
         let outcome = fetcher.on_snap_response(peer_id, Ok(resp));
@@ -2363,9 +2380,10 @@ mod tests {
             }
             assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
             let (tx, rx) = oneshot::channel();
-            fetcher
-                .inflight_snap_requests
-                .insert(fast, VecDeque::from([Request { request: (), response: tx }]));
+            fetcher.inflight_snap_requests.insert(
+                fast,
+                VecDeque::from([Request { request: FastInstant::now(), response: tx }]),
+            );
             fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap { inflight: 1 };
             let (followup_tx, _followup_rx) = oneshot::channel();
             fetcher.queued_requests.push_back(DownloadRequest::GetSnap {

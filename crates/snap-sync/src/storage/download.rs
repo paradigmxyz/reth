@@ -35,8 +35,8 @@ pub const DEFAULT_STORAGE_REQUESTS: usize = 4;
 
 /// Downloads the storage an account range's contracts still need, and repaired slots again.
 ///
-/// Each range response is committed before the next request, so at most one is held however large
-/// a contract is, and a download resumes from the persisted progress.
+/// Prefetched responses are bounded and commit in contract order. A large contract continues
+/// before later batches commit, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
     // Contracts asked for per request.
