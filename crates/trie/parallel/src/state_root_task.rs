@@ -47,11 +47,8 @@ pub struct StateRootComputeOutcome {
 
 /// Handle to a background sparse trie state root computation.
 ///
-/// Used by both the engine (during `newPayload`) and the payload builder (during `FCU`-triggered
-/// block building). Provides channels for streaming state updates into the pipeline and receiving
-/// the final computed state root.
-///
-/// Created by the engine's state-root strategy.
+/// Provides best-effort access hints, one authoritative update stream, and the final computation
+/// result. Dropping the handle cancels the task if it is still running.
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
@@ -145,7 +142,7 @@ impl StateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -293,7 +290,7 @@ impl PayloadStateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("state root task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -321,8 +318,7 @@ impl PayloadStateRootHandle {
 /// Hashed account and storage keys that a state-root task may want to prefetch.
 ///
 /// Hints are not authoritative. They may be missing, duplicated, stale, or ignored by a task.
-/// The conversions from and to proof-target types allocate; that cost is accepted because
-/// hints are produced on prewarm workers, off the block-execution thread.
+/// Conversions to and from proof-target types allocate new collections.
 #[derive(Debug, Clone, Default)]
 pub struct StateAccessHint {
     /// Hashed account keys that may be touched later in the block.
@@ -362,6 +358,9 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 }
 
 /// Semantic update stream consumed by state-root tasks.
+///
+/// These callbacks submit messages without reporting task completion or failure. Consumers must
+/// obtain the computation result separately, for example through [`StateRootHandle::state_root`].
 trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
@@ -496,6 +495,10 @@ impl SparseTrieStateRootSink {
     }
 }
 
+// Send errors mean the receiving pipeline has stopped, so further updates and the finish
+// signal cannot be processed. Task errors are delivered through the separate result channel;
+// if the task drops that channel without a result, StateRootHandle::state_root reports an error.
+// Cancellation abandons the result. Ignoring send errors here does not report a successful root.
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));

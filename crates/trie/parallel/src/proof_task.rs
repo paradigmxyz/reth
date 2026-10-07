@@ -251,9 +251,11 @@ impl ProofWorkerHandle {
                             "Storage worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "storage worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "storage",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -293,9 +295,11 @@ impl ProofWorkerHandle {
                             "Account worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "account worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "account",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -370,7 +374,7 @@ impl ProofWorkerHandle {
 
     /// Dispatch an account multiproof computation
     ///
-    /// The result will be sent via the `result_sender` channel included in the input.
+    /// The result will be sent via the sender in [`AccountMultiproofInput::proof_result_context`].
     pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
@@ -383,10 +387,10 @@ impl ProofWorkerHandle {
 
                 let AccountWorkerJob::AccountMultiproof { input } = err.0;
                 let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+                    input.proof_result_context;
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                    result: Err(StateRootTaskError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -1046,7 +1050,7 @@ where
     {
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let AccountMultiproofInput { targets, proof_result_context } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
@@ -1057,7 +1061,7 @@ where
         };
 
         let ProofResultContext { sender: result_tx, state, start_time: start } =
-            proof_result_sender;
+            proof_result_context;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
@@ -1125,7 +1129,7 @@ fn dispatch_v2_storage_proofs(
             .map_err(|_| {
                 StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
+                ).into())
             })?;
 
         storage_proof_receivers.insert(hashed_address, result_rx);
@@ -1158,14 +1162,7 @@ pub struct AccountMultiproofInput {
     /// The targets for which to compute the multiproof.
     pub targets: MultiProofTargetsV2,
     /// Context for sending the proof result.
-    pub proof_result_sender: ProofResultContext,
-}
-
-impl AccountMultiproofInput {
-    /// Returns the [`ProofResultContext`] for this input, consuming the input.
-    fn into_proof_result_sender(self) -> ProofResultContext {
-        self.proof_result_sender
-    }
+    pub proof_result_context: ProofResultContext,
 }
 
 /// Internal message for account workers.
@@ -1176,6 +1173,16 @@ enum AccountWorkerJob {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
     },
+}
+
+/// Context for a provider failure that prevents a proof worker from starting.
+#[derive(Debug, thiserror::Error)]
+#[error("{worker_type} worker {worker_id}: {source}")]
+struct ProofWorkerError {
+    worker_type: &'static str,
+    worker_id: usize,
+    #[source]
+    source: ProviderError,
 }
 
 #[cfg(test)]
@@ -1274,7 +1281,7 @@ mod tests {
                         account_targets: vec![ProofV2Target::new(address)],
                         storage_targets: std::iter::once((address, vec![slot])).collect(),
                     },
-                    proof_result_sender: ProofResultContext::new(
+                    proof_result_context: ProofResultContext::new(
                         proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),

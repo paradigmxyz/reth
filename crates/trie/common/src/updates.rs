@@ -206,19 +206,15 @@ impl TrieUpdates {
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
-    /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
+    /// Allocates sorted collections borrowing the trie updates as [`TrieUpdatesSortedRef`].
+    pub fn to_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         TrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
-            storage_tries: self
-                .storage_tries
-                .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref()))
-                .collect(),
+            storage_tries: self.storage_tries.iter().map(|m| (*m.0, m.1.to_sorted_ref())).collect(),
         }
     }
 
@@ -368,8 +364,9 @@ impl StorageTrieUpdates {
         StorageTrieUpdatesSorted { storage_nodes }
     }
 
-    /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
+    /// Allocates sorted collections borrowing the storage updates as
+    /// [`StorageTrieUpdatesSortedRef`].
+    pub fn to_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
         StorageTrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),

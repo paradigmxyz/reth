@@ -299,6 +299,10 @@ where
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let post_state_entry =
             self.post_state_cursor.seek(&key).cloned().map(|(k, v)| (k, v.into_option()));
 
