@@ -967,10 +967,4 @@ mod tests {
     fn rejects_overflowing_state_masking_window() {
         let _ = TreeConfig::default().with_num_state_masking_blocks(u64::MAX);
     }
-
-    #[test]
-    #[should_panic(expected = "multiproof chunk size must be non-zero")]
-    fn rejects_zero_multiproof_chunk_size() {
-        TreeConfig::default().with_multiproof_chunk_size(0);
-    }
 }

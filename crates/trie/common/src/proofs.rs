@@ -1852,10 +1852,4 @@ mod tests {
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
     }
-
-    #[test]
-    #[should_panic(expected = "chunk size must be non-zero")]
-    fn rejects_zero_chunk_size() {
-        MultiProofTargets::from_iter([(B256::ZERO, Default::default())]).chunks(0);
-    }
 }

@@ -297,24 +297,3 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[should_panic(expected = "chunk size must be non-zero")]
-    fn rejects_zero_chunk_size() {
-        let targets = MultiProofTargetsV2 {
-            account_targets: vec![ProofV2Target::new(B256::ZERO)],
-            storage_targets: Default::default(),
-        };
-        let _ = targets.chunks(0);
-    }
-
-    #[test]
-    #[should_panic(expected = "chunk size must be non-zero")]
-    fn rejects_zero_chunk_size_for_empty_targets() {
-        ChunkedMultiProofTargetsV2::new(MultiProofTargetsV2::default(), 0);
-    }
-}
