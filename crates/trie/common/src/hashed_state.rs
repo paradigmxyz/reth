@@ -1600,6 +1600,14 @@ mod tests {
         // Verify the original storage is not consumed
         assert_eq!(storage.storage.len(), 3);
     }
+
+    #[test]
+    #[should_panic(expected = "chunk size must be non-zero")]
+    fn rejects_zero_chunk_size() {
+        HashedPostState::default()
+            .with_accounts([(B256::ZERO, Some(Account::default()))])
+            .chunks(0);
+    }
 }
 
 /// Bincode-compatible hashed state type serde implementations.
@@ -2000,13 +2008,5 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "chunk size must be non-zero")]
-    fn rejects_zero_chunk_size() {
-        HashedPostState::default()
-            .with_accounts([(B256::ZERO, Some(Account::default()))])
-            .chunks(0);
     }
 }
