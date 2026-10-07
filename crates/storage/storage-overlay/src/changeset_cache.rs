@@ -15,7 +15,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -286,7 +286,7 @@ impl ChangesetCache {
         let end_block = *range.end();
         let timer = Instant::now();
 
-        if end_block > finish.number {
+        if !range.is_empty() && end_block > finish.number {
             return Err(ProviderError::InsufficientChangesets {
                 requested: end_block,
                 available: 0..=finish.number,
@@ -404,6 +404,21 @@ impl ChangesetCache {
             .overlay_builder(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+
+        // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
+        // missing blocks do not affect correctness.
+        let mut forward_updates = overlay_manager
+            .parent_chain(finish.hash)
+            .take_while(|block| block.recovered_block().number() >= start_block)
+            .map(|block| {
+                (
+                    block.recovered_block().number(),
+                    Arc::clone(&block.trie_data().sorted.trie_updates),
+                )
+            })
+            .collect::<Vec<_>>();
+        forward_updates.reverse();
+
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -413,6 +428,7 @@ impl ChangesetCache {
         let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
             provider,
             &state_trie_provider,
+            &forward_updates,
             start_block..=end_block,
             finish.number,
         )?);
@@ -624,6 +640,7 @@ mod tests {
         map::{B256Map, HashMap},
         Address, U256,
     };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -631,12 +648,12 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileSegment,
-        StaticFileWriter,
+        test_utils::create_test_provider_factory, BlockWriter, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter,
     };
-    use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::{StageCheckpointWriter, TrieWriter};
-    use reth_trie::{BranchNodeCompact, Nibbles, StateRoot};
+    use reth_trie::{BranchNodeCompact, ComputedTrieData, Nibbles, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -794,6 +811,299 @@ mod tests {
     }
 
     #[test]
+    fn consumers_restore_trie_values_masked_by_deferred_blocks() {
+        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
+        let provider = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider.insert_block(block.recovered_block()).unwrap();
+        }
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(10)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(5) }),
+            )
+            .unwrap();
+        let path = Nibbles::from_nibbles([1]);
+        let updates = |mask| {
+            Arc::new(TrieUpdatesSorted::new(
+                vec![(path, Some(BranchNodeCompact::new(mask, 0, 0, vec![], None)))],
+                B256Map::default(),
+            ))
+        };
+        let block4 = updates(1);
+        let block9 = updates(2);
+        // Block 9 masks block 4's write, so the persisted trie does not contain the block-5 value.
+        let masked = TrieUpdatesSorted::disjointed_merge_batch(&[&block4], &[&block9]);
+        assert!(masked.is_empty());
+        provider.write_trie_updates_sorted(&masked).unwrap();
+        provider.commit().unwrap();
+        let provider = factory.provider_rw().unwrap();
+        for (start, end, before) in [
+            (4, 4, Arc::new(TrieUpdatesSorted::new(vec![(path, None)], B256Map::default()))),
+            (5, 10, Arc::clone(&block4)),
+            (5, 5, Arc::default()),
+        ] {
+            manager.changeset_cache().inner.write().insert(
+                ChangesetRangeKey::new(start, end, blocks[end as usize].recovered_block().hash()),
+                before,
+            );
+        }
+        let (frontier, finish) = database_state_frontiers(&*provider).unwrap();
+        let overlay = manager
+            .overlay_builder(blocks[4].recovered_block().hash())
+            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+            .unwrap();
+        assert_eq!(overlay.input().nodes, block4);
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 4).unwrap(), *block4);
+    }
+
+    #[test]
+    fn calculated_reverts_preserve_deletions_across_frontiers() {
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let removed = Nibbles::from_nibbles([1]);
+        let replaced = Nibbles::from_nibbles([2]);
+        let node = BranchNodeCompact::new(0b0001, 0, 0, vec![], None);
+        let storage_updates = |storage_nodes| {
+            TrieUpdatesSorted::new(
+                vec![],
+                B256Map::from_iter([(hashed_address, StorageTrieUpdatesSorted { storage_nodes })]),
+            )
+        };
+        let finish_updates =
+            Arc::new(storage_updates(vec![(removed, None), (replaced, Some(node.clone()))]));
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in &blocks {
+            provider_rw.insert_block(block.recovered_block()).unwrap();
+        }
+        provider_rw
+            .write_trie_updates_sorted(&storage_updates(vec![(removed, Some(node.clone()))]))
+            .unwrap();
+        // Reverting the account's creation deletes every storage node visible at Finish.
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider_rw
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(2)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        for (block, updates) in [
+            (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
+            (&blocks[2], Arc::clone(&finish_updates)),
+            (&blocks[3], Arc::default()),
+        ] {
+            manager.insert_block(ExecutedBlock::new(
+                Arc::clone(&block.recovered_block),
+                Arc::clone(&block.execution_output),
+                ComputedTrieData::new(Arc::default(), updates),
+            ));
+        }
+        let before = factory.provider().unwrap();
+        let cache = manager.changeset_cache();
+        let (frontier, finish) = database_state_frontiers(&before).unwrap();
+        let result =
+            cache.get_or_compute_range(&manager, &before, 1..=2, frontier, finish).unwrap();
+        assert_eq!(
+            result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
+            &[(removed, None), (replaced, None)],
+        );
+
+        // An empty request returns no changesets, even when the persisted trie lags Finish.
+        let end = 2;
+        assert!(manager
+            .get_or_compute_cached_changesets_range(&before, end + 1..=end)
+            .unwrap()
+            .is_empty());
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        provider_rw.commit().unwrap();
+        let after = factory.provider().unwrap();
+        let (frontier, finish) = database_state_frontiers(&after).unwrap();
+        let advanced =
+            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish).unwrap();
+        assert!(Arc::ptr_eq(&advanced, &result));
+
+        // A cold calculation at the newer frontier must also serve the older reader.
+        cache.evict(2);
+        let advanced =
+            cache.get_or_compute_range(&manager, &after, 1..=2, frontier, finish).unwrap();
+        assert_eq!(advanced, result);
+
+        // An older reader must still receive the deletion after the frontier advances.
+        let cached = manager.get_or_compute_cached_changesets_range(&before, 1..=2).unwrap();
+        assert!(Arc::ptr_eq(&cached, &advanced));
+    }
+
+    #[test]
+    fn calculated_historical_range_excludes_tail_reverts() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let path = Nibbles::from_nibbles([1]);
+        let base_nodes = Arc::new(TrieUpdatesSorted::new(
+            vec![],
+            B256Map::from_iter([(
+                hashed_address,
+                StorageTrieUpdatesSorted {
+                    storage_nodes: vec![(
+                        path,
+                        Some(BranchNodeCompact::new(0b0001, 0, 0, vec![], None)),
+                    )],
+                },
+            )]),
+        ));
+        // Rewinding block 3 deletes a node introduced by the input overlay.
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(3, AccountBeforeTx { address, info: None })
+            .unwrap();
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                StateTrieOverlay::new(TrieInputSorted::new(
+                    Arc::clone(&base_nodes),
+                    Arc::default(),
+                    Default::default(),
+                )),
+                provider.cached_storage_settings().is_v2(),
+            );
+
+        let end = 2;
+        for range in [1..=end, end + 1..=end] {
+            let result = reth_trie_db::compute_range_trie_changesets(
+                &*provider,
+                &state_trie_provider,
+                &[(3, Arc::clone(&base_nodes))],
+                range,
+                3,
+            )
+            .unwrap();
+            assert!(result.is_empty());
+        }
+    }
+
+    #[test]
+    fn persisted_range_retains_transient_nodes_without_executed_blocks() {
+        let factory = create_test_provider_factory();
+        seed_headers(&factory, 2);
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(1, AccountBeforeTx { address, info: None })
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(test_account(1)) },
+            )
+            .unwrap();
+        // The account and its storage exist only at block 1. Enough slots to branch below the first
+        // nibble ensure the trie stores non-root nodes.
+        for slot in 0..257 {
+            provider
+                .tx_ref()
+                .put::<tables::StorageChangeSets>(
+                    BlockNumberAddress((1, address)),
+                    test_storage(slot, 0),
+                )
+                .unwrap();
+            provider
+                .tx_ref()
+                .put::<tables::StorageChangeSets>(
+                    BlockNumberAddress((2, address)),
+                    test_storage(slot, 1),
+                )
+                .unwrap();
+        }
+        let state_trie_provider =
+            OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+                &*provider,
+                empty_overlay(),
+                provider.cached_storage_settings().is_v2(),
+            );
+        let result = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &state_trie_provider,
+            &[],
+            1..=2,
+            2,
+        )
+        .unwrap();
+        let nodes = result.storage_tries_ref()[&hashed_address].storage_nodes_ref();
+        assert!(!nodes.is_empty());
+        assert!(nodes.iter().all(|(_, node)| node.is_none()));
+
+        let first = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &state_trie_provider,
+            &[],
+            1..=1,
+            2,
+        )
+        .unwrap();
+        let second = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &state_trie_provider,
+            &[],
+            2..=2,
+            2,
+        )
+        .unwrap();
+        let mut merged = second.clone();
+        merged.extend_ref_and_sort(&first);
+        assert_eq!(result, merged);
+        let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
+        assert_eq!(
+            reth_trie_db::compute_range_trie_changesets(
+                &*provider,
+                &state_trie_provider,
+                &forward,
+                1..=2,
+                2
+            )
+            .unwrap(),
+            result,
+        );
+        let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 1).unwrap(), second);
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 2).unwrap(), first);
+
+        // Recompute block 1 against its own tip instead of a later tip. Its changeset is identical.
+        let at_first = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+            &*provider,
+            StateTrieOverlay::new(TrieInputSorted::new(
+                Arc::new(second),
+                Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
+                Default::default(),
+            )),
+            provider.cached_storage_settings().is_v2(),
+        );
+        let at_first =
+            reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
+                .unwrap();
+        assert_eq!(first, at_first);
+    }
+
+    #[test]
     fn cached_range_merge_keeps_oldest_revert_values() {
         let factory = create_test_provider_factory();
         seed_headers(&factory, 2);
@@ -912,9 +1222,14 @@ mod tests {
                 overlay,
                 provider.cached_storage_settings().is_v2(),
             );
-        let actual =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 1..=3, 3)
-                .unwrap();
+        let actual = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &state_trie_provider,
+            &[],
+            1..=3,
+            3,
+        )
+        .unwrap();
         assert!(actual.storage_tries_ref().get(&hashed_address).is_none());
 
         let cache = ChangesetCache::new();
@@ -999,9 +1314,14 @@ mod tests {
                 overlay,
                 provider.cached_storage_settings().is_v2(),
             );
-        let actual =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &state_trie_provider, 2..=3, 3)
-                .unwrap();
+        let actual = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &state_trie_provider,
+            &[],
+            2..=3,
+            3,
+        )
+        .unwrap();
         assert_eq!(actual, expected);
     }
 
