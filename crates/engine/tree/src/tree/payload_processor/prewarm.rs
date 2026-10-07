@@ -132,6 +132,7 @@ where
     /// transactions as they arrive and wait for all spawned tasks to complete before
     /// clearing per-thread state. Workers that start via work-stealing lazily initialise
     /// their EVM state on first access via [`get_or_init`](reth_tasks::pool::Worker::get_or_init).
+    /// Already available transactions share a job without waiting for a batch to fill.
     fn spawn_txs_prewarm<Tx>(
         &self,
         pending: mpsc::Receiver<(usize, Tx)>,
@@ -176,17 +177,20 @@ where
                         continue;
                     }
 
-                    tx_count += 1;
+                    let batch = prewarm_transaction_batch((index, tx), &pending);
+                    tx_count += batch.iter().flatten().count();
                     let parent_span = Span::current();
                     s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        for (index, tx) in batch.into_iter().flatten() {
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: &parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        }
                     });
                 }
 
@@ -842,6 +846,16 @@ pub struct PrewarmMetrics {
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
 
+const PREWARM_TRANSACTION_BATCH_SIZE: usize = 4;
+
+fn prewarm_transaction_batch<Tx>(
+    first: (usize, Tx),
+    pending: &Receiver<(usize, Tx)>,
+) -> [Option<(usize, Tx)>; PREWARM_TRANSACTION_BATCH_SIZE] {
+    let mut transactions = std::iter::once(first).chain(pending.try_iter());
+    std::array::from_fn(|_| transactions.next())
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1251,5 +1265,42 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
+    }
+
+    #[test]
+    fn prewarm_batch_does_not_wait_for_more_transactions() {
+        let (_sender, receiver) = mpsc::channel();
+
+        let batch = prewarm_transaction_batch((0, 0), &receiver);
+
+        assert_eq!(batch, [Some((0, 0)), None, None, None]);
+    }
+
+    #[test]
+    fn prewarm_batch_preserves_order_and_leaves_next_transaction_queued() {
+        let (sender, receiver) = mpsc::channel();
+        for index in 1..=PREWARM_TRANSACTION_BATCH_SIZE {
+            sender.send((index, index)).unwrap();
+        }
+
+        let batch = prewarm_transaction_batch((0, 0), &receiver);
+
+        assert_eq!(batch, std::array::from_fn(|index| Some((index, index))));
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            (PREWARM_TRANSACTION_BATCH_SIZE, PREWARM_TRANSACTION_BATCH_SIZE)
+        );
+    }
+
+    #[test]
+    fn prewarm_batch_handles_disconnected_partial_stream() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send((1, 1)).unwrap();
+        drop(sender);
+
+        let batch = prewarm_transaction_batch((0, 0), &receiver);
+
+        assert_eq!(batch, [Some((0, 0)), Some((1, 1)), None, None]);
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
     }
 }
