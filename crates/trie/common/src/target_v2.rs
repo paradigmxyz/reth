@@ -296,6 +296,11 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             Some(chunk)
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     #[should_panic(expected = "chunk size must be non-zero")]
