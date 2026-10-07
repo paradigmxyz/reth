@@ -1009,6 +1009,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled")]
     fn pool_worker_publishes_only_strict_ready_results() {
         reth_tracing::init_test_tracing();
         for (nonce, index, reusable) in [(0, 0, true), (1, 0, false), (0, 128, false)] {
@@ -1021,7 +1022,10 @@ mod tests {
             let provider_rw = provider.provider_rw().unwrap();
             for (address, balance) in [(sender, 1_000_000_000), (beneficiary, 1)] {
                 let account = Account { balance: U256::from(balance), ..Default::default() };
-                provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account).unwrap();
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::PlainAccountState>(address, account.clone())
+                    .unwrap();
                 provider_rw
                     .tx_ref()
                     .put::<tables::HashedAccounts>(keccak256(address), account)
