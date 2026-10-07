@@ -56,7 +56,7 @@ where
     pub cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
-    separate_block_gas: bool,
+    eip8037_enabled: bool,
     check_block_state_gas_limit: bool,
     block_gas_refunds: bool,
     /// Total blob gas used.
@@ -115,7 +115,7 @@ where
         #[allow(clippy::useless_conversion)]
         let spec_id = evm.spec_id().into();
         let block_number = evm.block_env().number.to::<u64>();
-        let separate_block_gas = evm.version().feature(evm2::EvmFeatures::EIP8037);
+        let eip8037_enabled = evm.version().feature(evm2::EvmFeatures::EIP8037);
         let dao_fork_transition = chain_spec
             .ethereum_fork_activation(EthereumHardfork::Dao)
             .transitions_at_block(block_number);
@@ -136,7 +136,7 @@ where
             cumulative_gas_used: 0,
             block_regular_gas_used: 0,
             block_state_gas_used: 0,
-            separate_block_gas,
+            eip8037_enabled,
             check_block_state_gas_limit: true,
             block_gas_refunds: false,
             blob_gas_used: 0,
@@ -163,7 +163,7 @@ where
     }
 
     fn execution_gas_used(&self, result: &evm2::TxResult<T>) -> u64 {
-        if self.separate_block_gas && self.block_gas_refunds {
+        if self.eip8037_enabled && self.block_gas_refunds {
             result
                 .total_gas_spent
                 .saturating_sub(result.state_gas_spent)
@@ -310,7 +310,7 @@ where
         transaction_gas_limit: u64,
     ) -> Result<(), BlockExecutionError> {
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
-        let unavailable = if self.separate_block_gas {
+        let unavailable = if self.eip8037_enabled {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
             let state_available = block_gas_limit.saturating_sub(self.block_state_gas_used);
             let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
@@ -477,7 +477,7 @@ where
 
         let block_access_list = self.evm.state_mut().take_bal_builder();
         let block_gas_used = final_block_gas_used(
-            self.separate_block_gas,
+            self.eip8037_enabled,
             self.cumulative_gas_used,
             self.block_regular_gas_used,
             self.block_state_gas_used,
@@ -691,7 +691,7 @@ where
             .ethereum_fork_activation(EthereumHardfork::Dao)
             .transitions_at_block(block_number);
         self.inner.ctx = segment.ctx.clone();
-        self.inner.separate_block_gas = env.version.feature(evm2::EvmFeatures::EIP8037);
+        self.inner.eip8037_enabled = env.version.feature(evm2::EvmFeatures::EIP8037);
         self.inner.bal_index_offset = segment_idx as u64 * 2;
         self.inner.cumulative_gas_used = 0;
         self.inner.block_regular_gas_used = 0;
@@ -783,7 +783,7 @@ where
         Ok(FinishedBigBlockSegment {
             requests,
             gas_used: final_block_gas_used(
-                self.inner.separate_block_gas,
+                self.inner.eip8037_enabled,
                 self.inner.cumulative_gas_used,
                 self.inner.block_regular_gas_used,
                 self.inner.block_state_gas_used,
@@ -987,12 +987,12 @@ where
 }
 
 const fn final_block_gas_used(
-    separate_block_gas: bool,
+    eip8037_enabled: bool,
     cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
 ) -> u64 {
-    if separate_block_gas {
+    if eip8037_enabled {
         if block_regular_gas_used > block_state_gas_used {
             block_regular_gas_used
         } else {
