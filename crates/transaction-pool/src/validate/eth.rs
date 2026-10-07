@@ -1611,7 +1611,6 @@ fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     } else {
         Ok(())
     }
-
 }
 
 #[cfg(test)]
