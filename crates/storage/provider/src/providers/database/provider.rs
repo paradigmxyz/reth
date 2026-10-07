@@ -1483,7 +1483,12 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         {
             return Ok(())
         }
-        self.ensure_snap_state_verified()
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Refuses snap sync on a database without the hashed state layout it downloads into.
@@ -1524,19 +1529,6 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             }
             _ => Ok(()),
         }
-    }
-
-    /// Rejects state that snap has not verified for reading or publishing.
-    ///
-    /// Check the same database transaction that will serve the read. Raw database access stays
-    /// available to the downloader and verifier while the attempt is incomplete or abandoned.
-    pub(crate) fn ensure_snap_state_verified(&self) -> ProviderResult<()> {
-        if let Some(attempt) = self.snap_attempt()? &&
-            !attempt.is_verified()
-        {
-            return Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
-        }
-        Ok(())
     }
 }
 

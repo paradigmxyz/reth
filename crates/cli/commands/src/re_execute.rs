@@ -155,17 +155,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let mut bal_buf = Vec::new();
 
                 let db_at = {
-                    |block_number: u64| -> eyre::Result<_> {
+                    |block_number: u64| {
                         let provider = provider_factory
                             .database_provider_ro()
                             .unwrap()
                             .disable_long_read_transaction_safety();
                         let hash = provider.block_hash(block_number).unwrap().unwrap();
-                        Ok(StateProviderDatabase(
+                        StateProviderDatabase(
                             state_provider_factory
-                                .state_provider_from_database(provider, hash)?
+                                .state_provider_from_database(provider, hash)
                                 .into_evm_state_provider(),
-                        ))
+                        )
                     }
                 };
 
@@ -182,7 +182,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1)?);
+                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -199,7 +199,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Err(err) => {
                                 if skip_invalid_blocks {
                                     executor =
-                                        evm_config.batch_executor(db_at(block.number())?);
+                                        evm_config.batch_executor(db_at(block.number()));
                                     let _ =
                                         info_tx.send((block, eyre::Report::new(err)));
                                     continue
@@ -262,7 +262,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
                                             executor = evm_config
-                                                .batch_executor(db_at(block.number())?);
+                                                .batch_executor(db_at(block.number()));
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -275,7 +275,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                             if skip_invalid_blocks {
                                 executor =
-                                    evm_config.batch_executor(db_at(block.number())?);
+                                    evm_config.batch_executor(db_at(block.number()));
                                 let _ = info_tx.send((block, err));
                                 continue 'blocks;
                             }
@@ -290,7 +290,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             let last_block = block.number();
                             let old_executor = std::mem::replace(
                                 &mut executor,
-                                evm_config.batch_executor(db_at(last_block)?),
+                                evm_config.batch_executor(db_at(last_block)),
                             );
                             let bundle = old_executor.into_state().take_bundle();
                             verify_bundle_against_changesets(

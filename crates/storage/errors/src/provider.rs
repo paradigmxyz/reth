@@ -204,7 +204,7 @@ pub enum ProviderError {
     /// into.
     #[error("snap sync requires the hashed state layout, which this database predates")]
     SnapStorageLayoutUnsupported,
-    /// State a snap attempt has not verified cannot be served or marked complete.
+    /// State a snap attempt is still downloading was about to be marked complete.
     #[error("snap attempt {attempt} has not verified the downloaded state")]
     UnverifiedSnapState {
         /// Attempt that owns the unverified state.
