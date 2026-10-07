@@ -30,12 +30,6 @@ pub enum StateRootTaskError {
 
 impl From<StateProofError> for StateRootTaskError {
     fn from(error: StateProofError) -> Self {
-        match error {
-            StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
-            StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
-            StateProofError::TrieInconsistency(msg) => {
-                Self::Provider(ProviderError::TrieWitnessError(msg))
-            }
-        }
+        Self::Provider(error.into())
     }
 }
