@@ -151,7 +151,7 @@ impl<DB: Database> Database for RecordingDatabase<DB> {
 pub(super) struct HandoffInspector {
     after_execution: Arc<AtomicBool>,
     actions: Rc<RefCell<StorageJournal>>,
-    checkpoints: Vec<usize>,
+    checkpoints: Vec<FrameTrace>,
     enabled: bool,
 }
 
@@ -166,7 +166,19 @@ impl HandoffInspector {
         if !self.enabled {
             return
         }
-        self.checkpoints.push(self.actions.borrow().writes.len());
+        if let Some(parent) = self.checkpoints.last_mut() {
+            if parent.has_code && !parent.stepped {
+                self.actions.borrow_mut().overflowed = true;
+            }
+            // A parent can resume with a different execution backend after its child returns.
+            // Require opcode inspection independently for every resumed execution segment.
+            parent.stepped = false;
+        }
+        self.checkpoints.push(FrameTrace {
+            writes: self.actions.borrow().writes.len(),
+            has_code: false,
+            stepped: false,
+        });
         self.after_execution.store(false, Ordering::Relaxed);
     }
 
@@ -174,10 +186,14 @@ impl HandoffInspector {
         if !self.enabled {
             return
         }
-        if let Some(checkpoint) = self.checkpoints.pop() &&
-            !success
-        {
-            self.actions.borrow_mut().writes.truncate(checkpoint);
+        if let Some(frame) = self.checkpoints.pop() {
+            let mut actions = self.actions.borrow_mut();
+            // JIT frames may forward call/log hooks without forwarding individual opcodes.
+            // Never interpret absent balance observations as permission to rebase balances.
+            actions.overflowed |= frame.has_code && !frame.stepped;
+            if !success {
+                actions.writes.truncate(frame.writes);
+            }
         }
         if self.checkpoints.is_empty() {
             self.after_execution.store(true, Ordering::Relaxed);
@@ -198,10 +214,28 @@ impl HandoffInspector {
     }
 }
 
+#[derive(Debug)]
+struct FrameTrace {
+    writes: usize,
+    has_code: bool,
+    stepped: bool,
+}
+
 impl<Ctx> Inspector<Ctx> for HandoffInspector {
+    fn initialize_interp(&mut self, interp: &mut Interpreter, _ctx: &mut Ctx) {
+        if self.enabled &&
+            let Some(frame) = self.checkpoints.last_mut()
+        {
+            frame.has_code = !interp.bytecode.original_bytes().is_empty();
+        }
+    }
+
     fn step(&mut self, interp: &mut Interpreter, _ctx: &mut Ctx) {
         if !self.enabled {
             return
+        }
+        if let Some(frame) = self.checkpoints.last_mut() {
+            frame.stepped = true;
         }
         match interp.bytecode.opcode() {
             opcode::BALANCE => {
@@ -832,6 +866,39 @@ mod tests {
         assert!(candidate.reads.overflowed);
         assert!(candidate.effects.writes.is_empty());
         assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn uninspected_bytecode_frame_fails_closed() {
+        let mut recording = RecordingDatabase::new(database(), BENEFICIARY, true);
+        let mut inspector = recording.inspector();
+        inspector.enter();
+        inspector.checkpoints.last_mut().unwrap().has_code = true;
+        inspector.exit(true);
+        assert!(recording.take_reads().overflowed);
+    }
+
+    #[test]
+    fn uninspected_resumed_segment_fails_closed() {
+        let mut recording = RecordingDatabase::new(database(), BENEFICIARY, true);
+        let mut inspector = recording.inspector();
+        inspector.enter();
+        let frame = inspector.checkpoints.last_mut().unwrap();
+        frame.has_code = true;
+        frame.stepped = true;
+        inspector.enter(); // Parent yielded a call after an inspected segment.
+        inspector.exit(true); // An empty/precompile child has no opcodes to inspect.
+        inspector.exit(true); // Resumed parent completed without opcode callbacks.
+        assert!(recording.take_reads().overflowed);
+    }
+
+    #[test]
+    fn empty_frame_needs_no_opcode_callbacks() {
+        let mut recording = RecordingDatabase::new(database(), BENEFICIARY, true);
+        let mut inspector = recording.inspector();
+        inspector.enter();
+        inspector.exit(true);
+        assert!(!recording.take_reads().overflowed);
     }
 
     proptest::proptest! {

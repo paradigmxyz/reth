@@ -32,6 +32,10 @@ empty-account classification must still match; a beneficiary loaded only after e
 from the empty-account check because its fee-only access cannot influence call gas. Arithmetic
 overflow/underflow rejects the entire handoff before canonical commit.
 
+Every nonempty bytecode execution segment must emit opcode callbacks, including resumed parent
+frames. Backends such as optional JIT execution can skip these callbacks; those results fail
+closed rather than treating missing balance observations as permission to rebase balances.
+
 This follows Nethermind's separation of read preconditions and replayable effects, not its complete
 implementation. Account metadata checks and the caller minimum are deliberately more conservative;
 sender-chain warming and Nethermind's fine-grained per-field/minimum-balance tracking are not ported.
