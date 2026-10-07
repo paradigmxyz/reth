@@ -85,7 +85,7 @@ jobs:
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Secure runner
         uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
