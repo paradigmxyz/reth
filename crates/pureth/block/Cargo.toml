@@ -1,20 +1,16 @@
 [package]
-name = "pureth-withdrawal-root"
+name = "reth-pureth-block"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-publish = false
+description = "Composed execution block commitments"
 
 [lints]
 workspace = true
 
 [dependencies]
-alloy-eips = { workspace = true, features = ["ssz"] }
 alloy-primitives.workspace = true
-ethereum_ssz.workspace = true
 reth-pureth-ssz.workspace = true
-sha2.workspace = true
-tree_hash.workspace = true

@@ -5,6 +5,15 @@ use alloy_primitives::{b256, B256};
 use sha2::{Digest, Sha256};
 use tree_hash::{merkle_root, mix_in_length, TreeHash};
 
+mod codec;
+mod snapshot;
+
+pub use codec::{
+    decode_withdrawal, decode_withdrawals, encode_withdrawal, encode_withdrawals,
+    WithdrawalsCodecError, WITHDRAWAL_SSZ_LENGTH,
+};
+pub use snapshot::{WithdrawalSnapshot, WithdrawalSnapshotError};
+
 const WITHDRAWAL_ACTIVE_FIELDS: B256 =
     b256!("0x0f00000000000000000000000000000000000000000000000000000000000000");
 
@@ -207,5 +216,144 @@ mod tests {
             mix_in_length(&progressive_root(&synthetic_roots(22)), 22),
             b256!("0xe79bdcda4e58dd09c4b855964e1f1c01c99e215b6e01602f5302763effaf8637")
         );
+    }
+
+    #[test]
+    fn withdrawal_codec_preserves_field_encoding() {
+        let mut address_bytes = [0_u8; 20];
+        for (index, byte) in address_bytes.iter_mut().enumerate() {
+            *byte = u8::try_from(index + 1).unwrap();
+        }
+
+        let withdrawal = Withdrawal {
+            index: 0x0102_0304_0506_0708,
+            validator_index: 0x1122_3344_5566_7788,
+            address: Address::from(address_bytes),
+            amount: u64::MAX,
+        };
+
+        let mut expected = Vec::with_capacity(WITHDRAWAL_SSZ_LENGTH);
+        expected.extend_from_slice(&withdrawal.index.to_le_bytes());
+        expected.extend_from_slice(&withdrawal.validator_index.to_le_bytes());
+        expected.extend_from_slice(&address_bytes);
+        expected.extend_from_slice(&withdrawal.amount.to_le_bytes());
+
+        assert_eq!(expected.len(), WITHDRAWAL_SSZ_LENGTH);
+        assert_eq!(encode_withdrawal(&withdrawal), expected);
+        assert_eq!(decode_withdrawal(&expected).unwrap(), withdrawal);
+    }
+
+    #[test]
+    fn withdrawal_list_codec_preserves_order_and_empty_values() {
+        let withdrawals = vec![withdrawal_a(), withdrawal_b()];
+        let encoded = encode_withdrawals(&withdrawals).unwrap();
+
+        let mut expected = encode_withdrawal(&withdrawals[0]);
+        expected.extend_from_slice(&encode_withdrawal(&withdrawals[1]));
+
+        assert_eq!(encoded, expected);
+        assert_eq!(decode_withdrawals(&encoded).unwrap(), withdrawals);
+        assert!(encode_withdrawals(&[]).unwrap().is_empty());
+        assert!(decode_withdrawals(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn withdrawal_codec_rejects_incomplete_elements() {
+        for length in [0_usize, 43, 45] {
+            assert!(decode_withdrawal(&vec![0; length]).is_err());
+        }
+
+        for length in [1_usize, 43, 45, 87] {
+            assert!(decode_withdrawals(&vec![0; length]).is_err());
+        }
+
+        assert!(WithdrawalSnapshot::from_ssz(&[0; 43]).is_err());
+    }
+
+    #[test]
+    fn withdrawal_snapshot_preserves_values_bytes_and_root() {
+        let withdrawals = vec![withdrawal_a(), withdrawal_b()];
+        let expected_root = progressive_withdrawals_root(&withdrawals);
+        let expected_bytes = encode_withdrawals(&withdrawals).unwrap();
+
+        let snapshot = WithdrawalSnapshot::build(withdrawals.clone()).unwrap();
+
+        assert_eq!(snapshot.withdrawals(), withdrawals.as_slice());
+        assert_eq!(snapshot.serialized(), expected_bytes.as_slice());
+        assert_eq!(snapshot.root(), expected_root);
+        assert_eq!(snapshot.root(), snapshot.tree().root());
+
+        let decoded = WithdrawalSnapshot::from_ssz(snapshot.serialized()).unwrap();
+
+        assert_eq!(decoded.withdrawals(), snapshot.withdrawals());
+        assert_eq!(decoded.serialized(), snapshot.serialized());
+        assert_eq!(decoded.root(), snapshot.root());
+    }
+
+    #[test]
+    fn withdrawal_snapshot_retains_index_path_and_metadata_nodes() {
+        let withdrawal = withdrawal_a();
+        let snapshot = WithdrawalSnapshot::build(vec![withdrawal]).unwrap();
+
+        let list = snapshot.tree().children().unwrap();
+
+        let mut length_chunk = [0_u8; 32];
+        length_chunk[..8].copy_from_slice(&1_u64.to_le_bytes());
+        assert_eq!(list[1].root(), B256::from(length_chunk));
+
+        let list_contents = list[0].children().unwrap();
+        let container = list_contents[0].children().unwrap();
+
+        assert_eq!(container[1].root(), WITHDRAWAL_ACTIVE_FIELDS);
+
+        let field_contents = container[0].children().unwrap();
+        assert_eq!(field_contents[0].root(), withdrawal.index.tree_hash_root(),);
+    }
+
+    #[test]
+    fn withdrawal_snapshot_matches_roots_across_progressive_boundaries() {
+        for count in [0_usize, 1, 5, 6, 16, 17, 20, 21, 22] {
+            let withdrawals = (0..count)
+                .map(|index| Withdrawal {
+                    index: u64::try_from(index).unwrap(),
+                    validator_index: 100 + u64::try_from(index).unwrap(),
+                    address: Address::repeat_byte(u8::try_from(index + 1).unwrap()),
+                    amount: 1_000 + u64::try_from(index).unwrap(),
+                })
+                .collect::<Vec<_>>();
+
+            let expected_root = progressive_withdrawals_root(&withdrawals);
+            let snapshot = WithdrawalSnapshot::build(withdrawals).unwrap();
+
+            assert_eq!(snapshot.root(), expected_root);
+        }
+
+        assert_eq!(
+            WithdrawalSnapshot::build(Vec::new()).unwrap().root(),
+            b256!("f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"),
+        );
+
+        assert_eq!(
+            WithdrawalSnapshot::build(vec![withdrawal_a()]).unwrap().root(),
+            b256!("48cd06fcb026799de708515f04feaf9a67753755627c208dddbc4b7739348542"),
+        );
+    }
+
+    #[test]
+    fn withdrawal_snapshot_distinguishes_order_and_value_changes() {
+        let original = WithdrawalSnapshot::build(vec![withdrawal_a(), withdrawal_b()]).unwrap();
+
+        let reordered = WithdrawalSnapshot::build(vec![withdrawal_b(), withdrawal_a()]).unwrap();
+
+        let changed = WithdrawalSnapshot::build(vec![
+            Withdrawal { amount: 4, ..withdrawal_a() },
+            withdrawal_b(),
+        ])
+        .unwrap();
+
+        assert_ne!(original.root(), reordered.root());
+        assert_ne!(original.root(), changed.root());
+        assert_ne!(original.serialized(), reordered.serialized());
+        assert_ne!(original.serialized(), changed.serialized());
     }
 }
