@@ -34,7 +34,7 @@ use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_primitives_traits::{AlloyBlockHeader, BlockBody};
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
@@ -595,7 +595,7 @@ where
         };
         let execution_data = ExecutionData::new(
             ExecutionPayload::V4(built_payload.payload.clone()),
-            ExecutionPayloadSidecar::v3(
+            ExecutionPayloadSidecar::v4(
                 cancun_fields,
                 PraguePayloadFields::new(built_payload.execution_requests.clone()),
             ),
