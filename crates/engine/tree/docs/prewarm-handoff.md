@@ -17,17 +17,30 @@ Transactions with later sender nonces or funding dependencies can fail strict pa
 speculation. They are retried with permissive cache-only warming, and those results are never
 published for reuse. Transactions outside the bounded lookahead also use cache-only warming.
 
-An account loaded only after the outermost execution frame returns can be identified as the
-beneficiary's fee-only access. Its reward delta is rebased onto the current balance, avoiding a
-false conflict with earlier transaction fees. Nonce, code hash, and existence must still match.
-Beneficiary accesses during transaction validation or EVM execution are exact dependencies. A
-decreasing beneficiary balance or overflowing arithmetic conservatively rejects the handoff.
+Workers also record ordered `SSTORE` operations with call/create frame checkpoints. Failed frames
+discard their writes, but retain their read dependencies. Before publication, the recorder checks
+that replay covers the worker's entire committed storage delta, then resets stored slot values to
+their originals. Canonical execution applies only the recorded committed writes after validating
+all preconditions; it does not import the worker's final storage snapshot. Creation/destruction and
+storage clearing retain REVM's account status metadata and ordinary executor commit semantics.
+
+Balance effects replay as additions/subtractions onto the current balance when execution did not
+observe the balance. `BALANCE`, `SELFBALANCE`, `SELFDESTRUCT`, and internal value-transfer checks
+remain exact dependencies, including reads in reverted frames or failed value transfers. Caller
+funding conservatively requires at least its parent-state balance. Existence, nonce, code hash, and
+empty-account classification must still match; a beneficiary loaded only after execution is exempt
+from the empty-account check because its fee-only access cannot influence call gas. Arithmetic
+overflow/underflow rejects the entire handoff before canonical commit.
+
+This follows Nethermind's separation of read preconditions and replayable effects, not its complete
+implementation. Account metadata checks and the caller minimum are deliberately more conservative;
+sender-chain warming and Nethermind's fine-grained per-field/minimum-balance tracking are not ported.
 
 Handoff is restricted to Ethereum configurations that explicitly support it. BAL blocks and
 EIP-8037 multidimensional gas are excluded. Custom configurations retain the existing prewarming
 behavior unless they opt in and provide compatible transaction-result wrapping. No results are
 shared across payloads or imported from txpool prewarming. Results are limited to a 128-transaction
-lookahead and 8,192 distinct database reads per transaction.
+lookahead and 8,192 distinct database reads, balance observations, or storage actions per transaction.
 
 Metrics under `sync.prewarm.handoff` count `reused`, `rejected`, and `missing` results. The comparison
 tests cover state conflicts, beneficiary reads and fee rebasing, receipt and bundle equivalence,

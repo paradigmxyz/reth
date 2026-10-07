@@ -1,15 +1,15 @@
 //! Validated reuse of block-local transaction prewarming results.
 //!
 //! Workers execute against the parent state with normal nonce and balance validation. Canonical
-//! execution consumes only ready results whose complete database read set still matches, and
-//! commits them through the ordinary block executor. Results never cross payload boundaries.
-//! A beneficiary loaded only after the top-level frame exits is a fee-only dependency: its
-//! balance delta can be rebased, but EVM-visible beneficiary reads remain exact dependencies.
+//! execution validates ready results' read preconditions before replaying committed storage
+//! operations through the ordinary block executor. Results never cross payload boundaries.
+//! Unobserved balance deltas are rebased; EVM balance reads and internal value-debit checks
+//! remain exact dependencies. Caller funding checks conservatively require its parent balance.
 
 use alloy_consensus::{transaction::TxHashRef, Transaction, TxReceipt};
 use alloy_evm::{block::BlockExecutor, Evm};
 use alloy_primitives::{
-    map::{AddressMap, HashMap},
+    map::{AddressMap, AddressSet, HashMap},
     Address, B256, U256,
 };
 use metrics::Counter;
@@ -18,14 +18,22 @@ use reth_evm::{ConfigureEvm, HaltReasonFor, SpecFor, TxExecutionResultFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::TxTy;
 use revm::{
-    bytecode::Bytecode,
-    context::{result::ResultAndState, Block, Cfg},
-    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome},
-    state::AccountInfo,
+    bytecode::{opcode, Bytecode},
+    context::{
+        result::{ExecutionResult, ResultAndState},
+        Block, Cfg,
+    },
+    interpreter::{
+        interpreter_types::{InputsTr, Jumps},
+        CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter,
+    },
+    state::{AccountInfo, EvmState},
     Database, Inspector,
 };
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -42,6 +50,7 @@ pub(super) struct RecordingDatabase<DB> {
     reads: ReadSet,
     beneficiary: Address,
     after_execution: Arc<AtomicBool>,
+    actions: Rc<RefCell<StorageJournal>>,
     enabled: bool,
 }
 
@@ -53,16 +62,23 @@ impl<DB> RecordingDatabase<DB> {
             enabled,
             reads: ReadSet::default(),
             after_execution: Arc::new(AtomicBool::new(false)),
+            actions: Rc::new(RefCell::new(StorageJournal::default())),
         }
     }
 
     pub(super) fn inspector(&self) -> HandoffInspector {
-        HandoffInspector { after_execution: Arc::clone(&self.after_execution), depth: 0 }
+        HandoffInspector {
+            after_execution: Arc::clone(&self.after_execution),
+            actions: Rc::clone(&self.actions),
+            checkpoints: Vec::new(),
+            enabled: self.enabled,
+        }
     }
 
     pub(super) fn reset(&mut self) {
         self.reads = ReadSet::default();
         self.after_execution.store(false, Ordering::Relaxed);
+        *self.actions.borrow_mut() = StorageJournal::default();
     }
 
     pub(super) fn set_recording(&mut self, enabled: bool) {
@@ -71,7 +87,12 @@ impl<DB> RecordingDatabase<DB> {
     }
 
     pub(super) fn take_reads(&mut self) -> ReadSet {
-        std::mem::take(&mut self.reads)
+        let mut reads = std::mem::take(&mut self.reads);
+        let actions = std::mem::take(&mut *self.actions.borrow_mut());
+        reads.writes = actions.writes;
+        reads.balance_reads = actions.balance_reads;
+        reads.overflowed |= actions.overflowed;
+        reads
     }
 
     fn can_record(&mut self) -> bool {
@@ -125,49 +146,118 @@ impl<DB: Database> Database for RecordingDatabase<DB> {
     }
 }
 
-/// Marks only the post-frame beneficiary load as independent of EVM execution.
+/// Records persistent writes and balance observations, retaining reads across reverted frames.
 #[derive(Debug)]
 pub(super) struct HandoffInspector {
     after_execution: Arc<AtomicBool>,
-    depth: usize,
+    actions: Rc<RefCell<StorageJournal>>,
+    checkpoints: Vec<usize>,
+    enabled: bool,
 }
 
 impl HandoffInspector {
-    pub(super) fn reset(&mut self) {
-        self.depth = 0;
+    pub(super) fn reset(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        self.checkpoints.clear();
         self.after_execution.store(false, Ordering::Relaxed);
     }
 
     fn enter(&mut self) {
-        self.depth += 1;
+        if !self.enabled {
+            return
+        }
+        self.checkpoints.push(self.actions.borrow().writes.len());
         self.after_execution.store(false, Ordering::Relaxed);
     }
 
-    fn exit(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
-        if self.depth == 0 {
+    fn exit(&mut self, success: bool) {
+        if !self.enabled {
+            return
+        }
+        if let Some(checkpoint) = self.checkpoints.pop() &&
+            !success
+        {
+            self.actions.borrow_mut().writes.truncate(checkpoint);
+        }
+        if self.checkpoints.is_empty() {
             self.after_execution.store(true, Ordering::Relaxed);
         }
+    }
+
+    fn record_balance(&self, address: Address) {
+        let mut actions = self.actions.borrow_mut();
+        if actions.overflowed {
+            return
+        }
+        if actions.balance_reads.len() >= MAX_READS {
+            actions.balance_reads.clear();
+            actions.overflowed = true;
+            return
+        }
+        actions.balance_reads.insert(address);
     }
 }
 
 impl<Ctx> Inspector<Ctx> for HandoffInspector {
-    fn call(&mut self, _ctx: &mut Ctx, _inputs: &mut CallInputs) -> Option<CallOutcome> {
+    fn step(&mut self, interp: &mut Interpreter, _ctx: &mut Ctx) {
+        if !self.enabled {
+            return
+        }
+        match interp.bytecode.opcode() {
+            opcode::BALANCE => {
+                if let Ok(value) = interp.stack.peek(0) {
+                    self.record_balance(Address::from_word(B256::from(value)));
+                }
+            }
+            opcode::SELFBALANCE | opcode::SELFDESTRUCT => {
+                self.record_balance(interp.input.target_address());
+            }
+            _ => {}
+        }
+        if self.enabled &&
+            interp.bytecode.opcode() == opcode::SSTORE &&
+            let Ok(slot) = interp.stack.peek(0) &&
+            let Ok(value) = interp.stack.peek(1)
+        {
+            let mut actions = self.actions.borrow_mut();
+            if actions.overflowed {
+                return
+            }
+            if actions.writes.len() >= MAX_READS {
+                actions.writes.clear();
+                actions.overflowed = true;
+                return
+            }
+            actions.writes.push(StorageWrite {
+                address: interp.input.target_address(),
+                slot,
+                value,
+            });
+        }
+    }
+
+    fn call(&mut self, _ctx: &mut Ctx, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if self.enabled && !self.checkpoints.is_empty() && !inputs.call_value().is_zero() {
+            self.record_balance(inputs.caller);
+        }
         self.enter();
         None
     }
 
-    fn call_end(&mut self, _ctx: &mut Ctx, _inputs: &CallInputs, _outcome: &mut CallOutcome) {
-        self.exit();
+    fn call_end(&mut self, _ctx: &mut Ctx, _inputs: &CallInputs, outcome: &mut CallOutcome) {
+        self.exit(outcome.result.result.is_ok());
     }
 
-    fn create(&mut self, _ctx: &mut Ctx, _inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+    fn create(&mut self, _ctx: &mut Ctx, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        if self.enabled && !self.checkpoints.is_empty() && !inputs.value().is_zero() {
+            self.record_balance(inputs.caller());
+        }
         self.enter();
         None
     }
 
-    fn create_end(&mut self, _ctx: &mut Ctx, _inputs: &CreateInputs, _outcome: &mut CreateOutcome) {
-        self.exit();
+    fn create_end(&mut self, _ctx: &mut Ctx, _inputs: &CreateInputs, outcome: &mut CreateOutcome) {
+        self.exit(outcome.result.result.is_ok());
     }
 }
 
@@ -177,6 +267,23 @@ pub(super) struct ReadSet {
     storage: HashMap<(Address, U256), U256>,
     block_hashes: BTreeMap<u64, B256>,
     overflowed: bool,
+    writes: Vec<StorageWrite>,
+    balance_reads: AddressSet,
+}
+
+/// Transaction-local writes; a failed frame truncates writes but never its read dependencies.
+#[derive(Debug, Default)]
+struct StorageJournal {
+    writes: Vec<StorageWrite>,
+    balance_reads: AddressSet,
+    overflowed: bool,
+}
+
+#[derive(Debug)]
+struct StorageWrite {
+    address: Address,
+    slot: U256,
+    value: U256,
 }
 
 #[derive(Debug)]
@@ -190,12 +297,52 @@ struct AccountRead {
 pub(crate) struct PrewarmResult<H> {
     tx_hash: B256,
     reads: ReadSet,
-    result: ResultAndState<H>,
+    result: ExecutionResult<H>,
+    effects: StateEffects,
+    caller: Address,
+}
+
+/// Validated account effects and original storage metadata, with ordered persistent writes.
+#[derive(Debug)]
+struct StateEffects {
+    accounts: EvmState,
+    writes: Vec<StorageWrite>,
 }
 
 impl<H> PrewarmResult<H> {
-    pub(super) const fn new(tx_hash: B256, reads: ReadSet, result: ResultAndState<H>) -> Self {
-        Self { tx_hash, reads, result }
+    pub(super) fn new(
+        tx_hash: B256,
+        caller: Address,
+        mut reads: ReadSet,
+        mut result: ResultAndState<H>,
+    ) -> Self {
+        // Verify that the recorded operations cover the worker's complete committed storage
+        // delta. Fail closed on an unsupported/missing operation rather than replaying a snapshot.
+        let mut final_writes = HashMap::<_, _>::default();
+        for write in &reads.writes {
+            final_writes.insert((write.address, write.slot), write.value);
+        }
+        for (address, account) in &mut result.state {
+            for (slot, value) in &mut account.storage {
+                let recorded = final_writes.remove(&(*address, *slot));
+                if recorded.is_some_and(|recorded| recorded != value.present_value) ||
+                    (value.is_changed() && recorded.is_none())
+                {
+                    reads.overflowed = true;
+                }
+                // Retain slot warmth/original-value metadata, not the worker's final value.
+                value.present_value = value.original_value;
+            }
+        }
+        reads.overflowed |= !final_writes.is_empty();
+        let writes = std::mem::take(&mut reads.writes);
+        Self {
+            tx_hash,
+            reads,
+            result: result.result,
+            effects: StateEffects { accounts: result.state, writes },
+            caller,
+        }
     }
 
     /// Validates all dependencies before changing any canonical state.
@@ -215,18 +362,32 @@ impl<H> PrewarmResult<H> {
                     if original.nonce == current.nonce &&
                         original.code_hash == current.code_hash =>
                 {
-                    if read.fee_only {
-                        if current.balance < original.balance {
+                    if current.balance != original.balance {
+                        if !read.fee_only && self.reads.balance_reads.contains(&address) {
                             return None
                         }
-                        let account = self.result.state.get_mut(&address)?;
-                        let reward = account.info.balance.checked_sub(original.balance)?;
-                        let balance = current.balance.checked_add(reward)?;
-                        account.info = current.clone();
-                        account.info.balance = balance;
+                        if (read.fee_only || address == self.caller) &&
+                            current.balance < original.balance
+                        {
+                            return None
+                        }
+                        // Empty-account classification influences call gas and EXTCODEHASH.
+                        // Fee-only loads occur after execution and cannot influence those checks.
+                        if !read.fee_only && original.is_empty() != current.is_empty() {
+                            return None
+                        }
+                        let account = self.effects.accounts.get_mut(&address)?;
+                        account.info.balance = if account.info.balance >= original.balance {
+                            current.balance.checked_add(account.info.balance - original.balance)?
+                        } else {
+                            // Only the caller or a value-debit source may lose balance.
+                            // Internal debit sources are exact dependencies recorded by hooks.
+                            if address != self.caller {
+                                return None
+                            }
+                            current.balance.checked_sub(original.balance - account.info.balance)?
+                        };
                         *account.original_info_mut() = current.clone();
-                    } else if original.balance != current.balance {
-                        return None
                     }
                 }
                 _ => return None,
@@ -242,7 +403,17 @@ impl<H> PrewarmResult<H> {
                 return None
             }
         }
-        Some(self.result)
+        // All dependencies have passed. Stage the ordered committed writes locally; ordinary
+        // executor commit applies account creation/destruction flags and storage clearing.
+        for write in self.effects.writes {
+            self.effects
+                .accounts
+                .get_mut(&write.address)?
+                .storage
+                .get_mut(&write.slot)?
+                .present_value = write.value;
+        }
+        Some(ResultAndState { result: self.result, state: self.effects.accounts })
     }
 }
 
@@ -401,6 +572,7 @@ mod tests {
     }
 
     fn speculate(db: InMemoryDB, tx: TxEnv) -> PrewarmResult<HaltReason> {
+        let caller = tx.caller;
         let recording = RecordingDatabase::new(db, BENEFICIARY, true);
         let inspector = recording.inspector();
         let mut evm =
@@ -408,7 +580,7 @@ mod tests {
         evm.enable_inspector();
         let result = evm.transact(tx).unwrap();
         let reads = evm.db_mut().take_reads();
-        PrewarmResult::new(B256::ZERO, reads, result)
+        PrewarmResult::new(B256::ZERO, caller, reads, result)
     }
 
     fn execute(db: &mut InMemoryDB, tx: TxEnv) -> ResultAndState<HaltReason> {
@@ -455,16 +627,17 @@ mod tests {
     }
 
     #[test]
-    fn beneficiary_as_recipient_is_an_exact_dependency() {
+    fn beneficiary_as_recipient_replays_balance_addition() {
         let mut canonical = database();
         let mut transaction = tx(2);
         transaction.kind = TxKind::Call(BENEFICIARY);
         transaction.value = U256::from(7);
-        let candidate = speculate(canonical.clone(), transaction);
+        let candidate = speculate(canonical.clone(), transaction.clone());
         assert!(!candidate.reads.accounts[&BENEFICIARY].fee_only);
         let first = execute(&mut canonical, tx(1));
         canonical.commit(first.state);
-        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, transaction));
     }
 
     #[test]
@@ -485,6 +658,209 @@ mod tests {
             AccountInfo { balance: U256::from(200_000_000), ..Default::default() },
         );
         assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn increased_sender_balance_replays_debit() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(1));
+        canonical.insert_account_info(
+            Address::repeat_byte(1),
+            AccountInfo { balance: U256::from(2_000_000_000), ..Default::default() },
+        );
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, tx(1)));
+    }
+
+    #[test]
+    fn committed_storage_actions_replay_in_order() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x60, 1, 0x60, 0, 0x55, 0x60, 2, 0x60, 0, 0x55, 0]);
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert_eq!(
+            candidate.effects.writes.iter().map(|write| write.value).collect::<Vec<_>>(),
+            vec![U256::from(1), U256::from(2)]
+        );
+        assert_eq!(
+            candidate.effects.accounts[&CONTRACT].storage[&U256::ZERO].present_value,
+            U256::ZERO
+        );
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, tx(1)));
+    }
+
+    #[test]
+    fn reverted_storage_actions_are_discarded_but_reads_remain() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x60, 1, 0x60, 0, 0x55, 0x60, 0, 0x60, 0, 0xfd]);
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert!(candidate.effects.writes.is_empty());
+        assert_eq!(candidate.reads.storage[&(CONTRACT, U256::ZERO)], U256::ZERO);
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, tx(1)));
+        let candidate = speculate(canonical.clone(), tx(1));
+        canonical.insert_account_storage(CONTRACT, U256::ZERO, U256::from(2)).unwrap();
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn nested_revert_discards_only_child_actions() {
+        let mut canonical = database();
+        let child = Address::repeat_byte(5);
+        canonical.insert_account_info(
+            child,
+            AccountInfo::from_bytecode(Bytecode::new_raw(Bytes::from_static(&[
+                0x60, 2, 0x60, 0, 0x55, 0x60, 0, 0x60, 0, 0xfd,
+            ]))),
+        );
+        // Parent writes, calls reverting child, then writes again.
+        let mut code = vec![0x60, 1, 0x60, 0, 0x55];
+        code.extend_from_slice(&[0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x73]);
+        code.extend_from_slice(child.as_slice());
+        code.extend_from_slice(&[0x61, 0x80, 0x00, 0xf1, 0x50, 0x60, 3, 0x60, 1, 0x55, 0]);
+        contract(&mut canonical, &code);
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert_eq!(candidate.effects.writes.len(), 2);
+        assert!(candidate.effects.writes.iter().all(|write| write.address == CONTRACT));
+        assert_eq!(candidate.reads.storage[&(child, U256::ZERO)], U256::ZERO);
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, tx(1)));
+    }
+
+    #[test]
+    fn missing_storage_action_fails_closed() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x60, 1, 0x60, 0, 0x55, 0]);
+        let result = execute(&mut canonical, tx(1));
+        let candidate = PrewarmResult::new(B256::ZERO, tx(1).caller, ReadSet::default(), result);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn selfbalance_is_an_exact_dependency() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x47, 0x60, 0, 0x55, 0]);
+        let candidate = speculate(canonical.clone(), tx(1));
+        let mut info = canonical.basic(CONTRACT).unwrap().unwrap();
+        info.balance = U256::from(7);
+        canonical.insert_account_info(CONTRACT, info);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn unobserved_recipient_balance_replays_credit() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0]);
+        let mut transaction = tx(1);
+        transaction.value = U256::from(7);
+        let candidate = speculate(canonical.clone(), transaction.clone());
+        let mut info = canonical.basic(CONTRACT).unwrap().unwrap();
+        info.balance = U256::from(9);
+        canonical.insert_account_info(CONTRACT, info);
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused.state[&CONTRACT].info.balance, U256::from(16));
+        assert_eq!(reused, execute(&mut canonical, transaction));
+    }
+
+    #[test]
+    fn reverted_balance_read_remains_an_exact_dependency() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x41, 0x31, 0x50, 0x60, 0, 0x60, 0, 0xfd]);
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert!(candidate.effects.writes.is_empty());
+        assert!(candidate.reads.balance_reads.contains(&BENEFICIARY));
+        canonical.insert_account_info(
+            BENEFICIARY,
+            AccountInfo { balance: U256::from(2_000_000_000), ..Default::default() },
+        );
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn created_contract_storage_replays_with_creation_metadata() {
+        let mut canonical = database();
+        let mut transaction = tx(1);
+        transaction.kind = TxKind::Create;
+        transaction.data = Bytes::from_static(&[0x60, 1, 0x60, 0, 0x55, 0x60, 0, 0x60, 0, 0xf3]);
+        let candidate = speculate(canonical.clone(), transaction.clone());
+        assert_eq!(candidate.effects.writes.len(), 1);
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, transaction));
+    }
+
+    #[test]
+    fn failed_internal_value_check_is_an_exact_dependency() {
+        let mut canonical = database();
+        let mut code = vec![0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 2, 0x73];
+        code.extend_from_slice(Address::repeat_byte(5).as_slice());
+        code.extend_from_slice(&[0x61, 0x80, 0x00, 0xf1, 0x50, 0]);
+        contract(&mut canonical, &code);
+        let mut info = canonical.basic(CONTRACT).unwrap().unwrap();
+        info.balance = U256::from(1);
+        canonical.insert_account_info(CONTRACT, info.clone());
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert!(candidate.reads.balance_reads.contains(&CONTRACT));
+        info.balance = U256::from(3);
+        canonical.insert_account_info(CONTRACT, info);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn balance_rebase_rejects_changed_empty_classification() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0]);
+        let mut transaction = tx(1);
+        transaction.kind = TxKind::Call(Address::repeat_byte(5));
+        canonical.insert_account_info(Address::repeat_byte(5), AccountInfo::default());
+        let candidate = speculate(canonical.clone(), transaction);
+        canonical.insert_account_info(
+            Address::repeat_byte(5),
+            AccountInfo { balance: U256::from(1), ..Default::default() },
+        );
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn write_action_limit_rejects_even_reverted_frames() {
+        let mut canonical = database();
+        // Repeated writes to one slot exceed the action limit without exceeding the read limit.
+        // The eventual out-of-gas revert must not clear the overflow marker.
+        contract(&mut canonical, &[0x5b, 0x60, 1, 0x60, 0, 0x55, 0x60, 0, 0x56]);
+        let mut transaction = tx(1);
+        transaction.gas_limit = 3_000_000;
+        let candidate = speculate(canonical.clone(), transaction);
+        assert!(candidate.reads.overflowed);
+        assert!(candidate.effects.writes.is_empty());
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn storage_action_replay_matches_serial(
+            writes in proptest::collection::vec((0u8..8, 0u8..8), 0..40),
+            reverted in proptest::bool::ANY,
+            original in 0u8..8,
+        ) {
+            let mut canonical = database();
+            let mut code = Vec::new();
+            for (slot, value) in writes {
+                code.extend_from_slice(&[0x60, value, 0x60, slot, 0x55]);
+            }
+            if reverted {
+                code.extend_from_slice(&[0x60, 0, 0x60, 0, 0xfd]);
+            } else {
+                code.push(0);
+            }
+            contract(&mut canonical, &code);
+            for slot in 0..8 {
+                canonical.insert_account_storage(CONTRACT, U256::from(slot), U256::from(original)).unwrap();
+            }
+            let mut transaction = tx(1);
+            transaction.gas_limit = 1_000_000;
+            let candidate = speculate(canonical.clone(), transaction.clone());
+            let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+            proptest::prop_assert_eq!(reused, execute(&mut canonical, transaction));
+        }
     }
 
     #[test]
@@ -594,16 +970,15 @@ mod tests {
     fn borrowed_proof_hints_preserve_execution_state() {
         let mut parent = database();
         contract(&mut parent, &[0x60, 0x01, 0x60, 0x00, 0x55, 0x00]);
-        let candidate = speculate(parent, tx(1));
-        let original_state = candidate.result.state.clone();
-        let (targets, count) =
-            reth_trie_common::MultiProofTargetsV2::from_state_ref(&candidate.result.state);
+        let state = execute(&mut parent, tx(1)).state;
+        let original_state = state.clone();
+        let (targets, count) = reth_trie_common::MultiProofTargetsV2::from_state_ref(&state);
         assert_eq!(count, 1);
         assert_eq!(
             targets.storage_targets[&alloy_primitives::keccak256(CONTRACT)][0].key(),
             alloy_primitives::keccak256(B256::ZERO)
         );
-        assert_eq!(candidate.result.state, original_state);
+        assert_eq!(state, original_state);
         let (owned, owned_count) =
             reth_trie_common::MultiProofTargetsV2::from_state(original_state);
         assert_eq!(count, owned_count);

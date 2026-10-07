@@ -265,7 +265,7 @@ where
                 }
                 let Some(evm) = slot.as_mut() else { return };
                 evm.db_mut().set_recording(reusable);
-                evm.inspector_mut().reset();
+                evm.inspector_mut().reset(reusable);
                 evm.transact(tx_env).map(|res| (res, reusable.then(|| evm.db_mut().take_reads())))
             };
             let execution = match execution {
@@ -316,7 +316,7 @@ where
                 results.publish(
                     index,
                     ctx.executed_tx_index.load(Ordering::Relaxed),
-                    PrewarmResult::new(*tx.tx().tx_hash(), reads, res),
+                    PrewarmResult::new(*tx.tx().tx_hash(), *tx.signer(), reads, res),
                 );
             }
 
