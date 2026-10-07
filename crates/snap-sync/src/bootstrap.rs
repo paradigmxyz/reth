@@ -19,7 +19,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
-use std::{fmt, future::Future};
+use std::{fmt, future::Future, sync::Arc};
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
@@ -57,10 +58,13 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
     /// Creates a run that has not touched the network or the database yet.
     pub fn new(client: C, factory: F, runtime: Runtime, context: X) -> Self {
         let policy = SnapPivotPolicy::default();
+        let commit_lock = Arc::new(Mutex::new(()));
         Self {
             accounts: AccountRangeDownload::new(client.clone(), factory.clone(), runtime.clone()),
-            storage: StorageRangeDownload::new(client.clone(), factory.clone(), runtime.clone()),
-            bytecode: BytecodeDownload::new(client.clone(), factory.clone(), runtime.clone()),
+            storage: StorageRangeDownload::new(client.clone(), factory.clone(), runtime.clone())
+                .with_commit_lock(commit_lock.clone()),
+            bytecode: BytecodeDownload::new(client.clone(), factory.clone(), runtime.clone())
+                .with_commit_lock(commit_lock),
             catch_up: BlockAccessListCatchUp::new(client, factory.clone(), runtime.clone()),
             factory,
             runtime,

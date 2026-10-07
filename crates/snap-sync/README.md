@@ -22,7 +22,9 @@ This crate owns the synchronization logic and its progress. Requests and proof c
    whether supplied with it or stored beforehand. Storage batches are prefetched with at most four
    requests or verified responses retained, and commit in key order. Partial contracts finish before
    later batches commit. Storage and bytecode download concurrently; neither advances account
-   coverage until both finish. The network permits up to four Snap requests per provider, while
+   coverage until both finish. Their commits share an asynchronous writer gate to avoid MDBX's
+   busy retry sleeps; a running commit retains the gate even if its waiting future is dropped.
+   The network permits up to four Snap requests per provider, while
    other downloads retain their single-request scheduling. Bytecode presence checks avoid copying
    blobs during download, account commits, and the completeness scan.
 3. **Advance the pivot.** Peers only keep recent state, so once the pivot lags more than 96 blocks

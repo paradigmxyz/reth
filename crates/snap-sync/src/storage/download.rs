@@ -21,7 +21,8 @@ use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
 use reth_tasks::Runtime;
-use std::fmt;
+use std::{fmt, sync::Arc};
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 /// Default number of contracts asked for per storage request.
@@ -80,6 +81,12 @@ impl<C, F> StorageRangeDownload<C, F> {
     /// Returns this download prefetching at most `max_requests` storage batches, at least one.
     pub const fn with_max_requests(mut self, max_requests: usize) -> Self {
         self.max_requests = if max_requests == 0 { 1 } else { max_requests };
+        self
+    }
+
+    // Shares the database writer with another concurrently downloading domain.
+    pub(crate) fn with_commit_lock(mut self, lock: Arc<Mutex<()>>) -> Self {
+        self.context = self.context.with_commit_lock(lock);
         self
     }
 }
