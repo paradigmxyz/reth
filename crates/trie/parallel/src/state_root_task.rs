@@ -142,7 +142,7 @@ impl StateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -290,7 +290,7 @@ impl PayloadStateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("state root task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).

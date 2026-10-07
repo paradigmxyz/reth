@@ -251,9 +251,11 @@ impl ProofWorkerHandle {
                             "Storage worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "storage worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "storage",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -293,9 +295,11 @@ impl ProofWorkerHandle {
                             "Account worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "account worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "account",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -386,7 +390,7 @@ impl ProofWorkerHandle {
                     input.proof_result_context;
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                    result: Err(StateRootTaskError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -1125,7 +1129,7 @@ fn dispatch_v2_storage_proofs(
             .map_err(|_| {
                 StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
+                ).into())
             })?;
 
         storage_proof_receivers.insert(hashed_address, result_rx);
@@ -1169,6 +1173,16 @@ enum AccountWorkerJob {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
     },
+}
+
+/// Context for a provider failure that prevents a proof worker from starting.
+#[derive(Debug, thiserror::Error)]
+#[error("{worker_type} worker {worker_id}: {source}")]
+struct ProofWorkerError {
+    worker_type: &'static str,
+    worker_id: usize,
+    #[source]
+    source: ProviderError,
 }
 
 #[cfg(test)]
