@@ -23,7 +23,8 @@ This crate owns the synchronization logic and its progress. Requests and proof c
    requests or verified responses retained, and commit in key order. Partial contracts finish before
    later batches commit. Storage and bytecode download concurrently; neither advances account
    coverage until both finish. The network permits up to four Snap requests per provider, while
-   other downloads retain their single-request scheduling.
+   other downloads retain their single-request scheduling. Bytecode presence checks avoid copying
+   blobs during download, account commits, and the completeness scan.
 3. **Advance the pivot.** Peers only keep recent state, so once the pivot lags more than 96 blocks
    by default the sync re-anchors to a newer block. BALs of the blocks in between carry the state
    already downloaded forward, applied strictly in block order, and the remaining ranges download at
