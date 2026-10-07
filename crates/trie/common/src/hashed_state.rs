@@ -10,8 +10,6 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use itertools::Itertools;
-#[cfg(feature = "rayon")]
-pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
