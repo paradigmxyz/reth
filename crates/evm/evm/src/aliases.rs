@@ -52,3 +52,7 @@ where
     T: Inspector<EvmContextFor<Evm, DB>>,
 {
 }
+
+/// Helper to access the uncommitted transaction result for a [`ConfigureEvm`].
+pub type TxExecutionResultFor<Evm> =
+    <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::TxExecutionResult;

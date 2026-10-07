@@ -1,0 +1,677 @@
+//! Validated reuse of block-local transaction prewarming results.
+//!
+//! Workers execute against the parent state with normal nonce and balance validation. Canonical
+//! execution consumes only ready results whose complete database read set still matches, and
+//! commits them through the ordinary block executor. Results never cross payload boundaries.
+//! A beneficiary loaded only after the top-level frame exits is a fee-only dependency: its
+//! balance delta can be rebased, but EVM-visible beneficiary reads remain exact dependencies.
+
+use alloy_consensus::{transaction::TxHashRef, Transaction, TxReceipt};
+use alloy_evm::{block::BlockExecutor, Evm};
+use alloy_primitives::{map::AddressMap, Address, B256, U256};
+use metrics::Counter;
+use parking_lot::Mutex;
+use reth_evm::{ConfigureEvm, HaltReasonFor, SpecFor, TxExecutionResultFor};
+use reth_metrics::Metrics;
+use reth_primitives_traits::TxTy;
+use revm::{
+    bytecode::Bytecode,
+    context::{result::ResultAndState, Block, Cfg},
+    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome},
+    state::AccountInfo,
+    Database, Inspector,
+};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+
+const MAX_READS: usize = 8_192;
+const MAX_READY_RESULTS: usize = 128;
+
+/// A parent-state database that records every account and storage dependency.
+#[derive(Debug)]
+pub(super) struct RecordingDatabase<DB> {
+    inner: DB,
+    reads: ReadSet,
+    beneficiary: Address,
+    after_execution: Arc<AtomicBool>,
+    enabled: bool,
+}
+
+impl<DB> RecordingDatabase<DB> {
+    pub(super) fn new(inner: DB, beneficiary: Address, enabled: bool) -> Self {
+        Self {
+            inner,
+            beneficiary,
+            enabled,
+            reads: ReadSet::default(),
+            after_execution: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(super) fn inspector(&self) -> HandoffInspector {
+        HandoffInspector { after_execution: Arc::clone(&self.after_execution), depth: 0 }
+    }
+
+    pub(super) fn reset(&mut self) {
+        self.reads = ReadSet::default();
+        self.after_execution.store(false, Ordering::Relaxed);
+    }
+
+    pub(super) fn take_reads(&mut self) -> ReadSet {
+        std::mem::take(&mut self.reads)
+    }
+
+    fn can_record(&mut self) -> bool {
+        if !self.enabled || self.reads.overflowed {
+            return false
+        }
+        if self.reads.accounts.len() + self.reads.storage.len() + self.reads.block_hashes.len() >=
+            MAX_READS
+        {
+            self.reads = ReadSet { overflowed: true, ..Default::default() };
+            return false
+        }
+        true
+    }
+}
+
+impl<DB: Database> Database for RecordingDatabase<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let info = self.inner.basic(address)?;
+        if self.can_record() {
+            let fee_only =
+                address == self.beneficiary && self.after_execution.load(Ordering::Relaxed);
+            self.reads
+                .accounts
+                .entry(address)
+                .or_insert_with(|| AccountRead { info: info.clone(), fee_only });
+        }
+        Ok(info)
+    }
+
+    fn code_by_hash(&mut self, hash: B256) -> Result<Bytecode, Self::Error> {
+        self.inner.code_by_hash(hash)
+    }
+
+    fn storage(&mut self, address: Address, slot: U256) -> Result<U256, Self::Error> {
+        let value = self.inner.storage(address, slot)?;
+        if self.can_record() {
+            self.reads.storage.entry((address, slot)).or_insert(value);
+        }
+        Ok(value)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        let hash = self.inner.block_hash(number)?;
+        if self.can_record() {
+            self.reads.block_hashes.entry(number).or_insert(hash);
+        }
+        Ok(hash)
+    }
+}
+
+/// Marks only the post-frame beneficiary load as independent of EVM execution.
+#[derive(Debug)]
+pub(super) struct HandoffInspector {
+    after_execution: Arc<AtomicBool>,
+    depth: usize,
+}
+
+impl HandoffInspector {
+    pub(super) fn reset(&mut self) {
+        self.depth = 0;
+        self.after_execution.store(false, Ordering::Relaxed);
+    }
+
+    fn enter(&mut self) {
+        self.depth += 1;
+        self.after_execution.store(false, Ordering::Relaxed);
+    }
+
+    fn exit(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+        if self.depth == 0 {
+            self.after_execution.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+impl<Ctx> Inspector<Ctx> for HandoffInspector {
+    fn call(&mut self, _ctx: &mut Ctx, _inputs: &mut CallInputs) -> Option<CallOutcome> {
+        self.enter();
+        None
+    }
+
+    fn call_end(&mut self, _ctx: &mut Ctx, _inputs: &CallInputs, _outcome: &mut CallOutcome) {
+        self.exit();
+    }
+
+    fn create(&mut self, _ctx: &mut Ctx, _inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        self.enter();
+        None
+    }
+
+    fn create_end(&mut self, _ctx: &mut Ctx, _inputs: &CreateInputs, _outcome: &mut CreateOutcome) {
+        self.exit();
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ReadSet {
+    accounts: AddressMap<AccountRead>,
+    storage: HashMap<(Address, U256), U256>,
+    block_hashes: BTreeMap<u64, B256>,
+    overflowed: bool,
+}
+
+#[derive(Debug)]
+struct AccountRead {
+    info: Option<AccountInfo>,
+    fee_only: bool,
+}
+
+/// A strict speculative execution together with its original-state dependencies.
+#[derive(Debug)]
+pub(crate) struct PrewarmResult<H> {
+    tx_hash: B256,
+    reads: ReadSet,
+    result: ResultAndState<H>,
+}
+
+impl<H> PrewarmResult<H> {
+    pub(super) const fn new(tx_hash: B256, reads: ReadSet, result: ResultAndState<H>) -> Self {
+        Self { tx_hash, reads, result }
+    }
+
+    /// Validates all dependencies before changing any canonical state.
+    pub(crate) fn validate<DB: Database>(
+        mut self,
+        tx_hash: B256,
+        db: &mut DB,
+    ) -> Option<ResultAndState<H>> {
+        if self.tx_hash != tx_hash || self.reads.overflowed {
+            return None
+        }
+        for (address, read) in self.reads.accounts {
+            let current = db.basic(address).ok()?;
+            match (&read.info, &current) {
+                (None, None) => {}
+                (Some(original), Some(current))
+                    if original.nonce == current.nonce &&
+                        original.code_hash == current.code_hash =>
+                {
+                    if read.fee_only {
+                        if current.balance < original.balance {
+                            return None
+                        }
+                        let account = self.result.state.get_mut(&address)?;
+                        let reward = account.info.balance.checked_sub(original.balance)?;
+                        let balance = current.balance.checked_add(reward)?;
+                        account.info = current.clone();
+                        account.info.balance = balance;
+                        *account.original_info_mut() = current.clone();
+                    } else if original.balance != current.balance {
+                        return None
+                    }
+                }
+                _ => return None,
+            }
+        }
+        for ((address, slot), value) in self.reads.storage {
+            if db.storage(address, slot).ok()? != value {
+                return None
+            }
+        }
+        for (number, hash) in self.reads.block_hashes {
+            if db.block_hash(number).ok()? != hash {
+                return None
+            }
+        }
+        Some(self.result)
+    }
+}
+
+/// Bounded, non-waiting, payload-local handoff between prewarm workers and serial execution.
+#[derive(Debug)]
+pub(crate) struct PrewarmResults<H> {
+    ready: Mutex<BTreeMap<usize, PrewarmResult<H>>>,
+    pub(crate) metrics: HandoffMetrics,
+}
+
+impl<H> Default for PrewarmResults<H> {
+    fn default() -> Self {
+        Self { ready: Mutex::default(), metrics: HandoffMetrics::default() }
+    }
+}
+
+impl<H> PrewarmResults<H> {
+    pub(super) fn publish(&self, index: usize, next: usize, result: PrewarmResult<H>) {
+        if index < next ||
+            index.saturating_sub(next) >= MAX_READY_RESULTS ||
+            result.reads.overflowed
+        {
+            return
+        }
+        let mut ready = self.ready.lock();
+        ready.retain(|index, _| *index >= next);
+        if ready.len() < MAX_READY_RESULTS {
+            ready.insert(index, result);
+        }
+    }
+
+    pub(crate) fn take(&self, index: usize) -> Option<PrewarmResult<H>> {
+        let mut ready = self.ready.lock();
+        ready.retain(|ready_index, _| *ready_index >= index);
+        ready.remove(&index)
+    }
+}
+
+/// Counters for validated handoffs and ordinary-execution fallbacks.
+#[derive(Clone, Metrics)]
+#[metrics(scope = "sync.prewarm.handoff")]
+pub(crate) struct HandoffMetrics {
+    /// Transactions committed from validated speculative execution.
+    pub(crate) reused: Counter,
+    /// Ready results rejected by dependency or block-gas validation.
+    pub(crate) rejected: Counter,
+    /// Transactions whose speculative result was not ready.
+    pub(crate) missing: Counter,
+}
+
+/// Attempts a non-waiting handoff through the canonical executor's normal commit path.
+pub(crate) fn try_reuse_transaction<Cfg, E>(
+    results: &PrewarmResults<HaltReasonFor<Cfg>>,
+    index: usize,
+    transaction: &TxTy<Cfg::Primitives>,
+    config: &Cfg,
+    executor: &mut E,
+) -> bool
+where
+    Cfg: ConfigureEvm,
+    E: BlockExecutor<
+        Transaction = TxTy<Cfg::Primitives>,
+        Result = TxExecutionResultFor<Cfg>,
+        Receipt: TxReceipt,
+        Evm: Evm<HaltReason = HaltReasonFor<Cfg>, Spec = SpecFor<Cfg>>,
+    >,
+{
+    let Some(candidate) = results.take(index) else {
+        results.metrics.missing.increment(1);
+        return false
+    };
+    let gas_used = executor.receipts().last().map_or(0, TxReceipt::cumulative_gas_used);
+    let evm = executor.evm_mut();
+    let available = evm.block().gas_limit().saturating_sub(gas_used);
+    let limit = transaction.gas_limit().min(evm.cfg_env().tx_gas_limit_cap());
+    if limit <= available &&
+        let Some(result) = candidate.validate(*transaction.tx_hash(), evm.db_mut()) &&
+        let Some(result) = config.prewarm_transaction_result(transaction, result)
+    {
+        executor.commit_transaction(result);
+        results.metrics.reused.increment(1);
+        true
+    } else {
+        results.metrics.rejected.increment(1);
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{transaction::Recovered, Header, Signed, TxLegacy};
+    use alloy_primitives::{Bytes, Signature, TxKind};
+    use reth_ethereum_primitives::{Block as EthBlock, BlockBody, Receipt, TransactionSigned};
+    use reth_evm::{ConfigureEvm, Evm, EvmEnvFor, RecoveredTx};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::Block as _;
+    use revm::{
+        context::{result::HaltReason, TxEnv},
+        database::{states::bundle_state::BundleRetention, BundleState, InMemoryDB, State},
+        primitives::hardfork::SpecId,
+        DatabaseCommit,
+    };
+
+    const BENEFICIARY: Address = Address::repeat_byte(3);
+    const CONTRACT: Address = Address::repeat_byte(4);
+
+    fn env() -> EvmEnvFor<EthEvmConfig> {
+        let mut env = EvmEnvFor::<EthEvmConfig>::default();
+        env.cfg_env.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
+        env.block_env.gas_limit = 30_000_000;
+        env.block_env.beneficiary = BENEFICIARY;
+        env
+    }
+
+    fn database() -> InMemoryDB {
+        let mut db = InMemoryDB::default();
+        for address in [Address::repeat_byte(1), Address::repeat_byte(2), BENEFICIARY, CONTRACT] {
+            db.insert_account_info(
+                address,
+                AccountInfo { balance: U256::from(1_000_000_000), ..Default::default() },
+            );
+        }
+        db
+    }
+
+    fn tx(sender: u8) -> TxEnv {
+        TxEnv {
+            caller: Address::repeat_byte(sender),
+            gas_limit: 100_000,
+            gas_price: 1,
+            kind: TxKind::Call(CONTRACT),
+            value: U256::ZERO,
+            ..Default::default()
+        }
+    }
+
+    fn speculate(db: InMemoryDB, tx: TxEnv) -> PrewarmResult<HaltReason> {
+        let recording = RecordingDatabase::new(db, BENEFICIARY, true);
+        let inspector = recording.inspector();
+        let mut evm =
+            EthEvmConfig::mainnet().evm_with_env_and_inspector(recording, env(), inspector);
+        evm.enable_inspector();
+        let result = evm.transact(tx).unwrap();
+        let reads = evm.db_mut().take_reads();
+        PrewarmResult::new(B256::ZERO, reads, result)
+    }
+
+    fn execute(db: &mut InMemoryDB, tx: TxEnv) -> ResultAndState<HaltReason> {
+        EthEvmConfig::mainnet().evm_with_env(db, env()).transact(tx).unwrap()
+    }
+
+    fn contract(db: &mut InMemoryDB, code: &[u8]) {
+        db.insert_account_info(
+            CONTRACT,
+            AccountInfo::from_bytecode(Bytecode::new_raw(Bytes::copy_from_slice(code))),
+        );
+    }
+
+    #[test]
+    fn unchanged_state_reuses_identical_execution_result() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(1));
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        let serial = execute(&mut canonical, tx(1));
+        assert_eq!(reused, serial);
+    }
+
+    #[test]
+    fn independent_transactions_rebase_beneficiary_reward() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(2));
+        assert!(candidate.reads.accounts[&BENEFICIARY].fee_only);
+        let first = execute(&mut canonical, tx(1));
+        canonical.commit(first.state);
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        let serial = execute(&mut canonical, tx(2));
+        assert_eq!(reused, serial);
+    }
+
+    #[test]
+    fn beneficiary_balance_read_by_evm_is_not_rebased() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x41, 0x31, 0x60, 0x00, 0x55, 0x00]);
+        let candidate = speculate(canonical.clone(), tx(2));
+        assert!(!candidate.reads.accounts[&BENEFICIARY].fee_only);
+        let first = execute(&mut canonical, tx(1));
+        canonical.commit(first.state);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn beneficiary_as_recipient_is_an_exact_dependency() {
+        let mut canonical = database();
+        let mut transaction = tx(2);
+        transaction.kind = TxKind::Call(BENEFICIARY);
+        transaction.value = U256::from(7);
+        let candidate = speculate(canonical.clone(), transaction);
+        assert!(!candidate.reads.accounts[&BENEFICIARY].fee_only);
+        let first = execute(&mut canonical, tx(1));
+        canonical.commit(first.state);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn earlier_sender_transaction_rejects_stale_nonce() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(1));
+        let first = execute(&mut canonical, tx(1));
+        canonical.commit(first.state);
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn changed_sender_balance_rejects_result() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(1));
+        canonical.insert_account_info(
+            Address::repeat_byte(1),
+            AccountInfo { balance: U256::from(200_000_000), ..Default::default() },
+        );
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn storage_write_checks_original_slot_value() {
+        let mut canonical = database();
+        contract(&mut canonical, &[0x60, 0x01, 0x60, 0x00, 0x55, 0x00]);
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert_eq!(candidate.reads.storage[&(CONTRACT, U256::ZERO)], U256::ZERO);
+        canonical.insert_account_storage(CONTRACT, U256::ZERO, U256::from(2)).unwrap();
+        assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+    }
+
+    #[test]
+    fn changed_code_or_account_existence_rejects_result() {
+        for remove in [false, true] {
+            let mut canonical = database();
+            let candidate = speculate(canonical.clone(), tx(1));
+            if remove {
+                canonical.cache.accounts.remove(&CONTRACT);
+            } else {
+                contract(&mut canonical, &[0x00]);
+            }
+            assert!(candidate.validate(B256::ZERO, &mut canonical).is_none());
+        }
+    }
+
+    #[test]
+    fn revert_halt_create_and_selfdestruct_match_serial_execution() {
+        for code in [
+            &[0x60, 0x00, 0x60, 0x00, 0xfd][..],
+            &[0xfe][..],
+            &[0x60, 0x05, 0xff][..],
+            &[0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x00][..],
+        ] {
+            let mut canonical = database();
+            contract(&mut canonical, code);
+            let candidate = speculate(canonical.clone(), tx(2));
+            let first = execute(
+                &mut canonical,
+                TxEnv { kind: TxKind::Call(Address::repeat_byte(9)), ..tx(1) },
+            );
+            canonical.commit(first.state);
+            let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+            assert_eq!(reused, execute(&mut canonical, tx(2)));
+        }
+        let mut canonical = database();
+        let transaction =
+            TxEnv { kind: TxKind::Create, data: Bytes::from_static(&[0x00]), ..tx(1) };
+        let candidate = speculate(canonical.clone(), transaction.clone());
+        let reused = candidate.validate(B256::ZERO, &mut canonical).unwrap();
+        assert_eq!(reused, execute(&mut canonical, transaction));
+    }
+
+    #[test]
+    fn wrong_transaction_hash_rejects_result() {
+        let mut canonical = database();
+        let candidate = speculate(canonical.clone(), tx(1));
+        assert!(candidate.validate(B256::repeat_byte(1), &mut canonical).is_none());
+    }
+
+    #[test]
+    fn oversized_read_set_cannot_be_reused() {
+        let mut recording = RecordingDatabase::new(database(), BENEFICIARY, true);
+        for slot in 0..=MAX_READS {
+            recording.storage(CONTRACT, U256::from(slot)).unwrap();
+        }
+        let reads = recording.take_reads();
+        assert!(reads.overflowed);
+        assert!(reads.storage.is_empty());
+        let mut candidate = speculate(database(), tx(1));
+        candidate.reads = reads;
+        assert!(candidate.validate(B256::ZERO, &mut database()).is_none());
+    }
+
+    #[test]
+    fn ready_results_are_bounded_and_consumed_once() {
+        let results = PrewarmResults::default();
+        for index in 0..=MAX_READY_RESULTS {
+            results.publish(index, 0, speculate(database(), tx(1)));
+        }
+        assert_eq!(results.ready.lock().len(), MAX_READY_RESULTS);
+        assert!(results.take(1).is_some());
+        assert!(results.take(1).is_none());
+        assert!(results.take(0).is_none());
+        assert!(results.take(MAX_READY_RESULTS).is_none());
+        results.publish(0, 1, speculate(database(), tx(1)));
+        assert!(results.take(0).is_none());
+    }
+
+    fn recovered(transaction: &TxEnv) -> Recovered<TransactionSigned> {
+        Recovered::new_unchecked(
+            TransactionSigned::Legacy(Signed::new_unchecked(
+                TxLegacy {
+                    nonce: transaction.nonce,
+                    gas_price: transaction.gas_price,
+                    gas_limit: transaction.gas_limit,
+                    to: transaction.kind,
+                    value: transaction.value,
+                    input: transaction.data.clone(),
+                    ..Default::default()
+                },
+                Signature::test_signature(),
+                B256::ZERO,
+            )),
+            transaction.caller,
+        )
+    }
+
+    fn execute_block_transactions(
+        parent: InMemoryDB,
+        transactions: &[TxEnv],
+        handoff: bool,
+        gas_limit: u64,
+    ) -> (Vec<Receipt>, BundleState, usize) {
+        let config = EthEvmConfig::mainnet();
+        let block = EthBlock {
+            header: Header { gas_limit, ..Default::default() },
+            body: BlockBody::default(),
+        }
+        .seal_slow();
+        let mut state = State::builder().with_database(parent.clone()).with_bundle_update().build();
+        let mut block_env = env();
+        block_env.block_env.gas_limit = gas_limit;
+        let evm = config.evm_with_env(&mut state, block_env);
+        let mut executor =
+            config.create_executor_with_state(evm, config.context_for_block(&block).unwrap());
+        let results = PrewarmResults::default();
+        let mut reused = 0;
+        for (index, transaction) in transactions.iter().enumerate() {
+            let signed = recovered(transaction);
+            if handoff {
+                results.publish(index, index, speculate(parent.clone(), transaction.clone()));
+            }
+            if handoff &&
+                try_reuse_transaction(&results, index, signed.tx(), &config, &mut executor)
+            {
+                reused += 1;
+            } else {
+                executor.execute_transaction((transaction.clone(), &signed)).unwrap();
+            }
+        }
+        let receipts = executor.receipts().to_vec();
+        drop(executor);
+        state.merge_transitions(BundleRetention::Reverts);
+        (receipts, state.take_bundle(), reused)
+    }
+
+    #[test]
+    fn canonical_commit_matches_serial_receipts_and_bundle() {
+        let transactions = [tx(1), tx(2)];
+        let (serial_receipts, serial_state, _) =
+            execute_block_transactions(database(), &transactions, false, 30_000_000);
+        let (reused_receipts, reused_state, reused) =
+            execute_block_transactions(database(), &transactions, true, 30_000_000);
+        assert_eq!(reused, 2);
+        assert_eq!(reused_receipts, serial_receipts);
+        assert_eq!(reused_state, serial_state);
+    }
+
+    #[test]
+    fn canonical_storage_conflict_falls_back_and_matches_serial() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0x01, 0x60, 0x00, 0x55, 0x00]);
+        let transactions = [tx(1), tx(2)];
+        let (serial_receipts, serial_state, _) =
+            execute_block_transactions(parent.clone(), &transactions, false, 30_000_000);
+        let (reused_receipts, reused_state, reused) =
+            execute_block_transactions(parent, &transactions, true, 30_000_000);
+        assert_eq!(reused, 1);
+        assert_eq!(reused_receipts, serial_receipts);
+        assert_eq!(reused_state, serial_state);
+    }
+
+    #[test]
+    fn ready_result_cannot_bypass_remaining_block_gas() {
+        let config = EthEvmConfig::mainnet();
+        let parent = database();
+        let block = EthBlock {
+            header: Header { gas_limit: 110_000, ..Default::default() },
+            body: BlockBody::default(),
+        }
+        .seal_slow();
+        let mut state = State::builder().with_database(parent.clone()).with_bundle_update().build();
+        let mut block_env = env();
+        block_env.block_env.gas_limit = 110_000;
+        let evm = config.evm_with_env(&mut state, block_env);
+        let mut executor =
+            config.create_executor_with_state(evm, config.context_for_block(&block).unwrap());
+        executor.execute_transaction((tx(1), recovered(&tx(1)))).unwrap();
+        let results = PrewarmResults::default();
+        results.publish(1, 1, speculate(parent, tx(2)));
+        let signed = recovered(&tx(2));
+        assert!(!try_reuse_transaction(&results, 1, signed.tx(), &config, &mut executor));
+        assert_eq!(executor.receipts().len(), 1);
+        assert!(matches!(executor.execute_transaction((tx(2), signed)), Err(alloy_evm::block::BlockExecutionError::Validation(
+            alloy_evm::block::BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. }
+        ))));
+    }
+
+    #[test]
+    fn handoff_is_opt_in_and_rejects_relaxed_or_multidimensional_execution() {
+        let config = EthEvmConfig::mainnet();
+        assert!(!crate::tree::TreeConfig::default().prewarm_handoff_enabled());
+        assert!(crate::tree::TreeConfig::default()
+            .with_prewarm_handoff(true)
+            .prewarm_handoff_enabled());
+        assert!(config.prewarm_handoff_enabled(&env()));
+        for flag in 0..3 {
+            let mut invalid = env();
+            match flag {
+                0 => invalid.cfg_env.disable_nonce_check = true,
+                1 => invalid.cfg_env.disable_balance_check = true,
+                _ => invalid.cfg_env.enable_amsterdam_eip8037 = true,
+            }
+            assert!(!config.prewarm_handoff_enabled(&invalid));
+        }
+    }
+}

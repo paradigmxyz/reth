@@ -18,9 +18,9 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
+use alloy_consensus::{Header, Transaction};
 use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory, EthTxResult},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 #[cfg(feature = "jit")]
@@ -30,10 +30,14 @@ use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    JitBackend, NextBlockEnvAttributes, SenderRecoveryCache, TransactionEnvMut,
+    HaltReasonFor, JitBackend, NextBlockEnvAttributes, SenderRecoveryCache, TransactionEnvMut,
+    TxExecutionResultFor,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use revm::{context::BlockEnv, primitives::hardfork::SpecId};
+use revm::{
+    context::{result::ResultAndState, BlockEnv, Cfg},
+    primitives::hardfork::SpecId,
+};
 
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
@@ -264,6 +268,24 @@ where
             withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
+        })
+    }
+
+    fn prewarm_handoff_enabled(&self, env: &EvmEnvFor<Self>) -> bool {
+        !env.cfg_env.enable_amsterdam_eip8037 &&
+            !env.cfg_env.disable_nonce_check &&
+            !env.cfg_env.is_balance_check_disabled()
+    }
+
+    fn prewarm_transaction_result(
+        &self,
+        tx: &TransactionSigned,
+        result: ResultAndState<HaltReasonFor<Self>>,
+    ) -> Option<TxExecutionResultFor<Self>> {
+        Some(EthTxResult {
+            result,
+            blob_gas_used: tx.blob_gas_used().unwrap_or_default(),
+            tx_type: tx.tx_type(),
         })
     }
 }
