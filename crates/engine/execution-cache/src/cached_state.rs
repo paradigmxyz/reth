@@ -1190,9 +1190,13 @@ impl ExecutionCache {
                 return Err(())
             };
 
-            // Now we iterate over all storage and make updates to the cached storage values
+            // Unchanged slots retain their parent-state values. A cache miss can
+            // still load them from the provider; rewriting them adds contention
+            // and may evict other useful entries.
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                if slot.is_changed() {
+                    self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                }
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1311,7 +1315,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_revm::db::{states::StorageSlot, AccountStatus, BundleAccount};
     use reth_storage_api::StateProvider;
     use revm::state::AccountInfo;
 
@@ -1572,6 +1576,117 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn updated_cache_matches_storage_across_blocks() {
+        let address = Address::repeat_byte(0x42);
+        let first = [U256::ZERO, U256::from(9), U256::from(7), U256::ZERO];
+        let second = [U256::from(9), U256::ZERO, U256::from(7), U256::ZERO];
+        for warm in [false, true] {
+            let caches = ExecutionCache::new(1024 * 1024);
+            if warm {
+                for (key, value) in first.iter().enumerate() {
+                    caches.insert_storage(address, U256::from(key).into(), Some(*value));
+                }
+            }
+            for (step, (old, new)) in [(&first, &second), (&second, &first)].into_iter().enumerate()
+            {
+                let nonce = 1 + step as u64;
+                let provider = MockEthProvider::default();
+                provider.extend_accounts(vec![(
+                    address,
+                    ExtendedAccount::new(nonce, U256::ZERO).extend_storage(
+                        old.iter()
+                            .enumerate()
+                            // Canonical storage omits zero-valued slots.
+                            .filter(|(_, value)| !value.is_zero())
+                            .map(|(key, value)| (U256::from(key).into(), *value)),
+                    ),
+                )]);
+                let bundle = BundleState {
+                    state: HashMap::from_iter([(
+                        address,
+                        BundleAccount::new(
+                            Some(AccountInfo { nonce, ..Default::default() }),
+                            Some(AccountInfo { nonce: nonce + 1, ..Default::default() }),
+                            old.iter()
+                                .zip(new)
+                                .enumerate()
+                                .map(|(key, (before, after))| {
+                                    (U256::from(key), StorageSlot::new_changed(*before, *after))
+                                })
+                                .collect(),
+                            AccountStatus::Changed,
+                        ),
+                    )]),
+                    ..Default::default()
+                };
+                caches.insert_state(&bundle).unwrap();
+                // Uncached unchanged slots fall through to the parent. Changed slots,
+                // including values cleared to zero, must override that parent.
+                let current = CachedStateProvider::new(
+                    provider.into_evm_state_provider(),
+                    caches.clone(),
+                    None,
+                );
+                for (key, value) in new.iter().enumerate() {
+                    assert_eq!(
+                        current.storage(address, U256::from(key).into()).unwrap(),
+                        nonzero_storage_value(*value)
+                    );
+                }
+                assert_eq!(current.basic_account(&address).unwrap().unwrap().nonce, nonce + 1);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "component timing; run explicitly with --nocapture"]
+    fn measure_cache_state_updates() {
+        let caches = ExecutionCache::new(64 * 1024 * 1024);
+        for changed_percent in [10, 30, 100] {
+            let mut bundles = Vec::new();
+            for reverse in [false, true] {
+                let state = (0..4)
+                    .map(|account| {
+                        let address = Address::repeat_byte(account);
+                        let storage = (0..5000)
+                            .map(|key| {
+                                let changed = key % 100 < changed_percent;
+                                let before = U256::from(if reverse && changed { 9 } else { 7 });
+                                let after = U256::from(if !reverse && changed { 9 } else { 7 });
+                                (U256::from(key), StorageSlot::new_changed(before, after))
+                            })
+                            .collect();
+                        (
+                            address,
+                            BundleAccount::new(
+                                Some(AccountInfo { nonce: 1, ..Default::default() }),
+                                Some(AccountInfo { nonce: 2, ..Default::default() }),
+                                storage,
+                                AccountStatus::Changed,
+                            ),
+                        )
+                    })
+                    .collect();
+                bundles.push(BundleState { state, ..Default::default() });
+            }
+            for _ in 0..5 {
+                for bundle in &bundles {
+                    caches.insert_state(bundle).unwrap();
+                }
+            }
+            let start = std::time::Instant::now();
+            for _ in 0..100 {
+                for bundle in &bundles {
+                    std::hint::black_box(&caches)
+                        .insert_state(std::hint::black_box(bundle))
+                        .unwrap();
+                }
+            }
+            println!("CACHE_UPDATE changed_percent={changed_percent} updates=200 slots_per_update=20000 elapsed_ns={}", start.elapsed().as_nanos());
+        }
     }
 
     #[test]
