@@ -35,6 +35,8 @@ pub mod cursor;
 pub mod tx;
 
 mod utils;
+#[cfg(target_os = "linux")]
+mod value_prefetch;
 
 /// 1 KB in bytes
 pub const KILOBYTE: usize = 1024;
