@@ -100,7 +100,7 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::{prewarm::TransactionPrewarmPolicy, PayloadProcessor},
+    payload_processor::{prewarm::TransactionPrewarmPolicy, PayloadProcessor, PrewarmWakeup},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
@@ -1090,6 +1090,7 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let prewarm_wakeup = handle.prewarm_wakeup().cloned();
         executor.evm_mut().db_mut().set_state_hook(state_hook);
 
         let execution_start = Instant::now();
@@ -1100,7 +1101,7 @@ where
             transaction_count,
             handle.iter_transactions(),
             &receipt_tx,
-            &executed_tx_index,
+            (&executed_tx_index, prewarm_wakeup.as_deref()),
             has_bal,
         )?;
         drop(receipt_tx);
@@ -1260,7 +1261,7 @@ where
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
-        executed_tx_index: &AtomicUsize,
+        execution_progress: (&AtomicUsize, Option<&PrewarmWakeup>),
         has_bal: bool,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
@@ -1270,6 +1271,7 @@ where
         DB: revm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
+        let (executed_tx_index, prewarm_wakeup) = execution_progress;
         let mut senders = Vec::with_capacity(transaction_count);
 
         // Apply pre-execution changes (e.g., beacon root update)
@@ -1320,7 +1322,11 @@ where
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            if let Some(wakeup) = prewarm_wakeup {
+                wakeup.advance(executed_tx_index, senders.len());
+            } else {
+                executed_tx_index.store(senders.len(), Ordering::Relaxed);
+            }
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {

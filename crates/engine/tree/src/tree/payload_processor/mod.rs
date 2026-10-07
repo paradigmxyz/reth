@@ -45,6 +45,8 @@ pub mod bal;
 pub mod bal_prewarm_pool;
 pub mod prewarm;
 mod prewarm_dispatch;
+pub(super) use prewarm_dispatch::PrewarmWakeup;
+
 pub mod receipt_root_task;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
@@ -451,6 +453,9 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let prewarm_wakeup = (self.transaction_prewarm_policy.is_some() &&
+            matches!(&mode, PrewarmMode::Transactions { .. }))
+        .then(|| Arc::new(PrewarmWakeup::default()));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -463,6 +468,7 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            prewarm_wakeup: prewarm_wakeup.clone(),
             transaction_prewarm_policy: self.transaction_prewarm_policy,
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
@@ -483,6 +489,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            prewarm_wakeup,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -625,6 +632,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         &self.prewarm_handle.executed_tx_index
     }
 
+    /// Returns the optional bounded-admission notifier for canonical progress.
+    pub(super) fn prewarm_wakeup(&self) -> Option<&Arc<PrewarmWakeup>> {
+        self.prewarm_handle.prewarm_wakeup.as_ref()
+    }
+
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -670,6 +682,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Wakes bounded transaction admission after canonical progress.
+    prewarm_wakeup: Option<Arc<PrewarmWakeup>>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
@@ -900,6 +914,7 @@ mod tests {
                     saved_cache: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
+                    prewarm_wakeup: None,
                     cache_metrics: None,
                 },
                 transactions: receiver,

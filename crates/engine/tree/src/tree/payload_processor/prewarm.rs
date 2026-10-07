@@ -12,7 +12,7 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use super::{
-    bal_prewarm_pool::BalPrewarmPool, prewarm_dispatch::BoundedPrewarmReceiver,
+    bal_prewarm_pool::BalPrewarmPool, prewarm_dispatch::BoundedPrewarmReceiver, PrewarmWakeup,
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -173,6 +173,7 @@ where
                         policy,
                         Arc::clone(&ctx.executed_tx_index),
                         Arc::clone(&ctx.terminate_execution),
+                        ctx.prewarm_wakeup.clone().unwrap_or_default(),
                     );
                     while let Some((index, tx, permit)) = pending.next() {
                         tx_count += 1;
@@ -599,6 +600,8 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
+    /// Optional notification for the bounded transaction admission coordinator.
+    pub(crate) prewarm_wakeup: Option<Arc<PrewarmWakeup>>,
     /// Optional admission bounds, used only for transaction prewarming.
     pub(crate) transaction_prewarm_policy: Option<TransactionPrewarmPolicy>,
     /// Whether the precompile cache is disabled.
@@ -694,7 +697,12 @@ where
     /// Signals all prewarm tasks to stop execution.
     #[inline]
     pub fn stop(&self) {
-        self.terminate_execution.store(true, Ordering::Relaxed);
+        if let Some(wakeup) = &self.prewarm_wakeup {
+            self.terminate_execution.store(true, Ordering::SeqCst);
+            wakeup.notify();
+        } else {
+            self.terminate_execution.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Hashes and streams a single BAL account's state to the state-root job's hashed-update
@@ -909,6 +917,7 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            prewarm_wakeup: None,
             transaction_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
@@ -941,8 +950,10 @@ mod tests {
         ctx.env.transaction_count = 2;
         ctx.transaction_prewarm_policy =
             TransactionPrewarmPolicy::new(1, 1, Duration::from_millis(1));
+        ctx.prewarm_wakeup = Some(Arc::default());
         let stopped = ctx.terminate_execution.clone();
         let committed = ctx.executed_tx_index.clone();
+        let prewarm_wakeup = ctx.prewarm_wakeup.clone();
         let (task, actions_tx) =
             PrewarmCacheTask::new(runtime.clone(), PayloadExecutionCache::default(), ctx);
         // A real CacheTaskHandle drop supplies the same Terminate event as an early canonical
@@ -951,6 +962,7 @@ mod tests {
             saved_cache: None,
             to_prewarm_task: Some(actions_tx.clone()),
             executed_tx_index: committed,
+            prewarm_wakeup,
             cache_metrics: None,
         };
         let (input, pending) = mpsc::sync_channel(0);
@@ -1020,6 +1032,7 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            prewarm_wakeup: None,
             transaction_prewarm_policy: None,
             precompile_cache_disabled: false,
             precompile_cache_map: PrecompileCacheMap::default(),
@@ -1195,6 +1208,7 @@ mod tests {
                 saved_cache: task.ctx.saved_cache.clone(),
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
+                prewarm_wakeup: task.ctx.prewarm_wakeup.clone(),
                 cache_metrics: None,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),

@@ -1,15 +1,17 @@
 //! Optional admission for the external transaction-prewarm distributor.
 //!
 //! Waiting happens before a Rayon job is spawned, outside worker-local state. The existing
-//! committed cursor and stop flag are polled; the canonical loop never waits or takes a new lock.
+//! Canonical progress and worker completion wake a waiting coordinator. Timed polling still
+//! observes raw cursor updates and stop flags; canonical execution never waits for admission.
 
 use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
-        Arc,
+        mpsc::{Receiver, RecvTimeoutError},
+        Arc, OnceLock,
     },
+    thread::{self, Thread},
     time::Duration,
 };
 
@@ -64,7 +66,7 @@ impl TransactionPrewarmPolicy {
 #[derive(Debug)]
 struct InFlight {
     count: AtomicUsize,
-    completed: SyncSender<()>,
+    wakeup: Arc<PrewarmWakeup>,
 }
 
 /// A queued/running job owns this until its whole worker call has returned, including unwinding.
@@ -73,11 +75,9 @@ pub(super) struct PrewarmPermit(Arc<InFlight>);
 
 impl Drop for PrewarmPermit {
     fn drop(&mut self) {
-        let previous = self.0.count.fetch_sub(1, Ordering::Relaxed);
+        let previous = self.0.count.fetch_sub(1, Ordering::SeqCst);
         debug_assert!(previous > 0, "a prewarm permit was released more than once");
-        // A coalesced wake is only an optimization. Timed polling observes progress/stop even
-        // without a wake, and permit destruction must never block a pool worker.
-        let _ = self.0.completed.try_send(());
+        self.0.wakeup.notify();
     }
 }
 
@@ -88,9 +88,8 @@ pub(super) struct BoundedPrewarmReceiver<T> {
     committed: Arc<AtomicUsize>,
     stopped: Arc<AtomicBool>,
     in_flight: Arc<InFlight>,
-    completed: Receiver<()>,
     #[cfg(test)]
-    waiting: Option<SyncSender<WaitReason>>,
+    waiting: Option<std::sync::mpsc::SyncSender<WaitReason>>,
 }
 
 #[cfg(test)]
@@ -107,15 +106,14 @@ impl<T> BoundedPrewarmReceiver<T> {
         policy: TransactionPrewarmPolicy,
         committed: Arc<AtomicUsize>,
         stopped: Arc<AtomicBool>,
+        wakeup: Arc<PrewarmWakeup>,
     ) -> Self {
-        let (completion_tx, completed) = mpsc::sync_channel(1);
         Self {
             pending,
             policy,
             committed,
             stopped,
-            in_flight: Arc::new(InFlight { count: AtomicUsize::new(0), completed: completion_tx }),
-            completed,
+            in_flight: Arc::new(InFlight { count: AtomicUsize::new(0), wakeup }),
             #[cfg(test)]
             waiting: None,
         }
@@ -156,9 +154,25 @@ impl<T> BoundedPrewarmReceiver<T> {
                     self.in_flight.count.fetch_add(1, Ordering::Relaxed);
                     return Some((index, tx, PrewarmPermit(Arc::clone(&self.in_flight))));
                 }
+                let wakeup = &self.in_flight.wakeup;
+                wakeup.prepare_wait();
+                // Registration and this second check close the check/sleep race. Progress and
+                // permit release use the same SC order, so either the new state is visible here
+                // or notify observes registration and deposits a park token before we sleep.
+                let committed = self.committed.load(Ordering::SeqCst);
+                if self.stopped.load(Ordering::SeqCst) ||
+                    index < committed ||
+                    (index - committed < self.policy.lookahead.get() &&
+                        self.in_flight.count.load(Ordering::SeqCst) <
+                            self.policy.max_in_flight.get())
+                {
+                    wakeup.cancel_wait();
+                    continue;
+                }
                 #[cfg(test)]
                 self.observe_wait(if future { WaitReason::Future } else { WaitReason::Capacity });
-                let _ = self.completed.recv_timeout(self.policy.poll_interval);
+                thread::park_timeout(self.policy.poll_interval);
+                wakeup.cancel_wait();
             }
         }
     }
@@ -171,10 +185,52 @@ impl<T> BoundedPrewarmReceiver<T> {
     }
 }
 
+/// Coalesced notification for one external admission coordinator.
+///
+/// The thread is registered only on its first wait. Before registration, canonical progress is
+/// still recorded and the coordinator checks it normally. After registration, the receiver must
+/// remain on that coordinator thread. Only the existing bounded transaction path installs this.
+#[derive(Debug, Default)]
+pub(crate) struct PrewarmWakeup {
+    coordinator: OnceLock<Thread>,
+    waiting: AtomicBool,
+}
+
+impl PrewarmWakeup {
+    /// Advances the committed cursor and wakes admission if it registered a wait.
+    pub(crate) fn advance(&self, committed: &AtomicUsize, next: usize) {
+        committed.store(next, Ordering::SeqCst);
+        self.notify();
+    }
+
+    /// Notifies at most once per registered wait, without a shared channel lock.
+    pub(crate) fn notify(&self) {
+        // The read avoids a contended RMW when the coordinator is not waiting. SC pairs with
+        // registration and the subsequent state check; a token also covers notify-before-park.
+        if self.waiting.load(Ordering::SeqCst) && self.waiting.swap(false, Ordering::SeqCst) {
+            self.coordinator.get().expect("registered before waiting").unpark();
+        }
+    }
+
+    fn prepare_wait(&self) {
+        let coordinator = self.coordinator.get_or_init(thread::current);
+        debug_assert_eq!(coordinator.id(), thread::current().id());
+        self.waiting.store(true, Ordering::SeqCst);
+    }
+
+    fn cancel_wait(&self) {
+        self.waiting.store(false, Ordering::SeqCst);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{panic::AssertUnwindSafe, thread};
+    use std::{
+        panic::AssertUnwindSafe,
+        sync::mpsc::{self, SyncSender},
+        thread,
+    };
 
     const DEADLINE: Duration = Duration::from_secs(5);
 
@@ -184,13 +240,16 @@ mod tests {
         max_in_flight: usize,
     ) -> (SyncSender<(usize, T)>, BoundedPrewarmReceiver<T>, Receiver<WaitReason>) {
         let (input, pending) = mpsc::sync_channel(capacity);
-        let (waiting, waits) = mpsc::sync_channel(1);
+        // Preserve both the input and first blocking event even when the test intentionally
+        // disables short timed polling. A coalesced observer can otherwise lose that boundary.
+        let (waiting, waits) = mpsc::sync_channel(16);
         let mut receiver = BoundedPrewarmReceiver::new(
             pending,
             TransactionPrewarmPolicy::new(lookahead, max_in_flight, Duration::from_millis(1))
                 .unwrap(),
             Arc::new(AtomicUsize::new(0)),
             Arc::new(AtomicBool::new(false)),
+            Arc::default(),
         );
         receiver.waiting = Some(waiting);
         (input, receiver, waits)
@@ -267,6 +326,8 @@ mod tests {
         let (_, (), permit) = receiver.next().unwrap();
         receiver.committed.store(1, Ordering::Relaxed);
         let count = receiver.in_flight.clone();
+        let wakeup = count.wakeup.clone();
+        let committed = receiver.committed.clone();
         let (done, completion) = mpsc::channel();
         let worker = thread::spawn(move || {
             let (index, (), _permit) = receiver.next().unwrap();
@@ -274,6 +335,9 @@ mod tests {
         });
         wait_for(&waits, WaitReason::Capacity);
         assert_eq!(count.count.load(Ordering::Relaxed), 1);
+        // A canonical wake is not a permit release. The coordinator must re-check the cap.
+        wakeup.advance(&committed, 1);
+        wait_for(&waits, WaitReason::Capacity);
         assert!(matches!(completion.try_recv(), Err(mpsc::TryRecvError::Empty)));
         drop(permit);
         assert_eq!(completion.recv_timeout(DEADLINE).unwrap(), 1);
@@ -345,5 +409,95 @@ mod tests {
         input.send((usize::MAX, ())).unwrap();
         let (index, (), _permit) = receiver.next().unwrap();
         assert_eq!(index, usize::MAX);
+    }
+
+    #[test]
+    fn canonical_progress_wakes_future_work_without_worker_completion() {
+        let (input, mut receiver, waits) = receiver(1, 1, 1);
+        // Exceed the assertion deadline so timed polling cannot make this test pass. This
+        // private test override does not relax the public policy's maximum poll interval.
+        receiver.policy.poll_interval = Duration::from_secs(60);
+        input.send((1, 17)).unwrap();
+        let wakeup = receiver.in_flight.wakeup.clone();
+        let committed = receiver.committed.clone();
+        let stopped = receiver.stopped.clone();
+        let (done, completion) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let value = receiver.next().map(|(index, value, _permit)| (index, value));
+            done.send(value).unwrap();
+        });
+        wait_for(&waits, WaitReason::Future);
+        wakeup.advance(&committed, 1);
+        let result = completion.recv_timeout(DEADLINE);
+        // Also release the worker on failure, so a broken wake never leaves a long test wait.
+        stopped.store(true, Ordering::SeqCst);
+        worker.thread().unpark();
+        worker.join().unwrap();
+        assert_eq!(result.unwrap(), Some((1, 17)));
+    }
+
+    #[test]
+    fn notification_before_park_leaves_a_token() {
+        let wakeup = Arc::new(PrewarmWakeup::default());
+        let enter_park = Arc::new(AtomicBool::new(false));
+        let (ready, registered) = mpsc::sync_channel(1);
+        let (done, completion) = mpsc::channel();
+        let waiter = wakeup.clone();
+        let gate = enter_park.clone();
+        let worker = thread::spawn(move || {
+            waiter.prepare_wait();
+            ready.send(()).unwrap();
+            // Do not invoke another parking primitive between registration and park: it could
+            // consume this thread's token. The gate fixes the notify-before-park interleaving.
+            while !gate.load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+            thread::park_timeout(Duration::from_secs(60));
+            waiter.cancel_wait();
+            done.send(()).unwrap();
+        });
+        registered.recv_timeout(DEADLINE).unwrap();
+        let committed = AtomicUsize::new(0);
+        wakeup.advance(&committed, 1);
+        // Multiple progress events coalesce; the one token must still remain available.
+        wakeup.advance(&committed, 2);
+        enter_park.store(true, Ordering::Release);
+        let result = completion.recv_timeout(DEADLINE);
+        worker.thread().unpark();
+        worker.join().unwrap();
+        result.unwrap();
+        assert_eq!(committed.load(Ordering::SeqCst), 2);
+        assert!(!wakeup.waiting.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn progress_before_coordinator_registration_is_not_lost() {
+        let (input, receiver, waits) = receiver(1, 1, 1);
+        input.send((1, 17)).unwrap();
+        receiver.in_flight.wakeup.advance(&receiver.committed, 1);
+        assert!(receiver.in_flight.wakeup.coordinator.get().is_none());
+        let (index, value, _permit) = receiver.next().unwrap();
+        assert_eq!((index, value), (1, 17));
+        assert_eq!(waits.try_recv().unwrap(), WaitReason::Input);
+        assert!(matches!(waits.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert!(receiver.in_flight.wakeup.coordinator.get().is_none());
+    }
+
+    #[test]
+    fn notified_stop_releases_future_work_with_a_stalled_cursor() {
+        let (input, mut receiver, waits) = receiver(1, 1, 1);
+        receiver.policy.poll_interval = Duration::from_secs(60);
+        input.send((1, ())).unwrap();
+        let wakeup = receiver.in_flight.wakeup.clone();
+        let stopped = receiver.stopped.clone();
+        let (done, completion) = mpsc::channel();
+        let worker = thread::spawn(move || done.send(receiver.next().is_none()).unwrap());
+        wait_for(&waits, WaitReason::Future);
+        stopped.store(true, Ordering::SeqCst);
+        wakeup.notify();
+        let result = completion.recv_timeout(DEADLINE);
+        worker.thread().unpark();
+        worker.join().unwrap();
+        assert!(result.unwrap());
     }
 }
