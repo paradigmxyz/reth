@@ -470,6 +470,8 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            // Reuse recently freed pages to keep random writes in the working set.
+            liforeclaim: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
         });

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 use byteorder::{ByteOrder, LittleEndian};
 use reth_libmdbx::*;
+use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 #[test]
@@ -166,4 +167,79 @@ fn test_freelist() {
     // Freelist should not be empty after clear_db.
     freelist = env.freelist().unwrap();
     assert!(freelist > 0);
+}
+
+#[test]
+fn test_lifo_reclaim_snapshots_abort_and_reopen() {
+    let read_all = |env: &Environment| {
+        let tx = env.begin_ro_txn().unwrap();
+        let db = tx.open_db(None).unwrap();
+        tx.cursor(db.dbi())
+            .unwrap()
+            .iter_start::<Vec<u8>, Vec<u8>>()
+            .collect::<Result<BTreeMap<_, _>>>()
+            .unwrap()
+    };
+
+    for liforeclaim in [false, true] {
+        let dir = tempdir().unwrap();
+        let mut builder = Environment::builder();
+        builder
+            .write_map()
+            .set_flags(EnvironmentFlags {
+                liforeclaim,
+                mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
+                ..Default::default()
+            })
+            .set_geometry(Geometry { size: Some(0..64 * 1024 * 1024), ..Default::default() });
+        let env = builder.open(dir.path()).unwrap();
+        let mut expected = BTreeMap::new();
+
+        // Vary leaf and overflow values, delete keys, and reuse pages across commits.
+        for round in 0..8u32 {
+            let previous = expected.clone();
+            let snapshot = env.begin_ro_txn().unwrap();
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap();
+            for key in 0..512u32 {
+                let encoded = key.to_be_bytes().to_vec();
+                if (key + round) % 4 == 0 {
+                    tx.del(db.dbi(), &encoded, None).unwrap();
+                    expected.remove(&encoded);
+                } else {
+                    let value = vec![(key + round) as u8; 31 + ((key + round) % 8) as usize * 1024];
+                    tx.put(db.dbi(), &encoded, &value, WriteFlags::empty()).unwrap();
+                    expected.insert(encoded, value);
+                }
+            }
+            tx.commit().unwrap();
+            // Reclamation must not overwrite pages still visible to an older reader.
+            let old_contents = snapshot
+                .cursor(snapshot.open_db(None).unwrap().dbi())
+                .unwrap()
+                .iter_start::<Vec<u8>, Vec<u8>>()
+                .collect::<Result<BTreeMap<_, _>>>()
+                .unwrap();
+            assert_eq!(old_contents, previous);
+            assert_eq!(read_all(&env), expected);
+
+            {
+                let aborted = env.begin_rw_txn().unwrap();
+                let db = aborted.open_db(None).unwrap();
+                aborted.clear_db(db.dbi()).unwrap();
+                aborted.put(db.dbi(), b"uncommitted", [99; 8192], WriteFlags::empty()).unwrap();
+            }
+            assert_eq!(read_all(&env), expected);
+        }
+
+        drop(env);
+        // The optimization is an environment setting, not an on-disk format change.
+        builder.set_flags(EnvironmentFlags {
+            liforeclaim: !liforeclaim,
+            mode: Mode::ReadWrite { sync_mode: SyncMode::Durable },
+            ..Default::default()
+        });
+        let reopened = builder.open(dir.path()).unwrap();
+        assert_eq!(read_all(&reopened), expected);
+    }
 }
