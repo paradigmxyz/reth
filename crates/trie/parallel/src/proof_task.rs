@@ -31,6 +31,7 @@
 
 use crate::{
     error::StateRootTaskError,
+    storage_proof::{StorageProofResult, StorageProofResultMessage},
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -47,7 +48,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     proof_v2,
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -573,32 +574,6 @@ impl ProofResultContext {
     }
 }
 
-/// The results of a storage proof calculation.
-#[derive(Debug)]
-pub(crate) struct StorageProofResult {
-    /// The calculated V2 proof nodes
-    pub proof: Vec<ProofTrieNodeV2>,
-    /// The storage root calculated by the V2 proof
-    pub root: Option<B256>,
-}
-
-impl StorageProofResult {
-    /// Returns the calculated root of the trie, if one can be calculated from the proof.
-    const fn root(&self) -> Option<B256> {
-        self.root
-    }
-}
-
-/// Message containing a completed storage proof result with metadata.
-#[derive(Debug)]
-pub struct StorageProofResultMessage {
-    /// The hashed address this storage proof belongs to
-    #[allow(dead_code)]
-    pub(crate) hashed_address: B256,
-    /// The storage proof calculation result
-    pub(crate) result: Result<StorageProofResult, StateProofError>,
-}
-
 /// Internal message for storage workers.
 #[derive(Debug)]
 pub(crate) enum StorageWorkerJob {
@@ -789,7 +764,7 @@ where
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
 
-        let root = result.as_ref().ok().and_then(|result| result.root());
+        let root = result.as_ref().ok().and_then(|result| result.root);
 
         if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
             trace!(
@@ -1269,7 +1244,7 @@ mod tests {
                 )
                 .unwrap();
             let storage = storage_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
-            assert_eq!(storage.root(), Some(reth_trie::EMPTY_ROOT_HASH));
+            assert_eq!(storage.root, Some(reth_trie::EMPTY_ROOT_HASH));
 
             handle
                 .dispatch_account_multiproof(AccountMultiproofInput {
