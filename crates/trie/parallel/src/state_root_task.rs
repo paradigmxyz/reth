@@ -362,6 +362,9 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 }
 
 /// Semantic update stream consumed by state-root tasks.
+///
+/// These callbacks submit messages without reporting task completion or failure. Consumers must
+/// obtain the computation result separately, for example through [`StateRootHandle::state_root`].
 pub trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
@@ -496,6 +499,10 @@ impl SparseTrieStateRootSink {
     }
 }
 
+// Send errors mean the receiving pipeline has stopped, so further updates and the finish
+// signal cannot be processed. Task errors are delivered through the separate result channel;
+// if the task drops that channel without a result, StateRootHandle::state_root reports an error.
+// Cancellation abandons the result. Ignoring send errors here does not report a successful root.
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
