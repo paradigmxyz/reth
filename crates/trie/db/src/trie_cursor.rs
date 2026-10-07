@@ -39,9 +39,8 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 
 /// Trait for storage trie entry types that carry a subkey and node.
 ///
-/// Needed because [`StorageTrieEntry`] and [`PackedStorageTrieEntry`] are separate structs
-/// with different field types, but `DatabaseStorageTrieCursor` must access `.nibbles()` and
-/// `.node()` generically through `A::StorageValue`.
+/// Provides access to the encoded subkey and branch node, as well as construction and
+/// decomposition into owned parts, independently of the subkey encoding.
 pub trait StorageTrieEntryLike: Sized {
     /// The subkey type.
     type SubKey: Clone;
@@ -135,11 +134,9 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     }
 }
 
-/// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.
+/// Maps a [`TrieKeyAdapter`] to account and storage trie tables using its key and value types.
 ///
-/// This indirection is needed because the `tables!` macro generates non-generic
-/// table types, so we use separate "view" types for packed encoding that share
-/// the same MDBX table name.
+/// The selected table types must match the database's stored nibble encoding.
 pub trait TrieTableAdapter: TrieKeyAdapter {
     /// The account trie table type.
     type AccountTrieTable: Table<Key = Self::AccountKey, Value = BranchNodeCompact>;

@@ -47,11 +47,8 @@ pub struct StateRootComputeOutcome {
 
 /// Handle to a background sparse trie state root computation.
 ///
-/// Used by both the engine (during `newPayload`) and the payload builder (during `FCU`-triggered
-/// block building). Provides channels for streaming state updates into the pipeline and receiving
-/// the final computed state root.
-///
-/// Created by the engine's state-root strategy.
+/// Provides best-effort access hints, one authoritative update stream, and the final computation
+/// result. Dropping the handle cancels the task if it is still running.
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
@@ -321,8 +318,7 @@ impl PayloadStateRootHandle {
 /// Hashed account and storage keys that a state-root task may want to prefetch.
 ///
 /// Hints are not authoritative. They may be missing, duplicated, stale, or ignored by a task.
-/// The conversions from and to proof-target types allocate; that cost is accepted because
-/// hints are produced on prewarm workers, off the block-execution thread.
+/// Conversions to and from proof-target types allocate new collections.
 #[derive(Debug, Clone, Default)]
 pub struct StateAccessHint {
     /// Hashed account keys that may be touched later in the block.
