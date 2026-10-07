@@ -409,6 +409,8 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                // Let mapped writes fault pages in without issuing preliminary clearing writes.
+                inner_env.set_prefault_write(false);
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };

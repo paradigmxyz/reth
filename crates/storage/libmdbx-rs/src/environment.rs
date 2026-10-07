@@ -50,6 +50,7 @@ impl Environment {
             txn_dp_limit: None,
             spill_max_denominator: None,
             spill_min_denominator: None,
+            prefault_write: None,
             geometry: None,
             log_level: None,
             kind: Default::default(),
@@ -618,6 +619,7 @@ pub struct EnvironmentBuilder {
     txn_dp_limit: Option<u64>,
     spill_max_denominator: Option<u64>,
     spill_min_denominator: Option<u64>,
+    prefault_write: Option<u64>,
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
@@ -691,6 +693,7 @@ impl EnvironmentBuilder {
                     (ffi::MDBX_opt_txn_dp_limit, self.txn_dp_limit),
                     (ffi::MDBX_opt_spill_max_denominator, self.spill_max_denominator),
                     (ffi::MDBX_opt_spill_min_denominator, self.spill_min_denominator),
+                    (ffi::MDBX_opt_prefault_write_enable, self.prefault_write),
                 ] {
                     if let Some(v) = v {
                         mdbx_result(ffi::mdbx_env_set_option(env, opt, v))?;
@@ -870,6 +873,14 @@ impl EnvironmentBuilder {
 
     pub fn set_spill_min_denominator(&mut self, v: u8) -> &mut Self {
         self.spill_min_denominator = Some(v.into());
+        self
+    }
+
+    /// Controls clearing allocated pages through the file handle before touching them in
+    /// [`EnvironmentKind::WriteMap`] mode. Disabling this permits page faults instead of issuing
+    /// preliminary writes. This does not change the environment's commit synchronization mode.
+    pub fn set_prefault_write(&mut self, enabled: bool) -> &mut Self {
+        self.prefault_write = Some(u64::from(enabled));
         self
     }
 
