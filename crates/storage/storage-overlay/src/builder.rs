@@ -395,10 +395,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Builds the effective state trie overlay for the given provider.
     ///
-    /// Set `trie_changesets` only for consumers that produce [`TrieUpdates`], such as
-    /// [`StateRootProvider::state_root_with_updates`]. Other consumers, including roots, proofs,
-    /// multiproofs, and witnesses, should leave it false: complete the cached trie at Finish and
-    /// invalidate hashed-state revert prefixes instead of querying trie changesets.
+    /// See [`Self::build_state_trie_overlay_at_frontiers`] for the `trie_changesets` contract.
     #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     fn build_state_trie_overlay<Provider>(
@@ -427,6 +424,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Builds the effective state trie overlay using frontiers already read from the provider.
     ///
     /// This is useful for callers that key an overlay cache by the durable frontiers.
+    ///
+    /// Set `trie_changesets` to true only for consumers that produce trie updates. Other consumers,
+    /// including roots, proofs, multiproofs, and witnesses, should leave it false. When reverts are
+    /// required, false avoids querying trie changesets and invalidates prefixes for both reverted
+    /// hashed-state keys and keys changed by in-memory blocks replayed on top of the anchor.
     #[instrument(
         level = "debug",
         target = "storage::overlay",
@@ -1238,12 +1240,12 @@ mod tests {
             .build_state_trie_overlay(&provider, false)
             .unwrap();
 
-        let mut prefixes = overlay.input().prefix_sets.clone().freeze();
-        assert!(prefixes
+        let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
+        assert!(prefix_sets
             .account_prefix_set
             .contains(&Nibbles::unpack(keccak256(Address::with_last_byte(1)))));
-        assert!(prefixes.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
-        assert!(prefixes
+        assert!(prefix_sets.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
+        assert!(prefix_sets
             .storage_prefix_sets
             .get_mut(&B256::with_last_byte(2))
             .unwrap()
