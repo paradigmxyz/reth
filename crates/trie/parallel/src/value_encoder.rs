@@ -1,4 +1,4 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::storage_proof::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;

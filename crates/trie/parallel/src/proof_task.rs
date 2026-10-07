@@ -31,6 +31,7 @@
 
 use crate::{
     error::StateRootTaskError,
+    storage_proof::{StorageProofResult, StorageProofResultMessage},
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -572,32 +573,6 @@ impl ProofResultContext {
     ) -> Self {
         Self { sender, state, start_time }
     }
-}
-
-/// The results of a storage proof calculation.
-#[derive(Debug)]
-pub(crate) struct StorageProofResult {
-    /// The calculated V2 proof nodes
-    pub proof: Vec<ProofTrieNodeV2>,
-    /// The storage root calculated by the V2 proof
-    pub root: Option<B256>,
-}
-
-impl StorageProofResult {
-    /// Returns the calculated root of the trie, if one can be calculated from the proof.
-    const fn root(&self) -> Option<B256> {
-        self.root
-    }
-}
-
-/// Message containing a completed storage proof result with metadata.
-#[derive(Debug)]
-pub struct StorageProofResultMessage {
-    /// The hashed address this storage proof belongs to
-    #[allow(dead_code)]
-    pub(crate) hashed_address: B256,
-    /// The storage proof calculation result
-    pub(crate) result: Result<StorageProofResult, StateProofError>,
 }
 
 /// Internal message for storage workers.
