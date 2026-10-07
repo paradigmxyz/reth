@@ -297,7 +297,7 @@ pub use build::EthBlockAssembler;
 mod executor;
 pub use executor::{
     EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor,
-    EthBlockExecutorParts, EthTransactionResultWithState,
+    EthTransactionResultWithState,
 };
 
 /// Ethereum block executor and EVM factory implementations.
