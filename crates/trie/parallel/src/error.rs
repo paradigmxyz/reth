@@ -30,12 +30,28 @@ pub enum StateRootTaskError {
 
 impl From<StateProofError> for StateRootTaskError {
     fn from(error: StateProofError) -> Self {
-        match error {
-            StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
-            StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
-            StateProofError::TrieInconsistency(msg) => {
-                Self::Provider(ProviderError::TrieWitnessError(msg))
-            }
+        Self::Provider(error.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trie_inconsistency_keeps_its_type_across_proof_paths() {
+        let proof_error =
+            StateProofError::TrieInconsistency("cached node differs from leaf".into());
+        let direct = ProviderError::from(proof_error.clone());
+        let StateRootTaskError::Provider(parallel) = StateRootTaskError::from(proof_error) else {
+            panic!("parallel proof error must use the shared provider conversion");
+        };
+        for error in [direct, parallel] {
+            assert!(matches!(
+                error.downcast_other_ref::<StateProofError>(),
+                Some(StateProofError::TrieInconsistency(_))
+            ));
+            assert_eq!(error.to_string(), "trie inconsistency: cached node differs from leaf");
         }
     }
 }
