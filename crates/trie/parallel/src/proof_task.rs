@@ -765,7 +765,7 @@ where
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
 
-        let root = result.as_ref().ok().and_then(|result| result.root());
+        let root = result.as_ref().ok().and_then(|result| result.root);
 
         if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
             trace!(
