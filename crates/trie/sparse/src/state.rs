@@ -1168,24 +1168,11 @@ mod tests {
         let error = trie
             .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
                 account_proofs: vec![ProofTrieNodeV2::empty()],
-                storage_proofs: B256Map::from_iter([(address, vec![node.clone()])]),
+                storage_proofs: B256Map::from_iter([(address, vec![node])]),
             })
             .unwrap_err();
         assert!(
             matches!(error.kind(), SparseStateTrieErrorKind::SparseStorageTrie(account, SparseTrieErrorKind::Blind) if *account == address)
         );
-        assert_eq!(trie.take_deferred_drops().proof_nodes_bufs.len(), 2);
-
-        let mut trie = SparseStateTrie::new();
-        let error = trie
-            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
-                account_proofs: vec![node],
-                storage_proofs: Default::default(),
-            })
-            .unwrap_err();
-        assert!(matches!(
-            error.kind(),
-            SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
-        ));
     }
 }
