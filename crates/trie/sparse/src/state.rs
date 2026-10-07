@@ -1190,7 +1190,7 @@ mod tests {
                 let mut leaves = [0x11, 0x12, 0x21, 0x22]
                     .into_iter()
                     .flat_map(|prefix| {
-                        [0x10, 0x20].map(|suffix| {
+                        [0x11, 0x12, 0x21, 0x22].map(|suffix| {
                             let mut key = B256::ZERO;
                             key[0] = prefix;
                             key[1] = suffix;
