@@ -1317,7 +1317,7 @@ mod tests {
             )
             .unwrap();
         let storage = storage_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
-        assert_eq!(storage.root(), Some(reth_trie::EMPTY_ROOT_HASH));
+        assert_eq!(storage.root, Some(reth_trie::EMPTY_ROOT_HASH));
 
         drop(first);
         drop(second);
