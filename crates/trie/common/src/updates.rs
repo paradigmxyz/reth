@@ -214,11 +214,7 @@ impl TrieUpdates {
         TrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
-            storage_tries: self
-                .storage_tries
-                .iter()
-                .map(|m| (*m.0, m.1.to_sorted_ref()))
-                .collect(),
+            storage_tries: self.storage_tries.iter().map(|m| (*m.0, m.1.to_sorted_ref())).collect(),
         }
     }
 
