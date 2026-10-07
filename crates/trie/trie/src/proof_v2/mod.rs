@@ -1,7 +1,8 @@
-//! Proof calculation version 2: Leaf-only implementation.
+//! Proof calculation version 2 using leaf data and cached branch hashes.
 //!
 //! This module provides a rewritten proof calculator that:
-//! - Uses only leaf data (HashedAccounts/Storages) to generate proofs
+//! - Combines hashed account or storage leaves with cached branch hashes from a trie cursor
+//! - Recalculates subtries containing proof targets or changed keys instead of using cached hashes
 //! - Returns proof nodes sorted lexicographically by path
 //! - Automatically resets after each calculation
 //! - Re-uses cursors across calculations
@@ -37,7 +38,10 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
-/// A proof calculator that generates merkle proofs using only leaf data.
+/// A proof calculator that generates Merkle proofs from leaf data and cached branch hashes.
+///
+/// The hashed cursor supplies leaves, while the trie cursor supplies cached branch hashes to skip
+/// subtries. Subtries containing proof targets or keys in the configured prefix set are recalculated.
 ///
 /// The calculator:
 /// - Accepts one or more B256 proof targets sorted lexicographically
