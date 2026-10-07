@@ -38,9 +38,10 @@ use reth_primitives_traits::{SealedBlock, SealedHeader};
 #[cfg(feature = "std")]
 use reth_storage_errors::any::AnyError;
 
-use convert::{block_env_with_blob_params, spec_id};
 #[cfg(feature = "std")]
-use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
+use convert::payload_block_env;
+pub use convert::spec_id_by_timestamp_and_block_number;
+use convert::{block_env_with_blob_params, spec_id};
 
 /// Configured Ethereum EVM environment.
 pub struct EthEvmEnv<T = evm2::BaseEvmTypes>
@@ -296,7 +297,7 @@ pub use build::EthBlockAssembler;
 mod executor;
 pub use executor::{
     EthBigBlockExecutor, EthBigBlockPlan, EthBigBlockSegment, EthBlockExecutor,
-    EthTransactionResultWithState,
+    EthBlockExecutorParts, EthTransactionResultWithState,
 };
 
 /// Ethereum block executor and EVM factory implementations.

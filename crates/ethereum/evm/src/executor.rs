@@ -86,6 +86,23 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
+/// Owned executor state and transaction bookkeeping.
+///
+/// Custom executors can use these parts to construct their own block output.
+#[expect(missing_debug_implementations)]
+pub struct EthBlockExecutorParts<'a, T: EvmTypes, Receipt> {
+    /// EVM containing the execution overlay and optional block access list builder.
+    pub evm: Evm<'a, T>,
+    /// Accumulated state changes, including state committed through the executor's hooks.
+    pub block_state: BlockState,
+    /// Transaction receipts in execution order.
+    pub receipts: Vec<Receipt>,
+    /// Total receipt gas used.
+    pub cumulative_gas_used: u64,
+    /// Total blob gas used.
+    pub blob_gas_used: u64,
+}
+
 type StateUpdateHook = Option<Box<dyn FnMut(EvmState) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
@@ -174,6 +191,22 @@ where
             &mut |state| emit_state(&mut self.state_update_hook, state),
             state,
         );
+    }
+
+    /// Sets the Ethereum fork used for block system calls and deposit request processing.
+    pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
+        self.spec_id = spec_id;
+    }
+
+    /// Consumes the executor into its EVM, state, and transaction bookkeeping.
+    pub fn into_parts(self) -> EthBlockExecutorParts<'a, T, R::Receipt> {
+        EthBlockExecutorParts {
+            evm: self.evm,
+            block_state: self.block_state,
+            receipts: self.receipts,
+            cumulative_gas_used: self.cumulative_gas_used,
+            blob_gas_used: self.blob_gas_used,
+        }
     }
 
     #[inline]
