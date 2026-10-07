@@ -415,9 +415,16 @@ impl<B> EngineNodeLauncher<B> {
                     shutdown_req = &mut shutdown_rx => {
                         if let Ok(req) = shutdown_req {
                             debug!(target: "reth::cli", "received engine shutdown request");
+                            // Keep our own receiver to avoid treating event-channel closure as fatal.
+                            let (done_tx, done_rx) = oneshot::channel();
                             orchestrator.handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                                FromOrchestrator::Terminate { tx: done_tx }.into()
                             );
+                            match done_rx.await {
+                                Ok(()) => { let _ = req.done_tx.send(()); }
+                                Err(err) => res = Err(err.into()),
+                            }
+                            break;
                         }
                     }
                     _guard = &mut on_graceful_shutdown => {
