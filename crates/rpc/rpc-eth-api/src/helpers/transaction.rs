@@ -803,9 +803,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 //
                 // Reuse the sender that execution already recovered, if the node caches senders.
                 let signer = match self.eth_api_settings().sender_recovery_cache.as_ref() {
-                    Some(cache) => {
-                        cache.recover_with(&tx, |tx| tx.recover_signer_unchecked())
-                    }
+                    Some(cache) => cache.recover_with(&tx, |tx| tx.recover_signer_unchecked()),
                     None => tx.recover_signer_unchecked(),
                 }
                 .map_err(|_| EthApiError::InvalidTransactionSignature)?;
