@@ -130,16 +130,18 @@ impl FromStr for TrustedPeer {
 
         use url::Url;
 
-        // Parse the URL with enode prefix replaced with http.
-        // The enode prefix causes the parser to use parse_opaque() on
-        // the host str which only handles domains and ipv6, not ipv4.
-        let url = Url::parse(s.replace("enode://", "http://").as_str())
-            .map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
+        let url = Url::parse(s).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
 
-        let host = url
-            .host()
-            .ok_or_else(|| NodeRecordParseError::InvalidUrl("no host specified".to_string()))?
-            .to_owned();
+        // The enode scheme is not a special scheme, so the parser keeps the host as an opaque
+        // string, which covers domains and ipv6 but not ipv4. Parse it again as a regular host.
+        // Parsing the whole URL as http instead would drop port 80 as the default port.
+        let host = match url.host() {
+            Some(Host::Domain(domain)) => {
+                Host::parse(domain).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?
+            }
+            Some(host) => host.to_owned(),
+            None => return Err(NodeRecordParseError::InvalidUrl("no host specified".to_string())),
+        };
 
         let port = url
             .port()
@@ -207,6 +209,30 @@ mod tests {
             ),
         });
         assert!("enr:garbage".parse::<TrustedPeer>().is_err());
+    }
+
+    #[test]
+    fn test_url_parse_port_80() {
+        let id = b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0");
+        let cases = [
+            (format!("enode://{id:x}@10.3.58.6:80"), Host::Ipv4([10, 3, 58, 6].into()), 80, 80),
+            (
+                format!("enode://{id:x}@10.3.58.6:80?discport=30301"),
+                Host::Ipv4([10, 3, 58, 6].into()),
+                80,
+                30301,
+            ),
+            (format!("enode://{id:x}@my-domain:80"), Host::Domain("my-domain".to_string()), 80, 80),
+        ];
+
+        for (url, host, tcp_port, udp_port) in cases {
+            let node: TrustedPeer = url.parse().unwrap();
+            assert_eq!(node, TrustedPeer { host, tcp_port, udp_port, id });
+            assert_eq!(url, node.to_string());
+        }
+
+        let url = format!("enode://{id:x}@10.3.58.6");
+        assert!(url.parse::<TrustedPeer>().is_err());
     }
 
     #[test]
