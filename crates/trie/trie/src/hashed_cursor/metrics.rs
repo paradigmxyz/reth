@@ -114,7 +114,7 @@ impl HashedCursorMetricsCache {
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
-            target: "trie::trie_cursor",
+            target: "trie::hashed_cursor",
             "Hashed cursor metrics",
             name,
             next_count = self.next_count,
