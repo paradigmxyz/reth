@@ -15,8 +15,8 @@ use reth_ethereum::{
     tasks::Runtime,
 };
 use reth_pureth_query::{
-    verify_receipt_log_address, PurethApiServer, PurethRpc, QueryRequest, QueryResponse,
-    QueryService, SCHEMA_ID,
+    verify_query_response, PurethApiServer, PurethRpc, QueryRequest, QueryResponse, QueryService,
+    ReceiptSelection, SelectionLimits, SelectionOperation, SelectionRequest,
 };
 use reth_pureth_receipt::RethRootProvider;
 use std::{sync::Arc, time::Duration};
@@ -74,29 +74,46 @@ async fn run() -> eyre::Result<()> {
     let receipt = tokio::time::timeout(Duration::from_secs(30), pending.get_receipt()).await??;
     let block_hash =
         receipt.block_hash.ok_or_else(|| eyre::eyre!("mined receipt has no block hash"))?;
+    let mut topic = B256::ZERO;
+    topic[31] = 0x2a;
     let request = QueryRequest {
         block_hash,
         object: "receipts".to_owned(),
-        schema_id: SCHEMA_ID.to_owned(),
-        path: "[0].logs[0].address".to_owned(),
-        include_proof: true,
+        selection: SelectionRequest {
+            selections: vec![
+                ReceiptSelection {
+                    path: "[0].from".to_owned(),
+                    operation: SelectionOperation::Value {},
+                },
+                ReceiptSelection {
+                    path: "[0].status".to_owned(),
+                    operation: SelectionOperation::Value {},
+                },
+                ReceiptSelection {
+                    path: "[0].logs[0].topics[0]".to_owned(),
+                    operation: SelectionOperation::Value {},
+                },
+                ReceiptSelection {
+                    path: "[0].logs[0].data".to_owned(),
+                    operation: SelectionOperation::Slice { start: 1, end: 3 },
+                },
+            ],
+            include_proof: true,
+        },
     };
     let response: QueryResponse =
         client.request("pureth_query", rpc_params![request.clone()]).await?;
     eyre::ensure!(response.block_hash == block_hash);
-    eyre::ensure!(response.schema_id == request.schema_id);
-    eyre::ensure!(response.path == request.path);
-    eyre::ensure!(response.value_ssz.as_ref() == contract.as_slice());
+    eyre::ensure!(
+        response.selection.results[0].values_ssz[0].as_ref() == signer_address.as_slice()
+    );
+    eyre::ensure!(response.selection.results[1].values_ssz[0].as_ref() == [1]);
+    eyre::ensure!(response.selection.results[2].values_ssz[0].as_ref() == topic.as_slice());
+    eyre::ensure!(response.selection.results[3].values_ssz[0].as_ref() == [0xad, 0xbe]);
     eyre::ensure!(response.block_status == "canonical");
     eyre::ensure!(response.root_context == "reth_experimental_unanchored");
-    verify_receipt_log_address(
-        &request.schema_id,
-        &request.path,
-        response.value_ssz.as_ref(),
-        &response.proof,
-        response.root,
-    )
-    .map_err(|error| eyre::eyre!("{error:?}"))?;
+    verify_query_response(&request, &response, response.selection.root, SelectionLimits::default())
+        .map_err(|error| eyre::eyre!("{error:?}"))?;
 
     let missing = QueryRequest { block_hash: B256::repeat_byte(0xff), ..request };
     let error =
@@ -106,8 +123,9 @@ async fn run() -> eyre::Result<()> {
     };
     eyre::ensure!(error.code() == -32001);
     println!(
-        "block={block_hash} address={contract} root={} missing_block_code={}",
-        response.root,
+        "block={block_hash} sender={signer_address} topic={topic} data_slice={:?} root={} missing_block_code={}",
+        response.selection.results[3].values_ssz[0],
+        response.selection.root,
         error.code()
     );
     if std::env::var_os("PURETH_EXTERNAL_RPC_CHECK").is_some() {
@@ -125,7 +143,10 @@ fn chain_spec(signer: Address, contract: Address) -> Arc<ChainSpec> {
             (
                 contract,
                 GenesisAccount {
-                    code: Some(Bytes::from_static(&[0x60, 0x00, 0x60, 0x00, 0xa0, 0x00])),
+                    code: Some(Bytes::from_static(&[
+                        0x63, 0xde, 0xad, 0xbe, 0xef, 0x60, 0x00, 0x52, 0x60, 0x2a, 0x60, 0x04,
+                        0x60, 0x1c, 0xa1, 0x00,
+                    ])),
                     ..Default::default()
                 },
             ),

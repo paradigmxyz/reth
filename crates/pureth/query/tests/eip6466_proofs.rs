@@ -2,9 +2,9 @@
 
 use alloy_primitives::{Address, Bytes, B256};
 use reth_pureth_query::{
-    address_target_node, branch_positions, compose_gindices, container_field_gindex, parse_path,
-    progressive_chunk_gindex, resolve, verify_branch, verify_receipt_log_address, EnvelopeError,
-    ResolvedPath, SCHEMA_ID,
+    address_target_node, branch_positions, compose_gindices, container_field_gindex,
+    progressive_chunk_gindex, select_receipt_snapshot, verify_branch, ReceiptSelection,
+    SelectionError, SelectionLimits, SelectionOperation, SelectionRequest,
 };
 use reth_pureth_receipt::{
     eip6466::{
@@ -13,7 +13,10 @@ use reth_pureth_receipt::{
     RetainedNode,
 };
 
-const EIP_SCHEMA_ID: &str = "pureth-eip6466-ssz-bbfa594fe85fa8add427996fc1e2c38514553b10";
+#[derive(Clone, Copy)]
+enum ResolvedPath {
+    ReceiptLogAddress { receipt_index: u64, log_index: u64 },
+}
 
 fn receipts(count: usize, log_count: usize) -> Vec<Receipt> {
     (0..count)
@@ -57,7 +60,7 @@ fn snapshot(receipts: Vec<Receipt>) -> Eip6466ReceiptSnapshot {
     Eip6466ReceiptSnapshot::build(Receipts::new(receipts)).unwrap()
 }
 
-fn address_gindex(path: ResolvedPath) -> u64 {
+fn address_gindex(path: ResolvedPath) -> u128 {
     let ResolvedPath::ReceiptLogAddress { receipt_index, log_index } = path;
     [
         progressive_chunk_gindex(receipt_index).unwrap(),
@@ -71,10 +74,10 @@ fn address_gindex(path: ResolvedPath) -> u64 {
     .unwrap()
 }
 
-fn branch(tree: &RetainedNode, gindex: u64) -> (B256, Vec<B256>) {
+fn branch(tree: &RetainedNode, gindex: u128) -> (B256, Vec<B256>) {
     let mut node = tree;
     let mut siblings = Vec::new();
-    for bit in (0..u64::BITS - 1 - gindex.leading_zeros()).rev() {
+    for bit in (0..u128::BITS - 1 - gindex.leading_zeros()).rev() {
         let children = node.children().expect("address path must be retained");
         let side = usize::from(gindex & (1 << bit) != 0);
         siblings.push(children[side ^ 1].root());
@@ -87,15 +90,10 @@ fn branch(tree: &RetainedNode, gindex: u64) -> (B256, Vec<B256>) {
 fn selected_address(snapshot: &Eip6466ReceiptSnapshot, path: ResolvedPath) -> Option<Address> {
     let ResolvedPath::ReceiptLogAddress { receipt_index, log_index } = path;
     let receipt = snapshot.receipts().get(usize::try_from(receipt_index).ok()?)?;
-    let logs = match receipt {
-        Receipt::Basic(receipt) => &receipt.logs,
-        Receipt::Create(receipt) => &receipt.logs,
-        Receipt::SetCode(receipt) => &receipt.logs,
-    };
-    logs.get(usize::try_from(log_index).ok()?).map(Log::address)
+    receipt.logs().get(usize::try_from(log_index).ok()?).map(Log::address)
 }
 
-fn proof(snapshot: &Eip6466ReceiptSnapshot, path: ResolvedPath) -> (B256, u64, Vec<B256>) {
+fn proof(snapshot: &Eip6466ReceiptSnapshot, path: ResolvedPath) -> (B256, u128, Vec<B256>) {
     let address = selected_address(snapshot, path).unwrap();
     let target = address_target_node(address.as_slice()).unwrap();
     let gindex = address_gindex(path);
@@ -116,8 +114,7 @@ fn eip_address_proofs_use_the_retained_tree_for_each_receipt_variant() {
     assert_eq!(snapshot.root(), snapshot.tree().root());
     for receipt_index in 0..3 {
         for log_index in 0..2 {
-            let path = format!("[{receipt_index}].logs[{log_index}].address");
-            proof(&snapshot, resolve(&parse_path(&path).unwrap()).unwrap());
+            proof(&snapshot, ResolvedPath::ReceiptLogAddress { receipt_index, log_index });
         }
     }
 }
@@ -186,58 +183,29 @@ fn eip_proofs_reject_changed_values_roots_branches_and_positions() {
 }
 
 #[test]
-fn eip_address_selection_rejects_out_of_bounds_indexes() {
+fn receipt_selection_rejects_out_of_bounds_indexes() {
+    let reject = |snapshot: &Eip6466ReceiptSnapshot, receipt_index: u64, log_index: u64| {
+        let request = SelectionRequest {
+            selections: vec![ReceiptSelection {
+                path: format!("[{receipt_index}].logs[{log_index}].address"),
+                operation: SelectionOperation::Value {},
+            }],
+            include_proof: true,
+        };
+        assert_eq!(
+            select_receipt_snapshot(snapshot, &request, SelectionLimits::default()),
+            Err(SelectionError::OutOfBounds)
+        );
+    };
     for snapshot in [snapshot(receipts(0, 0)), snapshot(receipts(3, 0)), snapshot(receipts(3, 2))] {
-        assert!(selected_address(
-            &snapshot,
-            ResolvedPath::ReceiptLogAddress {
-                receipt_index: snapshot.receipts().len() as u64,
-                log_index: 0,
-            }
-        )
-        .is_none());
+        reject(&snapshot, snapshot.receipts().len() as u64, 0);
         for receipt_index in 0..snapshot.receipts().len() as u64 {
             for log_index in [2, u64::MAX] {
-                assert!(selected_address(
-                    &snapshot,
-                    ResolvedPath::ReceiptLogAddress { receipt_index, log_index }
-                )
-                .is_none());
+                reject(&snapshot, receipt_index, log_index);
             }
         }
     }
-    assert!(selected_address(
-        &snapshot(receipts(3, 0)),
-        ResolvedPath::ReceiptLogAddress { receipt_index: 0, log_index: 0 }
-    )
-    .is_none());
-}
-
-#[test]
-fn eip_proofs_do_not_enter_the_v0_envelope() {
-    let snapshot = snapshot(receipts(3, 2));
-    for receipt_index in 0..3 {
-        let path = format!("[{receipt_index}].logs[0].address");
-        let (target, _, branch) = proof(&snapshot, resolve(&parse_path(&path).unwrap()).unwrap());
-        assert_eq!(
-            verify_receipt_log_address(
-                EIP_SCHEMA_ID,
-                &path,
-                &target[..20],
-                &branch,
-                snapshot.root()
-            ),
-            Err(EnvelopeError::WrongSchema)
-        );
-        assert!(verify_receipt_log_address(
-            SCHEMA_ID,
-            &path,
-            &target[..20],
-            &branch,
-            snapshot.root()
-        )
-        .is_err());
-    }
+    reject(&snapshot(receipts(3, 0)), 0, 0);
 }
 
 #[test]
