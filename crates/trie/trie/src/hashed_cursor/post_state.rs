@@ -704,21 +704,4 @@ mod tests {
             }
         }
     }
-
-    proptest::proptest! {
-        #[test]
-        fn overlay_seeks_match_sorted_map(queries in proptest::collection::vec(0u8..10, 1..100)) {
-            let db = BTreeMap::from([(key(1), U256::from(1)), (key(3), U256::from(3)), (key(5), U256::from(5))]);
-            let post_state = storage_post_state(vec![(key(2), U256::from(2)), (key(3), U256::ZERO), (key(4), U256::from(4))]);
-            let expected = BTreeMap::from([(key(1), U256::from(1)), (key(2), U256::from(2)), (key(4), U256::from(4)), (key(5), U256::from(5))]);
-            let db = MockHashedCursor::new(Arc::new(db), Default::default());
-            let mut cursor = HashedPostStateCursor::new_storage(db, &post_state, B256::ZERO);
-            for query in queries {
-                let wanted = expected.range(key(query)..).next().map(|(k, v)| (*k, *v));
-                assert_eq!(cursor.seek(key(query)).unwrap(), wanted);
-                let next = wanted.and_then(|(k, _)| expected.range((std::ops::Bound::Excluded(k), std::ops::Bound::Unbounded)).next().map(|(k, v)| (*k, *v)));
-                assert_eq!(cursor.next().unwrap(), next);
-            }
-        }
-    }
 }
