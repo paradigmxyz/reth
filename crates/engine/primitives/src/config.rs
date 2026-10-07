@@ -296,6 +296,10 @@ impl TreeConfig {
     /// Create engine tree configuration.
     ///
     /// The backfill run threshold is clamped to [`MAX_BACKFILL_RUN_THRESHOLD`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `multiproof_chunk_size` is zero or the persistence thresholds are inconsistent.
     #[expect(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
@@ -326,6 +330,7 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        assert!(multiproof_chunk_size > 0, "multiproof chunk size must be non-zero");
         let num_state_masking_blocks =
             if persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_backpressure_threshold_invariant(
@@ -667,7 +672,12 @@ impl TreeConfig {
     }
 
     /// Setter for multiproof task chunk size for proof targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `multiproof_chunk_size` is zero.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
+        assert!(multiproof_chunk_size > 0, "multiproof chunk size must be non-zero");
         self.multiproof_chunk_size = multiproof_chunk_size;
         self
     }
@@ -956,5 +966,11 @@ mod tests {
     )]
     fn rejects_overflowing_state_masking_window() {
         let _ = TreeConfig::default().with_num_state_masking_blocks(u64::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "multiproof chunk size must be non-zero")]
+    fn rejects_zero_multiproof_chunk_size() {
+        TreeConfig::default().with_multiproof_chunk_size(0);
     }
 }

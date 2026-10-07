@@ -169,6 +169,10 @@ impl HashedPostState {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedHashedPostState`] for more information.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
@@ -772,6 +776,7 @@ impl FlattenedHashedPostStateItem {
 
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         let flattened = hashed_post_state
             .storages
             .into_iter()
@@ -1995,5 +2000,13 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "chunk size must be non-zero")]
+    fn rejects_zero_chunk_size() {
+        HashedPostState::default()
+            .with_accounts([(B256::ZERO, Some(Account::default()))])
+            .chunks(0);
     }
 }

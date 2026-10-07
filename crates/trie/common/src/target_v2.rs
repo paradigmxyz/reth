@@ -112,6 +112,10 @@ impl MultiProofTargetsV2 {
     }
 
     /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
     }
@@ -183,7 +187,12 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is zero.
     pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
@@ -286,5 +295,21 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
         } else {
             Some(chunk)
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "chunk size must be non-zero")]
+    fn rejects_zero_chunk_size() {
+        let targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(B256::ZERO)],
+            storage_targets: Default::default(),
+        };
+        let _ = targets.chunks(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "chunk size must be non-zero")]
+    fn rejects_zero_chunk_size_for_empty_targets() {
+        ChunkedMultiProofTargetsV2::new(MultiProofTargetsV2::default(), 0);
     }
 }
