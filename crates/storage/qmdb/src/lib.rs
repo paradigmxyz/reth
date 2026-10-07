@@ -739,6 +739,10 @@ fn qmdb_stage_error(error: QmdbError) -> StageError {
     StageError::Fatal(Box::new(error))
 }
 
+#[allow(
+    clippy::cloned_instead_of_copied,
+    reason = "Account is not Copy when the dependency's account-ext feature is enabled"
+)]
 fn current_account<Provider: AccountReader>(
     provider: &Provider,
     overrides: &HashMap<Address, Option<Account>>,
