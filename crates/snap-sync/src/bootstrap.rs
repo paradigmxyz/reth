@@ -439,22 +439,23 @@ where
         &mut self,
         range: &VerifiedRange,
     ) -> Result<Option<Step>, SnapSyncError> {
-        loop {
-            match self.storage.next(range).await? {
-                StorageRangeStep::Complete => break,
-                StorageRangeStep::Committed(_) => {}
-                StorageRangeStep::Unavailable { peer_id, .. } => {
-                    debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's storage");
-                    return Ok(Some(Step::Wait))
-                }
-            }
-            // A large contract takes many responses, each committed, so any of them is a
-            // resumable place to stop.
-            if self.cancel.is_cancelled() {
-                return Ok(Some(Step::Stop))
-            }
+        // Both downloads persist independently; join them before committing account coverage.
+        let (storage, code) = futures::future::join(
+            self.storage.download(range, &self.cancel),
+            self.bytecode.download(range, &self.cancel),
+        )
+        .await;
+        let storage = storage?;
+        let code = code?;
+        if let StorageRangeStep::Unavailable { peer_id } = storage {
+            debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's storage");
+            return Ok(Some(Step::Wait))
         }
-        self.download_code(range).await
+        if let BytecodeStep::Unavailable { peer_id } = code {
+            debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's code");
+            return Ok(Some(Step::Wait))
+        }
+        Ok(None)
     }
 
     // Persists the code `range` references. `Some` ends the pass.
@@ -602,7 +603,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, hashed_factory, header, key, policy, state_root,
+            account, account_range, byte_codes, hashed_factory, header, key, policy, state_root,
             storage_ranges, storage_root_of, stored_slots, verified_range, ReorgFactoryExt,
             ScriptedSnapClient,
         },
@@ -612,7 +613,8 @@ mod tests {
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
         NonceChange,
     };
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+    use reth_db_api::{tables, transaction::DbTx};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
@@ -629,7 +631,8 @@ mod tests {
     use reth_stages_types::StageId;
     use reth_storage_api::{SnapAttemptId, StageCheckpointReader};
     use reth_trie_common::{HashedPostState, TrieAccount};
-    use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+    use std::{cell::RefCell, collections::VecDeque, sync::Arc, time::Duration};
+    use tokio::sync::Notify;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
@@ -1564,5 +1567,61 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
         assert!(!provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn bytecode_download_overlaps_storage_without_advancing_account_coverage() {
+        let slots = vec![(key(1), U256::from(11))];
+        let code = Bytes::from(vec![1, 2, 3]);
+        let hash = keccak256(&code);
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        contract.code_hash = hash;
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let gate = Arc::new(Notify::new());
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[]),
+                storage_ranges(1, &[&slots], &slots, &[]),
+                byte_codes(1, &[code]),
+            ])
+            .with_response_gate(1, gate.clone()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(client.clone(), factory.clone(), Runtime::test(), context)
+                .with_policy(policy());
+        let task = bootstrap.run();
+        tokio::pin!(task);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let provider = factory.database_provider_ro().unwrap();
+                let stored = provider.tx_ref().get::<tables::Bytecodes>(hash).unwrap().is_some();
+                drop(provider);
+                if stored {
+                    break
+                }
+                tokio::select! {
+                    result = &mut task => panic!("storage is still pending: {result:?}"),
+                    _ = tokio::time::sleep(Duration::from_millis(1)) => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let provider = factory.database_provider_ro().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        assert_eq!(provider.account_coverage(write).unwrap().unwrap().next(), Some(B256::ZERO));
+        assert!(stored_slots(&provider, key(1)).is_empty());
+        drop(provider);
+        assert_eq!(client.storage_requests().len(), 1);
+        assert_eq!(*client.code_requests(), [vec![hash]]);
+        gate.notify_one();
+        assert!(matches!(task.await.unwrap(), SnapBootstrapOutcome::TrieRebuild { .. }));
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.account_coverage(write).unwrap().unwrap().is_complete());
+        assert_eq!(stored_slots(&provider, key(1)), slots);
     }
 }

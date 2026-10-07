@@ -11,6 +11,7 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use std::fmt;
+use tokio_util::sync::CancellationToken;
 
 /// Default number of code hashes asked for per request.
 pub const DEFAULT_CODE_HASHES: usize = 128;
@@ -94,6 +95,24 @@ where
         let persisted =
             self.context.commit(move |provider| provider.commit_bytecodes(write, codes)).await?;
         Ok(BytecodeStep::Committed { persisted })
+    }
+
+    /// Downloads every missing code blob of `range`, retaining each committed response.
+    pub async fn download(
+        &mut self,
+        range: &VerifiedRange,
+        cancel: &CancellationToken,
+    ) -> Result<BytecodeStep, SnapSyncError> {
+        loop {
+            if cancel.is_cancelled() {
+                return Err(SnapSyncError::Cancelled)
+            }
+            // Finish each response's commit before observing cancellation.
+            match self.next(range).await? {
+                BytecodeStep::Committed { .. } => {}
+                step => return Ok(step),
+            }
+        }
     }
 }
 

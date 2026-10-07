@@ -5,7 +5,11 @@ use crate::{
     StorageProgress, VerifiedRange, MAX_HASH,
 };
 use alloy_primitives::{B256, U256};
-use futures::future::join_all;
+use futures::{
+    future::{join_all, BoxFuture},
+    stream::FuturesOrdered,
+    StreamExt,
+};
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{
     StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedStorageRanges,
@@ -18,12 +22,16 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use std::fmt;
+use tokio_util::sync::CancellationToken;
 
 /// Default number of contracts asked for per storage request.
 pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 
 /// Default number of scheduled slots fetched again per repair batch.
 pub const DEFAULT_REPAIR_SLOTS: usize = 128;
+
+/// Default maximum number of storage batches requested ahead of their ordered commits.
+pub const DEFAULT_STORAGE_REQUESTS: usize = 4;
 
 /// Downloads the storage an account range's contracts still need, and repaired slots again.
 ///
@@ -35,6 +43,8 @@ pub struct StorageRangeDownload<C, F> {
     max_accounts: usize,
     // Scheduled slots fetched again per repair batch.
     max_repair_slots: usize,
+    // Bounds requests and verified responses waiting for earlier contracts.
+    max_requests: usize,
 }
 
 impl<C, F> StorageRangeDownload<C, F> {
@@ -44,6 +54,7 @@ impl<C, F> StorageRangeDownload<C, F> {
             context: DownloadContext::new(client, factory, runtime),
             max_accounts: DEFAULT_STORAGE_ACCOUNTS,
             max_repair_slots: DEFAULT_REPAIR_SLOTS,
+            max_requests: DEFAULT_STORAGE_REQUESTS,
         }
     }
 
@@ -63,6 +74,12 @@ impl<C, F> StorageRangeDownload<C, F> {
     /// batch, at least one.
     pub const fn with_max_repair_slots(mut self, max_repair_slots: usize) -> Self {
         self.max_repair_slots = if max_repair_slots == 0 { 1 } else { max_repair_slots };
+        self
+    }
+
+    /// Returns this download prefetching at most `max_requests` storage batches, at least one.
+    pub const fn with_max_requests(mut self, max_requests: usize) -> Self {
+        self.max_requests = if max_requests == 0 { 1 } else { max_requests };
         self
     }
 }
@@ -92,20 +109,7 @@ where
         let batch = contracts.range(first..end).expect("positions are inside the batch");
         let from = progress.resume_at(batch.accounts()[0].0).expect("first contract is incomplete");
 
-        let request = GetStorageRangesMessage {
-            request_id: self.context.next_request_id(),
-            root_hash: batch.state_root(),
-            account_hashes: batch.accounts().iter().map(|(account, _)| *account).collect(),
-            starting_hash: from.into(),
-            limit_hash: MAX_HASH.into(),
-            response_bytes: self.context.response_bytes(),
-        };
-        let downloader = StorageRangeDownloader::new(
-            self.context.client().clone(),
-            request,
-            &batch,
-            self.context.runtime().clone(),
-        )?;
+        let downloader = self.request(&batch, from)?;
         let ranges = match downloader.await? {
             StorageRangeOutcome::Verified(ranges) => ranges,
             StorageRangeOutcome::Unavailable { peer_id } => {
@@ -179,6 +183,118 @@ where
         // An account scheduled without slots has nothing to wait for.
         Ok((!values.is_empty() || requested == 0).then_some(values))
     }
+
+    /// Downloads all storage of `range`, prefetching independent batches and committing in order.
+    ///
+    /// A partial contract's continuation takes precedence over later batches. Cancellation or an
+    /// unavailable response drops speculative requests; a retry uses only persisted progress.
+    pub async fn download(
+        &mut self,
+        range: &VerifiedRange,
+        cancel: &CancellationToken,
+    ) -> Result<StorageRangeStep, SnapSyncError> {
+        let (write, origin) = (range.write(), range.origin());
+        let mut progress =
+            self.context.factory().database_provider_ro()?.storage_progress(write, origin)?;
+        let contracts = range.range().storage_batch();
+        let mut next = contracts
+            .accounts()
+            .iter()
+            .position(|(account, _)| !progress.is_complete(*account))
+            .unwrap_or_else(|| contracts.accounts().len());
+        let mut pending = FuturesOrdered::new();
+        loop {
+            if cancel.is_cancelled() {
+                return Err(SnapSyncError::Cancelled)
+            }
+            while pending.len() < self.max_requests && next < contracts.accounts().len() {
+                let end = progress.request_end(contracts.accounts(), next, self.max_accounts);
+                let batch = contracts.range(next..end).expect("positions are inside the batch");
+                let from =
+                    progress.resume_at(batch.accounts()[0].0).expect("contract is incomplete");
+                pending.push_back(self.prefetch(batch, from, end)?);
+                next = end;
+            }
+            let Some(response) = cancel.run_until_cancelled(pending.next()).await else {
+                return Err(SnapSyncError::Cancelled)
+            };
+            let Some(response) = response else { return Ok(StorageRangeStep::Complete) };
+            let (end, chunks) = match response? {
+                StorageBatchStep::Verified { end, chunks } => (end, chunks),
+                StorageBatchStep::Unavailable { peer_id } => {
+                    return Ok(StorageRangeStep::Unavailable { peer_id })
+                }
+            };
+            progress = self
+                .context
+                .commit(move |provider| {
+                    let mut progress = StorageProgress::START;
+                    for chunk in chunks {
+                        progress = provider.commit_storage_chunk(write, origin, chunk)?;
+                    }
+                    Ok(progress)
+                })
+                .await?;
+            if !progress.is_complete(contracts.accounts()[end - 1].0) {
+                let first = contracts.accounts()[..end]
+                    .iter()
+                    .position(|(account, _)| !progress.is_complete(*account))
+                    .expect("the batch is incomplete");
+                let request_end =
+                    progress.request_end(contracts.accounts(), first, self.max_accounts).min(end);
+                let batch =
+                    contracts.range(first..request_end).expect("positions are inside the batch");
+                let from =
+                    progress.resume_at(batch.accounts()[0].0).expect("contract is incomplete");
+                pending.push_front(self.prefetch(batch, from, end)?);
+            }
+        }
+    }
+
+    // Captures the batch's authenticated roots until its response is verified and split.
+    fn prefetch<'a>(
+        &mut self,
+        batch: VerifiedAccountBatch<'a>,
+        from: B256,
+        end: usize,
+    ) -> Result<BoxFuture<'a, Result<StorageBatchStep, SnapSyncError>>, SnapSyncError>
+    where
+        C: 'a,
+    {
+        let downloader = self.request(&batch, from)?;
+        Ok(Box::pin(async move {
+            Ok(match downloader.await? {
+                StorageRangeOutcome::Verified(ranges) => {
+                    StorageBatchStep::Verified { end, chunks: chunks(ranges, batch, from)? }
+                }
+                StorageRangeOutcome::Unavailable { peer_id } => {
+                    StorageBatchStep::Unavailable { peer_id }
+                }
+            })
+        }))
+    }
+
+    // Validates and sends one bounded batch at the slot its first contract resumes from.
+    fn request(
+        &mut self,
+        batch: &VerifiedAccountBatch<'_>,
+        from: B256,
+    ) -> Result<StorageRangeDownloader<C>, SnapSyncError> {
+        let request = GetStorageRangesMessage {
+            request_id: self.context.next_request_id(),
+            root_hash: batch.state_root(),
+            account_hashes: batch.accounts().iter().map(|(account, _)| *account).collect(),
+            starting_hash: from.into(),
+            limit_hash: MAX_HASH.into(),
+            response_bytes: self.context.response_bytes(),
+        };
+        Ok(StorageRangeDownloader::new(
+            self.context.client().clone(),
+            request,
+            batch,
+            self.context.runtime().clone(),
+        )?)
+    }
 }
 
 impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
@@ -187,6 +303,7 @@ impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
             .field("context", &self.context)
             .field("max_accounts", &self.max_accounts)
             .field("max_repair_slots", &self.max_repair_slots)
+            .field("max_requests", &self.max_requests)
             .finish()
     }
 }
@@ -203,6 +320,12 @@ pub enum StorageRangeStep {
     },
     /// Every contract in the range has its storage persisted.
     Complete,
+}
+
+// One prefetched response, retained until every preceding batch has committed.
+enum StorageBatchStep {
+    Verified { end: usize, chunks: Vec<StorageChunk> },
+    Unavailable { peer_id: PeerId },
 }
 
 // Splits a response into per-contract chunks. Only the last contract returned can be part way
@@ -250,7 +373,11 @@ mod tests {
     use reth_network_peers::WithPeerId;
     use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
     use reth_trie_common::TrieAccount;
-    use std::sync::Arc;
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+    use tokio::sync::Notify;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
 
@@ -623,5 +750,167 @@ mod tests {
         // Key 5 waits for the next batch, after the account commits this one.
         assert_eq!(values, Some(vec![(key(1), U256::from(11))]));
         assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1))]);
+    }
+
+    #[tokio::test]
+    async fn prefetch_is_bounded_and_later_responses_cannot_commit_first() {
+        let slots = small();
+        let accounts: Vec<_> = (1..=5).map(|n| (key(n), contract(n, &slots))).collect();
+        let (factory, range) = started(&accounts);
+        let gate = Arc::new(Notify::new());
+        let responses = (1..=5).map(|id| storage_ranges(id, &[&slots], &slots, &[]));
+        let client =
+            Arc::new(ScriptedSnapClient::new(responses).with_response_gate(0, gate.clone()));
+        let mut download =
+            StorageRangeDownload::new(client.clone(), factory.clone(), Runtime::test())
+                .with_max_accounts(1)
+                .with_max_requests(2);
+        let cancel = CancellationToken::new();
+        let task = download.download(&range, &cancel);
+        tokio::pin!(task);
+        // The second response is ready, but the first must commit before it.
+        assert!(futures::poll!(&mut task).is_pending());
+        assert_eq!(client.storage_requests().len(), 2);
+        assert_eq!(slots_of(&factory, key(2)), Vec::new());
+        assert_eq!(
+            factory
+                .database_provider_ro()
+                .unwrap()
+                .storage_progress(range.write(), range.origin())
+                .unwrap(),
+            StorageProgress::START,
+        );
+        gate.notify_one();
+        assert!(matches!(task.await.unwrap(), StorageRangeStep::Complete));
+        for n in 1..=5 {
+            assert_eq!(slots_of(&factory, key(n)), slots);
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_contract_continues_before_a_prefetched_later_contract() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]),
+            storage_ranges(2, &[&small], &small, &[]),
+            storage_ranges(3, &[&large[1..]], &large, &[key(2), key(3)]),
+        ];
+        let (client, download) = download(responses, factory.clone());
+        let mut download = download.with_max_accounts(1).with_max_requests(2);
+        assert!(matches!(
+            download.download(&range, &CancellationToken::new()).await.unwrap(),
+            StorageRangeStep::Complete,
+        ));
+        assert_eq!(
+            *client.storage_requests(),
+            [(vec![key(2)], B256::ZERO), (vec![key(3)], B256::ZERO), (vec![key(2)], key(2)),]
+        );
+        assert_eq!(slots_of(&factory, key(2)), large);
+        assert_eq!(slots_of(&factory, key(3)), small);
+    }
+
+    #[tokio::test]
+    async fn cancellation_discards_prefetch_and_resumes_persisted_storage() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        let gate = Arc::new(Notify::new());
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                storage_ranges(1, &[&large], &large, &[]),
+                storage_ranges(2, &[&small], &small, &[]),
+            ])
+            .with_response_gate(1, gate),
+        );
+        let mut download = StorageRangeDownload::new(client, factory.clone(), Runtime::test())
+            .with_max_accounts(1)
+            .with_max_requests(2);
+        let cancel = CancellationToken::new();
+        let task = download.download(&range, &cancel);
+        tokio::pin!(task);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while slots_of(&factory, key(2)) != large {
+                tokio::select! {
+                    _ = &mut task => panic!("the gated response is still pending"),
+                    _ = tokio::time::sleep(Duration::from_millis(1)) => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(slots_of(&factory, key(2)), large);
+        assert_eq!(slots_of(&factory, key(3)), Vec::new());
+        cancel.cancel();
+        assert!(matches!(task.await, Err(SnapSyncError::Cancelled)));
+        let response = storage_ranges(1, &[&small], &small, &[]);
+        let (client, mut resumed) = self::download([response], factory.clone());
+        assert!(matches!(
+            resumed.download(&range, &CancellationToken::new()).await.unwrap(),
+            StorageRangeStep::Complete
+        ));
+        assert_eq!(*client.storage_requests(), [(vec![key(3)], B256::ZERO)]);
+        assert_eq!(slots_of(&factory, key(3)), small);
+    }
+
+    #[tokio::test]
+    async fn prefetch_latency_measurement() {
+        let slots = small();
+        let accounts: Vec<_> = (1..=8).map(|n| (key(n), contract(n, &slots))).collect();
+        for concurrency in [1, 4] {
+            let (factory, range) = started(&accounts);
+            let responses = (1..=8).map(|id| storage_ranges(id, &[&slots], &slots, &[]));
+            let client = Arc::new(
+                ScriptedSnapClient::new(responses).with_response_delay(Duration::from_millis(100)),
+            );
+            let mut download = StorageRangeDownload::new(client, factory.clone(), Runtime::test())
+                .with_max_accounts(1)
+                .with_max_requests(concurrency);
+            let started = Instant::now();
+            assert!(matches!(
+                download.download(&range, &CancellationToken::new()).await.unwrap(),
+                StorageRangeStep::Complete
+            ));
+            println!(
+                "storage batches=8 response_latency_ms=100 concurrency={concurrency} elapsed_ms={}",
+                started.elapsed().as_millis()
+            );
+            for n in 1..=8 {
+                assert_eq!(slots_of(&factory, key(n)), slots);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pivot_move_refuses_prefetched_storage_before_any_commit() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        let gate = Arc::new(Notify::new());
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                storage_ranges(1, &[&large], &large, &[]),
+                storage_ranges(2, &[&small], &small, &[]),
+            ])
+            .with_response_gate(0, gate.clone()),
+        );
+        let mut download =
+            StorageRangeDownload::new(client.clone(), factory.clone(), Runtime::test())
+                .with_max_accounts(1)
+                .with_max_requests(2);
+        let cancel = CancellationToken::new();
+        let task = download.download(&range, &cancel);
+        tokio::pin!(task);
+        assert!(futures::poll!(&mut task).is_pending());
+        assert_eq!(client.storage_requests().len(), 2);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.advance_snap_pivot(range.write(), generation(2, state_root(&accounts))).unwrap();
+        provider.commit().unwrap();
+        gate.notify_one();
+
+        assert!(matches!(task.await, Err(SnapSyncError::StaleWrite { .. })));
+        assert_eq!(slots_of(&factory, key(2)), Vec::new());
+        assert_eq!(slots_of(&factory, key(3)), Vec::new());
     }
 }
