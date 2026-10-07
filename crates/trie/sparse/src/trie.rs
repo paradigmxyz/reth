@@ -5,9 +5,7 @@ use crate::{
 use alloc::boxed::Box;
 use alloy_primitives::{map::B256Map, B256};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
-use reth_trie_common::{
-    BranchNodeMasks, Nibbles, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2,
-};
+use reth_trie_common::{BranchNodeMasks, ProofTrieNodeV2, ProofV2TargetParent, TrieNodeV2};
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
