@@ -5,7 +5,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
 use either::Either;
-use reth_execution_errors::{SparseStateTrieResult, SparseTrieErrorKind};
+use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     DecodedMultiProof, MultiProof, Nibbles, ProofTrieNodeV2,
@@ -272,12 +272,12 @@ where
         #[cfg(not(feature = "std"))]
         let results: Vec<_> = targets
             .into_iter()
-            .map(|(_, target, mut nodes)| {
+            .map(|(hashed_address, target, mut nodes)| {
                 let result = match target {
                     Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
                     Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
                 };
-                (result, nodes)
+                (hashed_address, result, nodes)
             })
             .collect();
 
@@ -307,16 +307,22 @@ where
                             trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
                         }
                     };
-                    (result, nodes)
+                    (hashed_address, result, nodes)
                 })
                 .collect()
         };
 
         // Accumulate the first error and defer dropping the proof node buffers.
         let mut any_err = Ok(());
-        for (result, nodes) in results {
+        for (hashed_address, result, nodes) in results {
             if result.is_err() && any_err.is_ok() {
-                any_err = result.map_err(Into::into);
+                any_err = result.map_err(|error| match hashed_address {
+                    Some(address) => {
+                        SparseStateTrieErrorKind::SparseStorageTrie(address, error.into_kind())
+                            .into()
+                    }
+                    None => error.into(),
+                });
             }
             self.deferred_drops.proof_nodes_bufs.push(nodes);
         }
@@ -603,7 +609,7 @@ mod tests {
     };
     use arbitrary::Arbitrary;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use reth_execution_errors::{SparseStateTrieErrorKind, SparseTrieErrorKind};
+    use reth_execution_errors::SparseTrieErrorKind;
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
     use reth_trie_common::{
@@ -1148,5 +1154,38 @@ mod tests {
                 removed_nodes: HashSet::default()
             }
         );
+    }
+
+    #[test]
+    fn batched_revelation_preserves_storage_error_address() {
+        let address = B256::repeat_byte(7);
+        let node = ProofTrieNodeV2 {
+            path: Nibbles::from_nibbles([1]),
+            node: TrieNodeV2::EmptyRoot,
+            masks: None,
+        };
+        let mut trie = SparseStateTrie::new();
+        let error = trie
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![ProofTrieNodeV2::empty()],
+                storage_proofs: B256Map::from_iter([(address, vec![node.clone()])]),
+            })
+            .unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseStateTrieErrorKind::SparseStorageTrie(account, SparseTrieErrorKind::Blind) if *account == address)
+        );
+        assert_eq!(trie.take_deferred_drops().proof_nodes_bufs.len(), 2);
+
+        let mut trie = SparseStateTrie::new();
+        let error = trie
+            .reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+                account_proofs: vec![node],
+                storage_proofs: Default::default(),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind)
+        ));
     }
 }
