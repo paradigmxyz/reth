@@ -2907,6 +2907,24 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
+            Nibbles::from_nibbles([1]),
+            RlpNode::word_rlp(&B256::ZERO),
+        ));
+        let error = trie.set_root(root, None, true).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert!(trie.buffers.updates.is_none());
+
+        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
+        assert!(trie.buffers.updates.is_some());
+    }
+
+    #[test]
     fn pruning_pops_cursor_before_reusing_node_slot() {
         use super::{
             ArenaCursor, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild,
