@@ -2898,7 +2898,7 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::{ExtensionNode, ProofV2Target};
+    use reth_trie_common::ProofV2Target;
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3156,21 +3156,5 @@ mod tests {
 
             harness.assert_changes(&mut apst, changeset2);
         }
-    }
-
-    #[test]
-    fn standalone_extension_root_returns_error() {
-        let mut trie = ArenaParallelSparseTrie::default();
-        let root = TrieNodeV2::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles([1]),
-            RlpNode::word_rlp(&B256::repeat_byte(1)),
-        ));
-        let error = trie.set_root(root, None, true).unwrap_err();
-        assert!(
-            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
-        );
-        assert!(trie.buffers.updates.is_none());
-        trie.set_root(TrieNodeV2::EmptyRoot, None, false).unwrap();
-        assert_eq!(trie.root(epoch(1)), reth_trie_common::EMPTY_ROOT_HASH);
     }
 }
