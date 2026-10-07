@@ -238,6 +238,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
@@ -281,6 +285,10 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
@@ -1102,6 +1110,32 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn overlay_seeks_match_sorted_map(queries in proptest::collection::vec((0u8..10, proptest::bool::ANY), 1..100)) {
+            let key = |n| Nibbles::from_nibbles([n]);
+            let node = BranchNodeCompact::new(0b0011, 0, 0, vec![], None);
+            let db = BTreeMap::from([(key(1), node.clone()), (key(3), node.clone()), (key(5), node.clone())]);
+            let overlay = vec![(key(2), Some(node.clone())), (key(3), None), (key(4), Some(node.clone()))];
+            let expected = BTreeMap::from([(key(1), node.clone()), (key(2), node.clone()), (key(4), node.clone()), (key(5), node)]);
+            let db = MockTrieCursor::new(Arc::new(db), Default::default());
+            let updates = TrieUpdatesSorted::new(overlay, Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(db, &updates);
+            for (query, exact) in queries {
+                let query = key(query);
+                let wanted = if exact {
+                    expected.get_key_value(&query)
+                } else {
+                    expected.range(query..).next()
+                }.map(|(k, v)| (*k, v.clone()));
+                let actual = if exact { cursor.seek_exact(query) } else { cursor.seek(query) }.unwrap();
+                assert_eq!(actual, wanted);
+                let next = wanted.and_then(|(k, _)| expected.range((std::ops::Bound::Excluded(k), std::ops::Bound::Unbounded)).next().map(|(k, v)| (*k, v.clone())));
+                assert_eq!(cursor.next().unwrap(), next);
             }
         }
     }
