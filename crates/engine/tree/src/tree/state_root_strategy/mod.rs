@@ -679,8 +679,7 @@ impl DefaultStateRootStrategy {
                         }
                         Ok(None) => new_sparse_state_trie(),
                         Err(err) => {
-                            let _ =
-                                state_root_tx.send(Err(StateRootTaskError::Other(err.to_string())));
+                            let _ = state_root_tx.send(Err(StateRootTaskError::Other(err.into())));
                             return;
                         }
                     }

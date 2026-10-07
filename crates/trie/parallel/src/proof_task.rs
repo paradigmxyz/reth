@@ -44,9 +44,9 @@ use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     proof_v2,
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
+    trie_cursor::{TrieCursorFactory, TrieStorageCursor},
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use std::{
@@ -63,21 +63,39 @@ use tracing::{debug, debug_span, error, instrument, trace};
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{ProofTaskCursorMetricsCache, ProofWorkerMetrics};
 
-/// Type alias for the V2 account proof calculator with instrumented cursors.
+/// Type alias for the V2 account proof calculator with worker cursors.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<
-    InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
-    InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
+    WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::AccountTrieCursor<'a>>,
+    WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::AccountCursor<'a>>,
     AsyncAccountValueEncoder<
-        InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-        InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+        WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
+        WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
     >,
 >;
 
-/// Type alias for the V2 storage proof calculator with instrumented cursors.
+/// Type alias for the V2 storage proof calculator with worker cursors.
 type V2StorageProofCalculator<'a, Provider> = proof_v2::StorageProofCalculator<
-    InstrumentedTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
-    InstrumentedHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
+    WorkerTrieCursor<'a, <Provider as TrieCursorFactory>::StorageTrieCursor<'a>>,
+    WorkerHashedCursor<'a, <Provider as HashedCursorFactory>::StorageCursor<'a>>,
 >;
+
+/// Trie cursor used by proof workers, instrumented to record cursor metrics.
+#[cfg(feature = "metrics")]
+type WorkerTrieCursor<'a, C> = reth_trie::trie_cursor::InstrumentedTrieCursor<'a, C>;
+
+/// Trie cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
+/// cursor operations are not timed or counted.
+#[cfg(not(feature = "metrics"))]
+type WorkerTrieCursor<'a, C> = C;
+
+/// Hashed cursor used by proof workers, instrumented to record cursor metrics.
+#[cfg(feature = "metrics")]
+type WorkerHashedCursor<'a, C> = reth_trie::hashed_cursor::InstrumentedHashedCursor<'a, C>;
+
+/// Hashed cursor used by proof workers. Without the `metrics` feature the cursor is used as is, so
+/// cursor operations are not timed or counted.
+#[cfg(not(feature = "metrics"))]
+type WorkerHashedCursor<'a, C> = C;
 
 /// Tracks worker availability counts.
 ///
@@ -197,10 +215,10 @@ impl ProofWorkerHandle {
             "Spawning proof worker pools"
         );
 
-        // Registered once and shared by all workers of both pools, which record into the same
-        // metric series.
+        // Registered once per process and shared by all workers of both pools, which record into
+        // the same metric series.
         #[cfg(feature = "metrics")]
-        let metrics = Arc::new(ProofWorkerMetrics::default());
+        let metrics = ProofWorkerMetrics::shared();
 
         let parent_span = tracing::Span::current();
         for worker_id in 0..storage_worker_count {
@@ -231,9 +249,11 @@ impl ProofWorkerHandle {
                         "Storage worker failed"
                     );
                     let _ = result_tx.send(ProofResultMessage {
-                        result: Err(StateRootTaskError::ProofWorker(format!(
-                            "storage worker {worker_id}: {error}"
-                        ))),
+                        result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                            worker_type: "storage",
+                            worker_id,
+                            source: error,
+                        }))),
                         elapsed: Duration::ZERO,
                         state: Default::default(),
                     });
@@ -271,9 +291,11 @@ impl ProofWorkerHandle {
                         "Account worker failed"
                     );
                     let _ = result_tx.send(ProofResultMessage {
-                        result: Err(StateRootTaskError::ProofWorker(format!(
-                            "account worker {worker_id}: {error}"
-                        ))),
+                        result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                            worker_type: "account",
+                            worker_id,
+                            source: error,
+                        }))),
                         elapsed: Duration::ZERO,
                         state: Default::default(),
                     });
@@ -347,7 +369,7 @@ impl ProofWorkerHandle {
 
     /// Dispatch an account multiproof computation
     ///
-    /// The result will be sent via the `result_sender` channel included in the input.
+    /// The result will be sent via the sender in [`AccountMultiproofInput::proof_result_context`].
     pub fn dispatch_account_multiproof(
         &self,
         input: AccountMultiproofInput,
@@ -360,10 +382,10 @@ impl ProofWorkerHandle {
 
                 let AccountWorkerJob::AccountMultiproof { input } = err.0;
                 let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+                    input.proof_result_context;
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                    result: Err(StateRootTaskError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -658,19 +680,22 @@ where
         );
 
         let mut storage_proofs_processed = 0u64;
+        #[cfg(feature = "metrics")]
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
         let trie_cursor = proof_tx.provider.storage_trie_cursor(B256::ZERO)?;
         let hashed_cursor = proof_tx.provider.hashed_storage_cursor(B256::ZERO)?;
-        let instrumented_trie_cursor =
-            InstrumentedTrieCursor::new(trie_cursor, &mut cursor_metrics_cache.storage_trie_cursor);
-        let instrumented_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
+            trie_cursor,
+            &mut cursor_metrics_cache.storage_trie_cursor,
+        );
+        #[cfg(feature = "metrics")]
+        let hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
-        let mut v2_calculator = proof_v2::StorageProofCalculator::new_storage(
-            instrumented_trie_cursor,
-            instrumented_hashed_cursor,
-        );
+        let mut v2_calculator =
+            proof_v2::StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
         // Initially mark this worker as available.
         self.availability.mark_idle(self.worker_id);
@@ -859,6 +884,7 @@ where
         );
 
         let mut account_proofs_processed = 0u64;
+        #[cfg(feature = "metrics")]
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Create both account and storage calculators for V2 proofs.
@@ -869,42 +895,35 @@ where
         let storage_trie_cursor = provider.storage_trie_cursor(B256::ZERO)?;
         let storage_hashed_cursor = provider.hashed_storage_cursor(B256::ZERO)?;
 
-        let instrumented_account_trie_cursor = InstrumentedTrieCursor::new(
+        #[cfg(feature = "metrics")]
+        let account_trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
             account_trie_cursor,
             &mut cursor_metrics_cache.account_trie_cursor,
         );
-        let instrumented_account_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let account_hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             account_hashed_cursor,
             &mut cursor_metrics_cache.account_hashed_cursor,
         );
-        let instrumented_storage_trie_cursor = InstrumentedTrieCursor::new(
+        #[cfg(feature = "metrics")]
+        let storage_trie_cursor = reth_trie::trie_cursor::InstrumentedTrieCursor::new(
             storage_trie_cursor,
             &mut cursor_metrics_cache.storage_trie_cursor,
         );
-        let instrumented_storage_hashed_cursor = InstrumentedHashedCursor::new(
+        #[cfg(feature = "metrics")]
+        let storage_hashed_cursor = reth_trie::hashed_cursor::InstrumentedHashedCursor::new(
             storage_hashed_cursor,
             &mut cursor_metrics_cache.storage_hashed_cursor,
         );
 
-        let mut v2_account_calculator =
-            proof_v2::ProofCalculator::<
-                _,
-                _,
-                AsyncAccountValueEncoder<
-                    InstrumentedTrieCursor<
-                        '_,
-                        <Factory::Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
-                    >,
-                    InstrumentedHashedCursor<
-                        '_,
-                        <Factory::Provider as HashedCursorFactory>::StorageCursor<'_>,
-                    >,
-                >,
-            >::new(instrumented_account_trie_cursor, instrumented_account_hashed_cursor);
+        let mut v2_account_calculator = V2AccountProofCalculator::<'_, Factory::Provider>::new(
+            account_trie_cursor,
+            account_hashed_cursor,
+        );
         let v2_storage_calculator =
             Rc::new(RefCell::new(proof_v2::StorageProofCalculator::new_storage(
-                instrumented_storage_trie_cursor,
-                instrumented_storage_hashed_cursor,
+                storage_trie_cursor,
+                storage_hashed_cursor,
             )));
 
         // Count this worker as available only after successful initialization.
@@ -1026,7 +1045,7 @@ where
     {
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let AccountMultiproofInput { targets, proof_result_context } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
@@ -1037,7 +1056,7 @@ where
         };
 
         let ProofResultContext { sender: result_tx, state, start_time: start } =
-            proof_result_sender;
+            proof_result_context;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
@@ -1105,7 +1124,7 @@ fn dispatch_v2_storage_proofs(
             .map_err(|_| {
                 StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
+                ).into())
             })?;
 
         storage_proof_receivers.insert(hashed_address, result_rx);
@@ -1138,14 +1157,7 @@ pub struct AccountMultiproofInput {
     /// The targets for which to compute the multiproof.
     pub targets: MultiProofTargetsV2,
     /// Context for sending the proof result.
-    pub proof_result_sender: ProofResultContext,
-}
-
-impl AccountMultiproofInput {
-    /// Returns the [`ProofResultContext`] for this input, consuming the input.
-    fn into_proof_result_sender(self) -> ProofResultContext {
-        self.proof_result_sender
-    }
+    pub proof_result_context: ProofResultContext,
 }
 
 /// Internal message for account workers.
@@ -1156,6 +1168,16 @@ enum AccountWorkerJob {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
     },
+}
+
+/// Context for a provider failure that prevents a proof worker from starting.
+#[derive(Debug, thiserror::Error)]
+#[error("{worker_type} worker {worker_id}: {source}")]
+struct ProofWorkerError {
+    worker_type: &'static str,
+    worker_id: usize,
+    #[source]
+    source: ProviderError,
 }
 
 #[cfg(test)]
@@ -1255,7 +1277,7 @@ mod tests {
                         account_targets: vec![ProofV2Target::new(address)],
                         storage_targets: std::iter::once((address, vec![slot])).collect(),
                     },
-                    proof_result_sender: ProofResultContext::new(
+                    proof_result_context: ProofResultContext::new(
                         proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),

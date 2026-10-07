@@ -140,11 +140,10 @@ where
                     .unwrap_or_default(),
             )?
             .ensure_at_block(input.target())?;
-            return Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(input.target())
+            return Ok(ExecOutput::done(
+                StageCheckpoint::new(input.target())
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-                done: true,
-            })
+            ))
         };
         let end_block = *range_output.block_range.end();
 
@@ -206,10 +205,7 @@ where
 
         if self.prune_mode.is_none_or(|mode| !mode.is_full()) {
             // Lookup the next tx id after unwind_to block (first tx to remove)
-            let unwind_tx_from = provider
-                .block_body_indices(unwind_to)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-                .next_tx_num();
+            let unwind_tx_from = provider.next_tx_num_after_block(unwind_to)?;
 
             EitherWriter::new_senders(provider, unwind_to)?
                 .prune_senders(unwind_tx_from, unwind_to)?;
@@ -624,16 +620,15 @@ mod tests {
         assert_matches!(result, Ok(_));
         assert_eq!(
             result.unwrap(),
-            ExecOutput {
-                checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
+            ExecOutput::in_progress(
+                StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
                         processed: runner.db.count_entries::<tables::TransactionSenders>().unwrap()
                             as u64,
                         total: total_transactions
                     }
-                ),
-                done: false
-            }
+                )
+            )
         );
 
         // Execute second time to completion
@@ -646,12 +641,9 @@ mod tests {
         assert_matches!(result, Ok(_));
         assert_eq!(
             result.as_ref().unwrap(),
-            &ExecOutput {
-                checkpoint: StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
-                    EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
-                ),
-                done: true
-            }
+            &ExecOutput::done(StageCheckpoint::new(previous_stage).with_entities_stage_checkpoint(
+                EntitiesCheckpoint { processed: total_transactions, total: total_transactions }
+            ))
         );
 
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");

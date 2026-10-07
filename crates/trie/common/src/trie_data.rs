@@ -56,8 +56,8 @@ impl ComputedTrieData {
 /// This is a no-std compatible wrapper that supports three modes:
 /// 1. **Ready mode**: Data is available immediately (created via `ready()`)
 /// 2. **Deferred mode**: Data is computed on first access (created via `deferred()`)
-/// 3. **Pending mode**: Data is computed in background task, callers wait for that result (created
-///    via `pending()`).
+/// 3. **Pending mode**: Access blocks until the caller-owned producer publishes the data (created
+///    via `pending()`). No task is spawned automatically.
 ///
 /// In deferred mode, the computation runs on the first call to `get()`, `hashed_state()`,
 /// or `trie_updates()`, and results are cached for subsequent calls.
@@ -111,7 +111,11 @@ impl LazyTrieData {
         }
     }
 
-    /// Creates a new [`LazyTrieData`] with a spawned task to compute sorted trie data.
+    /// Creates a pending [`LazyTrieData`] and its producer without spawning a task.
+    ///
+    /// The caller must arrange for `LazyTrieDataProducer::compute_and_publish` to run before or
+    /// concurrently with access to the handle. Access blocks until publication; dropping the
+    /// producer without publishing leaves access blocked indefinitely.
     #[cfg(feature = "std")]
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
@@ -124,7 +128,10 @@ impl LazyTrieData {
         )
     }
 
-    /// Returns a reference to the sorted trie data, computing or waiting for result if necessary.
+    /// Returns a reference to the sorted trie data.
+    ///
+    /// Deferred mode computes on first access. Pending mode blocks until the producer publishes
+    /// the result and can block indefinitely if publication never occurs.
     ///
     /// # Panics
     ///
@@ -140,21 +147,21 @@ impl LazyTrieData {
 
     /// Returns a clone of the hashed state Arc.
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
         Arc::clone(&self.get().sorted.hashed_state)
     }
 
     /// Returns a clone of the trie updates Arc.
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
         Arc::clone(&self.get().sorted.trie_updates)
     }
 
     /// Returns a clone of the [`SortedTrieData`].
     ///
-    /// If not initialized, computes from the deferred source or panics.
+    /// Calls [`Self::get`], computing deferred data or blocking until pending data is published.
     pub fn sorted_trie_data(&self) -> SortedTrieData {
         self.get().sorted.clone()
     }
@@ -200,7 +207,10 @@ impl fmt::Debug for LazyTrieDataMode {
     }
 }
 
-/// Producer consumed by a spawned task to compute sorted trie data for a [`LazyTrieData`] handle.
+/// Producer that computes and publishes sorted trie data for a [`LazyTrieData`] handle.
+///
+/// The caller is responsible for running [`Self::compute_and_publish`]. Dropping the producer
+/// without publishing leaves pending accessors blocked indefinitely.
 #[must_use = "LazyTrieDataProducer must be consumed with compute_and_publish to wake trie data waiters"]
 pub struct LazyTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
@@ -373,7 +383,7 @@ mod tests {
             .with_accounts([(hashed_address, Some(Account::default()))])
             .with_storages([(
                 hashed_address,
-                HashedStorage::from_iter([(hashed_slot, U256::from(1))]),
+                HashedStorage::from_iter([(hashed_slot, U256::ONE)]),
             )]);
 
         let (deferred, task) =

@@ -189,10 +189,10 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             HOLESKY_GENESIS_HASH,
         ),
         genesis,
-        paris_block_and_final_difficulty: Some((0, U256::from(1))),
+        paris_block_and_final_difficulty: Some((0, U256::ONE)),
         hardforks,
         deposit_contract: Some(DepositContract::new(
-            address!("0x4242424242424242424242424242424242424242"),
+            Address::repeat_byte(0x42),
             0,
             b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
@@ -221,7 +221,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             HOODI_GENESIS_HASH,
         ),
         genesis,
-        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        paris_block_and_final_difficulty: Some((0, U256::ZERO)),
         hardforks,
         deposit_contract: Some(DepositContract::new(
             address!("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
@@ -251,7 +251,7 @@ pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         chain: Chain::dev(),
         genesis_header: SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks)),
         genesis,
-        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        paris_block_and_final_difficulty: Some((0, U256::ZERO)),
         hardforks,
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
@@ -1301,6 +1301,7 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
@@ -1311,7 +1312,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2411,13 +2412,13 @@ Post-merge hard forks (timestamp based):
         }
 
         let expected_state_root: B256 =
-            hex!("0x078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7").into();
+            b256!("0x078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7");
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
 
         assert_eq!(chainspec.genesis_header().withdrawals_root, Some(EMPTY_ROOT_HASH));
 
         let expected_hash: B256 =
-            hex!("0x1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c").into();
+            b256!("0x1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c");
         let hash = chainspec.genesis_hash();
         assert_eq!(hash, expected_hash);
     }
@@ -2482,9 +2483,9 @@ Post-merge hard forks (timestamp based):
 
         let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
-        assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
+        assert_eq!(chainspec.chain, Chain::optimism_mainnet());
         let expected_state_root: B256 =
-            hex!("0x9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
+            b256!("0x9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360");
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
         let hard_forks = vec![
             EthereumHardfork::Byzantium,
@@ -2498,7 +2499,7 @@ Post-merge hard forks (timestamp based):
         }
 
         let expected_hash: B256 =
-            hex!("0x5ae31c6522bd5856129f66be3d582b842e4e9faaa87f21cce547128339a9db3c").into();
+            b256!("0x5ae31c6522bd5856129f66be3d582b842e4e9faaa87f21cce547128339a9db3c");
         let hash = chainspec.genesis_header().hash_slow();
         assert_eq!(hash, expected_hash);
     }
@@ -2640,11 +2641,9 @@ Post-merge hard forks (timestamp based):
     fn test_parse_genesis_json() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x1337"}"#;
         let genesis: Genesis = serde_json::from_str(s).unwrap();
-        let acc = genesis
-            .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
-            .unwrap();
-        assert_eq!(acc.balance, U256::from(1));
+        let acc =
+            genesis.alloc.get(&address!("0xaa00000000000000000000000000000000000000")).unwrap();
+        assert_eq!(acc.balance, U256::ONE);
         assert_eq!(genesis.base_fee_per_gas, Some(0x1337));
     }
 
@@ -2652,11 +2651,9 @@ Post-merge hard forks (timestamp based):
     fn test_parse_cancun_genesis_json() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
         let genesis: Genesis = serde_json::from_str(s).unwrap();
-        let acc = genesis
-            .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
-            .unwrap();
-        assert_eq!(acc.balance, U256::from(1));
+        let acc =
+            genesis.alloc.get(&address!("0xaa00000000000000000000000000000000000000")).unwrap();
+        assert_eq!(acc.balance, U256::ONE);
         // assert that the cancun time was picked up
         assert_eq!(genesis.config.cancun_time, Some(4661));
     }
@@ -2667,11 +2664,9 @@ Post-merge hard forks (timestamp based):
         let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
-        let acc = genesis
-            .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
-            .unwrap();
-        assert_eq!(acc.balance, U256::from(1));
+        let acc =
+            genesis.alloc.get(&address!("0xaa00000000000000000000000000000000000000")).unwrap();
+        assert_eq!(acc.balance, U256::ONE);
         // assert that the cancun time was picked up
         assert_eq!(genesis.config.cancun_time, Some(4661));
         // assert that the prague time was picked up
@@ -2684,11 +2679,9 @@ Post-merge hard forks (timestamp based):
         let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
-        let acc = genesis
-            .alloc
-            .get(&"0xaa00000000000000000000000000000000000000".parse::<Address>().unwrap())
-            .unwrap();
-        assert_eq!(acc.balance, U256::from(1));
+        let acc =
+            genesis.alloc.get(&address!("0xaa00000000000000000000000000000000000000")).unwrap();
+        assert_eq!(acc.balance, U256::ONE);
         // assert that the cancun time was picked up
         assert_eq!(genesis.config.cancun_time, Some(4661));
     }
@@ -2717,8 +2710,7 @@ Post-merge hard forks (timestamp based):
 
         // set the state root to the same as in the hive test the hash was pulled from
         header.state_root =
-            B256::from_str("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4")
-                .unwrap();
+            b256!("0x62e2595e017f0ca23e08d17221010721a71c3ae932f4ea3cb12117786bb392d4");
 
         // shanghai is activated so we should have a withdrawals root
         assert_eq!(header.withdrawals_root, Some(EMPTY_WITHDRAWALS));
@@ -2802,7 +2794,7 @@ Post-merge hard forks (timestamp based):
         };
 
         // seed accounts after genesis struct created
-        let address = hex!("0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
+        let address = address!("0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b");
         let account = GenesisAccount::default().with_balance(U256::from(33));
         let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
 

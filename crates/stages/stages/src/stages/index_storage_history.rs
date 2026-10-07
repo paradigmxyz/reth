@@ -161,7 +161,7 @@ where
             provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
     }
 
     /// Unwind the stage.
@@ -181,12 +181,13 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+    use alloy_primitives::{Address, BlockNumber, B256, U256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -205,9 +206,8 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
-    const STORAGE_KEY: B256 =
-        b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+    const ADDRESS: Address = Address::with_last_byte(1);
+    const STORAGE_KEY: B256 = B256::with_last_byte(1);
 
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
@@ -273,7 +273,7 @@ mod tests {
         let mut stage = IndexStorageHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
+        assert_eq!(out, ExecOutput::done(StageCheckpoint::new(run_to)));
         provider.commit().unwrap();
     }
 
@@ -537,7 +537,7 @@ mod tests {
         };
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        assert_eq!(out, ExecOutput::done(StageCheckpoint::new(20000)));
         provider.commit().unwrap();
 
         // verify
@@ -628,10 +628,7 @@ mod tests {
                     return Ok(())
                 }
 
-                assert_eq!(
-                    output,
-                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
-                );
+                assert_eq!(output, ExecOutput::done(StageCheckpoint::new(input.target())));
 
                 let provider = self.db.factory.provider()?;
                 let mut changeset_cursor =
@@ -751,7 +748,7 @@ mod tests {
             let mut stage = IndexStorageHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             let mdbx_table = db.table::<tables::StoragesHistory>().unwrap();
@@ -783,7 +780,7 @@ mod tests {
             };
             let provider = db.factory.database_provider_rw().unwrap();
             let output = stage.execute(&provider, input).unwrap();
-            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(20_000), done: true });
+            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
             provider.commit().unwrap();
 
             let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
@@ -804,7 +801,7 @@ mod tests {
 
             let provider = db.factory.database_provider_rw().unwrap();
             let output = stage.execute(&provider, input()).unwrap();
-            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(20_000), done: true });
+            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
             drop(provider);
 
             let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
@@ -815,7 +812,7 @@ mod tests {
 
             let provider = db.factory.database_provider_rw().unwrap();
             let output = stage.execute(&provider, input()).unwrap();
-            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(20_000), done: true });
+            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
             provider.commit().unwrap();
             let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
             assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
@@ -840,7 +837,7 @@ mod tests {
             let mut stage = IndexStorageHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
@@ -877,7 +874,7 @@ mod tests {
             let mut stage = IndexStorageHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(5)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
@@ -908,7 +905,7 @@ mod tests {
             let mut stage = IndexStorageHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(5)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
@@ -920,7 +917,7 @@ mod tests {
             let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
@@ -943,10 +940,7 @@ mod tests {
             let mut stage = IndexStorageHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(
-                out,
-                ExecOutput { checkpoint: StageCheckpoint::new(num_blocks - 1), done: true }
-            );
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(num_blocks - 1)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();

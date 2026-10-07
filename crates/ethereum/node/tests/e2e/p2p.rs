@@ -16,7 +16,6 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::SealedBlock;
 use reth_provider::test_utils::MockEthProvider;
 use reth_tasks::Runtime;
-use reth_transaction_pool::TransactionPool;
 use std::{net::UdpSocket, sync::Arc, time::Duration};
 
 #[tokio::test]
@@ -280,15 +279,7 @@ async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> 
     // Send exactly one FCU with an unknown head == safe == finalized. The node must promote this
     // FCU when pipeline sync completes, without relying on another FCU.
     second_node.update_forkchoice(target.header.hash, target.header.hash).await?;
-
-    tokio::time::timeout(Duration::from_secs(40), async {
-        while second_provider.get_block_number().await? != TARGET_BLOCK {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        eyre::Ok(())
-    })
-    .await
-    .map_err(|_| eyre::eyre!("timed out waiting for pipeline sync to block {TARGET_BLOCK}"))??;
+    second_node.wait_for_head(target.header.hash).await?;
 
     let finalized = second_provider
         .get_block_by_number(BlockNumberOrTag::Finalized)
@@ -356,7 +347,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Wait until all nodes have the transaction
     for node in &nodes {
-        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
+        node.wait_for_pooled([tx_hash]).await?;
     }
 
     // Build and send one more transaction to a random node
@@ -365,7 +356,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Wait until all nodes have the transaction
     for node in &nodes {
-        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
+        node.wait_for_pooled([tx_hash]).await?;
     }
 
     Ok(())

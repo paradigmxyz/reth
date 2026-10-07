@@ -1202,6 +1202,15 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // Forward the head and finalized block, since a long-running backfill such as snap
+            // must follow them. A run awaiting revalidation has not started and reads the latest
+            // forkchoice when it does.
+            if self.backfill_sync_state.is_pending() || self.backfill_sync_state.is_active() {
+                self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
+                    state.head_block_hash,
+                )));
+                self.forward_finalized(state.finalized_block_hash);
+            }
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
@@ -2198,8 +2207,22 @@ where
         );
         self.backfill_sync_state = BackfillSyncState::Pending;
         self.metrics.engine.pipeline_runs.increment(1);
+        // Forkchoice updates only forward finality to a running backfill, so the run starting here
+        // gets the latest one up front.
+        if let Some(state) = self.state.forkchoice_state_tracker.latest_state() {
+            self.forward_finalized(state.finalized_block_hash);
+        }
         debug!(target: "engine::tree", "emitting backfill action event");
         self.send_event(EngineApiEvent::BackfillAction(action));
+    }
+
+    // Forwards `finalized` to the backfill unless the forkchoice leaves it unset.
+    fn forward_finalized(&self, finalized: B256) {
+        if !finalized.is_zero() {
+            self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(
+                finalized,
+            )));
+        }
     }
 
     /// Sends an event to the orchestrator.

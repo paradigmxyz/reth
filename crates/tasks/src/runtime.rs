@@ -15,9 +15,8 @@ use crate::{
     PanickedTaskError, TaskEvent, TaskManager,
 };
 use futures_util::{future::select, Future, FutureExt, TryFutureExt};
-#[cfg(feature = "rayon")]
-use std::{num::NonZeroUsize, thread::available_parallelism};
 use std::{
+    num::NonZeroUsize,
     pin::pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -31,6 +30,9 @@ use tracing::{debug, error};
 use tracing_futures::Instrument;
 
 use tokio::runtime::Runtime as TokioRuntime;
+
+#[cfg(feature = "rayon")]
+use std::thread::available_parallelism;
 
 /// Default thread keep-alive duration for the tokio runtime.
 pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -249,6 +251,20 @@ impl RuntimeConfig {
     #[cfg(feature = "rayon")]
     pub const fn with_rayon(mut self, rayon: RayonConfig) -> Self {
         self.rayon = rayon;
+        self
+    }
+
+    /// Override the available CPU count used to size thread pools.
+    ///
+    /// Explicit thread counts and externally supplied Tokio runtimes are preserved.
+    /// Fixed-size pools, such as the storage I/O pool, are not affected.
+    pub fn with_cpu_cores(mut self, cpu_cores: NonZeroUsize) -> Self {
+        let cpu_cores = cpu_cores.get();
+        if let TokioConfig::Owned { worker_threads, .. } = &mut self.tokio {
+            worker_threads.get_or_insert(cpu_cores);
+        }
+        #[cfg(feature = "rayon")]
+        self.rayon.cpu_threads.get_or_insert(cpu_cores);
         self
     }
 }
@@ -1103,6 +1119,66 @@ mod tests {
     fn test_runtime_config_default() {
         let config = RuntimeConfig::default();
         assert!(matches!(config.tokio, TokioConfig::Owned { .. }));
+    }
+
+    #[test]
+    fn cpu_cores_override_sizes_tokio_workers() {
+        let config = RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(8).unwrap());
+        assert!(matches!(config.tokio, TokioConfig::Owned { worker_threads: Some(8), .. }));
+    }
+
+    #[test]
+    fn cpu_cores_override_preserves_explicit_tokio_workers() {
+        let config = RuntimeConfig::default()
+            .with_tokio(TokioConfig::with_worker_threads(2))
+            .with_cpu_cores(NonZeroUsize::new(8).unwrap());
+        assert!(matches!(config.tokio, TokioConfig::Owned { worker_threads: Some(2), .. }));
+    }
+
+    #[test]
+    fn cpu_cores_override_preserves_existing_tokio_runtime() {
+        let runtime = TokioRuntime::new().unwrap();
+        let config = RuntimeConfig::default()
+            .with_tokio(TokioConfig::existing_handle(runtime.handle().clone()))
+            .with_cpu_cores(NonZeroUsize::new(8).unwrap());
+        assert!(matches!(config.tokio, TokioConfig::ExistingHandle(_)));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn cpu_cores_override_sizes_cpu_pools() {
+        let runtime = RuntimeBuilder::new(
+            RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(runtime.handle().metrics().num_workers(), 5);
+        assert_eq!(runtime.cpu_pool().current_num_threads(), 5);
+        assert_eq!(
+            runtime
+                .handle()
+                .block_on(runtime.rpc_pool().spawn(rayon::current_num_threads))
+                .unwrap(),
+            5
+        );
+        assert_eq!(runtime.prewarming_pool().current_num_threads(), 5);
+        assert_eq!(runtime.bal_streaming_pool().current_num_threads(), 5);
+        assert_eq!(runtime.proof_storage_worker_pool().max_threads(), 20);
+        assert_eq!(runtime.proof_account_worker_pool().max_threads(), 20);
+        assert_eq!(runtime.storage_pool().current_num_threads(), DEFAULT_STORAGE_POOL_THREADS);
+        assert_eq!(
+            runtime.state_trie_overlay_worker_pool().current_num_threads(),
+            DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS
+        );
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn cpu_cores_override_preserves_explicit_cpu_threads() {
+        let config = RuntimeConfig::default()
+            .with_rayon(RayonConfig { cpu_threads: Some(2), ..Default::default() })
+            .with_cpu_cores(NonZeroUsize::new(8).unwrap());
+        assert_eq!(config.rayon.default_thread_count(), 2);
     }
 
     #[test]

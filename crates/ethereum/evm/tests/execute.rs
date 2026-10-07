@@ -23,15 +23,15 @@ use reth_primitives_traits::{
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use revm::{
-    database::{CacheDB, EmptyDB, TransitionState},
+    database::{InMemoryDB, TransitionState},
     primitives::address,
     state::{AccountInfo, Bytecode, EvmState},
     Database,
 };
 use std::sync::{mpsc, Arc};
 
-fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_beacon_root_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let beacon_root_contract_account =
         AccountInfo::from_bytecode(Bytecode::new_raw(BEACON_ROOTS_CODE.clone()));
@@ -41,8 +41,8 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     db
 }
 
-fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_withdrawal_requests_contract() -> InMemoryDB {
+    let mut db = InMemoryDB::default();
 
     let withdrawal_requests_contract_account =
         AccountInfo::from_bytecode(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()));
@@ -139,7 +139,7 @@ fn eip_4788_no_code_cancun() {
         ..Header::default()
     };
 
-    let db = CacheDB::new(EmptyDB::default());
+    let db = InMemoryDB::default();
 
     // DON'T deploy the contract at genesis
     let chain_spec = Arc::new(
@@ -320,8 +320,8 @@ fn eip_4788_high_base_fee() {
 }
 
 /// Create a state provider with blockhashes and the EIP-2935 system contract.
-fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
-    let mut db = CacheDB::new(Default::default());
+fn create_database_with_block_hashes(latest_block: u64) -> InMemoryDB {
+    let mut db = InMemoryDB::default();
     for block_number in 0..=latest_block {
         db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
     }
@@ -559,7 +559,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap().is_zero()
     }));
 
     // attempt to execute block 2, this should not fail
@@ -590,8 +590,7 @@ fn eip_2935_state_transition_inside_fork() {
         U256::ZERO
     );
     assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap()),
+        executor.with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::ONE).unwrap()),
         U256::ZERO
     );
     assert!(executor.with_state_mut(|state| {
@@ -718,7 +717,7 @@ fn block_gas_limit_error() {
             gas_price: header.base_fee_per_gas.unwrap().into(),
             gas_limit: 2_500_000, // higher than block gas limit
             to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
-            value: U256::from(1),
+            value: U256::ONE,
             input,
         }),
     );
@@ -759,7 +758,7 @@ fn test_balance_increment_not_duplicated() {
 
     let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
-    let mut db = CacheDB::new(EmptyDB::default());
+    let mut db = InMemoryDB::default();
     let initial_balance = 100;
     db.insert_account_info(
         withdrawal_recipient,

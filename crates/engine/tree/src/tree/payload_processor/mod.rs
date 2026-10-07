@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn execution_cache_allows_single_checkout() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
@@ -923,7 +923,7 @@ mod tests {
     #[test]
     fn execution_cache_checkout_releases_on_drop() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([2u8; 32]);
+        let hash = B256::repeat_byte(2u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
@@ -940,13 +940,13 @@ mod tests {
     #[test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([3u8; 32]);
+        let hash = B256::repeat_byte(3u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
         // When the parent hash doesn't match (fork block), the cache is cleared,
         // hash updated on the original, and clone returned for reuse
-        let different_hash = B256::from([4u8; 32]);
+        let different_hash = B256::repeat_byte(4u8);
         let cache = execution_cache.get_cache_for(different_hash);
         assert!(cache.is_some(), "cache should be returned for reuse after clearing");
 
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn execution_cache_update_after_release_succeeds() {
         let execution_cache = PayloadExecutionCache::default();
-        let initial = B256::from([5u8; 32]);
+        let initial = B256::repeat_byte(5u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
 
@@ -970,7 +970,7 @@ mod tests {
 
         drop(guard);
 
-        let updated = B256::from([6u8; 32]);
+        let updated = B256::repeat_byte(6u8);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));
 
         let new_checkout = execution_cache.get_cache_for(updated);
@@ -986,8 +986,8 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
-        let parent_hash = B256::from([1u8; 32]);
-        let block_hash = B256::from([10u8; 32]);
+        let parent_hash = B256::repeat_byte(1u8);
+        let block_hash = B256::repeat_byte(10u8);
         let block_with_parent = BlockWithParent {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
@@ -1016,14 +1016,14 @@ mod tests {
         );
 
         // Setup: populate cache with block 1
-        let block1_hash = B256::from([1u8; 32]);
+        let block1_hash = B256::repeat_byte(1u8);
         payload_processor
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
         // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
-        let wrong_parent = B256::from([99u8; 32]);
-        let block3_hash = B256::from([3u8; 32]);
+        let wrong_parent = B256::repeat_byte(99u8);
+        let block3_hash = B256::repeat_byte(3u8);
         let block_with_parent = BlockWithParent {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
@@ -1050,7 +1050,7 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
-        let parent_hash = B256::from([1u8; 32]);
+        let parent_hash = B256::repeat_byte(1u8);
         payload_processor
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
@@ -1080,7 +1080,7 @@ mod tests {
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
         // the in-use guard specifically.
         let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: B256::from([2u8; 32]), number: 2 },
+            block: BlockNumHash { hash: B256::repeat_byte(2u8), number: 2 },
             parent: parent_hash,
         };
 
@@ -1115,12 +1115,12 @@ mod tests {
         let execution_cache = PayloadExecutionCache::default();
 
         // Canonical chain at block 4.
-        let block4_hash = B256::from([4u8; 32]);
+        let block4_hash = B256::repeat_byte(4u8);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
 
         // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
         // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
-        let fork_parent = B256::from([2u8; 32]);
+        let fork_parent = B256::repeat_byte(2u8);
         let prewarm_cache = execution_cache.get_cache_for(fork_parent);
         assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
         let prewarm_cache = prewarm_cache.unwrap();
@@ -1128,8 +1128,8 @@ mod tests {
 
         // Prewarm populates cache with fork-specific state (ancestor data for block 2).
         // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
-        let fork_addr = Address::from([0xBB; 20]);
-        let fork_key = B256::from([0xCC; 32]);
+        let fork_addr = Address::repeat_byte(0xBB);
+        let fork_key = B256::repeat_byte(0xCC);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
         // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.

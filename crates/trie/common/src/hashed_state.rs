@@ -169,6 +169,10 @@ impl HashedPostState {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedHashedPostState`] for more information.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
@@ -772,6 +776,7 @@ impl FlattenedHashedPostStateItem {
 
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         let flattened = hashed_post_state
             .storages
             .into_iter()
@@ -840,7 +845,7 @@ mod tests {
     }
 
     fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
-        core::iter::once((U256::from(1), StorageSlot::new_changed(original, present))).collect()
+        core::iter::once((U256::ONE, StorageSlot::new_changed(original, present))).collect()
     }
 
     #[test]
@@ -858,10 +863,8 @@ mod tests {
         };
 
         let mut storage = StorageWithOriginalValues::default();
-        storage.insert(
-            U256::from(1),
-            StorageSlot { present_value: U256::from(4), ..Default::default() },
-        );
+        storage
+            .insert(U256::ONE, StorageSlot { present_value: U256::from(4), ..Default::default() });
 
         // Create a `BundleAccount` struct to represent the account and its storage.
         let account = BundleAccount {
@@ -890,7 +893,7 @@ mod tests {
 
     #[test]
     fn destroyed_prefunded_account_without_storage_emits_no_storage() {
-        let original_info = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let original_info = AccountInfo { balance: U256::ONE, ..Default::default() };
         let account = BundleAccount::new(
             Some(original_info),
             None,
@@ -906,7 +909,7 @@ mod tests {
         let existing_contract =
             AccountInfo { code_hash: B256::repeat_byte(0x01), ..Default::default() };
         let legacy_empty_account = AccountInfo::default();
-        let prefunded_account = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let prefunded_account = AccountInfo { balance: U256::ONE, ..Default::default() };
 
         for original_info in
             [Some(existing_contract), Some(legacy_empty_account), Some(prefunded_account), None]
@@ -919,7 +922,7 @@ mod tests {
             );
 
             let storage = bundle_hashed_storage(&account).unwrap();
-            let hashed_slot = keccak256(B256::from(U256::from(1)));
+            let hashed_slot = keccak256(B256::with_last_byte(1));
             assert_eq!(storage.storage[&hashed_slot], U256::ZERO);
         }
     }
@@ -944,7 +947,7 @@ mod tests {
 
         let new_storage = bundle_hashed_storage(&new_account).unwrap();
         let existing_storage = bundle_hashed_storage(&existing_account).unwrap();
-        let hashed_slot = keccak256(B256::from(U256::from(1)));
+        let hashed_slot = keccak256(B256::with_last_byte(1));
         assert_eq!(new_storage.storage[&hashed_slot], value);
         assert_eq!(existing_storage.storage[&hashed_slot], value);
     }
@@ -1018,7 +1021,7 @@ mod tests {
         let slot1 = B256::random();
         let slot2 = B256::random();
         storage.storage.insert(slot1, U256::ZERO);
-        storage.storage.insert(slot2, U256::from(1));
+        storage.storage.insert(slot2, U256::ONE);
         state.storages.insert(addr1, storage);
 
         state
@@ -1122,7 +1125,7 @@ mod tests {
 
         let mut storage = HashedStorage::default();
         storage.storage.insert(slot1, U256::ZERO);
-        storage.storage.insert(slot2, U256::from(1));
+        storage.storage.insert(slot2, U256::ONE);
         state.storages.insert(addr1, storage);
 
         let mut excluded_slots = HashSet::default();
@@ -1148,7 +1151,7 @@ mod tests {
         // don't add the account to state.accounts (simulating unmodified account)
         // but add storage updates for this account
         let mut storage = HashedStorage::default();
-        storage.storage.insert(slot1, U256::from(1));
+        storage.storage.insert(slot1, U256::ONE);
         storage.storage.insert(slot2, U256::from(2));
         state.storages.insert(addr, storage);
 
@@ -1171,19 +1174,19 @@ mod tests {
         // Test extending accounts
         let mut state1 = HashedPostStateSorted {
             accounts: vec![
-                (B256::from([1; 32]), Some(Account::default())),
-                (B256::from([3; 32]), Some(Account::default())),
-                (B256::from([5; 32]), None),
+                (B256::repeat_byte(1), Some(Account::default())),
+                (B256::repeat_byte(3), Some(Account::default())),
+                (B256::repeat_byte(5), None),
             ],
             storages: B256Map::default(),
         };
 
         let state2 = HashedPostStateSorted {
             accounts: vec![
-                (B256::from([2; 32]), Some(Account::default())),
-                (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), /* Override */
-                (B256::from([4; 32]), Some(Account::default())),
-                (B256::from([6; 32]), None),
+                (B256::repeat_byte(2), Some(Account::default())),
+                (B256::repeat_byte(3), Some(Account { nonce: 1, ..Default::default() })), /* Override */
+                (B256::repeat_byte(4), Some(Account::default())),
+                (B256::repeat_byte(6), None),
             ],
             storages: B256Map::default(),
         };
@@ -1192,14 +1195,14 @@ mod tests {
 
         // Check accounts are merged and sorted
         assert_eq!(state1.accounts.len(), 6);
-        assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
-        assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
-        assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
+        assert_eq!(state1.accounts[0].0, B256::repeat_byte(1));
+        assert_eq!(state1.accounts[1].0, B256::repeat_byte(2));
+        assert_eq!(state1.accounts[2].0, B256::repeat_byte(3));
         assert_eq!(state1.accounts[2].1.as_ref().unwrap().nonce, 1); // Should have state2's value
-        assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
-        assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
+        assert_eq!(state1.accounts[3].0, B256::repeat_byte(4));
+        assert_eq!(state1.accounts[4].0, B256::repeat_byte(5));
         assert_eq!(state1.accounts[4].1, None);
-        assert_eq!(state1.accounts[5].0, B256::from([6; 32]));
+        assert_eq!(state1.accounts[5].0, B256::repeat_byte(6));
         assert_eq!(state1.accounts[5].1, None);
     }
 
@@ -1208,35 +1211,35 @@ mod tests {
         // Test normal extension
         let mut storage1 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([1; 32]), U256::from(10)),
-                (B256::from([3; 32]), U256::from(30)),
-                (B256::from([5; 32]), U256::ZERO),
+                (B256::repeat_byte(1), U256::from(10)),
+                (B256::repeat_byte(3), U256::from(30)),
+                (B256::repeat_byte(5), U256::ZERO),
             ],
         };
 
         let storage2 = HashedStorageSorted {
             storage_slots: vec![
-                (B256::from([2; 32]), U256::from(20)),
-                (B256::from([3; 32]), U256::from(300)), // Override
-                (B256::from([4; 32]), U256::from(40)),
-                (B256::from([6; 32]), U256::ZERO),
+                (B256::repeat_byte(2), U256::from(20)),
+                (B256::repeat_byte(3), U256::from(300)), // Override
+                (B256::repeat_byte(4), U256::from(40)),
+                (B256::repeat_byte(6), U256::ZERO),
             ],
         };
 
         storage1.extend_ref(&storage2);
 
         assert_eq!(storage1.storage_slots.len(), 6);
-        assert_eq!(storage1.storage_slots[0].0, B256::from([1; 32]));
+        assert_eq!(storage1.storage_slots[0].0, B256::repeat_byte(1));
         assert_eq!(storage1.storage_slots[0].1, U256::from(10));
-        assert_eq!(storage1.storage_slots[1].0, B256::from([2; 32]));
+        assert_eq!(storage1.storage_slots[1].0, B256::repeat_byte(2));
         assert_eq!(storage1.storage_slots[1].1, U256::from(20));
-        assert_eq!(storage1.storage_slots[2].0, B256::from([3; 32]));
+        assert_eq!(storage1.storage_slots[2].0, B256::repeat_byte(3));
         assert_eq!(storage1.storage_slots[2].1, U256::from(300)); // Should have storage2's value
-        assert_eq!(storage1.storage_slots[3].0, B256::from([4; 32]));
+        assert_eq!(storage1.storage_slots[3].0, B256::repeat_byte(4));
         assert_eq!(storage1.storage_slots[3].1, U256::from(40));
-        assert_eq!(storage1.storage_slots[4].0, B256::from([5; 32]));
+        assert_eq!(storage1.storage_slots[4].0, B256::repeat_byte(5));
         assert_eq!(storage1.storage_slots[4].1, U256::ZERO);
-        assert_eq!(storage1.storage_slots[5].0, B256::from([6; 32]));
+        assert_eq!(storage1.storage_slots[5].0, B256::repeat_byte(6));
         assert_eq!(storage1.storage_slots[5].1, U256::ZERO);
     }
 
@@ -1291,7 +1294,7 @@ mod tests {
             vec![(kept_account, Some(account(1))), (removed_account, Some(account(10)))],
             B256Map::from_iter([(
                 kept_storage,
-                HashedStorageSorted { storage_slots: vec![(slot1, U256::from(1))] },
+                HashedStorageSorted { storage_slots: vec![(slot1, U256::ONE)] },
             )]),
         );
 
@@ -1340,7 +1343,7 @@ mod tests {
         let older = HashedPostStateSorted::new(
             vec![(address, Some(Account { nonce: 1, ..Default::default() }))],
             B256Map::from_iter([
-                (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] }),
+                (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::ONE)] }),
                 (empty_storage, HashedStorageSorted::default()),
             ]),
         );
@@ -1399,7 +1402,7 @@ mod tests {
         let batch = HashedPostStateSorted::new(
             vec![(address, Some(account(1))), (deleted_address, None)],
             B256Map::from_iter([
-                (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] }),
+                (storage, HashedStorageSorted { storage_slots: vec![(slot, U256::ONE)] }),
                 (
                     deleted_storage,
                     HashedStorageSorted { storage_slots: vec![(deleted_slot, U256::ZERO)] },
@@ -1440,7 +1443,7 @@ mod tests {
             vec![],
             B256Map::from_iter([(
                 storage,
-                HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] },
+                HashedStorageSorted { storage_slots: vec![(slot, U256::ONE)] },
             )]),
         );
         let mask = HashedPostStateSorted::new(
@@ -1452,7 +1455,7 @@ mod tests {
 
         assert_eq!(
             result.storages.get(&storage),
-            Some(&HashedStorageSorted { storage_slots: vec![(slot, U256::from(1))] })
+            Some(&HashedStorageSorted { storage_slots: vec![(slot, U256::ONE)] })
         );
     }
 
@@ -1478,13 +1481,13 @@ mod tests {
 
     #[test]
     fn test_hashed_post_state_chunking_length() {
-        let addr1 = B256::from([1; 32]);
-        let addr2 = B256::from([2; 32]);
-        let addr3 = B256::from([3; 32]);
-        let addr4 = B256::from([4; 32]);
-        let slot1 = B256::from([1; 32]);
-        let slot2 = B256::from([2; 32]);
-        let slot3 = B256::from([3; 32]);
+        let addr1 = B256::repeat_byte(1);
+        let addr2 = B256::repeat_byte(2);
+        let addr3 = B256::repeat_byte(3);
+        let addr4 = B256::repeat_byte(4);
+        let slot1 = B256::repeat_byte(1);
+        let slot2 = B256::repeat_byte(2);
+        let slot3 = B256::repeat_byte(3);
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([(addr1, None), (addr2, None), (addr4, None)]),
@@ -1536,12 +1539,12 @@ mod tests {
 
     #[test]
     fn test_clone_into_sorted_equivalence() {
-        let addr1 = B256::from([1; 32]);
-        let addr2 = B256::from([2; 32]);
-        let addr3 = B256::from([3; 32]);
-        let slot1 = B256::from([1; 32]);
-        let slot2 = B256::from([2; 32]);
-        let slot3 = B256::from([3; 32]);
+        let addr1 = B256::repeat_byte(1);
+        let addr2 = B256::repeat_byte(2);
+        let addr3 = B256::repeat_byte(3);
+        let slot1 = B256::repeat_byte(1);
+        let slot2 = B256::repeat_byte(2);
+        let slot3 = B256::repeat_byte(3);
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([
@@ -1576,9 +1579,9 @@ mod tests {
 
     #[test]
     fn test_hashed_storage_clone_into_sorted_equivalence() {
-        let slot1 = B256::from([1; 32]);
-        let slot2 = B256::from([2; 32]);
-        let slot3 = B256::from([3; 32]);
+        let slot1 = B256::repeat_byte(1);
+        let slot2 = B256::repeat_byte(2);
+        let slot3 = B256::repeat_byte(3);
 
         let storage = HashedStorage {
             storage: B256Map::from_iter([
@@ -1935,7 +1938,7 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_storage.storage.insert(B256::random(), U256::from(1));
+            data.hashed_storage.storage.insert(B256::random(), U256::ONE);
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -1970,7 +1973,7 @@ pub mod serde_bincode_compat {
 
             data.hashed_state.storages.insert(
                 B256::random(),
-                HashedStorageSorted { storage_slots: vec![(B256::from([1; 32]), U256::from(10))] },
+                HashedStorageSorted { storage_slots: vec![(B256::repeat_byte(1), U256::from(10))] },
             );
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
@@ -1992,7 +1995,7 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_storage.storage_slots.push((B256::random(), U256::from(1)));
+            data.hashed_storage.storage_slots.push((B256::random(), U256::ONE));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
