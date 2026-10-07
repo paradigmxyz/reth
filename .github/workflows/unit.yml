@@ -3,6 +3,12 @@
 name: unit
 
 on:
+  workflow_dispatch:
+    inputs:
+      engine-tree-only:
+        description: "Run the engine tree unit tests without the full workspace/state/doc suites"
+        type: boolean
+        default: false
   pull_request:
   merge_group:
   push:
@@ -66,6 +72,7 @@ jobs:
           checksum: true
           fallback: none
       - name: Run tests
+        if: ${{ !inputs.engine-tree-only }}
         run: |
           cargo nextest run \
             --no-fail-fast \
@@ -73,10 +80,15 @@ jobs:
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
+      - name: Run engine tree tests
+        if: ${{ inputs.engine-tree-only }}
+        run: cargo nextest run --no-fail-fast --locked --features asm-keccak -p reth-engine-tree --lib
       - name: Run standalone EthStats tests
+        if: ${{ !inputs.engine-tree-only }}
         run: cargo nextest run --no-fail-fast --locked -p reth-node-ethstats
 
   state:
+    if: ${{ !inputs.engine-tree-only }}
     name: Ethereum state tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
@@ -128,6 +140,7 @@ jobs:
       - run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
+    if: ${{ !inputs.engine-tree-only }}
     name: doc tests
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
@@ -165,7 +178,7 @@ jobs:
   unit-success:
     name: unit success
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ always() && !inputs.engine-tree-only }}
     needs: [test, state, doc]
     timeout-minutes: 30
     steps:
