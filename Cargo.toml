@@ -79,6 +79,7 @@ members = [
     "crates/payload/util/",
     "crates/prune/prune",
     "crates/prune/types",
+    "crates/pureth/block",
     "crates/pureth/query",
     "crates/pureth/receipt",
     "crates/pureth/ssz",

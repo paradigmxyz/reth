@@ -10058,6 +10058,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-pureth-block"
+version = "2.7.0"
+dependencies = [
+ "alloy-primitives",
+ "reth-pureth-ssz",
+]
+
+[[package]]
 name = "reth-pureth-query"
 version = "2.7.0"
 dependencies = [
