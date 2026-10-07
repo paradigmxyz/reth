@@ -222,7 +222,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Sets the transaction gas budget checked against block capacity.
-    pub(crate) fn set_block_gas_limit_policy(&mut self, policy: BlockGasLimitPolicy) {
+    pub(crate) const fn set_block_gas_limit_policy(&mut self, policy: BlockGasLimitPolicy) {
         self.all_transactions.block_gas_limit_policy = policy;
     }
 
