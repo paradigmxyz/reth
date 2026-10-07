@@ -3,7 +3,7 @@ use crate::{
     Cli,
 };
 use clap::Subcommand;
-use eyre::{eyre, Result};
+use eyre::{eyre, OptionExt, Result};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -58,7 +58,7 @@ where
     /// Returns a mutable reference to the tracing layers, or error
     /// if tracing initialized and layers have detached already.
     pub fn access_tracing_layers(&mut self) -> Result<&mut Layers> {
-        self.layers.as_mut().ok_or_else(|| eyre!("Tracing already initialized"))
+        self.layers.as_mut().ok_or_eyre("Tracing already initialized")
     }
 
     /// Execute the configured cli command.

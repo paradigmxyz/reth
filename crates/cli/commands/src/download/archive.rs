@@ -11,7 +11,7 @@ use super::{
     verify::OutputVerifier,
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
 };
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
@@ -237,8 +237,7 @@ impl ArchiveProcessor {
 
     /// Downloads the archive into the cache, then extracts from the cached file.
     fn run_cached_attempt(&self, format: CompressionFormat) -> Result<()> {
-        let cache_dir =
-            self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
+        let cache_dir = self.ctx.cache_dir().ok_or_eyre("Missing download cache directory")?;
         let fetcher =
             ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
 

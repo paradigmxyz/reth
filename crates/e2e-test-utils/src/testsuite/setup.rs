@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use eyre::{eyre, Result};
+use eyre::{eyre, OptionExt, Result};
 use reth_chainspec::ChainSpec;
 use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes, TreeConfig};
 use reth_node_core::args::StorageArgs;
@@ -133,9 +133,7 @@ where
         let mut node_clients = Vec::new();
         let nodes = &import_result.nodes;
         for node in nodes {
-            let rpc = node
-                .rpc_client()
-                .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
+            let rpc = node.rpc_client().ok_or_eyre("Failed to create HTTP RPC client for node")?;
             let auth = node.auth_server_handle();
             let url = node.rpc_url();
             // TODO: Pass beacon_engine_handle once import system supports generic types
@@ -170,8 +168,7 @@ where
         if let Some(rlp_path) = self.import_rlp_path.take() {
             return self.apply_with_import::<N>(env, &rlp_path).await;
         }
-        let chain_spec =
-            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
+        let chain_spec = self.chain_spec.clone().ok_or_eyre("Chain specification is required")?;
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         self.shutdown_tx = Some(shutdown_tx);
@@ -226,8 +223,7 @@ where
         &self,
         rlp_path: &Path,
     ) -> Result<crate::setup_import::ChainImportResult> {
-        let chain_spec =
-            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
+        let chain_spec = self.chain_spec.clone().ok_or_eyre("Chain specification is required")?;
 
         crate::setup_import::setup_engine_with_chain_import(
             self.network.node_count,

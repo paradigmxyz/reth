@@ -35,9 +35,7 @@ impl<N: NodeTypesWithDB> DbTool<N> {
     /// filter down the desired results. (eg. List only rows which include `0xd3adbeef`)
     pub fn list<T: Table>(&self, filter: &ListFilter) -> Result<(Vec<TableRow<T>>, usize)> {
         let bmb = Rc::new(BMByte::from(&filter.search));
-        if bmb.is_none() && filter.has_search() {
-            eyre::bail!("Invalid search.");
-        }
+        eyre::ensure!(bmb.is_some() || !filter.has_search(), "Invalid search.");
 
         let mut hits = 0;
 

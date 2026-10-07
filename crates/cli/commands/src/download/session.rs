@@ -1,5 +1,5 @@
 use super::progress::{DownloadRequestLimiter, SharedProgress};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use reth_cli_util::cancellation::CancellationToken;
 use std::{
     path::{Path, PathBuf},
@@ -53,7 +53,7 @@ impl DownloadSession {
 
     /// Returns the request limiter or errors if the caller needs one.
     pub(crate) fn require_request_limiter(&self) -> Result<&Arc<DownloadRequestLimiter>> {
-        self.request_limiter().ok_or_else(|| eyre::eyre!("Missing download request limiter"))
+        self.request_limiter().ok_or_eyre("Missing download request limiter")
     }
 
     /// Returns the cancellation token for this command.

@@ -614,9 +614,13 @@ pub fn generate_manifest(
             let source_files = source_files_for_chunk(source_datadir, *ty, start, end)?;
 
             if source_files.is_empty() {
-                if found_any {
-                    eyre::bail!("Missing source files for {} chunk {}-{}", key, start, end);
-                }
+                eyre::ensure!(
+                    !found_any,
+                    "Missing source files for {} chunk {}-{}",
+                    key,
+                    start,
+                    end
+                );
                 continue;
             }
 
@@ -863,9 +867,7 @@ fn package_single_component(
     archive_file_name: &str,
     files: &[PlannedFile],
 ) -> Result<(u64, Vec<OutputFileChecksum>)> {
-    if files.is_empty() {
-        eyre::bail!("Cannot package empty single archive: {}", archive_file_name);
-    }
+    eyre::ensure!(!files.is_empty(), "Cannot package empty single archive: {}", archive_file_name);
 
     let archive_path = output_dir.join(archive_file_name);
     let output_files = write_archive_from_planned_files(&archive_path, files)?;

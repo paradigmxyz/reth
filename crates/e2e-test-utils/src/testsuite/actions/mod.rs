@@ -3,7 +3,7 @@
 use crate::testsuite::Environment;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::EngineApiClient;
@@ -139,9 +139,8 @@ where
         Box::pin(async move {
             if self.active_node_only {
                 // Only update the active node
-                let latest_block = env
-                    .current_block_info()
-                    .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+                let latest_block =
+                    env.current_block_info().ok_or_eyre("No latest block information available")?;
 
                 let fork_choice_state = ForkchoiceState {
                     head_block_hash: latest_block.hash,
@@ -214,9 +213,8 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let current_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+            let current_block =
+                env.current_block_info().ok_or_eyre("No current block information available")?;
 
             env.block_registry.insert(self.tag.clone(), (current_block, env.active_node_idx));
 
