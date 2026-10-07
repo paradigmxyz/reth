@@ -383,10 +383,13 @@ pub enum RangeProofError {
     Rlp(#[from] alloy_rlp::Error),
 }
 
-/// Verifies a consecutive leaf range against `root`, from `origin` through `limit`.
+/// Verifies a consecutive leaf range against `root`, starting at `origin`.
 ///
-/// When `leaves` is empty, `limit` supplies the response's right boundary so an empty interval can
-/// be authenticated without requiring a leaf past the limit.
+/// For nonempty `leaves`, the last returned leaf is the verified right boundary and `limit` is
+/// ignored. A boundary leaf may therefore exceed `limit`; callers enforcing a response limit
+/// must truncate the verified leaves themselves.
+///
+/// When `leaves` is empty, `limit` supplies the right boundary of the authenticated empty interval.
 ///
 /// Returns a lower bound for the next key, or `None` if the range exhausts the trie.
 pub fn verify_range_proof<I, V>(
