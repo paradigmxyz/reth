@@ -161,7 +161,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StorageRootProvider
                 .into_sorted(),
             );
             <DbStorageRoot<'_, _, A>>::overlay_root(self.tx(), address, input)
-                .map_err(|err| ProviderError::Database(err.into()))
+                .map_err(ProviderError::from)
         })
     }
 

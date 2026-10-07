@@ -6,7 +6,7 @@
 //! covered interior before the reconstructed root is compared with the requested root.
 
 use crate::{HashBuilder, Nibbles, RlpNode, TrieNode};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use alloy_rlp::Decodable;
 
@@ -37,12 +37,12 @@ impl<'a> RangeProofVerifier<'a> {
 
     // Verifies the range by rebuilding its root, making omitted or altered leaves change the
     // result.
-    fn verify(mut self, root: B256) -> Result<Option<B256>, RangeProofError> {
+    fn verify(mut self, root: B256) -> Result<Option<B256>, RangeProofErrorKind> {
         self.visit_reference(Nibbles::new(), &RlpNode::word_rlp(&root))?;
 
         let got = self.frontier.root()?;
         if got != root {
-            return Err(RangeProofError::RootMismatch { expected: root, got })
+            return Err(RangeProofErrorKind::RootMismatch { expected: root, got })
         }
         Ok(self.next.as_ref().map(TriePath::lowest_key))
     }
@@ -53,7 +53,7 @@ impl<'a> RangeProofVerifier<'a> {
         &mut self,
         prefix: Nibbles,
         reference: &RlpNode,
-    ) -> Result<(), RangeProofError> {
+    ) -> Result<(), RangeProofErrorKind> {
         match self.range.subtree_relation(&prefix)? {
             SubtreeRelation::OutsideLeft => self.add_outside_reference(prefix, reference),
             SubtreeRelation::OutsideRight => {
@@ -69,7 +69,7 @@ impl<'a> RangeProofVerifier<'a> {
     }
 
     // Visits a boundary node to expose the disjoint commitments needed for root reconstruction.
-    fn visit_node(&mut self, node: TrieNode, prefix: Nibbles) -> Result<(), RangeProofError> {
+    fn visit_node(&mut self, node: TrieNode, prefix: Nibbles) -> Result<(), RangeProofErrorKind> {
         match node {
             TrieNode::EmptyRoot => Ok(()),
             TrieNode::Leaf(leaf) => {
@@ -105,7 +105,7 @@ impl<'a> RangeProofVerifier<'a> {
         &mut self,
         prefix: Nibbles,
         reference: &RlpNode,
-    ) -> Result<(), RangeProofError> {
+    ) -> Result<(), RangeProofErrorKind> {
         if let Some(hash) = reference.as_hash() {
             self.frontier.push_subtree(prefix, hash);
             return Ok(())
@@ -114,7 +114,11 @@ impl<'a> RangeProofVerifier<'a> {
     }
 
     // Adds an inline outside node by descending until a retainable leaf or hashed child is reached.
-    fn add_outside_node(&mut self, node: TrieNode, prefix: Nibbles) -> Result<(), RangeProofError> {
+    fn add_outside_node(
+        &mut self,
+        node: TrieNode,
+        prefix: Nibbles,
+    ) -> Result<(), RangeProofErrorKind> {
         match node {
             TrieNode::EmptyRoot => Ok(()),
             TrieNode::Leaf(leaf) => {
@@ -160,9 +164,9 @@ impl ProofRange {
     }
 
     // Classifies a subtree prefix to avoid resolving subtries that cannot cross a boundary.
-    fn subtree_relation(&self, prefix: &Nibbles) -> Result<SubtreeRelation, RangeProofError> {
+    fn subtree_relation(&self, prefix: &Nibbles) -> Result<SubtreeRelation, RangeProofErrorKind> {
         if prefix.len() > KEY_NIBBLES {
-            return Err(RangeProofError::PathTooLong { path: *prefix })
+            return Err(RangeProofErrorKind::PathTooLong { path: *prefix })
         }
         let left = self.left.slice(..prefix.len());
         let right = self.right.slice(..prefix.len());
@@ -225,11 +229,11 @@ impl<'a> ProofNodes<'a> {
     }
 
     // Resolves inline references directly and requires proof backing for hashed references.
-    fn resolve(&self, path: Nibbles, reference: &RlpNode) -> Result<TrieNode, RangeProofError> {
+    fn resolve(&self, path: Nibbles, reference: &RlpNode) -> Result<TrieNode, RangeProofErrorKind> {
         let Some(hash) = reference.as_hash() else {
             return Ok(TrieNode::decode(&mut reference.as_slice())?)
         };
-        let node = self.0.get(&hash).ok_or(RangeProofError::MissingProofNode { path })?;
+        let node = self.0.get(&hash).ok_or(RangeProofErrorKind::MissingProofNode { path })?;
         Ok(TrieNode::decode(&mut &node[..])?)
     }
 }
@@ -240,7 +244,10 @@ struct ProofFrontier(Vec<FrontierEntry>);
 
 impl ProofFrontier {
     // Builds a frontier from validated leaves before HashBuilder enforces ordering with assertions.
-    fn from_leaves<I, V>(origin: B256, leaves: I) -> Result<(Self, Option<B256>), RangeProofError>
+    fn from_leaves<I, V>(
+        origin: B256,
+        leaves: I,
+    ) -> Result<(Self, Option<B256>), RangeProofErrorKind>
     where
         I: IntoIterator<Item = (B256, V)>,
         V: Into<Vec<u8>>,
@@ -251,13 +258,13 @@ impl ProofFrontier {
         for (key, value) in leaves {
             let value = value.into();
             if key < origin {
-                return Err(RangeProofError::LeafBeforeOrigin { key, origin })
+                return Err(RangeProofErrorKind::LeafBeforeOrigin { key, origin })
             }
             if previous.is_some_and(|previous| key <= previous) {
-                return Err(RangeProofError::NonMonotonicLeaves)
+                return Err(RangeProofErrorKind::NonMonotonicLeaves)
             }
             if value.is_empty() {
-                return Err(RangeProofError::EmptyLeafValue { key })
+                return Err(RangeProofErrorKind::EmptyLeafValue { key })
             }
             previous = Some(key);
             frontier.push_leaf(Nibbles::unpack(key), value);
@@ -279,7 +286,7 @@ impl ProofFrontier {
     }
 
     // Reconstructs the root after sorting leaves and subtries into HashBuilder's strict path order.
-    fn root(mut self) -> Result<B256, RangeProofError> {
+    fn root(mut self) -> Result<B256, RangeProofErrorKind> {
         // Outside subtries are disjoint from returned leaves, so sorting produces the strict path
         // order required by HashBuilder. Reject duplicates before they reach its assertion.
         self.0.sort_unstable_by_key(FrontierEntry::path);
@@ -289,7 +296,7 @@ impl ProofFrontier {
         for entry in self.0 {
             let path = entry.path();
             if previous.is_some_and(|previous| path <= previous) {
-                return Err(RangeProofError::DuplicateFrontierPath { path })
+                return Err(RangeProofErrorKind::DuplicateFrontierPath { path })
             }
             previous = Some(path);
             match entry {
@@ -320,9 +327,20 @@ impl FrontierEntry {
     }
 }
 
+/// An invalid or incomplete trie range proof. Display includes the verification failure.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error(transparent)]
+pub struct RangeProofError(Box<RangeProofErrorKind>);
+
+impl From<RangeProofErrorKind> for RangeProofError {
+    fn from(error: RangeProofErrorKind) -> Self {
+        Self(Box::new(error))
+    }
+}
+
 /// Error returned when a trie range proof is invalid.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum RangeProofError {
+enum RangeProofErrorKind {
     /// The response leaves are not strictly increasing.
     #[error("range leaves are not strictly increasing")]
     NonMonotonicLeaves,
@@ -383,7 +401,8 @@ pub enum RangeProofError {
     Rlp(#[from] alloy_rlp::Error),
 }
 
-/// Verifies a consecutive leaf range against `root`, from `origin` through `limit`.
+/// Verifies a consecutive leaf range against `root`, from `origin` through the last returned leaf.
+/// For nonempty responses, `limit` is ignored; the last leaf may be beyond the requested limit.
 ///
 /// When `leaves` is empty, `limit` supplies the response's right boundary so an empty interval can
 /// be authenticated without requiring a leaf past the limit.
@@ -406,12 +425,14 @@ where
     if proof.is_empty() {
         let got = frontier.root()?;
         if got != root {
-            return Err(RangeProofError::RootMismatch { expected: root, got })
+            return Err(RangeProofErrorKind::RootMismatch { expected: root, got }.into())
         }
         return Ok(None)
     }
 
-    RangeProofVerifier::new(origin, last_key.unwrap_or(limit), proof, frontier).verify(root)
+    RangeProofVerifier::new(origin, last_key.unwrap_or(limit), proof, frontier)
+        .verify(root)
+        .map_err(Into::into)
 }
 
 // Keeps path mutation behind one checked API because external `Nibbles` cannot have inherent
@@ -421,16 +442,16 @@ trait TriePath: Sized {
     fn lowest_key(&self) -> B256;
 
     // Requires extensions to consume bounded path space so hostile proofs cannot recurse in place.
-    fn descend_extension(self, key: &Nibbles) -> Result<Self, RangeProofError>;
+    fn descend_extension(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind>;
 
     // Rejects branches beyond the key depth before mutating the path.
-    fn descend_child(self, nibble: u8) -> Result<Self, RangeProofError>;
+    fn descend_child(self, nibble: u8) -> Result<Self, RangeProofErrorKind>;
 
     // Requires leaves to resolve to one full hashed key before entering the frontier.
-    fn descend_leaf(self, key: &Nibbles) -> Result<Self, RangeProofError>;
+    fn descend_leaf(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind>;
 
     // Shares the overflow guard used by extension and leaf descent.
-    fn join_checked(self, key: &Nibbles) -> Result<Self, RangeProofError>;
+    fn join_checked(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind>;
 }
 
 impl TriePath for Nibbles {
@@ -440,17 +461,17 @@ impl TriePath for Nibbles {
     }
 
     // Descends an extension while rejecting empty keys that could recurse without consuming space.
-    fn descend_extension(self, key: &Nibbles) -> Result<Self, RangeProofError> {
+    fn descend_extension(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind> {
         if key.is_empty() {
-            return Err(RangeProofError::EmptyExtensionKey { path: self })
+            return Err(RangeProofErrorKind::EmptyExtensionKey { path: self })
         }
         self.join_checked(key)
     }
 
     // Descends one branch nibble while rejecting nodes below the fixed hashed-key depth.
-    fn descend_child(self, nibble: u8) -> Result<Self, RangeProofError> {
+    fn descend_child(self, nibble: u8) -> Result<Self, RangeProofErrorKind> {
         if self.len() >= KEY_NIBBLES {
-            return Err(RangeProofError::PathTooLong { path: self })
+            return Err(RangeProofErrorKind::PathTooLong { path: self })
         }
         let mut path = self;
         path.push(nibble);
@@ -458,18 +479,18 @@ impl TriePath for Nibbles {
     }
 
     // Completes a leaf path while rejecting leaves that do not resolve to one full hashed key.
-    fn descend_leaf(self, key: &Nibbles) -> Result<Self, RangeProofError> {
+    fn descend_leaf(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind> {
         let path = self.join_checked(key)?;
         if path.len() != KEY_NIBBLES {
-            return Err(RangeProofError::InvalidLeafPath { path })
+            return Err(RangeProofErrorKind::InvalidLeafPath { path })
         }
         Ok(path)
     }
 
     // Joins path segments while rejecting proof nodes that exceed the fixed hashed-key depth.
-    fn join_checked(self, key: &Nibbles) -> Result<Self, RangeProofError> {
+    fn join_checked(self, key: &Nibbles) -> Result<Self, RangeProofErrorKind> {
         if self.len() + key.len() > KEY_NIBBLES {
-            return Err(RangeProofError::PathTooLong { path: self })
+            return Err(RangeProofErrorKind::PathTooLong { path: self })
         }
         Ok(self.join(key))
     }
@@ -488,12 +509,12 @@ mod tests {
         origin: B256,
         leaves: I,
         proof: &[Bytes],
-    ) -> Result<Option<B256>, RangeProofError>
+    ) -> Result<Option<B256>, RangeProofErrorKind>
     where
         I: IntoIterator<Item = (B256, V)>,
         V: Into<Vec<u8>>,
     {
-        super::verify_range_proof(root, origin, MAX_HASH, leaves, proof)
+        super::verify_range_proof(root, origin, MAX_HASH, leaves, proof).map_err(|err| *err.0)
     }
 
     fn key(value: u64) -> B256 {
@@ -606,7 +627,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(keccak256(&branch), key(1), no_leaves(), &proof),
-            Err(RangeProofError::PathTooLong { .. })
+            Err(RangeProofErrorKind::PathTooLong { .. })
         ));
 
         // A branch sitting at the full hashed-key depth, which has no room for a child.
@@ -620,7 +641,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(keccak256(&reach), key(1), no_leaves(), &proof),
-            Err(RangeProofError::PathTooLong { .. })
+            Err(RangeProofErrorKind::PathTooLong { .. })
         ));
     }
 
@@ -640,7 +661,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(root, key(1), no_leaves(), &proof),
-            Err(RangeProofError::EmptyExtensionKey { .. })
+            Err(RangeProofErrorKind::EmptyExtensionKey { .. })
         ));
     }
 
@@ -653,7 +674,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(root, key(2), leaves[1..3].to_vec(), &unrelated),
-            Err(RangeProofError::MissingProofNode { .. })
+            Err(RangeProofErrorKind::MissingProofNode { .. })
         ));
     }
 
@@ -683,7 +704,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(root, key(2), returned, &proof),
-            Err(RangeProofError::RootMismatch { .. })
+            Err(RangeProofErrorKind::RootMismatch { .. })
         ));
     }
 
@@ -695,7 +716,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(root, key(2), returned, &proof),
-            Err(RangeProofError::RootMismatch { .. })
+            Err(RangeProofErrorKind::RootMismatch { .. })
         ));
     }
 
@@ -718,7 +739,7 @@ mod tests {
 
         assert!(matches!(
             verify_range_proof(root, key(2), core::iter::empty::<(B256, Vec<u8>)>(), &proof,),
-            Err(RangeProofError::RootMismatch { .. })
+            Err(RangeProofErrorKind::RootMismatch { .. })
         ));
     }
 
@@ -739,15 +760,15 @@ mod tests {
 
         assert_eq!(
             verify_range_proof(B256::ZERO, B256::ZERO, leaves, &[]),
-            Err(RangeProofError::NonMonotonicLeaves)
+            Err(RangeProofErrorKind::NonMonotonicLeaves)
         );
         assert!(matches!(
             verify_range_proof(B256::ZERO, key(2), [(key(1), value(1))], &[],),
-            Err(RangeProofError::LeafBeforeOrigin { .. })
+            Err(RangeProofErrorKind::LeafBeforeOrigin { .. })
         ));
         assert_eq!(
             verify_range_proof(B256::ZERO, B256::ZERO, [(key(1), Vec::new())], &[]),
-            Err(RangeProofError::EmptyLeafValue { key: key(1) })
+            Err(RangeProofErrorKind::EmptyLeafValue { key: key(1) })
         );
     }
 
@@ -765,7 +786,7 @@ mod tests {
         );
         assert!(matches!(
             verify_range_proof(EMPTY_ROOT_HASH, B256::ZERO, [(key(1), value(1))], &[],),
-            Err(RangeProofError::RootMismatch { .. })
+            Err(RangeProofErrorKind::RootMismatch { .. })
         ));
         assert!(
             verify_range_proof(EMPTY_ROOT_HASH, B256::ZERO, no_leaves(), &[Bytes::new()]).is_err()

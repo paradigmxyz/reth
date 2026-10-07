@@ -3,12 +3,15 @@
 use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::{Bytes, B256};
 use nybbles::Nibbles;
-use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
+use reth_storage_errors::{db::DatabaseError, provider::ProviderError, trie::TrieCursorError};
 use thiserror::Error;
 
 /// State root errors.
 #[derive(Error, Clone, Debug)]
 pub enum StateRootError {
+    /// Ordered trie access failed.
+    #[error(transparent)]
+    Cursor(#[from] TrieCursorError),
     /// Internal database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -28,6 +31,10 @@ impl From<StateRootError> for ProviderError {
                 Self::Database(err)
             }
             StateRootError::PrefixSetLoadError(err) => err,
+            StateRootError::Cursor(err) |
+            StateRootError::StorageRootError(StorageRootError::Cursor(err)) => {
+                Self::TrieCursor(err)
+            }
         }
     }
 }
@@ -35,15 +42,19 @@ impl From<StateRootError> for ProviderError {
 /// Storage root error.
 #[derive(Error, Clone, Debug)]
 pub enum StorageRootError {
+    /// Ordered trie access failed.
+    #[error(transparent)]
+    Cursor(#[from] TrieCursorError),
     /// Internal database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
 }
 
-impl From<StorageRootError> for DatabaseError {
+impl From<StorageRootError> for ProviderError {
     fn from(err: StorageRootError) -> Self {
         match err {
-            StorageRootError::Database(err) => err,
+            StorageRootError::Database(err) => Self::Database(err),
+            StorageRootError::Cursor(err) => Self::TrieCursor(err),
         }
     }
 }
@@ -51,6 +62,9 @@ impl From<StorageRootError> for DatabaseError {
 /// State proof errors.
 #[derive(Error, Clone, Debug)]
 pub enum StateProofError {
+    /// Ordered trie access failed.
+    #[error(transparent)]
+    Cursor(#[from] TrieCursorError),
     /// Internal database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -63,6 +77,12 @@ pub enum StateProofError {
     /// proof calculation to be unable to make forward progress.
     #[error("trie inconsistency: {0}")]
     TrieInconsistency(alloc::string::String),
+    /// Requested storage work disconnected before returning its proof.
+    #[error("storage proof channel closed for {0}")]
+    StorageProofChannelClosed(B256),
+    /// No worker is available to accept a proof request.
+    #[error("{0} proof workers unavailable")]
+    WorkerUnavailable(&'static str),
 }
 
 impl From<StateProofError> for ProviderError {
@@ -70,7 +90,8 @@ impl From<StateProofError> for ProviderError {
         match value {
             StateProofError::Database(error) => Self::Database(error),
             StateProofError::Rlp(error) => Self::Rlp(error),
-            StateProofError::TrieInconsistency(msg) => Self::Database(DatabaseError::Other(msg)),
+            StateProofError::Cursor(error) => Self::TrieCursor(error),
+            error => Self::other(error),
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::B256Map, B256};
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::updates::TrieUpdates;
 
 /// Mock trie cursor factory.
@@ -84,7 +84,7 @@ impl TrieCursorFactory for MockTrieCursorFactory {
         Self: 'a;
 
     /// Generates a mock account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError> {
         Ok(MockTrieCursor::new(self.account_trie_nodes.clone(), self.visited_account_keys.clone()))
     }
 
@@ -92,7 +92,7 @@ impl TrieCursorFactory for MockTrieCursorFactory {
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError> {
         MockTrieCursor::new_storage(
             self.storage_tries.clone(),
             self.visited_storage_keys.clone(),
@@ -141,11 +141,11 @@ impl MockTrieCursor {
         all_storage_tries: Arc<B256Map<BTreeMap<Nibbles, BranchNodeCompact>>>,
         all_visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<Nibbles>>>>>,
         hashed_address: B256,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, TrieCursorError> {
         if !all_storage_tries.contains_key(&hashed_address) {
-            return Err(DatabaseError::Other(format!(
+            return Err(TrieCursorError::new(std::io::Error::other(format!(
                 "storage trie for {hashed_address:?} not found"
-            )));
+            ))));
         }
         Ok(Self {
             current_key: None,
@@ -189,7 +189,7 @@ impl TrieCursor for MockTrieCursor {
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let entry = self.trie_nodes().get(&key).cloned().map(|value| (key, value));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
@@ -205,7 +205,7 @@ impl TrieCursor for MockTrieCursor {
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         // Find the first key that is greater than or equal to the given key.
         let entry =
             self.trie_nodes().iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
@@ -220,7 +220,7 @@ impl TrieCursor for MockTrieCursor {
     }
 
     #[instrument(skip(self), ret(level = "trace"))]
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let mut iter = self.trie_nodes().iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
         // key otherwise.
@@ -239,7 +239,7 @@ impl TrieCursor for MockTrieCursor {
     }
 
     #[instrument(skip(self), ret(level = "trace"))]
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         Ok(self.current_key)
     }
 

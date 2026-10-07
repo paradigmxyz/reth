@@ -5,7 +5,7 @@ use reth_trie_common::{Nibbles, ProofV2Target};
 // revealed.
 #[inline]
 pub(crate) fn known_parent_prefix(target: &ProofV2Target) -> Option<Nibbles> {
-    target.parent.path(target.key_nibbles)
+    target.parent.path(target.key_nibbles())
 }
 
 // Returns the direct child of the known parent which contains the target. If there is no known
@@ -15,7 +15,7 @@ fn target_child_prefix(target: &ProofV2Target) -> Nibbles {
     target
         .parent
         .path_len()
-        .map_or_else(Nibbles::new, |parent_len| target.key_nibbles.slice(0..parent_len + 1))
+        .map_or_else(Nibbles::new, |parent_len| target.key_nibbles().slice(0..parent_len + 1))
 }
 
 /// Describes targets with the same already-revealed parent and the bounded range traversed to
@@ -46,7 +46,7 @@ pub(crate) fn iter_sub_trie_targets(
     targets.sort_unstable_by(|a, b| {
         known_parent_prefix(a)
             .cmp(&known_parent_prefix(b))
-            .then_with(|| a.key_nibbles.cmp(&b.key_nibbles))
+            .then_with(|| a.key_nibbles().cmp(&b.key_nibbles()))
     });
 
     targets
@@ -224,7 +224,7 @@ mod tests {
                         sub_trie
                             .targets
                             .iter()
-                            .map(|target| target.key_nibbles)
+                            .map(|target| target.key_nibbles())
                             .collect::<Vec<_>>(),
                     )
                 })

@@ -2,7 +2,7 @@ use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{B256, U256};
 use core::marker::PhantomData;
 use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 
 /// Noop hashed cursor factory.
 #[derive(Clone, Default, Debug)]
@@ -19,14 +19,14 @@ impl HashedCursorFactory for NoopHashedCursorFactory {
     where
         Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, TrieCursorError> {
         Ok(NoopHashedCursor::default())
     }
 
     fn hashed_storage_cursor(
         &self,
         _hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, TrieCursorError> {
         Ok(NoopHashedCursor::default())
     }
 }
@@ -49,11 +49,11 @@ where
 {
     type Value = V;
 
-    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, _key: B256) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         Ok(None)
     }
 
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         Ok(None)
     }
 
@@ -63,7 +63,7 @@ where
 }
 
 impl HashedStorageCursor for NoopHashedCursor<U256> {
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+    fn is_storage_empty(&mut self) -> Result<bool, TrieCursorError> {
         Ok(true)
     }
 

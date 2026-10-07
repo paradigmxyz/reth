@@ -259,7 +259,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         limit: B256,
         response_bytes: usize,
     ) -> RangeResult<(B256, Account)> {
-        let mut cursor = self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
+        let mut cursor = self.provider.hashed_account_cursor().map_err(ProviderError::from)?;
 
         let mut accounts = Vec::new();
         let mut total_bytes = 0usize;
@@ -267,7 +267,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
 
         // Append before checking `limit`, so an empty `[start, limit]` still returns the account
         // right past `limit`, provable as an empty range rather than a skipped one.
-        let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
+        let mut entry = cursor.seek(start).map_err(ProviderError::from)?;
         while let Some((hash, account)) = entry {
             total_bytes += 32 + 4 * 32; // hash + rough upper bound of the RLP account body
             accounts.push((hash, account));
@@ -279,7 +279,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
                 end = RangeEnd::ByteLimit;
                 break
             }
-            entry = cursor.next().map_err(ProviderError::Database)?;
+            entry = cursor.next().map_err(ProviderError::from)?;
         }
 
         Ok(RangeResponse { items: accounts, end })
@@ -294,7 +294,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
             TrieRootMetrics::new(TrieType::Storage),
         )
         .root()
-        .map_err(|err| ProviderError::Database(err.into()))?;
+        .map_err(ProviderError::from)?;
         Ok(root)
     }
 
@@ -308,14 +308,14 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
         // Distinguish an absent account from one with no storage, so callers don't silently
         // omit it and shift later accounts' positions.
         let mut account_cursor =
-            self.provider.hashed_account_cursor().map_err(ProviderError::Database)?;
-        let found = account_cursor.seek(hashed_address).map_err(ProviderError::Database)?;
+            self.provider.hashed_account_cursor().map_err(ProviderError::from)?;
+        let found = account_cursor.seek(hashed_address).map_err(ProviderError::from)?;
         if found.map(|(hash, _)| hash) != Some(hashed_address) {
             return Ok(None)
         }
 
         let mut cursor =
-            self.provider.hashed_storage_cursor(hashed_address).map_err(ProviderError::Database)?;
+            self.provider.hashed_storage_cursor(hashed_address).map_err(ProviderError::from)?;
 
         let mut slots = Vec::new();
         let mut total_bytes = 0usize;
@@ -323,7 +323,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
 
         // Append before checking `limit`, so an empty `[start, limit]` still returns the slot
         // right past `limit`, provable as an empty range rather than a skipped one.
-        let mut entry = cursor.seek(start).map_err(ProviderError::Database)?;
+        let mut entry = cursor.seek(start).map_err(ProviderError::from)?;
         while let Some((hash, value)) = entry {
             total_bytes += 64;
             slots.push((hash, value));
@@ -335,7 +335,7 @@ impl<N: ProviderNodeTypes> StateRangeProvider for HistoricalStateRangeView<N> {
                 end = RangeEnd::ByteLimit;
                 break
             }
-            entry = cursor.next().map_err(ProviderError::Database)?;
+            entry = cursor.next().map_err(ProviderError::from)?;
         }
 
         Ok(Some(RangeResponse { items: slots, end }))
@@ -1095,7 +1095,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::{BTreeMap, HashMap},
@@ -1195,10 +1195,7 @@ mod tests {
             blocks.push(ExecutedBlock::new(
                 Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
                 Arc::new(output),
-                ComputedTrieData::new(
-                    Arc::new(state.into_sorted()),
-                    Arc::new(updates.into_sorted()),
-                ),
+                SortedTrieData::new(Arc::new(state.into_sorted()), Arc::new(updates.into_sorted())),
             ));
         }
 
@@ -3304,7 +3301,7 @@ mod tests {
         let executed = ExecutedBlock::new(
             Arc::new(block),
             Arc::new(execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
@@ -3359,7 +3356,7 @@ mod tests {
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
 
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );
@@ -3408,7 +3405,7 @@ mod tests {
         .unseal();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(target_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );

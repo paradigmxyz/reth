@@ -10,8 +10,6 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use itertools::Itertools;
-#[cfg(feature = "rayon")]
-pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
@@ -167,6 +165,10 @@ impl HashedPostState {
     }
 
     /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     ///
     /// See [`ChunkedHashedPostState`] for more information.
     pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
@@ -426,17 +428,22 @@ impl HashedStorage {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
-    pub accounts: Vec<(B256, Option<Account>)>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::utils::deserialize_sorted_updates")
+    )]
+    accounts: Vec<(B256, Option<Account>)>,
     /// Map of hashed addresses to their sorted storage updates.
     pub storages: B256Map<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
-    /// Create new instance of [`HashedPostStateSorted`]
-    pub const fn new(
-        accounts: Vec<(B256, Option<Account>)>,
+    /// Sorts account updates by key, keeping the last value for duplicate keys.
+    pub fn new(
+        mut accounts: Vec<(B256, Option<Account>)>,
         storages: B256Map<HashedStorageSorted>,
     ) -> Self {
+        crate::utils::sort_updates(&mut accounts);
         Self { accounts, storages }
     }
 
@@ -670,10 +677,20 @@ impl AsRef<Self> for HashedPostStateSorted {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorageSorted {
     /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
-    pub storage_slots: Vec<(B256, U256)>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "crate::utils::deserialize_sorted_updates")
+    )]
+    storage_slots: Vec<(B256, U256)>,
 }
 
 impl HashedStorageSorted {
+    /// Sorts updates by key, keeping the last value for duplicate keys.
+    pub fn new(mut storage_slots: Vec<(B256, U256)>) -> Self {
+        crate::utils::sort_updates(&mut storage_slots);
+        Self { storage_slots }
+    }
+
     /// Returns reference to updated storage slots.
     pub fn storage_slots_ref(&self) -> &[(B256, U256)] {
         &self.storage_slots
@@ -772,6 +789,7 @@ impl FlattenedHashedPostStateItem {
 
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be nonzero");
         let flattened = hashed_post_state
             .storages
             .into_iter()
@@ -841,6 +859,40 @@ mod tests {
 
     fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
         core::iter::once((U256::ONE, StorageSlot::new_changed(original, present))).collect()
+    }
+
+    #[test]
+    #[should_panic(expected = "chunk size must be nonzero")]
+    fn zero_chunk_size_is_rejected() {
+        HashedPostState::default().with_accounts([(B256::ZERO, None)]).chunks(0);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn sorted_state_normalizes_construction_and_deserialization() {
+        let entries = vec![
+            (B256::with_last_byte(2), Some(Account::default())),
+            (B256::ZERO, Some(Account::default())),
+            (B256::ZERO, None),
+        ];
+        let state = HashedPostStateSorted::new(entries.clone(), Default::default());
+        assert_eq!(
+            state.accounts(),
+            &vec![(B256::ZERO, None), (B256::with_last_byte(2), Some(Account::default()))]
+        );
+        let mut value = serde_json::to_value(&state).unwrap();
+        value["accounts"] = serde_json::to_value(entries).unwrap();
+        assert_eq!(serde_json::from_value::<HashedPostStateSorted>(value).unwrap(), state);
+        let slots = vec![
+            (B256::with_last_byte(2), U256::ONE),
+            (B256::ZERO, U256::ONE),
+            (B256::ZERO, U256::ZERO),
+        ];
+        let mut value = serde_json::to_value(HashedStorageSorted::default()).unwrap();
+        value["storage_slots"] = serde_json::to_value(&slots).unwrap();
+        let storage = serde_json::from_value::<HashedStorageSorted>(value).unwrap();
+        assert_eq!(storage, HashedStorageSorted::new(slots));
+        assert_eq!(storage.storage_slots_ref()[0], (B256::ZERO, U256::ZERO));
     }
 
     #[test]
@@ -1752,10 +1804,10 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
         fn from(value: HashedPostStateSorted<'a>) -> Self {
-            Self {
-                accounts: value.accounts.into_owned(),
-                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
-            }
+            Self::new(
+                value.accounts.into_owned(),
+                value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            )
         }
     }
 
@@ -1851,7 +1903,7 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<HashedStorageSorted<'a>> for super::HashedStorageSorted {
         fn from(value: HashedStorageSorted<'a>) -> Self {
-            Self { storage_slots: value.storage_slots.into_owned() }
+            Self::new(value.storage_slots.into_owned())
         }
     }
 

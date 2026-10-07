@@ -1,6 +1,6 @@
 use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::HashedPostState;
 use revm::database::BundleAccount;
 
@@ -34,13 +34,13 @@ pub trait HashedCursorFactory {
         Self: 'a;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError>;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, TrieCursorError>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError>;
+    ) -> Result<Self::StorageCursor<'_>, TrieCursorError>;
 }
 
 /// The cursor for iterating over hashed entries.
@@ -51,10 +51,10 @@ pub trait HashedCursor {
 
     /// Seek an entry greater than or equal to the given key and position the cursor there.
     /// Returns the first entry with the key greater than or equal to the sought key.
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, TrieCursorError>;
 
     /// Move the cursor to the next entry and return it.
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, TrieCursorError>;
 
     /// Reset the cursor to its initial state.
     ///
@@ -68,13 +68,14 @@ pub trait HashedCursor {
 #[auto_impl::auto_impl(&mut)]
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
+    fn is_storage_empty(&mut self) -> Result<bool, TrieCursorError>;
 
     /// Set the hashed address for the storage cursor.
     ///
     /// # Important
     ///
-    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    /// Call [`HashedCursor::seek`] before iterating. [`Self::is_storage_empty`] is also
+    /// valid immediately after changing the address, but does not establish an iteration position.
     fn set_hashed_address(&mut self, hashed_address: B256);
 }
 
@@ -87,7 +88,7 @@ pub fn zero_destroyed_account_storage<'a>(
     cursor_factory: &impl HashedCursorFactory,
     accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     hashed_state: &mut HashedPostState,
-) -> Result<(), DatabaseError> {
+) -> Result<(), TrieCursorError> {
     let mut destroyed_accounts = accounts
         .into_iter()
         .filter(|(_, account)| account.was_destroyed() && account.original_info.is_some())

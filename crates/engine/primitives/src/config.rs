@@ -667,7 +667,12 @@ impl TreeConfig {
     }
 
     /// Setter for multiproof task chunk size for proof targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
+        assert!(multiproof_chunk_size > 0, "chunk size must be nonzero");
         self.multiproof_chunk_size = multiproof_chunk_size;
         self
     }

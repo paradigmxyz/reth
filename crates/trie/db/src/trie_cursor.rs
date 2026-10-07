@@ -6,6 +6,7 @@ use reth_db_api::{
     transaction::DbTx,
     DatabaseError,
 };
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
@@ -17,8 +18,9 @@ use std::marker::PhantomData;
 /// Trait abstracting nibble encoding for trie keys.
 ///
 /// Allows the same cursor implementation to work with both legacy (65-byte) and
-/// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
-/// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
+/// packed (33-byte) nibble encodings. The factory fixes the adapter at compile time; callers
+/// select the adapter matching storage settings, using [`crate::with_adapter!`] for runtime
+/// dispatch.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
@@ -39,9 +41,7 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 
 /// Trait for storage trie entry types that carry a subkey and node.
 ///
-/// Needed because [`StorageTrieEntry`] and [`PackedStorageTrieEntry`] are separate structs
-/// with different field types, but `DatabaseStorageTrieCursor` must access `.nibbles()` and
-/// `.node()` generically through `A::StorageValue`.
+/// Provides access to the entry key and branch node, and conversion to and from owned parts.
 pub trait StorageTrieEntryLike: Sized {
     /// The subkey type.
     type SubKey: Clone;
@@ -135,11 +135,7 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     }
 }
 
-/// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.
-///
-/// This indirection is needed because the `tables!` macro generates non-generic
-/// table types, so we use separate "view" types for packed encoding that share
-/// the same MDBX table name.
+/// Maps a [`TrieKeyAdapter`] to account and storage tables using the same key encoding.
 pub trait TrieTableAdapter: TrieKeyAdapter {
     /// The account trie table type.
     type AccountTrieTable: Table<Key = Self::AccountKey, Value = BranchNodeCompact>;
@@ -187,14 +183,14 @@ where
     where
         Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError> {
         Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<A::AccountTrieTable>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError> {
         Ok(DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<A::StorageTrieTable>()?,
             hashed_address,
@@ -221,7 +217,7 @@ where
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(self
             .0
             .seek_exact(A::AccountKey::from(key))?
@@ -231,18 +227,18 @@ where
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(self
             .0
             .seek(A::AccountKey::from(key))?
             .map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(self.0.next()?.map(|value| (A::account_key_to_nibbles(&value.0), value.1)))
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         Ok(self.0.current()?.map(|(k, _)| A::account_key_to_nibbles(&k)))
     }
 
@@ -282,7 +278,8 @@ where
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
+        for (nibbles, maybe_updated) in
+            updates.storage_nodes_ref().iter().filter(|(n, _)| !n.is_empty())
         {
             num_entries += 1;
             let nibbles = A::StorageSubKey::from(*nibbles);
@@ -315,7 +312,7 @@ where
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let subkey = A::StorageSubKey::from(key);
         Ok(self
             .cursor
@@ -330,7 +327,7 @@ where
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(self.cursor.seek_by_key_subkey(self.hashed_address, A::StorageSubKey::from(key))?.map(
             |value| {
                 let (subkey, node) = value.into_parts();
@@ -339,14 +336,14 @@ where
         ))
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(self.cursor.next_dup()?.map(|(_, value)| {
             let (subkey, node) = value.into_parts();
             (A::subkey_to_nibbles(&subkey), node)
         }))
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         Ok(self.cursor.current()?.map(|(_, v)| A::subkey_to_nibbles(v.nibbles())))
     }
 

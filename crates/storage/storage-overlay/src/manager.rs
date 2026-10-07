@@ -881,8 +881,8 @@ fn compute_overlay<N: NodePrimitives>(
             let mut parent_input = parent_input;
             extend_overlay(
                 Arc::make_mut(&mut parent_input),
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
+                &trie_data.hashed_state,
+                &trie_data.trie_updates,
             );
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
@@ -911,23 +911,21 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
             )
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
+        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
         ),
     );
 
@@ -1019,7 +1017,7 @@ mod tests {
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
-    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use revm::{
         bytecode::Bytecode,
         database::BundleState,
@@ -1066,7 +1064,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
         )
     }
 
@@ -1133,12 +1131,12 @@ mod tests {
 
         let (_, state) =
             overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
-        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(state.accounts().len(), 3);
 
         let short_anchor = blocks[1].recovered_block().hash();
         let (_, short) =
             overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
-        assert_eq!(short.accounts.len(), 1);
+        assert_eq!(short.accounts().len(), 1);
         let (_, cached_short) =
             overlay_for_parent(&manager, blocks[2].recovered_block().hash(), short_anchor).unwrap();
         assert!(Arc::ptr_eq(&short, &cached_short));
@@ -1284,9 +1282,9 @@ mod tests {
 
         assert!(!manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.execution_overlays.entries.contains_key(&parent_key));
-        assert_eq!(state_parent.state.accounts.len(), 2);
+        assert_eq!(state_parent.state.accounts().len(), 2);
         assert_eq!(execution_parent.accounts().len(), 2);
-        assert_eq!(child_state.accounts.len(), 3);
+        assert_eq!(child_state.accounts().len(), 3);
         assert_eq!(child_execution.accounts().len(), 3);
         assert!(child_execution
             .accounts()
@@ -1321,7 +1319,7 @@ mod tests {
             .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
             .unwrap();
 
-        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(state.accounts().len(), 3);
         assert_eq!(execution.accounts().len(), 3);
         assert!(manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.state_trie_overlays.entries.contains_key(&child_key));
@@ -1604,7 +1602,7 @@ mod tests {
 
         let (_, state) =
             overlay_for_parent(&manager, blocks[2].recovered_block().hash(), anchor_hash).unwrap();
-        assert_eq!(state.accounts.len(), 1);
+        assert_eq!(state.accounts().len(), 1);
         let execution = manager
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
             .unwrap();

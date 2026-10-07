@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -3663,7 +3663,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -4658,28 +4658,24 @@ mod tests {
         ];
 
         // Create sorted storage trie updates
-        let storage_trie1 = StorageTrieUpdatesSorted {
-            storage_nodes: vec![
-                (
-                    Nibbles::from_nibbles([0x1, 0x0]),
-                    Some(BranchNodeCompact::new(
-                        0b1111_0000_0000_0000, // state_mask
-                        0b0000_0000_0000_0000, // tree_mask
-                        0b0000_0000_0000_0000, // hash_mask (no hashes)
-                        vec![],
-                        None,
-                    )),
-                ),
-                (Nibbles::from_nibbles([0x2, 0x0]), None), // Deletion of existing node
-            ],
-        };
+        let storage_trie1 = StorageTrieUpdatesSorted::new(vec![
+            (
+                Nibbles::from_nibbles([0x1, 0x0]),
+                Some(BranchNodeCompact::new(
+                    0b1111_0000_0000_0000, // state_mask
+                    0b0000_0000_0000_0000, // tree_mask
+                    0b0000_0000_0000_0000, // hash_mask (no hashes)
+                    vec![],
+                    None,
+                )),
+            ),
+            (Nibbles::from_nibbles([0x2, 0x0]), None), // Deletion of existing node
+        ]);
 
-        let storage_trie2 = StorageTrieUpdatesSorted {
-            storage_nodes: vec![
-                (Nibbles::from_nibbles([0xa, 0xb]), None),
-                (Nibbles::from_nibbles([0xc, 0xd]), None),
-            ],
-        };
+        let storage_trie2 = StorageTrieUpdatesSorted::new(vec![
+            (Nibbles::from_nibbles([0xa, 0xb]), None),
+            (Nibbles::from_nibbles([0xc, 0xd]), None),
+        ]);
 
         let mut storage_tries = B256Map::default();
         storage_tries.insert(storage_address1, storage_trie1);
@@ -4791,11 +4787,8 @@ mod tests {
                 (masked_account, Some(Account { nonce: 1, ..Default::default() })),
             ],
             B256Map::from_iter([
-                (kept_storage, HashedStorageSorted { storage_slots: vec![(kept_slot, U256::ONE)] }),
-                (
-                    masked_storage,
-                    HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(2))] },
-                ),
+                (kept_storage, HashedStorageSorted::new(vec![(kept_slot, U256::ONE)])),
+                (masked_storage, HashedStorageSorted::new(vec![(masked_slot, U256::from(2))])),
             ]),
         );
         let full_persist_trie_updates = TrieUpdatesSorted::new(
@@ -4806,15 +4799,14 @@ mod tests {
             B256Map::from_iter([
                 (
                     kept_storage,
-                    StorageTrieUpdatesSorted {
-                        storage_nodes: vec![(kept_storage_node, Some(branch(0b1010)))],
-                    },
+                    StorageTrieUpdatesSorted::new(vec![(kept_storage_node, Some(branch(0b1010)))]),
                 ),
                 (
                     masked_storage,
-                    StorageTrieUpdatesSorted {
-                        storage_nodes: vec![(masked_storage_node, Some(branch(0b0101)))],
-                    },
+                    StorageTrieUpdatesSorted::new(vec![(
+                        masked_storage_node,
+                        Some(branch(0b0101)),
+                    )]),
                 ),
             ]),
         );
@@ -4822,7 +4814,7 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(full_persist_hashed_state),
                 Arc::new(full_persist_trie_updates),
             ),
@@ -4832,22 +4824,20 @@ mod tests {
             vec![(masked_account, Some(Account { nonce: 3, ..Default::default() }))],
             B256Map::from_iter([(
                 masked_storage,
-                HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(4))] },
+                HashedStorageSorted::new(vec![(masked_slot, U256::from(4))]),
             )]),
         );
         let deferred_trie_updates = TrieUpdatesSorted::new(
             vec![(masked_account_node, Some(branch(0b0011_0011)))],
             B256Map::from_iter([(
                 masked_storage,
-                StorageTrieUpdatesSorted {
-                    storage_nodes: vec![(masked_storage_node, Some(branch(0b1100)))],
-                },
+                StorageTrieUpdatesSorted::new(vec![(masked_storage_node, Some(branch(0b1100)))]),
             )]),
         );
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(deferred_trie_hashed_state),
                 Arc::new(deferred_trie_updates),
             ),
@@ -5575,7 +5565,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5644,9 +5634,7 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData {
-                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                },
+                SortedTrieData::new(Arc::new(hashed_state), Default::default()),
             );
             blocks.push(executed);
         }

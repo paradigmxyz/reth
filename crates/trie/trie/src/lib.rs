@@ -4,7 +4,6 @@
 //!
 //! ## Feature Flags
 //!
-//! - `rayon`: uses rayon for parallel [`HashedPostState`] creation.
 //! - `test-utils`: Export utilities for testing
 
 #![doc(
@@ -56,6 +55,7 @@ pub use progress::{
 pub mod stats;
 
 // re-export for convenience
+pub use reth_storage_errors::trie::TrieCursorError;
 pub use reth_trie_common::*;
 
 /// Trie calculation metrics.

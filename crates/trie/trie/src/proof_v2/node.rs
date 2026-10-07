@@ -72,7 +72,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             }
             Self::Branch { node: branch_node, .. } => {
                 branch_node.encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
+                Ok((RlpNode::from_rlp(buf), Some(branch_node.into_stack())))
             }
             Self::RlpNode { node, short_key, hash_mask_bit, .. } => {
                 if short_key.is_empty() {
@@ -128,9 +128,8 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// Returns the child's short key.
     pub(crate) const fn short_key(&self) -> &Nibbles {
         match self {
-            Self::Leaf { short_key, .. } |
-            Self::Branch { node: BranchNodeV2 { key: short_key, .. }, .. } |
-            Self::RlpNode { short_key, .. } => short_key,
+            Self::Leaf { short_key, .. } | Self::RlpNode { short_key, .. } => short_key,
+            Self::Branch { node, .. } => node.key(),
         }
     }
 
@@ -139,7 +138,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
         match self {
             Self::Leaf { .. } => (false, false),
             Self::Branch { node, masks } => (
-                node.key.is_empty() && node.length() >= 32,
+                node.key().is_empty() && node.length() >= 32,
                 masks.is_some_and(|masks| !masks.is_empty()),
             ),
             Self::RlpNode { short_key, hash_mask_bit, tree_mask_bit, .. } => {
@@ -158,12 +157,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Leaf { short_key, .. } | Self::RlpNode { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
-            Self::Branch { node: BranchNodeV2 { key, branch_rlp_node, .. }, .. } => {
-                *key = trim_nibbles_prefix(key, len);
-                if key.is_empty() {
-                    *branch_rlp_node = None;
-                }
-            }
+            Self::Branch { node, .. } => node.trim_key_prefix(len),
         }
     }
 }

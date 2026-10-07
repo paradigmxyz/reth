@@ -191,8 +191,8 @@ mod tests {
     use reth_trie_common::{
         serde_bincode_compat,
         updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
-        LazyTrieData, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted, LazyTrieData,
+        Nibbles, SortedTrieData,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -231,14 +231,14 @@ mod tests {
         let decoded: serde_bincode_compat::updates::StorageTrieUpdatesSorted<'_> =
             rmp_serde::decode::from_slice(&encoded)?;
         let decoded: StorageTrieUpdatesSorted = decoded.into();
-        assert_eq!(decoded.storage_nodes, storage_nodes);
+        assert_eq!(decoded.storage_nodes_ref(), storage_nodes);
 
         let storage_slots = vec![(B256::repeat_byte(1), U256::ONE)];
         let encoded = rmp_serde::encode::to_vec(&(&storage_slots, false))?;
         let decoded: serde_bincode_compat::hashed_state::HashedStorageSorted<'_> =
             rmp_serde::decode::from_slice(&encoded)?;
         let decoded: HashedStorageSorted = decoded.into();
-        assert_eq!(decoded.storage_slots, storage_slots);
+        assert_eq!(decoded.storage_slots_ref(), storage_slots);
 
         Ok(())
     }
@@ -318,7 +318,7 @@ mod tests {
             )]),
         };
 
-        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
+        let trie_data = LazyTrieData::ready(SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(trie_updates.into_sorted()),
         ));

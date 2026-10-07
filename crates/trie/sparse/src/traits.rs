@@ -78,7 +78,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails. Standalone extensions
+    /// whose child branch is not revealed are unsupported and return an error.
     ///
     /// # Panics
     ///
@@ -114,7 +115,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    /// `Ok(())` if all applicable nodes were revealed. Already revealed nodes and paths
+    /// that do not attach to a blinded child are ignored. Success does not imply every
+    /// supplied node was incorporated; the proof must match the current trie.
     ///
     /// # Note
     ///

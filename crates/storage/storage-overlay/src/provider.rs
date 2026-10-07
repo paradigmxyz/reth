@@ -1,7 +1,7 @@
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -17,6 +17,7 @@ use reth_storage_api::{
     StateProvider, StateRootProvider, StorageChangeSetReader, StorageRootProvider,
     StorageSettingsCache,
 };
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie::{
     hashed_cursor::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
@@ -605,7 +606,7 @@ where
                 true,
             )?;
             <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
-                .map_err(|err| ProviderError::Database(err.into()))
+                .map_err(ProviderError::from)
         })
     }
 
@@ -883,8 +884,8 @@ where
     where
         Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError> {
+        let overlay = self.state_trie_overlay(true).map_err(TrieCursorError::new)?;
         let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
             Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_read::<PackedAccountsTrie>()?,
@@ -900,8 +901,8 @@ where
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError> {
+        let overlay = self.state_trie_overlay(true).map_err(TrieCursorError::new)?;
         let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
             Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
                 self.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
@@ -944,25 +945,25 @@ where
     where
         Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.provider().tx()),
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, TrieCursorError> {
+        let overlay = self.state_trie_overlay(true).map_err(TrieCursorError::new)?;
+        Ok(reth_trie::hashed_cursor::HashedPostStateCursor::new_account(
+            DatabaseHashedCursorFactory::new(self.provider().tx()).hashed_account_cursor()?,
             &overlay.input().state,
-        )
-        .hashed_account_cursor()
+        ))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.provider().tx()),
+    ) -> Result<Self::StorageCursor<'_>, TrieCursorError> {
+        let overlay = self.state_trie_overlay(true).map_err(TrieCursorError::new)?;
+        Ok(reth_trie::hashed_cursor::HashedPostStateCursor::new_storage(
+            DatabaseHashedCursorFactory::new(self.provider().tx())
+                .hashed_storage_cursor(hashed_address)?,
             &overlay.input().state,
-        )
-        .hashed_storage_cursor(hashed_address)
+            hashed_address,
+        ))
     }
 }
 
@@ -1017,13 +1018,6 @@ impl<Provider> Deref for OwnedProvider<Provider> {
     }
 }
 
-fn into_database_error(error: ProviderError) -> DatabaseError {
-    match error {
-        ProviderError::Database(error) => error,
-        error => DatabaseError::Other(error.to_string()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1047,8 +1041,8 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
-        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
-        HashedStorage, Nibbles,
+        updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        SortedTrieData,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1076,7 +1070,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 
@@ -1113,7 +1107,7 @@ mod tests {
     }
 
     fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
-        overlay.input().state.accounts.iter().map(|(key, _)| *key).collect()
+        overlay.input().state.accounts().iter().map(|(key, _)| *key).collect()
     }
 
     fn account_node_paths(overlay: &StateTrieOverlay) -> Vec<Nibbles> {

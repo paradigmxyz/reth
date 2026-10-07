@@ -136,11 +136,48 @@ where
     *target = out;
 }
 
+/// Sorts updates by key, keeping the last value for duplicate keys.
+pub(crate) fn sort_updates<K: Ord, V>(updates: &mut Vec<(K, V)>) {
+    updates.sort_by(|a, b| a.0.cmp(&b.0));
+    updates.dedup_by(|a, b| {
+        if a.0 == b.0 {
+            core::mem::swap(&mut a.1, &mut b.1);
+            true
+        } else {
+            false
+        }
+    });
+}
+
+#[cfg(any(test, feature = "serde"))]
+pub(crate) fn deserialize_sorted_updates<'de, D, K, V>(
+    deserializer: D,
+) -> Result<Vec<(K, V)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    K: Ord + serde::Deserialize<'de>,
+    V: serde::Deserialize<'de>,
+{
+    let mut updates = <Vec<(K, V)> as serde::Deserialize>::deserialize(deserializer)?;
+    sort_updates(&mut updates);
+    Ok(updates)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::rc::Rc;
+    use alloc::{collections::BTreeMap, rc::Rc};
     use core::cell::Cell;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn sorted_updates_match_last_write_wins_map(mut entries in proptest::collection::vec((any::<u8>(), any::<u16>()), 0..1000)) {
+            let expected = entries.iter().copied().collect::<BTreeMap<_, _>>();
+            sort_updates(&mut entries);
+            prop_assert_eq!(entries, expected.into_iter().collect::<Vec<_>>());
+        }
+    }
 
     #[derive(Debug)]
     struct CloneCounter {

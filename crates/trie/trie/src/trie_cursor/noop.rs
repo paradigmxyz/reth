@@ -1,7 +1,7 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 
 /// Noop trie cursor factory.
 #[derive(Clone, Default, Debug)]
@@ -20,7 +20,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
         Self: 'a;
 
     /// Generates a noop account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError> {
         Ok(NoopAccountTrieCursor::default())
     }
 
@@ -28,7 +28,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn storage_trie_cursor(
         &self,
         _hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError> {
         Ok(NoopStorageTrieCursor::default())
     }
 }
@@ -42,22 +42,22 @@ impl TrieCursor for NoopAccountTrieCursor {
     fn seek_exact(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
     fn seek(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         Ok(None)
     }
 
@@ -75,22 +75,22 @@ impl TrieCursor for NoopStorageTrieCursor {
     fn seek_exact(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
     fn seek(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         Ok(None)
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         Ok(None)
     }
 

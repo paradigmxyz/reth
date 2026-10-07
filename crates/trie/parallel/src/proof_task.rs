@@ -31,6 +31,7 @@
 
 use crate::{
     error::StateRootTaskError,
+    storage_proof::{StorageProofResult, StorageProofResultMessage},
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -41,13 +42,12 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use reth_execution_errors::StateProofError;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
-use reth_storage_errors::db::DatabaseError;
 use reth_tasks::Runtime;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     proof_v2,
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofV2Target,
 };
 use std::{
     cell::RefCell,
@@ -251,9 +251,7 @@ impl ProofWorkerHandle {
                             "Storage worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "storage worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Provider(error)),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -293,9 +291,7 @@ impl ProofWorkerHandle {
                             "Account worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "account worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Provider(error)),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -359,12 +355,10 @@ impl ProofWorkerHandle {
                 let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
                 let _ = proof_result_sender.send(StorageProofResultMessage {
                     hashed_address,
-                    result: Err(
-                        DatabaseError::Other("storage workers unavailable".to_string()).into()
-                    ),
+                    result: Err(StateProofError::WorkerUnavailable("storage")),
                 });
 
-                ProviderError::other(std::io::Error::other("storage workers unavailable"))
+                StateProofError::WorkerUnavailable("storage").into()
             })
     }
 
@@ -378,15 +372,14 @@ impl ProofWorkerHandle {
         self.account_work_tx
             .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
             .map_err(|err| {
-                let error =
-                    ProviderError::other(std::io::Error::other("account workers unavailable"));
+                let error = ProviderError::from(StateProofError::WorkerUnavailable("account"));
 
                 let AccountWorkerJob::AccountMultiproof { input } = err.0;
                 let ProofResultContext { sender: result_tx, state, start_time: start } =
-                    input.into_proof_result_sender();
+                    input.result_context;
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                    result: Err(StateRootTaskError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -572,32 +565,6 @@ impl ProofResultContext {
     ) -> Self {
         Self { sender, state, start_time }
     }
-}
-
-/// The results of a storage proof calculation.
-#[derive(Debug)]
-pub(crate) struct StorageProofResult {
-    /// The calculated V2 proof nodes
-    pub proof: Vec<ProofTrieNodeV2>,
-    /// The storage root calculated by the V2 proof
-    pub root: Option<B256>,
-}
-
-impl StorageProofResult {
-    /// Returns the calculated root of the trie, if one can be calculated from the proof.
-    const fn root(&self) -> Option<B256> {
-        self.root
-    }
-}
-
-/// Message containing a completed storage proof result with metadata.
-#[derive(Debug)]
-pub struct StorageProofResultMessage {
-    /// The hashed address this storage proof belongs to
-    #[allow(dead_code)]
-    pub(crate) hashed_address: B256,
-    /// The storage proof calculation result
-    pub(crate) result: Result<StorageProofResult, StateProofError>,
 }
 
 /// Internal message for storage workers.
@@ -1046,7 +1013,7 @@ where
     {
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let AccountMultiproofInput { targets, result_context } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
@@ -1056,8 +1023,7 @@ where
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
 
-        let ProofResultContext { sender: result_tx, state, start_time: start } =
-            proof_result_sender;
+        let ProofResultContext { sender: result_tx, state, start_time: start } = result_context;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
@@ -1122,11 +1088,7 @@ fn dispatch_v2_storage_proofs(
 
         storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
-            .map_err(|_| {
-                StateRootTaskError::Other(format!(
-                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
-            })?;
+            .map_err(|_| StateRootTaskError::from(StateProofError::WorkerUnavailable("storage")))?;
 
         storage_proof_receivers.insert(hashed_address, result_rx);
     }
@@ -1158,14 +1120,7 @@ pub struct AccountMultiproofInput {
     /// The targets for which to compute the multiproof.
     pub targets: MultiProofTargetsV2,
     /// Context for sending the proof result.
-    pub proof_result_sender: ProofResultContext,
-}
-
-impl AccountMultiproofInput {
-    /// Returns the [`ProofResultContext`] for this input, consuming the input.
-    fn into_proof_result_sender(self) -> ProofResultContext {
-        self.proof_result_sender
-    }
+    pub result_context: ProofResultContext,
 }
 
 /// Internal message for account workers.
@@ -1274,7 +1229,7 @@ mod tests {
                         account_targets: vec![ProofV2Target::new(address)],
                         storage_targets: std::iter::once((address, vec![slot])).collect(),
                     },
-                    proof_result_sender: ProofResultContext::new(
+                    result_context: ProofResultContext::new(
                         proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),

@@ -9,8 +9,8 @@ use revm::state::EvmState;
 /// and return all nodes whose path is a prefix of the target's `key_nibbles`.
 #[derive(Debug, Copy, Clone)]
 pub struct ProofV2Target {
-    /// The key of the proof target, as nibbles.
-    pub key_nibbles: Nibbles,
+    /// The complete 64-nibble hashed key, established by `new`.
+    key_nibbles: Nibbles,
     /// The known-parent context for this target.
     pub parent: ProofV2TargetParent,
 }
@@ -27,6 +27,11 @@ impl ProofV2Target {
     /// Returns the key the target was initialized with.
     pub fn key(&self) -> B256 {
         B256::from_slice(&self.key_nibbles.pack())
+    }
+
+    /// Returns the complete 64-nibble hashed key.
+    pub const fn key_nibbles(&self) -> Nibbles {
+        self.key_nibbles
     }
 
     /// Sets the already-revealed parent branch of this target.
@@ -112,6 +117,10 @@ impl MultiProofTargetsV2 {
     }
 
     /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
     }
@@ -183,7 +192,12 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is zero.
     pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be nonzero");
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
@@ -285,6 +299,33 @@ impl Iterator for ChunkedMultiProofTargetsV2 {
             None
         } else {
             Some(chunk)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    #[should_panic(expected = "chunk size must be nonzero")]
+    fn zero_chunk_size_is_rejected() {
+        let targets = MultiProofTargetsV2 {
+            account_targets: vec![ProofV2Target::new(B256::ZERO)],
+            ..Default::default()
+        };
+        let _ = targets.chunks(0);
+    }
+
+    proptest! {
+        #[test]
+        fn target_preserves_full_key(bytes in any::<[u8; 32]>(), parent in 0usize..64) {
+            let key = B256::from(bytes);
+            let target = ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(parent));
+            prop_assert_eq!(target.key(), key);
+            prop_assert_eq!(target.key_nibbles().len(), 64);
+            prop_assert!(target.key_nibbles().len() > target.parent.path_len().unwrap());
         }
     }
 }

@@ -51,12 +51,11 @@ impl ProofTrieNodeV2 {
                 TrieNode::Branch(branch) => {
                     result.push(Self {
                         path,
-                        node: TrieNodeV2::Branch(BranchNodeV2 {
-                            key: Nibbles::new(),
-                            branch_rlp_node: None,
-                            stack: branch.stack,
-                            state_mask: branch.state_mask,
-                        }),
+                        node: TrieNodeV2::Branch(BranchNodeV2::new(
+                            Nibbles::new(),
+                            branch.stack,
+                            branch.state_mask,
+                        )),
                         masks,
                     });
                 }
@@ -77,8 +76,11 @@ impl ProofTrieNodeV2 {
                             last.path,
                             branch_v2.key
                         );
-                        branch_v2.key = ext.key;
-                        branch_v2.branch_rlp_node = Some(ext.child);
+                        *branch_v2 = BranchNodeV2::new(
+                            ext.key,
+                            core::mem::take(&mut branch_v2.stack),
+                            branch_v2.state_mask,
+                        );
                         last.path = path;
                     }
 
@@ -151,21 +153,19 @@ impl Decodable for TrieNodeV2 {
                 Default::default(),
                 branch.stack,
                 branch.state_mask,
-                None,
             ))),
             TrieNode::Extension(ext) => {
                 if ext.child.is_hash() {
                     Ok(Self::Extension(ext))
                 } else {
-                    let Self::Branch(mut branch) = Self::decode(&mut ext.child.as_ref())? else {
+                    let TrieNode::Branch(branch) = TrieNode::decode(&mut ext.child.as_ref())?
+                    else {
                         return Err(alloy_rlp::Error::Custom(
                             "extension node child is not a branch",
                         ));
                     };
 
-                    branch.key = ext.key;
-
-                    Ok(Self::Branch(branch))
+                    Ok(Self::Branch(BranchNodeV2::new(ext.key, branch.stack, branch.state_mask)))
                 }
             }
         }
@@ -181,17 +181,18 @@ impl Decodable for TrieNodeV2 {
 /// This node also encompasses the possible parent extension node of a branch via the `key` field.
 #[derive(PartialEq, Eq, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "BranchNodeFields"))]
 pub struct BranchNodeV2 {
     /// The key for the branch's parent extension. if key is empty then the branch does not have a
     /// parent extension.
-    pub key: Nibbles,
+    key: Nibbles,
     /// The collection of RLP encoded children.
-    pub stack: Vec<RlpNode>,
-    /// The bitmask indicating the presence of children at the respective nibble positions
-    pub state_mask: TrieMask,
+    stack: Vec<RlpNode>,
+    /// The bitmask indicating the presence of children at the respective nibble positions.
+    state_mask: TrieMask,
     /// [`RlpNode`] encoding of the branch node. Always provided when `key` is not empty (i.e this
     /// is an extension node).
-    pub branch_rlp_node: Option<RlpNode>,
+    branch_rlp_node: Option<RlpNode>,
 }
 
 impl fmt::Debug for BranchNodeV2 {
@@ -206,14 +207,88 @@ impl fmt::Debug for BranchNodeV2 {
 }
 
 impl BranchNodeV2 {
-    /// Creates a new branch node with the given short key, stack, and state mask.
-    pub const fn new(
-        key: Nibbles,
-        stack: Vec<RlpNode>,
-        state_mask: TrieMask,
-        branch_rlp_node: Option<RlpNode>,
-    ) -> Self {
+    /// Creates a branch, computing its reference when it has a parent extension.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the stack length differs from the number of set bits in `state_mask`.
+    pub fn new(key: Nibbles, stack: Vec<RlpNode>, state_mask: TrieMask) -> Self {
+        assert_eq!(
+            stack.len(),
+            state_mask.count_bits() as usize,
+            "branch stack must match state mask"
+        );
+        let branch_rlp_node = (!key.is_empty()).then(|| {
+            // At most 16 33-byte child references, an empty value, and a 3-byte list header.
+            let mut buffer = [0; 532];
+            let mut out = buffer.as_mut_slice();
+            BranchNodeRef::new(&stack, state_mask).encode(&mut out);
+            let len = 532 - out.len();
+            RlpNode::from_rlp(&buffer[..len])
+        });
         Self { key, stack, state_mask, branch_rlp_node }
+    }
+
+    /// Returns the parent extension key, or an empty key for a bare branch.
+    pub const fn key(&self) -> &Nibbles {
+        &self.key
+    }
+
+    /// Returns the children in nibble order.
+    pub fn stack(&self) -> &[RlpNode] {
+        &self.stack
+    }
+
+    /// Consumes the node and returns its children buffer for reuse.
+    pub fn into_stack(self) -> Vec<RlpNode> {
+        self.stack
+    }
+
+    /// Returns the mask of present children.
+    pub const fn state_mask(&self) -> TrieMask {
+        self.state_mask
+    }
+
+    /// Returns the branch reference used by the parent extension, if present.
+    pub const fn branch_rlp_node(&self) -> Option<&RlpNode> {
+        self.branch_rlp_node.as_ref()
+    }
+
+    /// Removes a prefix from the parent extension key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `len` exceeds the key length.
+    pub fn trim_key_prefix(&mut self, len: usize) {
+        self.key = self.key.slice(len..);
+        if self.key.is_empty() {
+            self.branch_rlp_node = None;
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct BranchNodeFields {
+    key: Nibbles,
+    stack: Vec<RlpNode>,
+    state_mask: TrieMask,
+    branch_rlp_node: Option<RlpNode>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<BranchNodeFields> for BranchNodeV2 {
+    type Error = &'static str;
+
+    fn try_from(fields: BranchNodeFields) -> Result<Self, Self::Error> {
+        if fields.stack.len() != fields.state_mask.count_bits() as usize {
+            return Err("branch stack must match state mask")
+        }
+        let node = Self::new(fields.key, fields.stack, fields.state_mask);
+        if node.branch_rlp_node != fields.branch_rlp_node {
+            return Err("branch reference must match its children and extension key")
+        }
+        Ok(node)
     }
 }
 
@@ -258,6 +333,30 @@ mod tests {
         let mut buf = encoded.as_slice();
         assert_eq!(TrieNodeV2::decode(&mut buf).unwrap(), node);
         assert!(buf.is_empty());
+    }
+
+    proptest! {
+        #[test]
+        fn inline_extension_roundtrip(key in proptest::collection::vec(0u8..16, 1..16)) {
+            let leaf = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(Nibbles::new(), vec![1])));
+            let branch = BranchNodeV2::new(Nibbles::from_nibbles(key), vec![leaf.clone(), leaf], TrieMask::from(3));
+            assert!(branch.branch_rlp_node().unwrap().len() < 32);
+            assert_roundtrip_and_length(TrieNodeV2::Branch(branch));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "branch stack must match state mask")]
+    fn rejects_inconsistent_branch_stack() {
+        BranchNodeV2::new(Nibbles::new(), Vec::new(), TrieMask::from(1));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn rejects_inconsistent_deserialized_branch() {
+        let mut value = serde_json::to_value(BranchNodeV2::default()).unwrap();
+        value["state_mask"] = serde_json::to_value(TrieMask::from(1)).unwrap();
+        assert!(serde_json::from_value::<BranchNodeV2>(value).is_err());
     }
 
     #[test]

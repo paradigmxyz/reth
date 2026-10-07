@@ -2,7 +2,7 @@ use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::forward_cursor::ForwardInMemoryCursor;
 use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::HashedPostStateSorted;
 
 /// The hashed cursor factory for the post state.
@@ -19,21 +19,21 @@ impl<CF, T> HashedPostStateCursorFactory<CF, T> {
     }
 }
 
-impl<'overlay, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'overlay T>
+impl<CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, T>
 where
     CF: HashedCursorFactory,
     T: AsRef<HashedPostStateSorted>,
 {
     type AccountCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account>>
+        = HashedPostStateCursor<'cursor, CF::AccountCursor<'cursor>, Option<Account>>
     where
         Self: 'cursor;
     type StorageCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::StorageCursor<'cursor>, U256>
+        = HashedPostStateCursor<'cursor, CF::StorageCursor<'cursor>, U256>
     where
         Self: 'cursor;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, TrieCursorError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
         Ok(HashedPostStateCursor::new_account(cursor, self.post_state.as_ref()))
     }
@@ -41,7 +41,7 @@ where
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, TrieCursorError> {
         let post_state = self.post_state.as_ref();
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
         Ok(HashedPostStateCursor::new_storage(cursor, post_state, hashed_address))
@@ -135,7 +135,7 @@ where
 {
     /// Create new account cursor which combines a DB cursor and the post state.
     pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
+        let post_state_cursor = ForwardInMemoryCursor::new(post_state.accounts());
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -206,7 +206,7 @@ where
     }
 
     /// Positions the DB cursor state using the underlying cursor when needed.
-    fn cursor_seek(&mut self, key: B256) -> Result<(), DatabaseError> {
+    fn cursor_seek(&mut self, key: B256) -> Result<(), TrieCursorError> {
         // Only seek if:
         // 1. We have a cursor entry and need to seek forward (entry.0 < key), OR
         // 2. The DB cursor needs to be positioned.
@@ -225,7 +225,7 @@ where
     }
 
     /// Advances the DB cursor state to the subsequent entry using the underlying cursor.
-    fn cursor_next(&mut self) -> Result<(), DatabaseError> {
+    fn cursor_next(&mut self) -> Result<(), TrieCursorError> {
         #[cfg(debug_assertions)]
         {
             debug_assert!(self.seeked);
@@ -245,7 +245,7 @@ where
     ///
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
-    fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, DatabaseError> {
+    fn choose_next_entry(&mut self) -> Result<Option<(B256, V::NonZero)>, TrieCursorError> {
         loop {
             let post_state_current =
                 self.post_state_cursor.current().cloned().map(|(k, v)| (k, v.into_option()));
@@ -298,7 +298,11 @@ where
     ///
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
+
         let post_state_entry =
             self.post_state_cursor.seek(&key).cloned().map(|(k, v)| (k, v.into_option()));
 
@@ -340,7 +344,7 @@ where
     /// Returns [None] if the previous memoized or the next greater entries are missing.
     ///
     /// NOTE: This function will not return any entry unless [`HashedCursor::seek`] has been called.
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         #[cfg(debug_assertions)]
         {
             debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
@@ -399,7 +403,7 @@ where
     ///
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+    fn is_storage_empty(&mut self) -> Result<bool, TrieCursorError> {
         let is_empty = self.seek(B256::ZERO)?.is_none();
         self.reset();
         Ok(is_empty)
@@ -427,10 +431,25 @@ mod tests {
     }
 
     fn storage_post_state(storage_slots: Vec<(B256, U256)>) -> HashedPostStateSorted {
-        let storage_sorted = reth_trie_common::HashedStorageSorted { storage_slots };
+        let storage_sorted = reth_trie_common::HashedStorageSorted::new(storage_slots);
         let mut storages = alloy_primitives::map::B256Map::default();
         storages.insert(B256::ZERO, storage_sorted);
         HashedPostStateSorted::new(Vec::new(), storages)
+    }
+
+    #[test]
+    fn seeks_backward_and_after_exhaustion() {
+        let db = Arc::new(BTreeMap::from([(key(1), U256::ONE), (key(3), U256::from(3))]));
+        let mock = MockHashedCursor::new(db, Default::default());
+        let state = storage_post_state(vec![(key(1), U256::ZERO), (key(2), U256::from(2))]);
+        let mut cursor = HashedPostStateCursor::new_storage(mock, &state, B256::ZERO);
+        assert_eq!(cursor.seek(key(3)).unwrap(), Some((key(3), U256::from(3))));
+        assert_eq!(cursor.seek(key(1)).unwrap(), Some((key(2), U256::from(2))));
+        assert_eq!(cursor.next().unwrap(), Some((key(3), U256::from(3))));
+        assert_eq!(cursor.next().unwrap(), None);
+        assert_eq!(cursor.seek(key(1)).unwrap(), Some((key(2), U256::from(2))));
+        assert_eq!(cursor.seek(key(4)).unwrap(), None);
+        assert_eq!(cursor.seek(key(2)).unwrap(), Some((key(2), U256::from(2))));
     }
 
     #[test]
@@ -611,9 +630,7 @@ mod tests {
 
                 // Create a HashedPostStateSorted with the storage data
                 let hashed_address = B256::ZERO;
-                let storage_sorted = reth_trie_common::HashedStorageSorted {
-                    storage_slots: post_state_nodes,
-                };
+                let storage_sorted = reth_trie_common::HashedStorageSorted::new(post_state_nodes);
                 let mut storages = alloy_primitives::map::B256Map::default();
                 storages.insert(hashed_address, storage_sorted);
                 let post_state = HashedPostStateSorted::new(Vec::new(), storages);

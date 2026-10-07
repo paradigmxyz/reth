@@ -1,11 +1,12 @@
-use crate::proof_task::StorageProofResultMessage;
+//! Deferred account encoding and collection of requested storage proofs.
+
+use crate::storage_proof::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use reth_execution_errors::trie::StateProofError;
+use reth_execution_errors::StateProofError;
 use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
     proof_v2::{DeferredValueEncoder, LeafValueEncoder, StorageProofCalculator},
@@ -16,6 +17,124 @@ use std::{
     rc::Rc,
     time::{Duration, Instant},
 };
+
+/// Account encoder sharing pending storage work with its deferred values.
+pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
+    storage: Rc<RefCell<StorageProofs>>,
+    storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+}
+
+impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
+    pub(crate) fn new(
+        dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+    ) -> Self {
+        Self {
+            storage: Rc::new(RefCell::new(StorageProofs {
+                pending: dispatched,
+                results: Default::default(),
+                stats: Default::default(),
+            })),
+            storage_calculator,
+        }
+    }
+
+    /// Collects every requested storage proof, including work returned by dropped encoders.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any deferred encoders remain alive.
+    pub(crate) fn finalize(
+        self,
+    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
+        let mut storage = Rc::into_inner(self.storage)
+            .expect("no deferred encoders are still allocated")
+            .into_inner();
+        for (address, rx) in core::mem::take(&mut storage.pending) {
+            storage.collect(address, rx)?;
+        }
+        Ok((storage.results, storage.stats))
+    }
+}
+
+impl<TC, HC> LeafValueEncoder for AsyncAccountValueEncoder<TC, HC>
+where
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
+{
+    type Value = Account;
+    type DeferredEncoder = AsyncAccountDeferredValueEncoder<TC, HC>;
+
+    fn deferred_encoder(
+        &mut self,
+        hashed_address: B256,
+        account: Account,
+    ) -> Self::DeferredEncoder {
+        let mut storage = self.storage.borrow_mut();
+        let receiver = storage.pending.remove(&hashed_address);
+        if receiver.is_some() {
+            storage.stats.dispatched_count += 1;
+        } else {
+            storage.stats.sync_count += 1;
+        }
+        AsyncAccountDeferredValueEncoder {
+            hashed_address,
+            account,
+            receiver,
+            storage: self.storage.clone(),
+            storage_calculator: self.storage_calculator.clone(),
+        }
+    }
+}
+
+/// Deferred value whose unconsumed receiver is returned to finalization on drop.
+pub(crate) struct AsyncAccountDeferredValueEncoder<TC, HC> {
+    hashed_address: B256,
+    account: Account,
+    receiver: Option<CrossbeamReceiver<StorageProofResultMessage>>,
+    storage: Rc<RefCell<StorageProofs>>,
+    storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+}
+
+impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
+    fn drop(&mut self) {
+        if let Some(rx) = self.receiver.take() {
+            self.storage.borrow_mut().pending.insert(self.hashed_address, rx);
+        }
+    }
+}
+
+impl<TC, HC> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<TC, HC>
+where
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
+{
+    #[allow(clippy::clone_on_copy)]
+    fn encode(mut self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
+        let dispatched = self.receiver.is_some();
+        let root = self
+            .receiver
+            .take()
+            .map(|rx| self.storage.borrow_mut().collect(self.hashed_address, rx))
+            .transpose()?
+            .flatten();
+        let root = if let Some(root) = root {
+            root
+        } else {
+            if dispatched {
+                self.storage.borrow_mut().stats.dispatched_missing_root_count += 1;
+            }
+            // A storage-only target may omit its root even when account traversal needs it.
+            let mut calculator = self.storage_calculator.borrow_mut();
+            let root_node = calculator.storage_root_node(self.hashed_address)?;
+            calculator
+                .compute_root_hash(&[root_node])?
+                .expect("storage_root_node returns a node at empty path")
+        };
+        self.account.clone().into_trie_account(root).encode(buf);
+        Ok(())
+    }
+}
 
 /// Stats collected by [`AsyncAccountValueEncoder`] during proof computation.
 ///
@@ -43,267 +162,72 @@ impl ValueEncoderStats {
     }
 }
 
-/// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
-pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
-    /// A storage proof job was dispatched to the worker pool.
-    Dispatched {
-        hashed_address: B256,
-        account: Account,
-        /// The receiver for the storage proof result. This is an `Option` so that `encode` can
-        /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
-        /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
-        /// Shared storage proof results.
-        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
-        /// Shared stats for tracking wait time and counts.
-        stats: Rc<RefCell<ValueEncoderStats>>,
-        /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
-        /// root.
-        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-    },
-    /// Synchronous storage root computation.
-    Sync {
-        /// Shared storage proof calculator for computing storage roots.
-        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-        hashed_address: B256,
-        account: Account,
-    },
+#[derive(Debug)]
+struct StorageProofs {
+    pending: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
+    results: B256Map<Vec<ProofTrieNodeV2>>,
+    stats: ValueEncoderStats,
 }
 
-impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
-    fn drop(&mut self) {
-        // If this is a Dispatched encoder that was never consumed via encode(), we need to
-        // receive the storage proof result to avoid losing it.
-        let res = if let Self::Dispatched {
-            hashed_address,
-            proof_result_rx,
-            storage_proof_results,
-            stats,
-            ..
-        } = self
-        {
-            // Take the receiver out - if it's None (already consumed by encode), nothing to do
-            let Some(proof_result_rx) = proof_result_rx.take() else { return };
-
-            (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
-
-                let wait_start = Instant::now();
-                let msg = rx.recv().map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?;
-                let result = msg.result?;
-
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
-
-                storage_proof_results.borrow_mut().insert(*hashed_address, result.proof);
-                Ok(())
-            })()
-        } else {
-            return;
-        };
-
-        if let Err(err) = res {
-            tracing::error!(target: "trie::parallel", %err, "Failed to collect storage proof in deferred encoder drop");
-        }
-    }
-}
-
-impl<TC, HC> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<TC, HC>
-where
-    TC: TrieStorageCursor,
-    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
-{
-    #[allow(clippy::clone_on_copy)]
-    fn encode(mut self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let (account, root) = match &mut self {
-            Self::Dispatched {
-                hashed_address,
-                account,
-                proof_result_rx,
-                storage_proof_results,
-                stats,
-                storage_calculator,
-            } => {
-                let hashed_address = *hashed_address;
-                let account = account.clone();
-                // Take the receiver so Drop won't try to receive on it again
-                let proof_result_rx = proof_result_rx
-                    .take()
-                    .expect("encode called on already-consumed Dispatched encoder");
-                let wait_start = Instant::now();
-                let result = proof_result_rx?
-                    .recv()
-                    .map_err(|_| {
-                        StateProofError::Database(DatabaseError::Other(format!(
-                            "Storage proof channel closed for {hashed_address:?}",
-                        )))
-                    })?
-                    .result?;
-                stats.borrow_mut().storage_wait_time += wait_start.elapsed();
-
-                storage_proof_results.borrow_mut().insert(hashed_address, result.proof);
-
-                let root = match result.root {
-                    Some(root) => root,
-                    None => {
-                        // In `compute_v2_account_multiproof` we ensure that all dispatched storage
-                        // proofs computations for which there is also an account proof will return
-                        // a root node, but it could happen randomly that an account which is not in
-                        // the account proof targets, but _is_ in storage proof targets, will need
-                        // to be encoded as part of general trie traversal, so we need to handle
-                        // that case here.
-                        stats.borrow_mut().dispatched_missing_root_count += 1;
-
-                        let mut calculator = storage_calculator.borrow_mut();
-                        let root_node = calculator.storage_root_node(hashed_address)?;
-                        calculator
-                            .compute_root_hash(&[root_node])?
-                            .expect("storage_root_node returns a node at empty path")
-                    }
-                };
-
-                (account, root)
-            }
-            Self::Sync { storage_calculator, hashed_address, account } => {
-                let hashed_address = *hashed_address;
-                let account = account.clone();
-                let mut calculator = storage_calculator.borrow_mut();
-                let root_node = calculator.storage_root_node(hashed_address)?;
-                let storage_root = calculator
-                    .compute_root_hash(&[root_node])?
-                    .expect("storage_root_node returns a node at empty path");
-
-                (account, storage_root)
-            }
-        };
-
-        let account = account.into_trie_account(root);
-        account.encode(buf);
-        Ok(())
-    }
-}
-
-/// Implements the [`LeafValueEncoder`] trait for accounts.
-///
-/// Accepts a set of pre-dispatched storage proof receivers for accounts whose storage roots are
-/// being computed asynchronously by worker threads.
-///
-/// For accounts without pre-dispatched proofs, uses a shared
-/// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
-/// multiple accounts.
-pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
-    /// Storage proof jobs which were dispatched ahead of time.
-    dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-    /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
-    /// required because [`DeferredValueEncoder`] cannot have a lifetime.
-    storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
-    /// Shared storage proof calculator for synchronous computation. Reuses cursors and internal
-    /// buffers across multiple storage root calculations.
-    storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-    /// Shared stats for tracking wait time and variant counts.
-    stats: Rc<RefCell<ValueEncoderStats>>,
-}
-
-impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
-    /// Initializes a [`Self`] using a storage proof calculator which will be reused to calculate
-    /// storage roots synchronously.
-    ///
-    /// # Parameters
-    /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
-    /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
-    pub(crate) fn new(
-        dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-    ) -> Self {
-        Self {
-            dispatched,
-            storage_proof_results: Default::default(),
-            storage_calculator,
-            stats: Default::default(),
-        }
-    }
-
-    /// Consume [`Self`] and return all collected storage proofs along with accumulated stats.
-    ///
-    /// This method collects any remaining dispatched proofs that weren't consumed during proof
-    /// calculation and includes their wait time in the returned stats.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
-    /// been dropped.
-    pub(crate) fn finalize(
-        self,
-    ) -> Result<(B256Map<Vec<ProofTrieNodeV2>>, ValueEncoderStats), StateProofError> {
-        let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
-            .expect("no deferred encoders are still allocated")
-            .into_inner();
-
-        let mut stats = Rc::into_inner(self.stats)
-            .expect("no deferred encoders are still allocated")
-            .into_inner();
-
-        // Any remaining dispatched proofs need to have their results collected.
-        // These are proofs that were pre-dispatched but not consumed during proof calculation.
-        for (hashed_address, rx) in &self.dispatched {
-            let wait_start = Instant::now();
-            let result = rx
-                .recv()
-                .map_err(|_| {
-                    StateProofError::Database(DatabaseError::Other(format!(
-                        "Storage proof channel closed for {hashed_address:?}",
-                    )))
-                })?
-                .result?;
-            stats.storage_wait_time += wait_start.elapsed();
-
-            storage_proof_results.insert(*hashed_address, result.proof);
-        }
-
-        Ok((storage_proof_results, stats))
-    }
-}
-
-impl<TC, HC> LeafValueEncoder for AsyncAccountValueEncoder<TC, HC>
-where
-    TC: TrieStorageCursor,
-    HC: HashedStorageCursor<Value = alloy_primitives::U256>,
-{
-    type Value = Account;
-    type DeferredEncoder = AsyncAccountDeferredValueEncoder<TC, HC>;
-
-    fn deferred_encoder(
+impl StorageProofs {
+    fn collect(
         &mut self,
-        hashed_address: B256,
-        account: Self::Value,
-    ) -> Self::DeferredEncoder {
-        // If the proof job has already been dispatched for this account then it's not necessary to
-        // dispatch another.
-        if let Some(rx) = self.dispatched.remove(&hashed_address) {
-            self.stats.borrow_mut().dispatched_count += 1;
-            return AsyncAccountDeferredValueEncoder::Dispatched {
-                hashed_address,
-                account,
-                proof_result_rx: Some(Ok(rx)),
-                storage_proof_results: self.storage_proof_results.clone(),
-                stats: self.stats.clone(),
-                storage_calculator: self.storage_calculator.clone(),
+        address: B256,
+        rx: CrossbeamReceiver<StorageProofResultMessage>,
+    ) -> Result<Option<B256>, StateProofError> {
+        let start = Instant::now();
+        let message = rx.recv();
+        self.stats.storage_wait_time += start.elapsed();
+        let result =
+            message.map_err(|_| StateProofError::StorageProofChannelClosed(address))?.result?;
+        self.results.insert(address, result.proof);
+        Ok(result.root)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage_proof::StorageProofResult;
+    use reth_trie::{
+        hashed_cursor::noop::NoopHashedCursor, trie_cursor::noop::NoopStorageTrieCursor,
+    };
+
+    #[test]
+    fn dropped_encoder_returns_required_proof_to_finalization() {
+        for outcome in 0..3 {
+            let address = B256::with_last_byte(1);
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            let calculator = StorageProofCalculator::new_storage(
+                NoopStorageTrieCursor::default(),
+                NoopHashedCursor::default(),
+            );
+            let mut encoder = AsyncAccountValueEncoder::new(
+                B256Map::from_iter([(address, rx)]),
+                Rc::new(RefCell::new(calculator)),
+            );
+            let deferred = encoder.deferred_encoder(address, Account::default());
+            // Drop before the worker responds: dropping must neither block nor discard its result.
+            drop(deferred);
+            if outcome != 2 {
+                let result = if outcome == 0 {
+                    Ok(StorageProofResult { proof: vec![ProofTrieNodeV2::empty()], root: None })
+                } else {
+                    Err(StateProofError::TrieInconsistency("storage proof failed".into()))
+                };
+                tx.send(StorageProofResultMessage { hashed_address: address, result }).unwrap();
             }
-        }
-
-        // If the address didn't have a job dispatched for it then we can assume it has no targets,
-        // and we only need its root.
-
-        // Compute storage root synchronously using the shared calculator
-        self.stats.borrow_mut().sync_count += 1;
-        AsyncAccountDeferredValueEncoder::Sync {
-            storage_calculator: self.storage_calculator.clone(),
-            hashed_address,
-            account,
+            drop(tx);
+            let result = encoder.finalize();
+            match outcome {
+                0 => assert_eq!(result.unwrap().0[&address], vec![ProofTrieNodeV2::empty()]),
+                1 => assert!(
+                    matches!(result, Err(StateProofError::TrieInconsistency(message)) if message == "storage proof failed")
+                ),
+                _ => assert!(
+                    matches!(result, Err(StateProofError::StorageProofChannelClosed(a)) if a == address)
+                ),
+            }
         }
     }
 }

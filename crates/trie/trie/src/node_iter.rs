@@ -3,7 +3,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use alloy_trie::proof::AddedRemovedKeys;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use tracing::{instrument, trace};
 
 /// Represents a branch node in the trie.
@@ -122,7 +122,10 @@ where
     /// If the key is the same as the last seeked key, the result of the last seek is returned.
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
-    fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+    fn seek_hashed_entry(
+        &mut self,
+        key: B256,
+    ) -> Result<Option<(B256, H::Value)>, TrieCursorError> {
         if let Some((last_key, _)) = self.last_next_result.as_ref() &&
             *last_key == key
         {
@@ -160,7 +163,7 @@ where
     /// Advances the hashed cursor to the next entry.
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
-    fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+    fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, TrieCursorError> {
         let next = self.hashed_cursor.next()?;
 
         self.last_next_result = next.clone();
@@ -200,7 +203,7 @@ where
     )]
     pub fn try_next(
         &mut self,
-    ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
+    ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, TrieCursorError> {
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {

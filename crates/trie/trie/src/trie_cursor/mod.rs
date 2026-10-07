@@ -1,6 +1,6 @@
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 
 /// In-memory implementations of trie cursors.
 mod in_memory;
@@ -40,13 +40,13 @@ pub trait TrieCursorFactory {
         Self: 'a;
 
     /// Create an account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError>;
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError>;
 
     /// Create a storage tries cursor.
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError>;
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError>;
 }
 
 /// A cursor for traversing stored trie nodes. The cursor must iterate over keys in
@@ -57,17 +57,19 @@ pub trait TrieCursor {
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError>;
 
     /// Move the cursor to the key and return a value matching of greater than the key.
-    fn seek(&mut self, key: Nibbles)
-        -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError>;
 
     /// Move the cursor to the next key.
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError>;
 
     /// Get the current entry.
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError>;
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError>;
 
     /// Reset the cursor to the beginning.
     ///
@@ -95,7 +97,7 @@ pub trait TrieStorageCursor: TrieCursor {
 pub struct TrieCursorIter<'a, C> {
     cursor: &'a mut C,
     /// The initial value from seek, if any
-    initial: Option<Result<(Nibbles, BranchNodeCompact), DatabaseError>>,
+    initial: Option<Result<(Nibbles, BranchNodeCompact), TrieCursorError>>,
 }
 
 impl<'a, C> TrieCursorIter<'a, C> {
@@ -123,7 +125,7 @@ impl<'a, C> Iterator for TrieCursorIter<'a, C>
 where
     C: TrieCursor,
 {
-    type Item = Result<(Nibbles, BranchNodeCompact), DatabaseError>;
+    type Item = Result<(Nibbles, BranchNodeCompact), TrieCursorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // If we have an initial value from seek, return it first

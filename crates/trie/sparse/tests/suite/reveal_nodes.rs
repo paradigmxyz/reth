@@ -1,5 +1,5 @@
 use super::*;
-use alloy_trie::{nodes::BranchNodeRef, TrieMask};
+use alloy_trie::TrieMask;
 use reth_trie_common::{BranchNodeV2, RlpNode};
 
 /// Empty slice is a no-op.
@@ -401,15 +401,10 @@ pub(super) fn test_reveal_boundary_node_with_missing_upper_parent_branch<T: Spar
     let child_hash_0 = RlpNode::word_rlp(&B256::repeat_byte(0xAA));
     let child_hash_1 = RlpNode::word_rlp(&B256::repeat_byte(0xBB));
     let state_mask = TrieMask::new(0b0011);
-    let branch_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(
-        &[child_hash_0.clone(), child_hash_1.clone()],
-        state_mask,
-    )));
     let root = TrieNodeV2::Branch(BranchNodeV2::new(
         Nibbles::from_nibbles([0x1, 0x2]),
         vec![child_hash_0, child_hash_1],
         state_mask,
-        Some(branch_rlp),
     ));
 
     let mut trie = (new_trie)();

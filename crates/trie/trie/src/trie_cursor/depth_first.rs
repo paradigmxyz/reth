@@ -1,6 +1,6 @@
 use super::TrieCursor;
 use crate::{BranchNodeCompact, Nibbles};
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use std::{cmp::Ordering, iter::FusedIterator};
 use tracing::trace;
 
@@ -72,7 +72,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
         self.next.reverse();
     }
 
-    fn fill_next(&mut self) -> Result<(), DatabaseError> {
+    fn fill_next(&mut self) -> Result<(), TrieCursorError> {
         debug_assert!(self.next.is_empty());
 
         loop {
@@ -105,7 +105,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
 }
 
 impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
-    type Item = Result<(Nibbles, BranchNodeCompact), DatabaseError>;
+    type Item = Result<(Nibbles, BranchNodeCompact), TrieCursorError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -141,23 +141,23 @@ mod tests {
         fn seek_exact(
             &mut self,
             _key: Nibbles,
-        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            Err(DatabaseError::Other("test error".to_string()))
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
+            Err(TrieCursorError::new(std::io::Error::other("test error".to_string())))
         }
 
         fn seek(
             &mut self,
             _key: Nibbles,
-        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            Err(DatabaseError::Other("test error".to_string()))
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
+            Err(TrieCursorError::new(std::io::Error::other("test error".to_string())))
         }
 
-        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-            Err(DatabaseError::Other("test error".to_string()))
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
+            Err(TrieCursorError::new(std::io::Error::other("test error".to_string())))
         }
 
-        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-            Err(DatabaseError::Other("test error".to_string()))
+        fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
+            Err(TrieCursorError::new(std::io::Error::other("test error".to_string())))
         }
 
         fn reset(&mut self) {}

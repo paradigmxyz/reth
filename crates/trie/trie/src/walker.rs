@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use alloy_trie::proof::AddedRemovedKeys;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use tracing::{instrument, trace};
 
 #[cfg(test)]
@@ -280,7 +280,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// # Returns
     ///
     /// * `Result<(), Error>` - Unit on success or an error.
-    pub fn advance(&mut self) -> Result<(), DatabaseError> {
+    pub fn advance(&mut self) -> Result<(), TrieCursorError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 trace!(
@@ -308,7 +308,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn node(
+        &mut self,
+        exact: bool,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let key = self.key().expect("key must exist");
         let entry = if exact { self.cursor.seek_exact(*key)? } else { self.cursor.seek(*key)? };
         #[cfg(feature = "metrics")]
@@ -323,7 +326,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 
     /// Consumes the next node in the trie, updating the stack.
     #[instrument(level = "trace", skip(self), ret)]
-    fn consume_node(&mut self) -> Result<(), DatabaseError> {
+    fn consume_node(&mut self) -> Result<(), TrieCursorError> {
         let Some((key, node)) = self.node(false)? else {
             // If no next node is found, clear the stack.
             self.stack.clear();
@@ -372,7 +375,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     fn move_to_next_sibling(
         &mut self,
         allow_root_to_child_nibble: bool,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), TrieCursorError> {
         let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its

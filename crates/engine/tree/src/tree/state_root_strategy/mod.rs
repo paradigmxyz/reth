@@ -84,7 +84,7 @@ pub use reth_trie_parallel::{
     state_root_task::{
         evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
         StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use reth_trie_sparse::{
@@ -551,7 +551,6 @@ impl DefaultStateRootStrategy {
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
         let (proof_result_tx, proof_result_rx) =
             crossbeam_channel::unbounded::<ProofResultMessage>();
@@ -580,6 +579,12 @@ impl DefaultStateRootStrategy {
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
         let parent_state_root = parent_header.state_root();
+        let (handle, from_multi_proof) = StateRootHandle::channel(
+            parent_state_root,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        );
 
         self.spawn_sparse_trie_task(
             executor,
@@ -603,16 +608,7 @@ impl DefaultStateRootStrategy {
             },
         );
 
-        (
-            StateRootHandle::new(
-                parent_state_root,
-                updates_tx,
-                cancel_guard,
-                state_root_rx,
-                hashed_state_rx,
-            ),
-            pending_trie_rx,
-        )
+        (handle, pending_trie_rx)
     }
 
     /// Spawns the sparse-trie task and hands off its pending trie for later publication.
@@ -687,7 +683,7 @@ impl DefaultStateRootStrategy {
                         Ok(None) => new_sparse_state_trie(),
                         Err(err) => {
                             let _ =
-                                state_root_tx.send(Err(StateRootTaskError::Other(err.to_string())));
+                                state_root_tx.send(Err(StateRootTaskError::Other(Box::new(err))));
                             return;
                         }
                     }
@@ -1454,13 +1450,13 @@ mod tests {
                 let mut job = SparseTrieStateRootJob {
                     pending_trie_rx,
                     overlay_manager: overlay_manager.clone(),
-                    handle: StateRootHandle::new(
+                    handle: StateRootHandle::channel(
                         B256::ZERO,
-                        crossbeam_channel::unbounded().0,
                         StateRootTaskCancelGuard::channel().0,
                         result_rx,
                         mpsc::channel().1,
-                    ),
+                    )
+                    .0,
                     state_provider_factory: OverlayStateProviderFactory::new(
                         provider.clone(),
                         overlay_manager.overlay_builder(genesis_hash),

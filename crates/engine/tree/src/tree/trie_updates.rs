@@ -2,11 +2,10 @@ use alloy_primitives::{
     map::{B256Map, HashMap},
     B256,
 };
-use reth_db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeCompact, Nibbles,
+    BranchNodeCompact, Nibbles, TrieCursorError,
 };
 use std::collections::BTreeSet;
 use tracing::warn;
@@ -95,7 +94,7 @@ pub(crate) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
     regular: TrieUpdates,
-) -> Result<bool, DatabaseError> {
+) -> Result<bool, TrieCursorError> {
     let mut task = adjust_trie_updates(task);
     let mut regular = adjust_trie_updates(regular);
 
@@ -176,10 +175,10 @@ pub(crate) fn compare_trie_updates(
 }
 
 fn compare_storage_trie_updates<C: TrieCursor>(
-    trie_cursor: impl Fn() -> Result<C, DatabaseError>,
+    trie_cursor: impl Fn() -> Result<C, TrieCursorError>,
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
-) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
+) -> Result<StorageTrieUpdatesDiff, TrieCursorError> {
     let mut diff = StorageTrieUpdatesDiff::default();
 
     // compare storage nodes
@@ -266,7 +265,7 @@ fn branch_nodes_equal(
     task: Option<&BranchNodeCompact>,
     regular: Option<&BranchNodeCompact>,
     database: Option<&BranchNodeCompact>,
-) -> Result<bool, DatabaseError> {
+) -> Result<bool, TrieCursorError> {
     Ok(match (task, regular) {
         (Some(task), Some(regular)) => {
             task.state_mask == regular.state_mask &&

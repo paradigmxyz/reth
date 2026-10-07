@@ -20,14 +20,14 @@
 
 use crate::trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use alloy_primitives::{map::B256Map, B256};
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     BranchNodeCompact, Nibbles,
 };
 
 /// Result type for changeset operations.
-pub type ChangesetResult<T> = Result<T, DatabaseError>;
+pub type ChangesetResult<T> = Result<T, TrieCursorError>;
 
 /// Computes trie changesets by looking up current node values from the trie.
 ///
@@ -65,10 +65,8 @@ where
         let storage_changesets = compute_storage_changesets(&mut storage_cursor, storage_updates)?;
 
         if !storage_changesets.is_empty() {
-            storage_tries.insert(
-                *hashed_address,
-                StorageTrieUpdatesSorted { storage_nodes: storage_changesets },
-            );
+            storage_tries
+                .insert(*hashed_address, StorageTrieUpdatesSorted::new(storage_changesets));
         }
     }
 
@@ -116,11 +114,11 @@ fn compute_storage_changesets(
     cursor: &mut impl TrieStorageCursor,
     storage_updates: &StorageTrieUpdatesSorted,
 ) -> ChangesetResult<Vec<(Nibbles, Option<BranchNodeCompact>)>> {
-    let mut storage_changesets = Vec::with_capacity(storage_updates.storage_nodes.len());
+    let mut storage_changesets = Vec::with_capacity(storage_updates.len());
 
     // For each changed storage node, look up its current value
     // The input is already sorted, so the output will be sorted
-    for (path, _new_node) in &storage_updates.storage_nodes {
+    for (path, _new_node) in storage_updates.storage_nodes_ref() {
         let old_node = cursor.seek_exact(*path)?.map(|(_path, node)| node);
         storage_changesets.push((*path, old_node));
     }
@@ -227,9 +225,7 @@ mod tests {
         let mut storage_updates = B256Map::default();
         storage_updates.insert(
             hashed_address,
-            StorageTrieUpdatesSorted {
-                storage_nodes: vec![(path1, Some(new_node1)), (path3, Some(new_node3))],
-            },
+            StorageTrieUpdatesSorted::new(vec![(path1, Some(new_node1)), (path3, Some(new_node3))]),
         );
 
         let updates = TrieUpdatesSorted::new(vec![], storage_updates);
@@ -240,14 +236,14 @@ mod tests {
         // Check storage changesets
         assert_eq!(changesets.storage_tries_ref().len(), 1);
         let storage_changesets = changesets.storage_tries_ref().get(&hashed_address).unwrap();
-        assert_eq!(storage_changesets.storage_nodes.len(), 2);
+        assert_eq!(storage_changesets.storage_nodes_ref().len(), 2);
 
         // path1 should have the old node1 value
-        assert_eq!(storage_changesets.storage_nodes[0].0, path1);
-        assert_eq!(storage_changesets.storage_nodes[0].1, Some(node1));
+        assert_eq!(storage_changesets.storage_nodes_ref()[0].0, path1);
+        assert_eq!(storage_changesets.storage_nodes_ref()[0].1, Some(node1));
 
         // path3 should have None (it didn't exist before)
-        assert_eq!(storage_changesets.storage_nodes[1].0, path3);
-        assert_eq!(storage_changesets.storage_nodes[1].1, None);
+        assert_eq!(storage_changesets.storage_nodes_ref()[1].0, path3);
+        assert_eq!(storage_changesets.storage_nodes_ref()[1].1, None);
     }
 }

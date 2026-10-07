@@ -18,6 +18,9 @@ pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 /// Bundled errors variants thrown by various providers.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum ProviderError {
+    /// Ordered trie access failed.
+    #[error(transparent)]
+    TrieCursor(#[from] crate::trie::TrieCursorError),
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),

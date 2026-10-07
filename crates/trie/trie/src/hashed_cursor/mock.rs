@@ -6,7 +6,7 @@ use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::HashedPostState;
 use tracing::instrument;
 
@@ -94,14 +94,14 @@ impl HashedCursorFactory for MockHashedCursorFactory {
     where
         Self: 'a;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, TrieCursorError> {
         Ok(MockHashedCursor::new(self.hashed_accounts.clone(), self.visited_account_keys.clone()))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, TrieCursorError> {
         MockHashedCursor::new_storage(
             self.hashed_storage_tries.clone(),
             self.visited_storage_keys.clone(),
@@ -149,11 +149,11 @@ impl<T> MockHashedCursor<T> {
         all_storage_values: Arc<B256Map<BTreeMap<B256, T>>>,
         all_visited_storage_keys: Arc<B256Map<Mutex<Vec<KeyVisit<B256>>>>>,
         hashed_address: B256,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, TrieCursorError> {
         if !all_storage_values.contains_key(&hashed_address) {
-            return Err(DatabaseError::Other(format!(
+            return Err(TrieCursorError::new(std::io::Error::other(format!(
                 "storage trie for {hashed_address:?} not found"
-            )));
+            ))));
         }
         Ok(Self {
             current_key: None,
@@ -196,7 +196,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     type Value = T;
 
     #[instrument(skip(self), ret(level = "trace"))]
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         // Find the first key that is greater than or equal to the given key.
         let entry = self.values().iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
@@ -210,7 +210,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     }
 
     #[instrument(skip(self), ret(level = "trace"))]
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         let mut iter = self.values().iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
         // key otherwise.
@@ -237,7 +237,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
 
 impl<T: Debug + Clone> HashedStorageCursor for MockHashedCursor<T> {
     #[instrument(level = "trace", skip(self), ret)]
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+    fn is_storage_empty(&mut self) -> Result<bool, TrieCursorError> {
         Ok(self.values().is_empty())
     }
 

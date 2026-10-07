@@ -1,7 +1,7 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
 use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
 /// The trie cursor factory for the trie updates.
@@ -20,22 +20,22 @@ impl<CF, T> InMemoryTrieCursorFactory<CF, T> {
     }
 }
 
-impl<'overlay, CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, &'overlay T>
+impl<CF, T> TrieCursorFactory for InMemoryTrieCursorFactory<CF, T>
 where
-    CF: TrieCursorFactory + 'overlay,
+    CF: TrieCursorFactory,
     T: AsRef<TrieUpdatesSorted>,
 {
     type AccountTrieCursor<'cursor>
-        = InMemoryTrieCursor<'overlay, CF::AccountTrieCursor<'cursor>>
+        = InMemoryTrieCursor<'cursor, CF::AccountTrieCursor<'cursor>>
     where
         Self: 'cursor;
 
     type StorageTrieCursor<'cursor>
-        = InMemoryTrieCursor<'overlay, CF::StorageTrieCursor<'cursor>>
+        = InMemoryTrieCursor<'cursor, CF::StorageTrieCursor<'cursor>>
     where
         Self: 'cursor;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, TrieCursorError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
         Ok(InMemoryTrieCursor::new_account(cursor, self.trie_updates.as_ref()))
     }
@@ -43,7 +43,7 @@ where
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, TrieCursorError> {
         let trie_updates = self.trie_updates.as_ref();
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         Ok(InMemoryTrieCursor::new_storage(cursor, trie_updates, hashed_address))
@@ -155,7 +155,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 
     /// Positions the DB cursor state using the underlying cursor when needed.
-    fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
+    fn cursor_seek(&mut self, key: Nibbles) -> Result<(), TrieCursorError> {
         // Only seek if:
         // 1. We have a cursor entry and need to seek forward (entry.0 < key), OR
         // 2. The DB cursor needs to be positioned.
@@ -174,7 +174,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 
     /// Advances the DB cursor state to the subsequent entry using the underlying cursor.
-    fn cursor_next(&mut self) -> Result<(), DatabaseError> {
+    fn cursor_next(&mut self) -> Result<(), TrieCursorError> {
         #[cfg(debug_assertions)]
         {
             debug_assert!(self.seeked);
@@ -196,7 +196,9 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     //
     /// This may consume and move forward the current entries when the overlay indicates a removed
     /// node.
-    fn choose_next_entry(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn choose_next_entry(
+        &mut self,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         loop {
             let mem_entry = self.in_memory_cursor.current().cloned();
             let db_entry = self.db_cursor_state.entry();
@@ -237,7 +239,11 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
+
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
@@ -280,7 +286,11 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
+        if self.last_key.is_none_or(|last| key < last) {
+            self.reset();
+        }
+
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
@@ -315,7 +325,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         Ok(entry)
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         #[cfg(debug_assertions)]
         {
             debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
@@ -349,7 +359,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         Ok(entry)
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         match &self.last_key {
             Some(key) => Ok(Some(*key)),
             None => self.get_cursor_mut().current(),
@@ -422,6 +432,28 @@ mod tests {
             "Results mismatch.\nGot: {:?}\nExpected: {:?}",
             results, test_case.expected_results
         );
+    }
+
+    #[test]
+    fn seeks_backward_and_after_exhaustion() {
+        let keys = [1, 2, 3, 4].map(|n| Nibbles::from_nibbles([n]));
+        let node = BranchNodeCompact::default();
+        let db = Arc::new(BTreeMap::from([(keys[0], node.clone()), (keys[2], node.clone())]));
+        let mock = MockTrieCursor::new(db, Default::default());
+        let updates = TrieUpdatesSorted::new(
+            vec![(keys[0], None), (keys[1], Some(node.clone()))],
+            Default::default(),
+        );
+        let mut cursor = InMemoryTrieCursor::new_account(mock, &updates);
+        assert_eq!(cursor.seek(keys[2]).unwrap(), Some((keys[2], node.clone())));
+        assert_eq!(cursor.seek(keys[0]).unwrap(), Some((keys[1], node.clone())));
+        assert_eq!(cursor.seek_exact(keys[0]).unwrap(), None);
+        assert_eq!(cursor.seek_exact(keys[1]).unwrap(), Some((keys[1], node.clone())));
+        assert_eq!(cursor.seek(keys[3]).unwrap(), None);
+        assert_eq!(cursor.seek_exact(keys[1]).unwrap(), Some((keys[1], node.clone())));
+        assert_eq!(cursor.next().unwrap(), Some((keys[2], node.clone())));
+        assert_eq!(cursor.next().unwrap(), None);
+        assert_eq!(cursor.seek(keys[0]).unwrap(), Some((keys[1], node)));
     }
 
     #[test]

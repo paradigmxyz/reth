@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
 use reth_primitives_traits::FastInstant as Instant;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use std::time::Duration;
 use tracing::trace_span;
 
@@ -17,7 +17,7 @@ use reth_metrics::metrics::{self, Histogram};
 #[derive(Clone, Debug)]
 pub struct HashedCursorMetrics {
     /// Histogram tracking overall time spent in database operations
-    overall_duration: Histogram,
+    overall_duration_seconds: Histogram,
     /// Histogram for `next()` operations
     next_histogram: Histogram,
     /// Histogram for `seek()` operations
@@ -33,8 +33,8 @@ impl HashedCursorMetrics {
         let trie_type_str = trie_type.as_str();
 
         Self {
-            overall_duration: metrics::histogram!(
-                "trie.hashed_cursor.overall_duration",
+            overall_duration_seconds: metrics::histogram!(
+                "trie.hashed_cursor.overall_duration_seconds",
                 "type" => trie_type_str
             ),
             next_histogram: metrics::histogram!(
@@ -63,7 +63,7 @@ impl HashedCursorMetrics {
         self.next_histogram.record(cache.next_count as f64);
         self.seek_histogram.record(cache.seek_count as f64);
         self.is_storage_empty_histogram.record(cache.is_storage_empty_count as f64);
-        self.overall_duration.record(cache.total_duration.as_secs_f64());
+        self.overall_duration_seconds.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
 }
@@ -114,7 +114,7 @@ impl HashedCursorMetricsCache {
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
-            target: "trie::trie_cursor",
+            target: "trie::hashed_cursor",
             "Hashed cursor metrics",
             name,
             next_count = self.next_count,
@@ -152,7 +152,7 @@ where
 {
     type Value = C::Value;
 
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         let start = Instant::now();
         self.metrics.seek_count += 1;
         let result = self.cursor.seek(key);
@@ -160,7 +160,7 @@ where
         result
     }
 
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, TrieCursorError> {
         let start = Instant::now();
         self.metrics.next_count += 1;
         let result = self.cursor.next();
@@ -177,7 +177,7 @@ impl<'metrics, C> HashedStorageCursor for InstrumentedHashedCursor<'metrics, C>
 where
     C: HashedStorageCursor,
 {
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+    fn is_storage_empty(&mut self) -> Result<bool, TrieCursorError> {
         let start = Instant::now();
         self.metrics.is_storage_empty_count += 1;
         let result = self.cursor.is_storage_empty();

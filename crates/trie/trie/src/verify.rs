@@ -12,7 +12,7 @@ use crate::{
 use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use std::cmp::{Ordering, Reverse};
 use tracing::trace;
 
@@ -195,7 +195,7 @@ struct SingleVerifier<I> {
 }
 
 impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
-    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
+    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, TrieCursorError> {
         let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr })
@@ -240,7 +240,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         outputs: &mut Vec<Output>,
         path: Nibbles,
         node: BranchNodeCompact,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), TrieCursorError> {
         loop {
             // `curr` is None only if the end of the iterator has been reached. Any further nodes
             // found must be considered missing.
@@ -285,7 +285,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
     /// Must be called once there are no more calls to `next` to made. All further nodes produced
     /// by the iterator will be considered extraneous.
-    fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
+    fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), TrieCursorError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
                 outputs.push(self.output_extra(curr_path, curr_node));
@@ -316,7 +316,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
     pub fn new(
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, TrieCursorError> {
         Ok(Self {
             trie_cursor_factory,
             hashed_cursor_factory: hashed_cursor_factory.clone(),
@@ -335,7 +335,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         account: B256,
         path: Nibbles,
         node: BranchNodeCompact,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), TrieCursorError> {
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(account)?;
         let mut storage = SingleVerifier::new(Some(account), trie_cursor)?;
         storage.next(&mut self.outputs, path, node)?;
@@ -353,7 +353,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
         next_account: B256,
         start_inclusive: bool,
         end_inclusive: bool,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), TrieCursorError> {
         let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let mut account_seeked = false;
 

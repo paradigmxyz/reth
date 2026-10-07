@@ -1,8 +1,8 @@
-//! Proof calculation version 2: Leaf-only implementation.
+//! Proof calculation using leaf data and cached branch hashes.
 //!
 //! This module provides a rewritten proof calculator that:
-//! - Uses only leaf data (HashedAccounts/Storages) to generate proofs
-//! - Returns proof nodes sorted lexicographically by path
+//! - Uses hashed leaf data and cached trie branches to generate proofs
+//! - Returns proof nodes in depth-first order (children before parents)
 //! - Automatically resets after each calculation
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
@@ -16,8 +16,8 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeRef, BranchNodeV2, Nibbles, ProofTrieNodeV2,
-    ProofV2Target, RlpNode, TrieNodeV2,
+    prefix_set::PrefixSet, BranchNodeMasks, BranchNodeV2, Nibbles, ProofTrieNodeV2, ProofV2Target,
+    RlpNode, TrieNodeV2,
 };
 use std::{cmp::Ordering, sync::Arc};
 use tracing::{error, instrument, trace};
@@ -37,11 +37,11 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
-/// A proof calculator that generates merkle proofs using only leaf data.
+/// A proof calculator using hashed leaf data and cached branch hashes to skip unchanged subtries.
 ///
 /// The calculator:
-/// - Accepts one or more B256 proof targets sorted lexicographically
-/// - Returns proof nodes sorted lexicographically by path
+/// - Accepts B256 proof targets and reorders them by parent context and key
+/// - Returns proof nodes in depth-first order (children before parents)
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
@@ -223,7 +223,7 @@ where
             // forward to 0xabc2 (because all children will have been visited already). At this
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
-            if lower.key_nibbles.starts_with(path) {
+            if lower.key_nibbles().starts_with(path) {
                 let is_below_parent = |target: &ProofV2Target| {
                     target.parent.path_len().is_none_or(|len| path.len() > len)
                 };
@@ -231,18 +231,18 @@ where
                     (is_below_parent(lower) ||
                         targets
                             .skip_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
+                            .take_while(|target| target.key_nibbles().starts_with(path))
                             .any(is_below_parent) ||
                         targets
                             .rev_iter()
-                            .take_while(|target| target.key_nibbles.starts_with(path))
+                            .take_while(|target| target.key_nibbles().starts_with(path))
                             .any(is_below_parent))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
             if upper
-                .is_some_and(|upper| depth_first::cmp(path, &upper.key_nibbles) != Ordering::Less)
+                .is_some_and(|upper| depth_first::cmp(path, &upper.key_nibbles()) != Ordering::Less)
             {
                 (lower, upper) = targets.next();
                 trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
@@ -587,15 +587,6 @@ where
             self.branch_path.len() - branch.ext_len as usize,
         );
 
-        // Compute hash for the branch node if it has a parent extension.
-        let rlp_node = if short_key.is_empty() {
-            None
-        } else {
-            self.rlp_encode_buf.clear();
-            BranchNodeRef::new(&rlp_nodes_buf, branch.state_mask).encode(&mut self.rlp_encode_buf);
-            Some(RlpNode::from_rlp(&self.rlp_encode_buf))
-        };
-
         // Update the branch_path. If this branch is the only branch then only its extension needs
         // to be trimmed, otherwise we also need to remove its nibble from its parent.
         let new_path_len =
@@ -603,7 +594,7 @@ where
 
         // Wrap the `BranchNodeV2` so it can be pushed onto the child stack.
         let branch_as_child = ProofTrieBranchChild::Branch {
-            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask, rlp_node),
+            node: BranchNodeV2::new(short_key, rlp_nodes_buf, branch.state_mask),
             masks: (!masks.is_empty()).then_some(masks),
         };
 
@@ -1346,7 +1337,7 @@ where
 
             // Direct root branches do not have an entry in the branch node table. A root extension
             // still carries the masks of the child branch embedded within it.
-            if matches!(&root_node.node, TrieNodeV2::Branch(branch) if branch.key.is_empty()) {
+            if matches!(&root_node.node, TrieNodeV2::Branch(branch) if branch.key().is_empty()) {
                 root_node.masks = None;
             }
 
@@ -1386,7 +1377,7 @@ where
         if !sub_trie_targets
             .targets
             .iter()
-            .any(|target| target.key_nibbles.starts_with(&child_path))
+            .any(|target| target.key_nibbles().starts_with(&child_path))
         {
             return Ok(())
         }
@@ -1489,9 +1480,7 @@ where
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// The input slice is reordered by known-parent context and key before traversal.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
@@ -1604,9 +1593,7 @@ where
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
     /// returned nodes will be sorted depth-first by path.
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// The input slice is reordered by known-parent context and key before traversal.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
     pub fn storage_proof(
         &mut self,
@@ -1904,16 +1891,16 @@ mod tests {
         target: &ProofV2Target,
     ) -> Option<ProofTrieNodeV2> {
         let Some(parent_path_len) = target.parent.path_len() else {
-            return target.key_nibbles.starts_with(&node.path).then(|| node.clone())
+            return target.key_nibbles().starts_with(&node.path).then(|| node.clone())
         };
 
         if node.path.len() > parent_path_len {
-            return target.key_nibbles.starts_with(&node.path).then(|| node.clone())
+            return target.key_nibbles().starts_with(&node.path).then(|| node.clone())
         }
 
         let logical_path = match &node.node {
             TrieNodeV2::Leaf(leaf) => node.path.join(&leaf.key),
-            TrieNodeV2::Branch(branch) => node.path.join(&branch.key),
+            TrieNodeV2::Branch(branch) => node.path.join(branch.key()),
             TrieNodeV2::EmptyRoot | TrieNodeV2::Extension(_) => return None,
         };
         let child_path_len = parent_path_len + 1;
@@ -1922,7 +1909,7 @@ mod tests {
         }
 
         let child_path = logical_path.slice(0..child_path_len);
-        if !target.key_nibbles.starts_with(&child_path) {
+        if !target.key_nibbles().starts_with(&child_path) {
             return None
         }
 
@@ -1932,10 +1919,7 @@ mod tests {
         match &mut projected.node {
             TrieNodeV2::Leaf(leaf) => leaf.key = leaf.key.slice(trim_len..),
             TrieNodeV2::Branch(branch) => {
-                branch.key = branch.key.slice(trim_len..);
-                if branch.key.is_empty() {
-                    branch.branch_rlp_node = None;
-                }
+                branch.trim_key_prefix(trim_len);
             }
             TrieNodeV2::EmptyRoot | TrieNodeV2::Extension(_) => unreachable!(),
         }
@@ -2021,7 +2005,7 @@ mod tests {
             // arbitrary parent boundaries, including absence targets that diverge inside them.
             let legacy_targets = targets_vec
                 .iter()
-                .map(|target| B256::from_slice(&target.key_nibbles.pack()))
+                .map(|target| B256::from_slice(&target.key_nibbles().pack()))
                 .chain(self.storage().keys().copied())
                 .collect::<B256Set>();
 
@@ -2388,8 +2372,8 @@ mod tests {
         let TrieNodeV2::Branch(branch) = &branch_node.node else {
             panic!("rebased node should be a branch")
         };
-        assert!(branch.key.is_empty());
-        assert!(branch.branch_rlp_node.is_none());
+        assert!(branch.key().is_empty());
+        assert!(branch.branch_rlp_node().is_none());
     }
 
     #[test]

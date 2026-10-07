@@ -207,18 +207,14 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
+    pub fn to_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         TrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
-            storage_tries: self
-                .storage_tries
-                .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref()))
-                .collect(),
+            storage_tries: self.storage_tries.iter().map(|m| (*m.0, m.1.to_sorted_ref())).collect(),
         }
     }
 
@@ -369,7 +365,7 @@ impl StorageTrieUpdates {
     }
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
+    pub fn to_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
         StorageTrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),
@@ -518,32 +514,22 @@ pub struct TrieUpdatesSortedRef<'a> {
 pub struct TrieUpdatesSorted {
     /// Sorted collection of updated state nodes with corresponding paths. None indicates that a
     /// node was removed.
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(deserialize_with = "crate::utils::deserialize_sorted_updates")
+    )]
     account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
     /// Storage tries stored by hashed address of the account the trie belongs to.
     storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
-    /// Creates a new `TrieUpdatesSorted` with the given account nodes and storage tries.
-    ///
-    /// # Panics
-    ///
-    /// In debug mode, panics if `account_nodes` is not sorted by the `Nibbles` key,
-    /// or if any storage trie's `storage_nodes` is not sorted by its `Nibbles` key.
+    /// Sorts account updates by key, keeping the last value for duplicate keys.
     pub fn new(
-        account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+        mut account_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
         storage_tries: B256Map<StorageTrieUpdatesSorted>,
     ) -> Self {
-        debug_assert!(
-            account_nodes.is_sorted_by_key(|item| &item.0),
-            "account_nodes must be sorted by Nibbles key"
-        );
-        debug_assert!(
-            storage_tries.values().all(|storage_trie| {
-                storage_trie.storage_nodes.is_sorted_by_key(|item| &item.0)
-            }),
-            "all storage_nodes in storage_tries must be sorted by Nibbles key"
-        );
+        crate::utils::sort_updates(&mut account_nodes);
         Self { account_nodes, storage_tries }
     }
 
@@ -784,10 +770,20 @@ pub struct StorageTrieUpdatesSortedRef<'a> {
 pub struct StorageTrieUpdatesSorted {
     /// Sorted collection of updated storage nodes with corresponding paths. None indicates a node
     /// is removed.
-    pub storage_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(deserialize_with = "crate::utils::deserialize_sorted_updates")
+    )]
+    storage_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
 }
 
 impl StorageTrieUpdatesSorted {
+    /// Sorts updates by key, keeping the last value for duplicate keys.
+    pub fn new(mut storage_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>) -> Self {
+        crate::utils::sort_updates(&mut storage_nodes);
+        Self { storage_nodes }
+    }
+
     /// Returns reference to updated storage nodes.
     pub fn storage_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.storage_nodes
@@ -850,6 +846,22 @@ impl From<StorageTrieUpdatesSorted> for StorageTrieUpdates {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+
+    #[test]
+    fn sorted_updates_normalize_deserialization() {
+        let key = Nibbles::from_nibbles([1]);
+        let later = Nibbles::from_nibbles([2]);
+        let nodes = vec![(later, None), (key, Some(BranchNodeCompact::default())), (key, None)];
+        let mut value = serde_json::to_value(StorageTrieUpdatesSorted::default()).unwrap();
+        value["storage_nodes"] = serde_json::to_value(&nodes).unwrap();
+        let storage = serde_json::from_value::<StorageTrieUpdatesSorted>(value).unwrap();
+        assert_eq!(storage.storage_nodes_ref(), &[(key, None), (later, None)]);
+        let mut value = serde_json::to_value(TrieUpdatesSorted::default()).unwrap();
+        value["account_nodes"] = serde_json::to_value(&nodes).unwrap();
+        let updates = serde_json::from_value::<TrieUpdatesSorted>(value).unwrap();
+        assert_eq!(updates, TrieUpdatesSorted::new(nodes, Default::default()));
+        assert_eq!(updates.account_nodes_ref(), storage.storage_nodes_ref());
+    }
 
     #[test]
     fn test_finalize_keeps_storage_updates_after_destroyed_node_removal() {
@@ -1432,14 +1444,10 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<TrieUpdatesSorted<'a>> for super::TrieUpdatesSorted {
         fn from(value: TrieUpdatesSorted<'a>) -> Self {
-            Self {
-                account_nodes: value.account_nodes.into_owned(),
-                storage_tries: value
-                    .storage_tries
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into()))
-                    .collect(),
-            }
+            Self::new(
+                value.account_nodes.into_owned(),
+                value.storage_tries.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            )
         }
     }
 
@@ -1536,7 +1544,7 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<StorageTrieUpdatesSorted<'a>> for super::StorageTrieUpdatesSorted {
         fn from(value: StorageTrieUpdatesSorted<'a>) -> Self {
-            Self { storage_nodes: value.storage_nodes.into_owned() }
+            Self::new(value.storage_nodes.into_owned())
         }
     }
 
@@ -1700,7 +1708,7 @@ pub mod serde_bincode_compat {
 
             data.trie_updates
                 .storage_nodes
-                .push((Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None));
+                .insert(0, (Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

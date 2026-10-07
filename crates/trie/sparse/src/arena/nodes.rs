@@ -306,15 +306,15 @@ impl ArenaSparseNode {
                 value: leaf.value,
             },
             TrieNodeV2::Branch(branch) => {
-                let children = branch.stack[..branch.state_mask.count_bits() as usize]
+                let children = branch.stack()[..branch.state_mask().count_bits() as usize]
                     .iter()
                     .map(|rlp| arena.insert_blinded(rlp.clone()))
                     .collect();
                 Self::Branch(ArenaSparseNodeBranch {
                     state: ArenaSparseNodeState::Revealed,
                     children,
-                    state_mask: branch.state_mask,
-                    short_key: branch.key,
+                    state_mask: branch.state_mask(),
+                    short_key: *branch.key(),
                     branch_masks: masks.unwrap_or_default(),
                 })
             }

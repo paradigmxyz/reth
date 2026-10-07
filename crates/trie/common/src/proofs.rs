@@ -93,6 +93,10 @@ impl MultiProofTargets {
 
     /// Returns an iterator that yields chunks of the specified size.
     ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
+    ///
     /// See [`ChunkedMultiProofTargets`] for more information.
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
@@ -132,6 +136,7 @@ pub struct ChunkedMultiProofTargets {
 
 impl ChunkedMultiProofTargets {
     fn new(targets: MultiProofTargets, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be nonzero");
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -642,11 +647,11 @@ fn encode_v2_proof_nodes<'a>(nodes: impl Iterator<Item = &'a ProofTrieNodeV2>) -
         }
 
         if let TrieNodeV2::Branch(branch) = &proof_node.node &&
-            !branch.key.is_empty() &&
-            branch.branch_rlp_node.as_ref().is_some_and(|node| node.is_hash())
+            !branch.key().is_empty() &&
+            branch.branch_rlp_node().is_some_and(|node| node.is_hash())
         {
             let mut encoded = Vec::new();
-            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(&mut encoded);
+            BranchNodeRef::new(branch.stack(), branch.state_mask()).encode(&mut encoded);
             proof.push(Bytes::from(encoded));
         }
     }
@@ -1195,6 +1200,12 @@ mod tests {
     };
 
     #[test]
+    #[should_panic(expected = "chunk size must be nonzero")]
+    fn zero_chunk_size_is_rejected() {
+        MultiProofTargets::from_iter([(B256::ZERO, Default::default())]).chunks(0);
+    }
+
+    #[test]
     fn v2_account_proof_expands_extension_branch() {
         let branch =
             BranchNode::new(vec![RlpNode::word_rlp(&B256::repeat_byte(0x11))], TrieMask::from(1));
@@ -1203,7 +1214,6 @@ mod tests {
             Nibbles::from_nibbles([0xa, 0xb]),
             branch.stack,
             branch.state_mask,
-            Some(RlpNode::from_rlp(&branch_rlp)),
         ));
         let extension_rlp = alloy_rlp::encode(&combined);
         let multiproof = DecodedMultiProofV2 {

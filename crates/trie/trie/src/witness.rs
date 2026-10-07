@@ -322,10 +322,10 @@ where
         self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
 
         if let TrieNodeV2::Branch(branch) = node &&
-            !branch.key.is_empty()
+            !branch.key().is_empty()
         {
             encoded.clear();
-            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
+            BranchNodeRef::new(branch.stack(), branch.state_mask()).encode(encoded);
             let hash = keccak256(encoded.as_slice());
             self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
         }

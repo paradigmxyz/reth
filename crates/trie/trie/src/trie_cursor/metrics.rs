@@ -2,7 +2,7 @@ use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use reth_primitives_traits::FastInstant as Instant;
-use reth_storage_errors::db::DatabaseError;
+use reth_storage_errors::trie::TrieCursorError;
 use std::time::Duration;
 use tracing::trace_span;
 
@@ -18,7 +18,7 @@ use reth_metrics::metrics::{self, Histogram};
 #[derive(Clone, Debug)]
 pub struct TrieCursorMetrics {
     /// Histogram tracking overall time spent in database operations
-    overall_duration: Histogram,
+    overall_duration_seconds: Histogram,
     /// Histogram for `next()` operations
     next_histogram: Histogram,
     /// Histogram for `seek()` operations
@@ -34,8 +34,8 @@ impl TrieCursorMetrics {
         let trie_type_str = trie_type.as_str();
 
         Self {
-            overall_duration: metrics::histogram!(
-                "trie.cursor.overall_duration",
+            overall_duration_seconds: metrics::histogram!(
+                "trie.cursor.overall_duration_seconds",
                 "type" => trie_type_str
             ),
             next_histogram: metrics::histogram!(
@@ -64,7 +64,7 @@ impl TrieCursorMetrics {
         self.next_histogram.record(cache.next_count as f64);
         self.seek_histogram.record(cache.seek_count as f64);
         self.seek_exact_histogram.record(cache.seek_exact_count as f64);
-        self.overall_duration.record(cache.total_duration.as_secs_f64());
+        self.overall_duration_seconds.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
 }
@@ -147,7 +147,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let start = Instant::now();
         self.metrics.seek_exact_count += 1;
         let result = self.cursor.seek_exact(key);
@@ -158,7 +158,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let start = Instant::now();
         self.metrics.seek_count += 1;
         let result = self.cursor.seek(key);
@@ -166,7 +166,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         result
     }
 
-    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, TrieCursorError> {
         let start = Instant::now();
         self.metrics.next_count += 1;
         let result = self.cursor.next();
@@ -174,7 +174,7 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
         result
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, TrieCursorError> {
         self.cursor.current()
     }
 

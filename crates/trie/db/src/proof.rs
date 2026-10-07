@@ -3,12 +3,13 @@ use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
     MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput, TrieInputSorted,
 };
+use std::sync::Arc;
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
 pub trait DatabaseProof<'a> {
@@ -55,14 +56,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .account_proof(address, slots)
+        overlay_proof(self, input).account_proof(address, slots)
     }
 
     fn overlay_multiproof(
@@ -70,14 +64,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .multiproof(targets)
+        overlay_proof(self, input).multiproof(targets)
     }
 
     fn overlay_multiproof_v2(
@@ -85,14 +72,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> Result<DecodedMultiProofV2, StateProofError> {
-        let nodes_sorted = input.nodes.into_sorted();
-        let state_sorted = input.state.into_sorted();
-        Proof::new(
-            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
-            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
-        )
-        .with_prefix_sets_mut(input.prefix_sets)
-        .multiproof_v2(targets)
+        overlay_proof(self, input).multiproof_v2(targets)
     }
 }
 
@@ -175,4 +155,22 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         )
         .storage_multiproof(targets)
     }
+}
+
+/// Sorts inputs and installs the overlays shared by all database proof operations.
+fn overlay_proof<'a, TX: DbTx, A: TrieTableAdapter>(
+    proof: &Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>,
+    input: TrieInput,
+) -> Proof<impl TrieCursorFactory + Clone, impl HashedCursorFactory + Clone> {
+    Proof::new(
+        InMemoryTrieCursorFactory::new(
+            proof.trie_cursor_factory().clone(),
+            Arc::new(input.nodes.into_sorted()),
+        ),
+        HashedPostStateCursorFactory::new(
+            proof.hashed_cursor_factory().clone(),
+            Arc::new(input.state.into_sorted()),
+        ),
+    )
+    .with_prefix_sets_mut(input.prefix_sets)
 }
