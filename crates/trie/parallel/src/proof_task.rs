@@ -251,9 +251,11 @@ impl ProofWorkerHandle {
                             "Storage worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "storage worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "storage",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -293,9 +295,11 @@ impl ProofWorkerHandle {
                             "Account worker failed"
                         );
                         let _ = result_tx.send(ProofResultMessage {
-                            result: Err(StateRootTaskError::ProofWorker(format!(
-                                "account worker {worker_id}: {error}"
-                            ))),
+                            result: Err(StateRootTaskError::Other(Box::new(ProofWorkerError {
+                                worker_type: "account",
+                                worker_id,
+                                source: error,
+                            }))),
                             elapsed: Duration::ZERO,
                             state: Default::default(),
                         });
@@ -386,7 +390,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
-                    result: Err(StateRootTaskError::ProofDispatch(error.clone())),
+                    result: Err(StateRootTaskError::Provider(error.clone())),
                     elapsed: start.elapsed(),
                     state,
                 });
@@ -1125,7 +1129,7 @@ fn dispatch_v2_storage_proofs(
             .map_err(|_| {
                 StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
-                ))
+                ).into())
             })?;
 
         storage_proof_receivers.insert(hashed_address, result_rx);
@@ -1178,12 +1182,22 @@ enum AccountWorkerJob {
     },
 }
 
+/// Context for a provider failure that prevents a proof worker from starting.
+#[derive(Debug, thiserror::Error)]
+#[error("{worker_type} worker {worker_id}: {source}")]
+struct ProofWorkerError {
+    worker_type: &'static str,
+    worker_id: usize,
+    #[source]
+    source: ProviderError,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-    use std::sync::Arc;
+    use std::{error::Error as _, sync::Arc};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -1294,5 +1308,24 @@ mod tests {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }
+    }
+
+    #[test]
+    fn worker_failure_preserves_provider_source() {
+        let error = StateRootTaskError::Other(Box::new(ProofWorkerError {
+            worker_type: "storage",
+            worker_id: 3,
+            source: ProviderError::other(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "database access denied",
+            )),
+        }));
+        assert_eq!(error.to_string(), "storage worker 3: database access denied");
+        let worker = error.source().unwrap().downcast_ref::<ProofWorkerError>().unwrap();
+        let provider = worker.source().unwrap().downcast_ref::<ProviderError>().unwrap();
+        assert_eq!(
+            provider.downcast_other_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
     }
 }
