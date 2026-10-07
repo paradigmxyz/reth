@@ -89,7 +89,7 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, sync::Arc, thread::available_parallelism, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -236,7 +236,7 @@ impl LaunchContext {
         // TODO: reserved_cpu_cores is currently ignored because subtracting from thread pool
         // sizes doesn't actually reserve CPU cores for other processes.
         let _ = reserved_cpu_cores;
-        let num_threads = available_parallelism().map_or(1, NonZeroUsize::get);
+        let num_threads = self.task_executor.cpu_pool().current_num_threads();
         if let Err(err) = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("rayon-{i:02}"))
