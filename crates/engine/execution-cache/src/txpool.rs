@@ -1,8 +1,8 @@
 //! Immutable snapshots produced by txpool-driven state prewarming.
 
 use alloy_primitives::{Address, StorageKey, StorageValue, B256, U256};
+use reth_evm::cached::CachedReads;
 use reth_primitives_traits::{Account, Bytecode};
-use reth_revm::cached::CachedReads;
 use std::sync::Arc;
 
 /// A deep, immutable txpool-prewarm cache snapshot for one parent state.
@@ -28,7 +28,12 @@ impl TxPoolPrewarmCacheSnapshot {
 
     /// Returns a cached account, preserving cached non-existence.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.reads.accounts.get(address).map(|account| account.info.as_ref().map(Account::from))
+        self.reads.accounts.get(address).map(|account| {
+            account
+                .info
+                .as_ref()
+                .map(|info| Account::from(reth_execution_types::revm_account(info)))
+        })
     }
 
     /// Returns a cached storage value, preserving cached zero values.
@@ -42,7 +47,7 @@ impl TxPoolPrewarmCacheSnapshot {
     /// as a miss and the caller's fallback tier decides.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Option<Bytecode>> {
         let code = self.reads.contracts.get(code_hash)?;
-        (!code.is_empty()).then(|| Some(Bytecode(code.clone())))
+        (!code.is_empty()).then(|| Some(Bytecode(reth_execution_types::revm_bytecode(code))))
     }
 
     /// Returns `(accounts, storage slots, bytecodes)` in the snapshot.
@@ -59,10 +64,7 @@ impl TxPoolPrewarmCacheSnapshot {
 mod tests {
     use super::*;
     use alloy_primitives::map::U256Map;
-    use reth_revm::{
-        cached::CachedAccount,
-        revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo},
-    };
+    use reth_evm::cached::{AccountInfo, Bytecode as EvmBytecode, CachedAccount};
 
     #[test]
     fn lookups_preserve_cache_semantics() {
@@ -77,8 +79,8 @@ mod tests {
         storage.insert(U256::from(2), U256::ZERO);
         reads.insert_account(owner, AccountInfo { nonce: 3, ..Default::default() }, storage);
         reads.accounts.insert(missing, CachedAccount { info: None, storage: Default::default() });
-        reads.contracts.insert(code_hash, RevmBytecode::new_raw([0x60, 0x01].into()));
-        reads.contracts.insert(empty_code_hash, RevmBytecode::default());
+        reads.contracts.insert(code_hash, EvmBytecode::new_legacy([0xef, 0x01].into()));
+        reads.contracts.insert(empty_code_hash, EvmBytecode::default());
 
         let snapshot = TxPoolPrewarmCacheSnapshot::new(B256::ZERO, Arc::new(reads));
 
@@ -92,7 +94,9 @@ mod tests {
         assert_eq!(snapshot.storage(owner, slot(9)), None);
         assert_eq!(snapshot.storage(missing, slot(1)), None);
 
-        assert!(snapshot.bytecode(&code_hash).unwrap().is_some());
+        let code = snapshot.bytecode(&code_hash).unwrap().unwrap();
+        assert!(code.is_legacy());
+        assert_eq!(code.original_bytes().as_ref(), &[0xef, 0x01]);
         assert_eq!(snapshot.bytecode(&empty_code_hash), None, "empty code reads as a miss");
         assert_eq!(snapshot.bytecode(&B256::repeat_byte(0x0E)), None);
 

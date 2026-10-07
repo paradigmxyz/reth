@@ -11,18 +11,19 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
 revm.workspace = true
+# reth
 reth-engine-primitives.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["witness"] }
+reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-revm = { workspace = true, features = ["serde"] }
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
 
 # alloy
+evm2.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
@@ -42,8 +43,7 @@ serde_json.workspace = true
 alloy-eips.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-revm = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 tempfile.workspace = true

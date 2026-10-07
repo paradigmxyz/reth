@@ -13,19 +13,16 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{
-        states::reverts::{AccountInfoRevert, RevertToSlot},
-        BundleState,
-    },
+use reth_revm::db::{
+    states::reverts::{AccountInfoRevert, RevertToSlot},
+    BundleState,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
@@ -292,7 +289,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 &mut executor,
                                 evm_config.batch_executor(db_at(last_block)),
                             );
-                            let bundle = old_executor.into_state().take_bundle();
+                            let bundle = old_executor.into_state();
                             verify_bundle_against_changesets(
                                 &provider,
                                 &bundle,
@@ -303,7 +300,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    let bundle = executor.into_state().take_bundle();
+                    let bundle = executor.into_state();
                     verify_bundle_against_changesets(
                         &provider,
                         &bundle,

@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::{DecodedRevmBal, ExecutionOutcome};
+use crate::{DecodedEvmBal, ExecutionOutcome};
 use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Recovered, TxHashRef},
@@ -49,7 +49,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
     /// cache data and not part of the serialized representation.
     #[cfg_attr(feature = "serde", serde(skip))]
-    bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
+    bals: BTreeMap<BlockNumber, Arc<DecodedEvmBal>>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -137,19 +137,19 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all prepared block access lists for this chain.
     ///
     /// Blocks without an available BAL have no entry; see the `bals` field for details.
-    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
+    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedEvmBal>> {
         &self.bals
     }
 
     /// Get the prepared block access list for a specific block number, if one is available.
     ///
     /// `None` only means no BAL was attached for that block; see the `bals` field for details.
-    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
+    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedEvmBal>> {
         self.bals.get(&block_number)
     }
 
     /// Attach a prepared block access list to a block of this chain.
-    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedRevmBal>) {
+    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedEvmBal>) {
         debug_assert!(
             self.blocks.contains_key(&block_number),
             "BAL must belong to a block of this chain"
@@ -276,7 +276,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Blocks without an available BAL are skipped; see the `bals` field for details.
     pub fn blocks_and_bals(
         &self,
-    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedEvmBal>)> + '_ {
         self.bals
             .iter()
             .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))

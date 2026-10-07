@@ -114,4 +114,5 @@ account-ext = [
     "revm/account-ext",
     "reth-trie/account-ext",
     "reth-trie-db/account-ext",
+    "reth-execution-types/account-ext",
 ]

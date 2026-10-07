@@ -5,7 +5,6 @@ use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
-use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::{BlockExecutionError, BlockExecutionOutput},
     ConfigureEvm,
@@ -41,11 +40,11 @@ struct BackfillTaskOutput<T> {
 /// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
-type SingleBlockStreamItem<N = EthPrimitives> = (
+pub(super) type SingleBlockStreamItem<N> = (
     RecoveredBlock<<N as NodePrimitives>::Block>,
     BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
 );
-type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
+type BatchBlockStreamItem<N> = Chain<N>;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
@@ -200,7 +199,11 @@ where
     }
 }
 
-impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, SingleBlockStreamItem> {
+impl<E, P> From<SingleBlockBackfillJob<E, P>>
+    for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
+where
+    E: ConfigureEvm,
+{
     fn from(job: SingleBlockBackfillJob<E, P>) -> Self {
         Self {
             evm_config: job.evm_config,
@@ -292,8 +295,7 @@ mod tests {
         let mut backfill_stream = factory.backfill(1..=1).into_single_blocks().into_stream();
 
         // execute first block
-        let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
-        execution_output.state.reverts.sort();
+        let (block, execution_output) = backfill_stream.next().await.unwrap().unwrap();
         let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);
@@ -329,8 +331,7 @@ mod tests {
             .with_thresholds(ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() })
             .with_stream_parallelism(1);
         let mut backfill_stream = factory.backfill(1..=2).into_stream();
-        let mut chain = backfill_stream.next().await.unwrap().unwrap();
-        chain.execution_outcome_mut().state_mut().reverts.sort();
+        let chain = backfill_stream.next().await.unwrap().unwrap();
 
         assert!(chain.blocks_iter().map(|block| block.as_ref()).eq(&blocks));
         assert_eq!(chain.execution_outcome(), &execution_outcome);
@@ -436,13 +437,9 @@ mod tests {
         let mut backfill_stream = factory.backfill(1..=4).into_stream();
 
         // Collect the two expected chains from the stream
-        let mut chain1 = backfill_stream.next().await.unwrap()?;
-        let mut chain2 = backfill_stream.next().await.unwrap()?;
+        let chain1 = backfill_stream.next().await.unwrap()?;
+        let chain2 = backfill_stream.next().await.unwrap()?;
         assert!(backfill_stream.next().await.is_none());
-
-        // Sort reverts for comparison
-        chain1.execution_outcome_mut().state_mut().reverts.sort();
-        chain2.execution_outcome_mut().state_mut().reverts.sort();
 
         // Compute expected chains using non-stream BackfillJob (sequential)
         let factory_seq =
@@ -450,14 +447,10 @@ mod tests {
                 ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() },
             );
 
-        let mut expected_chain1 =
+        let expected_chain1 =
             factory_seq.backfill(1..=2).collect::<Result<Vec<_>, _>>()?.into_iter().next().unwrap();
-        let mut expected_chain2 =
+        let expected_chain2 =
             factory_seq.backfill(3..=4).collect::<Result<Vec<_>, _>>()?.into_iter().next().unwrap();
-
-        // Sort reverts for expected
-        expected_chain1.execution_outcome_mut().state_mut().reverts.sort();
-        expected_chain2.execution_outcome_mut().state_mut().reverts.sort();
 
         // Assert the streamed chains match the expected sequential ones
         assert_eq!(chain1.blocks(), expected_chain1.blocks());

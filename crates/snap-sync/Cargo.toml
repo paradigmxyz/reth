@@ -44,11 +44,13 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-execution-types.workspace = true
+evm2.workspace = true
 alloy-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-stages-api.workspace = true

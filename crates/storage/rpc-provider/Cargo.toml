@@ -58,4 +58,5 @@ account-ext = [
     "reth-stages-types/account-ext",
     "reth-trie/account-ext",
     "revm/account-ext",
+    "reth-execution-types/account-ext",
 ]

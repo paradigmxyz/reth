@@ -1,10 +1,10 @@
 //! Helper type that represents one of two possible executor types
 
-use crate::{execute::Executor, Database, OnStateHook};
+use crate::{execute::Executor, Database};
 
 // re-export Either
 pub use futures_util::future::Either;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, EvmState};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
@@ -27,20 +27,6 @@ where
         }
     }
 
-    fn execute_one_with_state_hook<F>(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        state_hook: F,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-    where
-        F: OnStateHook + 'static,
-    {
-        match self {
-            Self::Left(a) => a.execute_one_with_state_hook(block, state_hook),
-            Self::Right(b) => b.execute_one_with_state_hook(block, state_hook),
-        }
-    }
-
     fn execute(
         self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
@@ -52,13 +38,41 @@ where
         }
     }
 
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(EvmState) + Send + 'static,
+    {
+        match self {
+            Self::Left(a) => a.execute_one_with_state_hook(block, state_hook),
+            Self::Right(b) => b.execute_one_with_state_hook(block, state_hook),
+        }
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(EvmState) + Send + 'static,
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_hook(block, state_hook),
+            Self::Right(b) => b.execute_with_state_hook(block, state_hook),
+        }
+    }
+
     fn execute_with_state_closure<F>(
         self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::database::State<DB>),
+        F: FnMut(&revm::database::BundleState),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure(block, state),
@@ -66,10 +80,17 @@ where
         }
     }
 
-    fn into_state(self) -> revm::database::State<DB> {
+    fn execute_with_state_closure_always<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&revm::database::BundleState),
+    {
         match self {
-            Self::Left(a) => a.into_state(),
-            Self::Right(b) => b.into_state(),
+            Self::Left(a) => a.execute_with_state_closure_always(block, state),
+            Self::Right(b) => b.execute_with_state_closure_always(block, state),
         }
     }
 
@@ -77,6 +98,13 @@ where
         match self {
             Self::Left(a) => a.size_hint(),
             Self::Right(b) => b.size_hint(),
+        }
+    }
+
+    fn into_state(self) -> revm::database::BundleState {
+        match self {
+            Self::Left(a) => a.into_state(),
+            Self::Right(b) => b.into_state(),
         }
     }
 

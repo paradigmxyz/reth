@@ -12,6 +12,7 @@ description = "Cross-block execution cache for payload processing"
 workspace = true
 
 [dependencies]
+reth-execution-types.workspace = true
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true

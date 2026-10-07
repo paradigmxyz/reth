@@ -13,6 +13,7 @@ use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{
+    database::StateProviderDatabase,
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
@@ -24,7 +25,6 @@ use reth_provider::{
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     StorageSettingsCache, TrieWriter,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{
@@ -261,9 +261,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
         let mut executor = executor_provider.batch_executor(state_db);
 
-        let result = executor
-            .execute_one(&(*block).clone())
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        let result = executor.execute_one(&(*block).clone()).map_err(|err| {
+            Error::block_failed(block_number, std::io::Error::other(err.to_string()))
+        })?;
         // Check the block access list size cap and compute its hash for post-Amsterdam blocks so
         // the consensus check below validates it.
         let block_access_list_hash = executor
@@ -275,7 +275,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             })
             .transpose()
             .map_err(|err| Error::block_failed(block_number, err))?;
-        let output = BlockExecutionOutput { state: executor.into_state().take_bundle(), result };
+        let output = BlockExecutionOutput { state: executor.into_state(), result };
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output, None, block_access_list_hash)
@@ -435,7 +435,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
 
-        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        // Skipped because this case is known to be invalid in the upstream state tests.
         | "RevertInCreateInInit_Paris.json"
         | "RevertInCreateInInit.json"
         | "dynamicAccountOverwriteEmpty.json"
