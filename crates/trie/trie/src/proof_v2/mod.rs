@@ -2,7 +2,7 @@
 //!
 //! This module provides a rewritten proof calculator that:
 //! - Uses only leaf data (HashedAccounts/Storages) to generate proofs
-//! - Returns proof nodes in depth-first post-order (children before parents)
+//! - Returns proof nodes in depth-first post-order (children before parents).
 //! - Automatically resets after each calculation
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
@@ -40,8 +40,8 @@ const RLP_ENCODE_BUF_SIZE: usize = 1024;
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
-/// - Accepts proof targets in any order and sorts them in place by parent context, then key
-/// - Returns proof nodes in depth-first post-order (children before parents)
+/// - Accepts proof targets in any order and sorts them in place by parent context, then key.
+/// - Returns proof nodes in depth-first post-order (children before parents).
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
