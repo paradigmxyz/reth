@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -3663,7 +3663,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -4822,7 +4822,7 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(full_persist_hashed_state),
                 Arc::new(full_persist_trie_updates),
             ),
@@ -4847,7 +4847,7 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(deferred_trie_hashed_state),
                 Arc::new(deferred_trie_updates),
             ),
@@ -5575,7 +5575,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5644,9 +5644,7 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData {
-                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                },
+                SortedTrieData::new(Arc::new(hashed_state), Default::default()),
             );
             blocks.push(executed);
         }

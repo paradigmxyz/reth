@@ -1095,7 +1095,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::{BTreeMap, HashMap},
@@ -1195,10 +1195,7 @@ mod tests {
             blocks.push(ExecutedBlock::new(
                 Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
                 Arc::new(output),
-                ComputedTrieData::new(
-                    Arc::new(state.into_sorted()),
-                    Arc::new(updates.into_sorted()),
-                ),
+                SortedTrieData::new(Arc::new(state.into_sorted()), Arc::new(updates.into_sorted())),
             ));
         }
 
@@ -3304,7 +3301,7 @@ mod tests {
         let executed = ExecutedBlock::new(
             Arc::new(block),
             Arc::new(execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
@@ -3359,7 +3356,7 @@ mod tests {
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
 
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );
@@ -3408,7 +3405,7 @@ mod tests {
         .unseal();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(target_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );
