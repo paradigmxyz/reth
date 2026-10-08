@@ -48,9 +48,18 @@ async fn serving_and_syncing(
     let mut rng = StdRng::seed_from_u64(1);
     advance_with_random_transactions(&mut server, CHAIN_LENGTH as usize, &mut rng, true).await?;
 
-    let (mut client, _) = snap_setup(fork, runtime).build_single().await?;
-    client.connect(&mut server).await;
+    let client = syncing_client(&mut server, snap_setup(fork, runtime)).await?;
     Ok((server, client))
+}
+
+// A fresh node launched from `setup` and connected to `server`.
+async fn syncing_client(
+    server: &mut NodeHelperType<EthereumNode>,
+    setup: E2ETestSetupBuilder<EthereumNode>,
+) -> eyre::Result<NodeHelperType<EthereumNode>> {
+    let (mut client, _) = setup.build_single().await?;
+    client.connect(server).await;
+    Ok(client)
 }
 
 #[tokio::test]
@@ -103,13 +112,11 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
 
-    let (mut client, _) = snap_setup(EthereumHardfork::Amsterdam, runtime)
-        .with_tree_config_modifier(|config| {
+    let setup =
+        snap_setup(EthereumHardfork::Amsterdam, runtime).with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        })
-        .build_single()
-        .await?;
-    client.connect(&mut server).await;
+        });
+    let client = syncing_client(&mut server, setup).await?;
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
 
