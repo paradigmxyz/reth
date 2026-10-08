@@ -396,7 +396,7 @@ where
                         .record(wake.duration_since(t));
 
                     let update = message.map_err(|_| StateRootTaskError::Other(
-                        "updates channel disconnected before state root calculation".to_string(),
+                        "updates channel disconnected before state root calculation".into(),
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
@@ -497,11 +497,7 @@ where
                 // the unchanged root node.
                 (self.parent_state_root, TrieUpdates::default())
             }
-            Err(err) => {
-                return Err(StateRootTaskError::Other(format!(
-                    "could not calculate state root: {err:?}"
-                )))
-            }
+            Err(err) => return Err(StateRootTaskError::Other(err.into())),
         };
 
         let end = Instant::now();
@@ -697,8 +693,7 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
-        self.reveal_proof_result(result)
-            .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
+        self.reveal_proof_result(result).map_err(|e| StateRootTaskError::Other(e.into()))
     }
 
     /// Reveals a proof batch.
@@ -1150,7 +1145,7 @@ where
 
                 match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                     targets: proof_targets,
-                    proof_result_sender: ProofResultContext::new(
+                    proof_result_context: ProofResultContext::new(
                         self.proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),
@@ -1161,7 +1156,7 @@ where
                     }
                     Err(e) => {
                         error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::ProofDispatch(e));
+                        dispatch_error = Some(StateRootTaskError::Provider(e));
                     }
                 }
             },
