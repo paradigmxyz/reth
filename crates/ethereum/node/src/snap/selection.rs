@@ -107,11 +107,11 @@ mod tests {
     use reth_node_core::args::NetworkArgs;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StageCheckpointWriter,
-        StorageSettings, StorageSettingsCache,
+        ChainSpecProvider, DBProvider, MetadataWriter, ProviderError, StorageSettings,
+        StorageSettingsCache,
     };
     use reth_snap_sync::{SnapAttemptStore, SnapGeneration};
-    use reth_stages::{StageCheckpoint, StageId, StageSetBuilder};
+    use reth_stages::StageSetBuilder;
     use reth_tasks::Runtime;
     use std::sync::Arc;
 
@@ -177,13 +177,10 @@ mod tests {
     }
 
     #[test]
-    fn building_refuses_snap_into_a_legacy_layout_stored_at_genesis() {
+    fn building_refuses_snap_into_a_legacy_layout() {
         let factory = factory(amsterdam());
-        // Genesis stores the settings and sets every checkpoint to its block.
-        let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v1()).unwrap();
-        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(0)).unwrap();
-        provider.commit().unwrap();
+        // Genesis caches the stored layout before the backfill is built.
+        factory.set_storage_settings_cache(StorageSettings::v1());
 
         // Recovery runs before genesis stores the settings, so only the build can refuse it.
         let error = build(true, factory).unwrap_err();
