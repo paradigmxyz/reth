@@ -351,9 +351,11 @@ pub fn native_bytecode(code: &Bytecode) -> evm2::bytecode::Bytecode {
     }
     if let Some(jumps) = code.legacy_jump_table() {
         let jumps = evm2::bytecode::JumpTable::from_slice(jumps.as_slice(), code.len());
-        // SAFETY: revm and evm2 use the same legacy analysis and padding rules for PUSH and
-        // DUPN/SWAPN/EXCHANGE. The bytecode and jump map come from an already analyzed value;
-        // retaining its padded bytes preserves the interpreter's bounds invariants.
+        // SAFETY: revm's legacy padding completes any truncated trailing PUSH or
+        // DUPN/SWAPN/EXCHANGE immediate and terminates the code with STOP, so decoding
+        // immediates never reads past the buffer, which is what `new_analyzed` requires. evm2's
+        // own `new_legacy` pads a fixed 33 bytes instead, so the buffers can differ in length.
+        // The jump map comes from the same analyzed value.
         unsafe { evm2::bytecode::Bytecode::new_analyzed(code.bytes(), code.len(), jumps) }
     } else {
         evm2::bytecode::Bytecode::new_raw(code.original_bytes())
@@ -528,7 +530,7 @@ mod tests {
             let analyzed = evm2::bytecode::Bytecode::new_legacy(persistent.original_bytes());
             assert_eq!(native, analyzed);
             assert_eq!(revm_bytecode(&native), persistent);
-            assert_eq!(native.bytes(), analyzed.bytes());
+            assert_eq!(native.bytes(), &persistent.bytes());
             assert_eq!(native.legacy_jump_table(), analyzed.legacy_jump_table());
             if !persistent.is_empty() {
                 assert_eq!(native.bytes().as_ptr(), persistent.bytes_ref().as_ptr());
