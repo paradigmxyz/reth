@@ -350,7 +350,15 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         let dev_mining = self.dev_mining;
         let launch = self.launcher.clone().unwrap_or_else(|| {
             Arc::new(|args, database, _| {
-                Box::pin(launch_test_node(args, database, PipelineBackfill))
+                Box::pin(async move {
+                    // The pipeline would silently replace the snap sync the flag opts into.
+                    ensure!(
+                        !args.node_config.network.snap_v2,
+                        "nodes with `--snap.v2` need a backfill set with `with_backfill`, e.g. \
+                         `EthereumBackfill::new`"
+                    );
+                    launch_test_node(args, database, PipelineBackfill).await
+                })
             })
         });
         // Restartable nodes create their own runtime when they are launched.
