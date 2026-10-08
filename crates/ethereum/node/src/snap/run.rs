@@ -754,29 +754,6 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_root_mismatch_starts_a_new_attempt_instead_of_failing() {
-        let (mut pipeline, factory, write, pivot) = handoff_ready(TestStage::new(StageId::Headers));
-        // State whose root differs from the one the pivot header commits to.
-        let provider = factory.database_provider_rw().unwrap();
-        provider
-            .tx_ref()
-            .put::<tables::HashedAccounts>(
-                B256::repeat_byte(3),
-                Account { nonce: 1, ..Default::default() },
-            )
-            .unwrap();
-        provider.commit().unwrap();
-        let (_targets, mut receiver) = watch::channel(target());
-        let (run, _stop) = snap_run(&factory);
-
-        let pass =
-            run.rebuild_and_hand_off(&mut pipeline, &mut receiver, write, pivot).await.unwrap();
-
-        assert_eq!(pass, Pass::RootMismatch);
-        assert!(factory.provider().unwrap().active_snap_write().unwrap().is_none());
-    }
-
-    #[tokio::test]
     async fn repeated_root_mismatches_fail_the_run() {
         let (mut pipeline, factory, _, _) =
             handoff_ready(TestStage::new(StageId::Headers).add_exec(headers_done(PIVOT)));

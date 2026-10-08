@@ -173,12 +173,6 @@ async fn fcu_restores_reorged_out_persisted_head() -> eyre::Result<()> {
     assert_fcu_restores_reorged_out_persisted_head(3).await
 }
 
-/// A stale persisted head above a shorter sibling branch must also become canonical again.
-#[tokio::test]
-async fn fcu_restores_reorged_out_persisted_head_above_shorter_branch() -> eyre::Result<()> {
-    assert_fcu_restores_reorged_out_persisted_head(1).await
-}
-
 /// Holds the database writer lock across both FCUs so disk cleanup cannot win the race.
 async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();

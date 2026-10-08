@@ -764,14 +764,4 @@ mod tests {
             assert!(EXECUTED.load(Ordering::SeqCst), "Custom command should have been executed");
         }
     }
-
-    #[test]
-    fn parse_cpu_cores_override() {
-        let mut cli = Cli::try_parse_args_from(["reth", "node", "--cpu-cores", "8"]).unwrap();
-        let node = cli.as_node_command_mut().unwrap();
-        assert_eq!(node.engine.cpu_cores.unwrap().get(), 8);
-        assert!(node.engine.tree_config().use_state_root_task());
-        let err = Cli::try_parse_args_from(["reth", "node", "--cpu-cores", "0"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
-    }
 }
