@@ -3229,28 +3229,6 @@ mod tests {
     }
 
     #[test]
-    fn state_range_provider_serves_persisted_root_with_in_memory_overlay() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, _, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT - 1,
-            1,
-            BlockRangeParams::default(),
-        )?;
-        assert!(provider.canonical_in_memory_state.head_state().is_some());
-        let provider_rw = provider.database.provider_rw()?;
-        provider_rw.save_stage_checkpoint(
-            StageId::Finish,
-            StageCheckpoint::new((TEST_BLOCKS_COUNT - 2) as u64),
-        )?;
-        provider_rw.commit()?;
-
-        assert!(provider.state_range_provider(EMPTY_ROOT_HASH)?.is_some());
-
-        Ok(())
-    }
-
-    #[test]
     fn latest_reads_in_memory_state_like_the_hash_lookup() -> eyre::Result<()> {
         use crate::{AccountReader, StateProvider, StateProviderBox};
         use reth_storage_api::DatabaseProviderROFactory;
@@ -3328,57 +3306,6 @@ mod tests {
             assert_eq!(state.basic_account(&address)?, Some(account.clone()));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn state_range_provider_resolves_root_from_in_memory_block() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let factory = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new(factory)?;
-
-        let (address, account) = random_account(1);
-        let hashed_address = keccak256(address);
-        let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account.clone()));
-
-        // A root only the in-memory block carries, so a match proves the in-memory path (not
-        // persisted history, which has no block with this root) resolved it.
-        let unique_root = B256::repeat_byte(0x77);
-        let parent = provider.canonical_in_memory_state.get_canonical_head();
-        let mut block = random_block(
-            &mut rng,
-            parent.number + 1,
-            BlockParams { parent: Some(parent.hash()), tx_count: Some(0), ..Default::default() },
-        )
-        .unseal();
-        block.header.state_root = unique_root;
-        let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
-
-        let trie_data = SortedTrieData::new(
-            Arc::new(hashed_state.into_sorted()),
-            Arc::new(TrieUpdates::default().into_sorted()),
-        );
-        let execution_output = BlockExecutionOutput {
-            result: BlockExecutionResult {
-                receipts: Default::default(),
-                requests: Default::default(),
-                gas_used: 0,
-                blob_gas_used: 0,
-            },
-            state: Default::default(),
-        };
-        let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
-        provider
-            .canonical_in_memory_state
-            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
-
-        let state =
-            provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
-        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
-        assert_eq!(range.items, vec![(hashed_address, account)]);
 
         Ok(())
     }

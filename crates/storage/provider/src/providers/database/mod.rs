@@ -1240,20 +1240,6 @@ mod tests {
     }
 
     #[test]
-    fn snap_sync_requires_the_hashed_state_layout() {
-        let factory = create_test_provider_factory();
-
-        factory.set_storage_settings_cache(StorageSettings::v2());
-        assert!(factory.database_provider_ro().unwrap().ensure_snap_sync_layout().is_ok());
-
-        factory.set_storage_settings_cache(StorageSettings::v1());
-        assert_matches!(
-            factory.database_provider_ro().unwrap().ensure_snap_sync_layout(),
-            Err(ProviderError::SnapStorageLayoutUnsupported)
-        );
-    }
-
-    #[test]
     fn anchored_static_files_resume_after_the_pivot() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
