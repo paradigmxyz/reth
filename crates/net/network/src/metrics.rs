@@ -654,3 +654,17 @@ impl AnnouncedTxTypesMetrics {
         self.other.record(tx_types_counter.other as f64);
     }
 }
+
+/// Metrics for outbound Snap requests delegated by the state fetcher.
+#[derive(Metrics)]
+#[metrics(scope = "network.snap")]
+pub struct SnapRequestMetrics {
+    /// Requests awaiting their response, including buffered replies behind an earlier request.
+    pub(crate) requests_inflight: Gauge,
+    /// Total requests delegated to a peer.
+    pub(crate) requests_sent_total: Counter,
+    /// Requests completed with a network error or disconnected session.
+    pub(crate) requests_failed_total: Counter,
+    /// Seconds from delegation until the response is delivered to the caller.
+    pub(crate) response_duration_seconds: Histogram,
+}
