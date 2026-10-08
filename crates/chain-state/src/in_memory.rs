@@ -722,6 +722,20 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 }
 
+impl<N: NodePrimitives> Drop for BlockState<N> {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(state) = parent {
+            // into_inner avoids recursive drop during concurrent parent release.
+            let Some(mut state) = Arc::into_inner(state) else {
+                break;
+            };
+            // Detach the next parent before dropping this state.
+            parent = state.parent.take();
+        }
+    }
+}
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
@@ -1032,6 +1046,7 @@ mod tests {
     use alloy_primitives::Bytes;
     use rand::Rng;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    use std::sync::Barrier;
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1488,5 +1503,63 @@ mod tests {
         assert_eq!(block.hash(), block1.recovered_block.hash());
         assert_eq!(Some(bal), block1.bal());
         assert!(blocks_and_bals.next().is_none());
+    }
+
+    const SMALL_STACK: usize = 64 * 1024;
+    const DEPTH: usize = 100_000;
+
+    fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
+        let block = ExecutedBlock::default();
+        for _ in 0..depth {
+            parent = Some(Arc::new(BlockState::with_parent(block.clone(), parent)));
+        }
+        parent.expect("nonempty chain")
+    }
+
+    fn small_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new().stack_size(SMALL_STACK).spawn(f).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn deep_chain_drop_preserves_shared_tail() {
+        small_stack(|| {
+            let tail = block_state_chain(DEPTH, None);
+            let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+            let head = block_state_chain(DEPTH, Some(tail.clone()));
+            let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+            drop(head);
+            assert_eq!(Arc::strong_count(&tail), 1);
+            assert_eq!(tail.chain().count(), DEPTH);
+            assert_eq!(head_payload.strong_count(), 0);
+            assert_eq!(tail_payload.strong_count(), DEPTH);
+            drop(tail);
+            assert_eq!(tail_payload.strong_count(), 0);
+        });
+    }
+
+    #[test]
+    fn concurrent_drop_releases_shared_tail() {
+        let tail = block_state_chain(DEPTH, None);
+        let payload = Arc::downgrade(&tail.block_ref().execution_output);
+        let barrier = Arc::new(Barrier::new(3));
+        let handles = (0..2)
+            .map(|_| {
+                let head = block_state_chain(1, Some(tail.clone()));
+                let barrier = barrier.clone();
+                std::thread::Builder::new()
+                    .stack_size(SMALL_STACK)
+                    .spawn(move || {
+                        barrier.wait();
+                        drop(head);
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        drop(tail);
+        barrier.wait();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(payload.strong_count(), 0);
     }
 }
