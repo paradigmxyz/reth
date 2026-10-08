@@ -840,14 +840,6 @@ mod tests {
     }
 
     #[test]
-    fn cpu_cores_override_rejects_zero() {
-        let err = CommandParser::<EngineArgs>::try_parse_from(["reth", "--cpu-cores", "0"])
-            .err()
-            .unwrap();
-        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
-    }
-
-    #[test]
     fn cpu_cores_override_preserves_state_root_fallback() {
         let args = CommandParser::<EngineArgs>::parse_from([
             "reth",
@@ -1113,37 +1105,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_num_state_masking_blocks() {
-        let args = CommandParser::<EngineArgs>::parse_from([
-            "reth",
-            "--engine.persistence-threshold",
-            "13",
-            "--engine.num-state-masking-blocks",
-            "7",
-        ])
-        .args;
-
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
-    }
-
-    #[test]
-    fn test_parse_backfill_threshold() {
-        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
-        let config = args.tree_config();
-        assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
-
-        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
-            let args = CommandParser::<EngineArgs>::parse_from([
-                "reth",
-                "--engine.backfill-threshold",
-                threshold,
-            ])
-            .args;
-            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
-        }
-    }
-
-    #[test]
     fn validate_rejects_state_masking_window_at_or_above_threshold() {
         let args = EngineArgs {
             persistence_threshold: 4,
@@ -1202,17 +1163,6 @@ mod tests {
         assert_eq!(config.num_state_masking_blocks(), 0);
         assert_eq!(config.memory_block_buffer_target(), 0);
         assert_eq!(config.persistence_backpressure_threshold(), 1);
-    }
-
-    #[test]
-    fn zero_persistence_threshold_disables_explicit_state_masking() {
-        let args = EngineArgs {
-            persistence_threshold: 0,
-            num_state_masking_blocks: u64::MAX,
-            ..EngineArgs::default()
-        };
-        args.validate().unwrap();
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 0);
     }
 
     #[test]

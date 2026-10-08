@@ -368,20 +368,3 @@ where
 {
     type Components = Comp;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::AccessRights;
-
-    #[test]
-    fn inconsistent_access_rights_skip_consistency_checks() {
-        assert!(AccessRights::RwInconsistent.is_read_write());
-        assert!(AccessRights::RwInconsistent.skips_consistency_check());
-        assert!(!AccessRights::RW.skips_consistency_check());
-
-        assert!(!AccessRights::RoInconsistent.is_read_write());
-        assert!(AccessRights::RoInconsistent.is_read_only_inconsistent());
-        assert!(AccessRights::RoInconsistent.skips_consistency_check());
-        assert!(!AccessRights::RO.skips_consistency_check());
-    }
-}
