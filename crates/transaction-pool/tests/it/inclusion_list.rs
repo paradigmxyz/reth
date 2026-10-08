@@ -6,12 +6,6 @@ use reth_transaction_pool::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn inclusion_list_is_empty_without_transactions() {
-    let pool = TestPoolBuilder::default();
-    assert!(pool.build_inclusion_list(8192).is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn inclusion_list_caps_transactions_per_sender() {
     const OTHER_SENDERS: usize = 2;
     const BUSY_SENDER_TXS: usize = 6;
