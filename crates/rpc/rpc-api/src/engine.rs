@@ -20,7 +20,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use reth_engine_primitives::EngineTypes;
-use reth_jasonrpeesea::{rpc, RpcModule, RpcResult};
+use reth_json_rpc::{rpc, RpcModule, RpcResult};
 use serde_json::Value;
 
 /// Helper trait for the engine api server.
@@ -40,8 +40,8 @@ pub trait IntoEngineApiRpcModule {
 // directly in any of the trait methods. Instead, we have to add the bounds manually. This would be
 // disastrous if we had more than one associated type used in the trait methods.
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine", server_bounds(Engine::PayloadAttributes: reth_jasonrpeesea::DeserializeOwned)))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: reth_jasonrpeesea::Serialize + Clone), server_bounds(Engine::PayloadAttributes: reth_jasonrpeesea::DeserializeOwned)))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine", server_bounds(Engine::PayloadAttributes: reth_json_rpc::DeserializeOwned)))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: reth_json_rpc::Serialize + Clone), server_bounds(Engine::PayloadAttributes: reth_json_rpc::DeserializeOwned)))]
 pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field

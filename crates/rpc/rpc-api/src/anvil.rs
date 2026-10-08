@@ -1,4 +1,4 @@
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_anvil::{Forking, Metadata, MineOptions, NodeInfo};

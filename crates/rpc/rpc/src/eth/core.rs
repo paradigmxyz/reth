@@ -563,7 +563,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_jasonrpeesea::INVALID_PARAMS_CODE;
+    use reth_json_rpc::INVALID_PARAMS_CODE;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},

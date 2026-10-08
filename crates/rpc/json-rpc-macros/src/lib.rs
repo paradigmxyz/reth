@@ -1,4 +1,4 @@
-//! Procedural macros for `reth-jasonrpeesea`.
+//! Procedural macros for `reth-json-rpc`.
 
 use proc_macro::TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
@@ -162,7 +162,7 @@ impl Rpc {
             if matches!(m.kind, Kind::Subscription { .. }) {
                 func.sig.inputs.insert(
                     1,
-                    parse_quote!(subscription_sink: ::reth_jasonrpeesea::PendingSubscriptionSink),
+                    parse_quote!(subscription_sink: ::reth_json_rpc::PendingSubscriptionSink),
                 );
             }
             if func.sig.asyncness.take().is_some() {
@@ -190,14 +190,14 @@ impl Rpc {
             let register = match &m.kind {
                 Kind::Method => {
                     let on_err = quote! {
-                        return ::reth_jasonrpeesea::__private::MethodResult::Err(__err)
+                        return ::reth_json_rpc::__private::MethodResult::Err(__err)
                     };
                     let parse = parse_args(&m.args, &on_err);
                     let (ctx, wait) =
                         if is_async { (quote!(&__ctx), quote!(.await)) } else { (quote!(__ctx), quote!()) };
                     let mut body = quote!(#call(#ctx #(, #args)*) #wait);
                     if !m.args.is_empty() {
-                        body = quote!(#parse ::reth_jasonrpeesea::__private::MethodResult::Ok(#body));
+                        body = quote!(#parse ::reth_json_rpc::__private::MethodResult::Ok(#body));
                     }
                     if is_async {
                         quote!(rpc.register_async_method(#rpc_name, |#params, __ctx| async move { #body }))
@@ -214,7 +214,7 @@ impl Rpc {
                     let wait = is_async.then(|| quote!(.await));
                     let body = quote! {
                         #parse
-                        ::reth_jasonrpeesea::IntoSubscriptionResult::into_subscription_result(
+                        ::reth_json_rpc::IntoSubscriptionResult::into_subscription_result(
                             #call(&__ctx, __pending #(, #args)*) #wait
                         )
                     };
@@ -254,11 +254,11 @@ impl Rpc {
 
                 /// Collects all methods and subscriptions into an `RpcModule`.
                 #[allow(deprecated)]
-                fn into_rpc(self) -> ::reth_jasonrpeesea::RpcModule<Self>
+                fn into_rpc(self) -> ::reth_json_rpc::RpcModule<Self>
                 where
                     #(#bounds,)*
                 {
-                    let mut rpc = ::reth_jasonrpeesea::RpcModule::new(self);
+                    let mut rpc = ::reth_json_rpc::RpcModule::new(self);
                     #(#registrations)*
                     rpc
                 }
@@ -283,9 +283,9 @@ impl Rpc {
         let has_subscriptions =
             self.methods.iter().any(|m| matches!(m.kind, Kind::Subscription { .. }));
         let super_trait = if has_subscriptions {
-            quote!(::reth_jasonrpeesea::client::SubscriptionClientT)
+            quote!(::reth_json_rpc::client::SubscriptionClientT)
         } else {
-            quote!(::reth_jasonrpeesea::client::ClientT)
+            quote!(::reth_json_rpc::client::ClientT)
         };
 
         let fns = self.methods.iter().map(|m| {
@@ -297,7 +297,7 @@ impl Rpc {
                     Ok(ty) => (
                         quote!(#ty),
                         quote! {
-                            ::reth_jasonrpeesea::client::ClientT::request::<#ty, _>(
+                            ::reth_json_rpc::client::ClientT::request::<#ty, _>(
                                 self, #rpc_name, __rpc_params,
                             )
                         },
@@ -305,9 +305,9 @@ impl Rpc {
                     Err(err) => return err.to_compile_error(),
                 },
                 Kind::Subscription { unsubscribe, item, .. } => (
-                    quote!(::reth_jasonrpeesea::client::Subscription<#item>),
+                    quote!(::reth_json_rpc::client::Subscription<#item>),
                     quote! {
-                        ::reth_jasonrpeesea::client::SubscriptionClientT::subscribe::<#item, _>(
+                        ::reth_json_rpc::client::SubscriptionClientT::subscribe::<#item, _>(
                             self, #rpc_name, __rpc_params, #unsubscribe,
                         )
                     },
@@ -315,7 +315,7 @@ impl Rpc {
             };
             sig.output = parse_quote! {
                 -> impl ::core::future::Future<
-                    Output = ::core::result::Result<#output, ::reth_jasonrpeesea::client::Error>,
+                    Output = ::core::result::Result<#output, ::reth_json_rpc::client::Error>,
                 > + ::core::marker::Send
             };
             let attrs = &m.func.attrs;
@@ -326,11 +326,11 @@ impl Rpc {
                 #sig {
                     async move {
                         #[allow(unused_mut)]
-                        let mut __rpc_params = ::reth_jasonrpeesea::client::ArrayParams::new();
+                        let mut __rpc_params = ::reth_json_rpc::client::ArrayParams::new();
                         #(
                             if let ::core::result::Result::Err(__err) = __rpc_params.insert(#args) {
                                 return ::core::result::Result::Err(
-                                    ::reth_jasonrpeesea::client::Error::ParseError(__err),
+                                    ::reth_json_rpc::client::Error::ParseError(__err),
                                 );
                             }
                         )*
@@ -383,9 +383,8 @@ impl Rpc {
             .type_params()
             .map(|param| {
                 let ident = &param.ident;
-                let de =
-                    de.contains(ident).then(|| quote!(+ ::reth_jasonrpeesea::DeserializeOwned));
-                let ser = ser.contains(ident).then(|| quote!(+ ::reth_jasonrpeesea::Serialize));
+                let de = de.contains(ident).then(|| quote!(+ ::reth_json_rpc::DeserializeOwned));
+                let ser = ser.contains(ident).then(|| quote!(+ ::reth_json_rpc::Serialize));
                 parse_quote! {
                     #ident: ::core::marker::Send + ::core::marker::Sync + 'static #de #ser
                 }

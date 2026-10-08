@@ -1,4 +1,4 @@
-use reth_jasonrpeesea::server::{HttpBody, HttpRequest, HttpResponse};
+use reth_json_rpc::server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,
@@ -104,7 +104,7 @@ mod tests {
     use super::*;
     use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
     use http_body_util::BodyExt;
-    use reth_jasonrpeesea::server::{HttpRequest, HttpResponse};
+    use reth_json_rpc::server::{HttpRequest, HttpResponse};
     use std::{convert::Infallible, future::ready};
 
     const TEST_DATA: &str = "compress test data ";

@@ -1,5 +1,5 @@
 use alloy_primitives::U64;
-use reth_jasonrpeesea::RpcResult as Result;
+use reth_json_rpc::RpcResult as Result;
 use reth_network_api::PeersInfo;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_eth_api::helpers::EthApiSpec;

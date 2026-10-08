@@ -7,7 +7,7 @@ use eyre::Result;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
 use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};
-use reth_jasonrpeesea::client::ClientT;
+use reth_json_rpc::client::ClientT;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
 use reth_prune_types::PruneSegment;

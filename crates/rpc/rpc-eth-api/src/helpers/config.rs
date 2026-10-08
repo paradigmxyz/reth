@@ -10,7 +10,7 @@ use alloy_primitives::Address;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
 use reth_revm::db::EmptyDB;

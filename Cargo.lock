@@ -3637,7 +3637,7 @@ dependencies = [
  "clap",
  "http",
  "reth-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "serde_json",
  "tower",
  "tracing",
@@ -3753,7 +3753,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "reth-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "tower",
  "tracing",
 ]
@@ -3866,7 +3866,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "reth-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "serde_json",
  "tokio",
 ]
@@ -3899,7 +3899,7 @@ dependencies = [
  "eyre",
  "futures",
  "reth-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "tokio",
 ]
 
@@ -3925,7 +3925,7 @@ dependencies = [
  "eyre",
  "futures",
  "reth-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "serde",
  "serde_json",
  "tokio",
@@ -7635,7 +7635,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
@@ -8194,7 +8194,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-fs-util",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network-api",
  "reth-network-peers",
  "reth-node-api",
@@ -8942,7 +8942,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -8964,7 +8964,7 @@ dependencies = [
  "futures",
  "interprocess",
  "rand 0.9.5",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-tracing",
  "serde",
  "serde_json",
@@ -8977,7 +8977,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-jasonrpeesea"
+name = "reth-json-rpc"
 version = "2.7.0"
 dependencies = [
  "bytes",
@@ -8990,7 +8990,7 @@ dependencies = [
  "hyper-util",
  "rand 0.9.5",
  "reqwest",
- "reth-jasonrpeesea-macros",
+ "reth-json-rpc-macros",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -9002,7 +9002,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-jasonrpeesea-macros"
+name = "reth-json-rpc-macros"
 version = "2.7.0"
 dependencies = [
  "proc-macro2",
@@ -9297,7 +9297,7 @@ dependencies = [
  "reth-exex",
  "reth-fs-util",
  "reth-invalid-block-hooks",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -9431,7 +9431,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network",
  "reth-network-p2p",
  "reth-network-peers",
@@ -9536,7 +9536,7 @@ dependencies = [
  "procfs",
  "reqwest",
  "reth-fs-util",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-metrics",
  "reth-tasks",
  "socket2",
@@ -9835,7 +9835,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-execution-types",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-metrics",
  "reth-network-api",
  "reth-network-peers",
@@ -9890,7 +9890,7 @@ dependencies = [
  "alloy-serde",
  "reth-chain-state",
  "reth-engine-primitives",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network-peers",
  "reth-rpc-eth-api",
  "reth-trie-common",
@@ -9925,7 +9925,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-ipc",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-metrics",
  "reth-network-api",
  "reth-network-peers",
@@ -9970,7 +9970,7 @@ dependencies = [
  "auto_impl",
  "dyn-clone",
  "reth-evm",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-primitives-traits",
  "reth-rpc-traits",
  "serde_json",
@@ -9986,7 +9986,7 @@ dependencies = [
  "futures-util",
  "reth-chainspec",
  "reth-e2e-test-utils",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-node-api",
  "reth-node-ethereum",
  "reth-rpc-api",
@@ -10010,7 +10010,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-metrics",
  "reth-network-api",
  "reth-node-ethereum",
@@ -10055,7 +10055,7 @@ dependencies = [
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network-api",
  "reth-node-api",
  "reth-primitives-traits",
@@ -10104,7 +10104,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-revm",
@@ -10138,7 +10138,7 @@ dependencies = [
  "http-body-util",
  "pin-project",
  "reqwest",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "tokio",
  "tower",
  "tower-http",
@@ -10153,7 +10153,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "reth-errors",
- "reth-jasonrpeesea",
+ "reth-json-rpc",
  "reth-network-api",
  "serde",
  "strum 0.27.2",

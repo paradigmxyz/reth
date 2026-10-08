@@ -19,7 +19,7 @@ tokio-util = { workspace = true, features = ["codec", "rt"] }
 tower.workspace = true
 
 # misc
-reth-jasonrpeesea = { workspace = true, features = ["client"] }
+reth-json-rpc = { workspace = true, features = ["client"] }
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true

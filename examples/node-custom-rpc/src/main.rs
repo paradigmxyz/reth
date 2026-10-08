@@ -20,7 +20,7 @@ use reth_ethereum::{
     node::EthereumNode,
     pool::TransactionPool,
 };
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     rpc, PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionResult,
 };
 use std::time::Duration;
@@ -146,7 +146,7 @@ where
 mod tests {
     use super::*;
     use reth_ethereum::pool::noop::NoopTransactionPool;
-    use reth_jasonrpeesea::{
+    use reth_json_rpc::{
         client::{HttpClientBuilder, WsClientBuilder},
         server::ServerBuilder,
     };

@@ -6,7 +6,7 @@ use alloy_rpc_types_trace::{
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},
     parity::*,
 };
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// Ethereum trace API
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]

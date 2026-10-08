@@ -1,5 +1,5 @@
 use alloy_rpc_types::RpcModules;
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// RPC namespace, used to find the versions of all rpc modules
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "rpc"))]

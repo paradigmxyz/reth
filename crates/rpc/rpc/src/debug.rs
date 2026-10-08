@@ -19,7 +19,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_jasonrpeesea::{PendingSubscriptionSink, RpcResult, SubscriptionMessage};
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionMessage};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -997,7 +997,7 @@ where
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         if subscription != "traceChain" {
             pending.reject(EthApiError::InvalidParams(format!(
                 "unsupported debug subscription: {subscription}"

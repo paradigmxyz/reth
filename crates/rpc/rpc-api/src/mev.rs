@@ -1,5 +1,5 @@
 use alloy_rpc_types_mev::{EthBundleHash, MevSendBundle, SimBundleOverrides, SimBundleResponse};
-use reth_jasonrpeesea::rpc;
+use reth_json_rpc::rpc;
 
 /// Mev rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "mev"))]
@@ -12,7 +12,7 @@ pub trait MevSimApi {
         &self,
         bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
-    ) -> reth_jasonrpeesea::RpcResult<SimBundleResponse>;
+    ) -> reth_json_rpc::RpcResult<SimBundleResponse>;
 }
 
 /// Mev rpc interface.
@@ -22,10 +22,7 @@ pub trait MevFullApi {
     /// Submitting bundles to the relay. It takes in a bundle and provides a bundle hash as a
     /// return value.
     #[method(name = "sendBundle")]
-    async fn send_bundle(
-        &self,
-        request: MevSendBundle,
-    ) -> reth_jasonrpeesea::RpcResult<EthBundleHash>;
+    async fn send_bundle(&self, request: MevSendBundle) -> reth_json_rpc::RpcResult<EthBundleHash>;
 
     /// Similar to `mev_sendBundle` but instead of submitting a bundle to the relay, it returns
     /// a simulation result. Only fully matched bundles can be simulated.
@@ -34,5 +31,5 @@ pub trait MevFullApi {
         &self,
         bundle: MevSendBundle,
         sim_overrides: SimBundleOverrides,
-    ) -> reth_jasonrpeesea::RpcResult<SimBundleResponse>;
+    ) -> reth_json_rpc::RpcResult<SimBundleResponse>;
 }

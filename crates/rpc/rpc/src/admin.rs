@@ -6,7 +6,7 @@ use alloy_rpc_types_admin::{
     Ports, ProtocolInfo,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
@@ -147,8 +147,8 @@ where
     /// Handler for `admin_peerEvents`
     async fn subscribe_peer_events(
         &self,
-        _pending: reth_jasonrpeesea::PendingSubscriptionSink,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+        _pending: reth_json_rpc::PendingSubscriptionSink,
+    ) -> reth_json_rpc::SubscriptionResult {
         Err("admin_peerEvents is not implemented yet".into())
     }
 

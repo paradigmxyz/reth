@@ -7,7 +7,7 @@ use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,

@@ -75,7 +75,9 @@ impl Methods {
     /// Returns `None` if the request only contained notifications.
     pub async fn raw_json_request(&self, request: &str) -> Option<String> {
         let service = RpcService::new(self.clone(), usize::MAX, None);
-        handle_message(&service, Bytes::copy_from_slice(request.as_bytes()), usize::MAX).await
+        handle_message(&service, Bytes::copy_from_slice(request.as_bytes()), usize::MAX)
+            .await
+            .map(|(json, _)| json)
     }
 }
 

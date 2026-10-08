@@ -15,7 +15,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
 };
-use reth_jasonrpeesea::client::ClientT;
+use reth_json_rpc::client::ClientT;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     node_config::NodeConfig,
@@ -651,14 +651,13 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
-    let middleware = tower::util::MapRequestLayer::new(
-        move |request: reth_jasonrpeesea::server::HttpRequest| {
+    let middleware =
+        tower::util::MapRequestLayer::new(move |request: reth_json_rpc::server::HttpRequest| {
             if request.uri().path().starts_with("/engine/") {
                 observed.fetch_add(1, Ordering::Relaxed);
             }
             request
-        },
-    );
+        });
     let chain = test_chain_spec(EthereumHardfork::Prague);
     let NodeHandle { node, .. } =
         NodeBuilder::new(NodeConfig::test().with_chain(chain).with_unused_ports())

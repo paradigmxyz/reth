@@ -5,7 +5,7 @@ use alloy_rpc_types_engine::{
     TOO_DEEP_REORG_ERROR_MSG,
 };
 use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
@@ -86,12 +86,12 @@ pub enum EngineApiError {
     UnexpectedRequestsHash,
     /// Any other rpc error
     #[error("{0}")]
-    Other(reth_jasonrpeesea::ErrorObject),
+    Other(reth_json_rpc::ErrorObject),
 }
 
 impl EngineApiError {
     /// Crates a new [`EngineApiError::Other`] variant.
-    pub const fn other(err: reth_jasonrpeesea::ErrorObject) -> Self {
+    pub const fn other(err: reth_json_rpc::ErrorObject) -> Self {
         Self::Other(err)
     }
 }
@@ -110,7 +110,7 @@ impl ErrorData {
     }
 }
 
-impl From<EngineApiError> for reth_jasonrpeesea::ErrorObject {
+impl From<EngineApiError> for reth_json_rpc::ErrorObject {
     fn from(error: EngineApiError) -> Self {
         match error {
             // Per the Shanghai Engine API spec, FCU V2 must return -38003 when the wrong
@@ -219,7 +219,7 @@ mod tests {
     fn ensure_engine_rpc_error(
         code: i32,
         message: &str,
-        err: impl Into<reth_jasonrpeesea::ErrorObject>,
+        err: impl Into<reth_json_rpc::ErrorObject>,
     ) {
         let err = err.into();
         assert_eq!(err.code(), code);

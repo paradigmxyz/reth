@@ -4,16 +4,16 @@
 
 use std::fmt::Write;
 
-use reth_jasonrpeesea::SubscriptionId;
+use reth_json_rpc::SubscriptionId;
 
-/// An [`IdProvider`](reth_jasonrpeesea::IdProvider) for ethereum subscription ids.
+/// An [`IdProvider`](reth_json_rpc::IdProvider) for ethereum subscription ids.
 ///
 /// Returns new hex-string [QUANTITY](https://ethereum.org/en/developers/docs/apis/json-rpc/#quantities-encoding) ids
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct EthSubscriptionIdProvider;
 
-impl reth_jasonrpeesea::IdProvider for EthSubscriptionIdProvider {
+impl reth_json_rpc::IdProvider for EthSubscriptionIdProvider {
     fn next_id(&self) -> SubscriptionId {
         to_quantity(rand::random::<u128>())
     }

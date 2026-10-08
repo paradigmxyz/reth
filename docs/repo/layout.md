@@ -138,7 +138,7 @@ There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../
 
 #### Transports
 
-The JSON-RPC server, client and `#[rpc]` macro live in [`rpc/jasonrpeesea`](../../crates/rpc/jasonrpeesea), which serves HTTP and WebSockets.
+The JSON-RPC server, client and `#[rpc]` macro live in [`rpc/json-rpc`](../../crates/rpc/json-rpc), which serves HTTP and WebSockets.
 
 The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 

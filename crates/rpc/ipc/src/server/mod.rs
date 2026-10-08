@@ -1,14 +1,13 @@
 //! JSON-RPC IPC server implementation
 
 use crate::stream_codec::StreamCodec;
-use bytes::Bytes;
 use futures::StreamExt;
 use interprocess::local_socket::{
     tokio::prelude::LocalSocketListener,
     traits::tokio::{Listener, Stream},
     GenericFilePath, ListenerOptions, ToFsName,
 };
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     serve_connection, stop_channel, IdProvider, Methods, RpcService, RpcServiceBuilder,
     RpcServiceT, ServerConfig, ServerHandle, StopHandle,
 };
@@ -52,7 +51,7 @@ where
     ///
     /// ```
     /// use reth_ipc::server::Builder;
-    /// use reth_jasonrpeesea::RpcModule;
+    /// use reth_json_rpc::RpcModule;
     /// async fn run_server() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds".into());
     ///     let mut module = RpcModule::new(());
@@ -142,8 +141,9 @@ where
             trace!("accepted ipc connection");
 
             let (reader, writer) = stream.split();
-            let reader = FramedRead::new(reader, StreamCodec::stream_incoming())
-                .filter_map(|res| ready(res.ok().map(Bytes::from)));
+            let codec =
+                StreamCodec::stream_incoming().with_max_length(config.max_request_size() as usize);
+            let reader = FramedRead::new(reader, codec).filter_map(|res| ready(res.ok()));
             let writer = FramedWrite::new(writer, StreamCodec::stream_incoming());
             let methods = methods.clone();
             let rpc_middleware = rpc_middleware.clone();
@@ -247,13 +247,13 @@ impl<RpcMiddleware> Builder<RpcMiddleware> {
     /// You may choose static dispatch or dynamic dispatch because
     /// `IdProvider` is implemented for `Box<T>`.
     ///
-    /// Default: [`RandomIntegerIdProvider`](reth_jasonrpeesea::RandomIntegerIdProvider).
+    /// Default: [`RandomIntegerIdProvider`](reth_json_rpc::RandomIntegerIdProvider).
     ///
     /// # Examples
     ///
     /// ```rust
     /// use reth_ipc::server::Builder;
-    /// use reth_jasonrpeesea::RandomStringIdProvider;
+    /// use reth_json_rpc::RandomStringIdProvider;
     ///
     /// // static dispatch
     /// let builder1 = Builder::default().set_id_provider(RandomStringIdProvider::new(16));
@@ -295,7 +295,7 @@ mod tests {
     use super::*;
     use crate::client::IpcClientBuilder;
     use futures::future::{select, Either};
-    use reth_jasonrpeesea::{
+    use reth_json_rpc::{
         client::{BatchRequestBuilder, ClientT, Error, Subscription, SubscriptionClientT},
         rpc_params, MethodResponse, PendingSubscriptionSink, Request, RpcModule,
         SubscriptionMessage, INTERNAL_ERROR_CODE, TOO_MANY_SUBSCRIPTIONS_CODE,
@@ -664,5 +664,36 @@ mod tests {
 
         assert_eq!(say_hello_response, goodbye_msg);
         assert_eq!(say_goodbye_response, hello_msg);
+    }
+
+    #[tokio::test]
+    async fn invalid_and_oversized_messages() {
+        let endpoint = &dummy_name();
+        let server = Builder::default().max_request_body_size(64).build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "succeed").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let stream = endpoint.as_str().to_fs_name::<GenericFilePath>().unwrap();
+        let stream = interprocess::local_socket::tokio::Stream::connect(stream).await.unwrap();
+        let (reader, mut writer) = stream.split();
+        writer.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"\xff\"}").await.unwrap();
+        writer.write_all(format!(r#"{{"x":"{}"}}"#, "a".repeat(100)).as_bytes()).await.unwrap();
+        writer.write_all(br#"{"jsonrpc":"2.0","id":2,"method":"anything"}"#).await.unwrap();
+        let mut responses = FramedRead::new(reader, StreamCodec::stream_incoming())
+            .map(|res| String::from_utf8(res.unwrap().into()).unwrap())
+            .take(3)
+            .collect::<Vec<_>>()
+            .await;
+        responses.sort_unstable();
+        assert_eq!(
+            responses,
+            [
+                r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#,
+                r#"{"jsonrpc":"2.0","id":2,"result":"succeed"}"#,
+                r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32007,"message":"Request is too big","data":"Exceeded max limit of 64"}}"#,
+            ]
+        );
     }
 }

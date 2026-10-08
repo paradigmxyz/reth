@@ -1,4 +1,4 @@
-use reth_jasonrpeesea::ServerConfig;
+use reth_json_rpc::ServerConfig;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};

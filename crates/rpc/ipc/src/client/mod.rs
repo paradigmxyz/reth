@@ -3,7 +3,7 @@
 use crate::stream_codec::StreamCodec;
 use futures::TryFutureExt;
 use interprocess::local_socket::{tokio::prelude::*, GenericFilePath};
-use reth_jasonrpeesea::client::{Client, ClientBuilder};
+use reth_json_rpc::client::{Client, ClientBuilder};
 use std::{io, time::Duration};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -25,7 +25,7 @@ impl IpcClientBuilder {
     ///
     /// ```
     /// use reth_ipc::client::IpcClientBuilder;
-    /// use reth_jasonrpeesea::{client::ClientT, rpc_params};
+    /// use reth_json_rpc::{client::ClientT, rpc_params};
     ///
     /// # async fn run_client() -> Result<(), Box<dyn core::error::Error +  Send + Sync>> {
     /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;

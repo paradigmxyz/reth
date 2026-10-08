@@ -10,7 +10,7 @@ use alloy_rpc_types_mev::{
 };
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{

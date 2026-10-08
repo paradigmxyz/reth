@@ -630,7 +630,7 @@ where
     /// # Examples
     ///
     /// ```rust,ignore
-    /// use reth_jasonrpeesea::{rpc, RpcResult};
+    /// use reth_json_rpc::{rpc, RpcResult};
     ///
     /// #[derive(Clone)]
     /// struct CustomApi<Pool> { pool: Pool }

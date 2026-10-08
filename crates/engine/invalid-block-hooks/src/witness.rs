@@ -188,7 +188,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
     /// The healthy node client to compare the witness against.
-    healthy_node_client: Option<reth_jasonrpeesea::client::HttpClient>,
+    healthy_node_client: Option<reth_json_rpc::client::HttpClient>,
 }
 
 impl<P, E> InvalidBlockWitnessHook<P, E> {
@@ -197,7 +197,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
         provider: P,
         evm_config: E,
         output_directory: PathBuf,
-        healthy_node_client: Option<reth_jasonrpeesea::client::HttpClient>,
+        healthy_node_client: Option<reth_json_rpc::client::HttpClient>,
     ) -> Self {
         Self { provider, evm_config, output_directory, healthy_node_client }
     }

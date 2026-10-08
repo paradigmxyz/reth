@@ -1,4 +1,4 @@
-use reth_jasonrpeesea::{MethodResponse, Request, RpcModule, RpcServiceT};
+use reth_json_rpc::{MethodResponse, Request, RpcModule, RpcServiceT};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,

@@ -32,7 +32,7 @@ use reth_engine_primitives::ConsensusEngineHandle;
 use reth_errors::RethError;
 use reth_ethereum_engine_primitives::EthBuiltPayload;
 use reth_evm::{execute::BlockBuilder, ConfigureEvm, NextBlockEnvAttributes};
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     transaction::{recover::try_recover_signers, signed::RecoveryError},

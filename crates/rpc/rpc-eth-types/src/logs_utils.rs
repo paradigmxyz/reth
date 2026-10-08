@@ -8,7 +8,7 @@ use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
-use reth_jasonrpeesea::ErrorObject;
+use reth_json_rpc::ErrorObject;
 use reth_primitives_traits::{
     BlockBody, NodePrimitives, RecoveredBlock, SealedHeaderFor, SignedTransaction,
 };

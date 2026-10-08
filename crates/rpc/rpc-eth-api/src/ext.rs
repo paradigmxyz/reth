@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// Extension trait for `eth_` namespace for L2s.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]

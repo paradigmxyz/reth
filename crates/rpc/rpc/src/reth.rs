@@ -11,9 +11,7 @@ use reth_chain_state::{
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_jasonrpeesea::{
-    PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionSink,
-};
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionSink};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -266,7 +264,7 @@ where
     async fn reth_subscribe_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
         self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
@@ -278,7 +276,7 @@ where
     async fn reth_subscribe_persisted_block(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
         self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
@@ -290,7 +288,7 @@ where
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();

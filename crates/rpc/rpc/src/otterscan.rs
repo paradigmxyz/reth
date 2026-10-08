@@ -12,7 +12,7 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
 use reth_chainspec::ChainSpecProvider;
-use reth_jasonrpeesea::{ErrorObject, RpcResult};
+use reth_json_rpc::{ErrorObject, RpcResult};
 use reth_primitives_traits::{BlockBody, TxTy};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;

@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, TransactionSigned};
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     client::{ClientT, SubscriptionClientT},
     server::{HttpRequest, HttpResponse},
 };

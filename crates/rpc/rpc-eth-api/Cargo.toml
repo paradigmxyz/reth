@@ -47,7 +47,7 @@ alloy-rpc-types-mev.workspace = true
 alloy-consensus.workspace = true
 
 # rpc
-reth-jasonrpeesea = { workspace = true, features = ["macros"] }
+reth-json-rpc = { workspace = true, features = ["macros"] }
 
 # async
 async-trait.workspace = true
@@ -63,7 +63,7 @@ tracing.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
-client = ["reth-jasonrpeesea/client"]
+client = ["reth-json-rpc/client"]
 account-ext = [
     "alloy-rpc-types-eth/account-ext",
     "reth-primitives-traits/account-ext",

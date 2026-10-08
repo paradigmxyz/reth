@@ -5,7 +5,7 @@ use alloy_rpc_types_beacon::relay::{
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6,
 };
-use reth_jasonrpeesea::rpc;
+use reth_json_rpc::rpc;
 
 /// Block validation rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "flashbots"))]
@@ -16,40 +16,40 @@ pub trait BlockSubmissionValidationApi {
     async fn validate_builder_submission_v1(
         &self,
         request: BuilderBlockValidationRequest,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV2")]
     async fn validate_builder_submission_v2(
         &self,
         request: BuilderBlockValidationRequestV2,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV3")]
     async fn validate_builder_submission_v3(
         &self,
         request: BuilderBlockValidationRequestV3,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV4")]
     async fn validate_builder_submission_v4(
         &self,
         request: BuilderBlockValidationRequestV4,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV5")]
     async fn validate_builder_submission_v5(
         &self,
         request: BuilderBlockValidationRequestV5,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 
     /// A Request to validate a block submission.
     #[method(name = "validateBuilderSubmissionV6")]
     async fn validate_builder_submission_v6(
         &self,
         request: BuilderBlockValidationRequestV6,
-    ) -> reth_jasonrpeesea::RpcResult<()>;
+    ) -> reth_json_rpc::RpcResult<()>;
 }

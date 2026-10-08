@@ -18,7 +18,7 @@ metrics-util.workspace = true
 
 tokio.workspace = true
 
-reth-jasonrpeesea = { workspace = true, features = ["server"] }
+reth-json-rpc = { workspace = true, features = ["server"] }
 http.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true

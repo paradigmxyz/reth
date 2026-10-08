@@ -4,7 +4,7 @@ use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use reth_jasonrpeesea::RpcResult as Result;
+use reth_json_rpc::RpcResult as Result;
 use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer};
 use reth_rpc_convert::RpcTxReq;

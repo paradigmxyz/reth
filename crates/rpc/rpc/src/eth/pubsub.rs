@@ -11,9 +11,7 @@ use alloy_rpc_types_eth::{
 };
 use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_jasonrpeesea::{
-    ErrorObject, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink,
-};
+use reth_json_rpc::{ErrorObject, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
@@ -228,7 +226,7 @@ where
         pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> reth_jasonrpeesea::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {

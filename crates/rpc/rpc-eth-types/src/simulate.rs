@@ -18,7 +18,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
 };
-use reth_jasonrpeesea::{ErrorObject, INTERNAL_ERROR_CODE};
+use reth_json_rpc::{ErrorObject, INTERNAL_ERROR_CODE};
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
@@ -513,7 +513,7 @@ where
         + FromEthApiError
         + FromEvmError<T::Evm>
         + From<T::Error>
-        + Into<reth_jasonrpeesea::ErrorObject>,
+        + Into<reth_json_rpc::ErrorObject>,
     T: RpcConvert,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());

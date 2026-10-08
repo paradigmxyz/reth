@@ -1,12 +1,12 @@
 [package]
-name = "reth-jasonrpeesea-macros"
+name = "reth-json-rpc-macros"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Procedural macros for reth-jasonrpeesea"
+description = "Procedural macros for reth-json-rpc"
 
 [lints]
 workspace = true

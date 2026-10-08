@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
-use reth_jasonrpeesea::{RpcModule, RpcResult};
+use reth_json_rpc::{RpcModule, RpcResult};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{

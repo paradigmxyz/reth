@@ -22,7 +22,7 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
 use reth_execution_types::BlockExecutionOutput;
-use reth_jasonrpeesea::{ErrorObject, RpcResult};
+use reth_json_rpc::{ErrorObject, RpcResult};
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},

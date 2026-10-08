@@ -2,7 +2,7 @@
 
 use crate::utils::launch_http;
 use alloy_primitives::U256;
-use reth_jasonrpeesea::client::{ClientT, ToRpcParams};
+use reth_json_rpc::client::{ClientT, ToRpcParams};
 use reth_rpc_server_types::RethRpcModule;
 use serde_json::value::RawValue;
 

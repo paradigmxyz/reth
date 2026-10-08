@@ -5,7 +5,7 @@ use alloy_rpc_types_eth::BlockNumberOrTag;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
-use reth_jasonrpeesea::client::ClientT;
+use reth_json_rpc::client::ClientT;
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};

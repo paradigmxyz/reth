@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use http::HeaderMap;
-use reth_jasonrpeesea::server::HttpResponse;
+use reth_json_rpc::server::HttpResponse;
 
 mod auth_client_layer;
 mod auth_layer;

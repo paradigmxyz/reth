@@ -1,5 +1,5 @@
 [package]
-name = "reth-jasonrpeesea"
+name = "reth-json-rpc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,7 +24,7 @@ tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 
 # macros
-reth-jasonrpeesea-macros = { workspace = true, optional = true }
+reth-json-rpc-macros = { workspace = true, optional = true }
 
 # server
 http = { workspace = true, optional = true }
@@ -43,7 +43,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 [features]
 default = []
-macros = ["dep:reth-jasonrpeesea-macros"]
+macros = ["dep:reth-json-rpc-macros"]
 server = [
     "dep:http",
     "dep:http-body",

@@ -1,4 +1,4 @@
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     server::{HttpRequest, HttpResponse, TowerService},
     RpcService, RpcServiceT,
 };

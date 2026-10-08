@@ -15,7 +15,7 @@ use alloy_rpc_types_eth::{
     StateContext, SyncStatus, Work,
 };
 use alloy_serde::JsonStorageKey;
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
@@ -464,7 +464,7 @@ impl<T>
     > for T
 where
     T: FullEthApi,
-    reth_jasonrpeesea::ErrorObject: From<T::Error>,
+    reth_json_rpc::ErrorObject: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {

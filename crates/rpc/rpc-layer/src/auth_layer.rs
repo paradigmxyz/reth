@@ -1,6 +1,6 @@
 use super::AuthValidator;
 use pin_project::pin_project;
-use reth_jasonrpeesea::server::{HttpRequest, HttpResponse};
+use reth_json_rpc::server::{HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,
@@ -16,7 +16,7 @@ use tower::{Layer, Service};
 /// # How to integrate
 /// ```rust
 /// async fn build_layered_rpc_server() {
-///     use reth_jasonrpeesea::server::ServerBuilder;
+///     use reth_json_rpc::server::ServerBuilder;
 ///     use reth_rpc_layer::{AuthLayer, JwtAuthValidator, JwtSecret};
 ///     use std::net::SocketAddr;
 ///
@@ -155,7 +155,7 @@ mod tests {
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use reqwest::{header, StatusCode};
-    use reth_jasonrpeesea::{
+    use reth_json_rpc::{
         server::ServerBuilder, RandomStringIdProvider, RpcModule, ServerConfig, ServerHandle,
     };
     use std::{

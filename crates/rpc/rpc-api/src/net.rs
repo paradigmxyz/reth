@@ -1,5 +1,5 @@
 use alloy_primitives::U64;
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// Net rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]

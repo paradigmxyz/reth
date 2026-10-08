@@ -38,7 +38,7 @@ use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},
 };
-use reth_jasonrpeesea::server::{HttpBody, HttpRequest, HttpResponse};
+use reth_json_rpc::server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,

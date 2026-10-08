@@ -81,8 +81,8 @@ members = [
     "crates/prune/types",
     "crates/revm/",
     "crates/rpc/ipc/",
-    "crates/rpc/jasonrpeesea/",
-    "crates/rpc/jasonrpeesea-macros/",
+    "crates/rpc/json-rpc/",
+    "crates/rpc/json-rpc-macros/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
@@ -369,8 +369,8 @@ reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
 reth-ipc = { path = "crates/rpc/ipc" }
-reth-jasonrpeesea = { path = "crates/rpc/jasonrpeesea" }
-reth-jasonrpeesea-macros = { path = "crates/rpc/jasonrpeesea-macros" }
+reth-json-rpc = { path = "crates/rpc/json-rpc" }
+reth-json-rpc-macros = { path = "crates/rpc/json-rpc-macros" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
 reth-metrics = { path = "crates/metrics" }

@@ -248,11 +248,22 @@ impl Pending {
             Self::Subscribe(tx) => drop(tx.send(Err(err))),
         }
     }
+
+    /// Returns `true` if the caller stopped waiting, for example after a timeout.
+    fn is_closed(&self) -> bool {
+        match self {
+            Self::Call(tx) => tx.is_closed(),
+            Self::Subscribe(tx) => tx.is_closed(),
+        }
+    }
 }
 
 #[derive(Default)]
 struct State {
-    pending: FxHashMap<u64, Pending>,
+    /// Pending calls by id, with the id of the first call sent in the same message.
+    pending: FxHashMap<u64, (u64, Pending)>,
+    /// Number of pending calls at which to remove the ones nobody waits for.
+    prune_at: usize,
     subscriptions: FxHashMap<SubscriptionId, mpsc::Sender<Box<RawValue>>>,
     subscription_buffer: usize,
 }
@@ -275,7 +286,7 @@ async fn drive<R, T, E, W>(
             command = commands.recv() => {
                 let json = match command {
                     Some(Command::Send { json, pending }) => {
-                        state.pending.extend(pending);
+                        state.add_pending(pending);
                         json
                     }
                     Some(Command::Unsubscribe { json, sub_id }) => {
@@ -304,6 +315,15 @@ async fn drive<R, T, E, W>(
 }
 
 impl State {
+    fn add_pending(&mut self, pending: Vec<(u64, Pending)>) {
+        let Some(&(message, _)) = pending.first() else { return };
+        self.pending.extend(pending.into_iter().map(|(id, pending)| (id, (message, pending))));
+        if self.pending.len() >= self.prune_at {
+            self.pending.retain(|_, (_, pending)| !pending.is_closed());
+            self.prune_at = (self.pending.len() * 2).max(64);
+        }
+    }
+
     fn handle(&mut self, msg: &[u8]) {
         if msg.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'[') {
             match serde_json::from_slice::<Vec<RawResponse<'_>>>(msg) {
@@ -335,13 +355,21 @@ impl State {
         }
 
         let Some(id) = response.id else {
-            // The server could not tell which request failed, so fail all of them.
-            if let Some(err) = response.error {
-                self.pending.drain().for_each(|(_, pending)| pending.fail(err.clone()));
+            // The server could not tell which request failed, which is only clear if all pending
+            // calls were sent in one message. Otherwise they are left to time out rather than
+            // failing calls that may succeed.
+            let mut messages = self.pending.values().map(|(message, _)| *message);
+            if let Some(err) = response.error &&
+                let Some(message) = messages.next() &&
+                messages.all(|m| m == message)
+            {
+                self.pending.drain().for_each(|(_, (_, pending))| pending.fail(err.clone()));
+            } else {
+                tracing::debug!(target: "rpc::jsonrpc", "response without id");
             }
             return
         };
-        let Some(pending) = self.pending.remove(&id) else { return };
+        let Some((_, pending)) = self.pending.remove(&id) else { return };
         match pending {
             Pending::Call(tx) => {
                 let _ = tx.send(Ok(response.into_result()));
@@ -439,5 +467,49 @@ mod tests {
         let err =
             client.subscribe::<u64, _>("sub", crate::rpc_params!["x"], "unsub").await.unwrap_err();
         assert!(matches!(err, Error::Call(err) if err.code() == crate::INTERNAL_ERROR_CODE));
+    }
+
+    #[test]
+    fn prune_abandoned_calls() {
+        let calls = |ids: std::ops::Range<u64>| -> (Vec<_>, Vec<_>) {
+            ids.map(|id| {
+                let (tx, rx) = oneshot::channel();
+                ((id, Pending::Call(tx)), rx)
+            })
+            .unzip()
+        };
+        let mut state = State::default();
+        let (pending, abandoned) = calls(0..100);
+        state.add_pending(pending);
+        drop(abandoned);
+        let (pending, _waiting) = calls(100..200);
+        state.add_pending(pending);
+        assert_eq!(state.pending.len(), 100);
+        assert!(state.pending.keys().all(|id| *id >= 100));
+    }
+
+    #[test]
+    fn response_without_id() {
+        let error =
+            br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#;
+        let mut state = State::default();
+        let (tx1, mut rx1) = oneshot::channel();
+        let (tx2, mut rx2) = oneshot::channel();
+        state.add_pending(vec![(1, Pending::Call(tx1))]);
+        state.add_pending(vec![(2, Pending::Call(tx2))]);
+        state.handle(error);
+        assert!(rx1.try_recv().is_err() && rx2.try_recv().is_err());
+        assert_eq!(state.pending.len(), 2);
+
+        state.pending.remove(&1);
+        state.handle(error);
+        assert_eq!(rx2.try_recv().unwrap().unwrap_err().code(), -32700);
+        assert!(state.pending.is_empty());
+
+        let (tx3, mut rx3) = oneshot::channel();
+        let (tx4, mut rx4) = oneshot::channel();
+        state.add_pending(vec![(3, Pending::Call(tx3)), (4, Pending::Call(tx4))]);
+        state.handle(error);
+        assert!(rx3.try_recv().unwrap().is_err() && rx4.try_recv().unwrap().is_err());
     }
 }

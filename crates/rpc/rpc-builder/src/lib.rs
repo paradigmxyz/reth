@@ -29,7 +29,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     AlreadyStoppedError, IdProvider, Methods, RegisterMethodError, RpcModule, RpcServiceBuilder,
     ServerConfig, ServerHandle,
 };
@@ -75,7 +75,7 @@ pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use reth_ipc::server::Builder as IpcServerBuilder;
-pub use reth_jasonrpeesea::server::ServerBuilder;
+pub use reth_json_rpc::server::ServerBuilder;
 pub use reth_rpc_server_types::{constants, RpcModuleSelection};
 pub use tower::{
     layer::util::{Identity, Stack},
@@ -1078,7 +1078,7 @@ where
 /// Http and WS share the same settings: [`ServerBuilder`].
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
-/// [`ServerBuilder::build`] and [`Server::start`](reth_jasonrpeesea::server::Server::start).
+/// [`ServerBuilder::build`] and [`Server::start`](reth_json_rpc::server::Server::start).
 #[derive(Debug)]
 pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
@@ -2202,7 +2202,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<reth_jasonrpeesea::ServerHandle>,
+    ipc: Option<reth_json_rpc::ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 
@@ -2268,24 +2268,24 @@ impl RpcServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> Option<reth_jasonrpeesea::client::HttpClient> {
+    pub fn http_client(&self) -> Option<reth_json_rpc::client::HttpClient> {
         let url = self.http_url()?;
 
         let client = if let Some(token) = self.bearer_token() {
-            reth_jasonrpeesea::client::HttpClientBuilder::default()
+            reth_json_rpc::client::HttpClientBuilder::default()
                 .set_headers(HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]))
                 .build(url)
         } else {
-            reth_jasonrpeesea::client::HttpClientBuilder::default().build(url)
+            reth_json_rpc::client::HttpClientBuilder::default().build(url)
         };
 
         client.expect("failed to create http client").into()
     }
 
     /// Returns a ws client connected to the server.
-    pub async fn ws_client(&self) -> Option<reth_jasonrpeesea::client::WsClient> {
+    pub async fn ws_client(&self) -> Option<reth_json_rpc::client::WsClient> {
         let url = self.ws_url()?;
-        let mut builder = reth_jasonrpeesea::client::WsClientBuilder::default();
+        let mut builder = reth_json_rpc::client::WsClientBuilder::default();
 
         if let Some(token) = self.bearer_token() {
             let headers = HeaderMap::from_iter([(AUTHORIZATION, token.parse().unwrap())]);

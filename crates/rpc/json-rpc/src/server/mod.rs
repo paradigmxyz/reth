@@ -266,7 +266,7 @@ where
         };
         let max_response_size = config.max_response_body_size as usize;
         match handle_message(&*self.rpc, body, max_response_size).await {
-            Some(json) => json_response(StatusCode::OK, json),
+            Some((json, _)) => json_response(StatusCode::OK, json),
             None => status_response(StatusCode::OK),
         }
     }

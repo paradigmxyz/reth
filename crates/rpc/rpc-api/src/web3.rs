@@ -1,5 +1,5 @@
 use alloy_primitives::{Bytes, B256};
-use reth_jasonrpeesea::{rpc, RpcResult};
+use reth_json_rpc::{rpc, RpcResult};
 
 /// Web3 rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "web3"))]

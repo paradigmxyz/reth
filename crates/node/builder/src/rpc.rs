@@ -2,7 +2,7 @@
 
 use reth_engine_tree::tree::WaitForCaches;
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
-pub use reth_jasonrpeesea::{RpcService, RpcServiceBuilder};
+pub use reth_json_rpc::{RpcService, RpcServiceBuilder};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Either, Identity, Stack,
@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_jasonrpeesea::RpcModule;
+use reth_json_rpc::RpcModule;
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
@@ -1427,12 +1427,12 @@ where
 /// Builder for engine API RPC module.
 ///
 /// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
-/// is effectively a helper trait that provides the type erased [`reth_jasonrpeesea::RpcModule`]
+/// is effectively a helper trait that provides the type erased [`reth_json_rpc::RpcModule`]
 /// instance that contains the method handlers for the engine API. See [`EngineApi`] for an
 /// implementation of [`IntoEngineApiRpcModule`].
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
     /// The engine API RPC module. Only required to be convertible to an
-    /// [`reth_jasonrpeesea::RpcModule`].
+    /// [`reth_json_rpc::RpcModule`].
     type EngineApi: IntoEngineApiRpcModule + Send + Sync;
 
     /// Builds the engine API instance given the provided [`AddOnsContext`].

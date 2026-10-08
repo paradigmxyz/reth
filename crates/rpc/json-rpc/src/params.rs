@@ -49,6 +49,10 @@ impl<'a> ParamsSequence<'a> {
                 self.0 = "";
                 return None
             }
+            b'[' if json[1..].trim_start().starts_with(']') => {
+                self.0 = "";
+                return None
+            }
             b'[' | b',' => json = &json[1..],
             _ => {
                 self.0 = "";
@@ -104,6 +108,12 @@ mod tests {
         let mut seq = p.sequence();
         let parsed: [Option<u32>; 4] = std::array::from_fn(|_| seq.optional_next().unwrap());
         assert_eq!(parsed, [Some(1), Some(2), None, None]);
+
+        for empty in ["[]", "[ ]"] {
+            let p = params(empty);
+            assert_eq!(p.sequence().optional_next::<u8>().unwrap(), None);
+            assert!(p.sequence().next::<u8>().is_err());
+        }
 
         let p = Params::new(None);
         assert_eq!(p.sequence().optional_next::<u8>().unwrap(), None);

@@ -63,7 +63,7 @@ pub mod client;
 pub mod server;
 
 #[cfg(feature = "macros")]
-pub use reth_jasonrpeesea_macros::rpc;
+pub use reth_json_rpc_macros::rpc;
 
 pub use serde::{de::DeserializeOwned, Serialize};
 pub use serde_json::value::RawValue;

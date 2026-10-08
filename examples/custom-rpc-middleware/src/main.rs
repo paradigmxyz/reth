@@ -25,7 +25,7 @@ use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},
 };
-use reth_jasonrpeesea::{ErrorObject, MethodResponse, Request, RpcServiceT};
+use reth_json_rpc::{ErrorObject, MethodResponse, Request, RpcServiceT};
 use tower::Layer;
 
 fn main() {

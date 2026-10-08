@@ -1,6 +1,6 @@
 use http::StatusCode;
 use http_body_util::{BodyExt, LengthLimitError, Limited};
-use reth_jasonrpeesea::server::{HttpBody, HttpRequest, HttpResponse};
+use reth_json_rpc::server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::{poll_fn, Future},
     pin::Pin,
@@ -237,7 +237,7 @@ mod tests {
     use http::header::CONTENT_ENCODING;
     use http_body::{Body, Frame};
     use http_body_util::BodyExt;
-    use reth_jasonrpeesea::server::{HttpRequest, HttpResponse};
+    use reth_json_rpc::server::{HttpRequest, HttpResponse};
     use std::{
         convert::Infallible,
         future::ready,

@@ -51,7 +51,7 @@ tracing.workspace = true
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
-reth-jasonrpeesea = { workspace = true, features = ["macros"] }
+reth-json-rpc = { workspace = true, features = ["macros"] }
 async-trait.workspace = true
 derive_more.workspace = true
 crossbeam-channel.workspace = true

@@ -39,7 +39,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-reth-jasonrpeesea.workspace = true
+reth-json-rpc.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

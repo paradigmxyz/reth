@@ -28,7 +28,7 @@ use futures_util::{
 use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only};
 use reth_engine_primitives::BeaconForkChoiceUpdateError;
-use reth_jasonrpeesea::client::{ClientT, HttpClient};
+use reth_json_rpc::client::{ClientT, HttpClient};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
     Block, BlockBody, BlockTy, FullNodeComponents, NodePrimitives, PayloadTypes, PrimitivesTy,

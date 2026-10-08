@@ -20,7 +20,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # rpc
-reth-jasonrpeesea.workspace = true
+reth-json-rpc.workspace = true
 
 # misc
 strum = { workspace = true, features = ["derive"] }

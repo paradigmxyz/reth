@@ -7,7 +7,7 @@ use reth_consensus_debug_client::{
     DebugConsensusClient, EtherscanBlockProvider, PayloadProvider, RpcBlockProvider,
 };
 use reth_engine_local::{LocalMiner, MiningMode};
-use reth_jasonrpeesea::{DeserializeOwned, Serialize};
+use reth_json_rpc::{DeserializeOwned, Serialize};
 use reth_node_api::{
     BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PayloadAttrTy,
     PayloadAttributesBuilder, PayloadTypes,

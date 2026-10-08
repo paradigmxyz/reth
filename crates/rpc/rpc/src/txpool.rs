@@ -6,7 +6,7 @@ use alloy_primitives::Address;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_convert::RpcConvert;

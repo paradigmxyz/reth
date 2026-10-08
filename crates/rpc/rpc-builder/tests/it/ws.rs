@@ -4,7 +4,7 @@
 use crate::utils::{launch_ws, test_address, test_rpc_builder};
 use reth_consensus::noop::NoopConsensus;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_jasonrpeesea::{
+use reth_json_rpc::{
     client::{Subscription, SubscriptionClientT},
     ServerConfig,
 };
@@ -96,7 +96,7 @@ async fn test_eth_subscribe_all_supported_kinds_accept() {
     ];
 
     for (kind, params) in cases {
-        let mut rpc_params = reth_jasonrpeesea::client::ArrayParams::new();
+        let mut rpc_params = reth_json_rpc::client::ArrayParams::new();
         rpc_params.insert(kind).unwrap();
         for p in params {
             rpc_params.insert(p).unwrap();
@@ -121,7 +121,7 @@ async fn test_eth_subscribe_syncing_delivers_initial_status() {
     let client = handle.ws_client().await.unwrap();
 
     let mut sub: Subscription<Value> = client
-        .subscribe("eth_subscribe", reth_jasonrpeesea::rpc_params!["syncing"], "eth_unsubscribe")
+        .subscribe("eth_subscribe", reth_json_rpc::rpc_params!["syncing"], "eth_unsubscribe")
         .await
         .unwrap();
 
@@ -145,11 +145,7 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
     let client = handle.ws_client().await.unwrap();
 
     let result: Result<Subscription<Value>, _> = client
-        .subscribe(
-            "eth_subscribe",
-            reth_jasonrpeesea::rpc_params!["invalidKind"],
-            "eth_unsubscribe",
-        )
+        .subscribe("eth_subscribe", reth_json_rpc::rpc_params!["invalidKind"], "eth_unsubscribe")
         .await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
@@ -164,11 +160,7 @@ async fn test_eth_subscribe_server_survives_client_disconnect() {
     {
         let client = handle.ws_client().await.unwrap();
         let _sub: Subscription<Value> = client
-            .subscribe(
-                "eth_subscribe",
-                reth_jasonrpeesea::rpc_params!["newHeads"],
-                "eth_unsubscribe",
-            )
+            .subscribe("eth_subscribe", reth_json_rpc::rpc_params!["newHeads"], "eth_unsubscribe")
             .await
             .unwrap();
         // client + subscription drop here
@@ -177,7 +169,7 @@ async fn test_eth_subscribe_server_survives_client_disconnect() {
     // Server must still accept new connections after a client disconnects
     let client2 = handle.ws_client().await.unwrap();
     let sub: Subscription<Value> = client2
-        .subscribe("eth_subscribe", reth_jasonrpeesea::rpc_params!["newHeads"], "eth_unsubscribe")
+        .subscribe("eth_subscribe", reth_json_rpc::rpc_params!["newHeads"], "eth_unsubscribe")
         .await
         .unwrap();
 
@@ -235,7 +227,7 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
     let mut sub: Subscription<Value> = client
         .subscribe(
             "eth_subscribe",
-            reth_jasonrpeesea::rpc_params!["newPendingTransactions"],
+            reth_json_rpc::rpc_params!["newPendingTransactions"],
             "eth_unsubscribe",
         )
         .await
@@ -274,7 +266,7 @@ async fn test_eth_subscribe_syncing_releases_permit_on_unsubscribe() {
             match client
                 .subscribe(
                     "eth_subscribe",
-                    reth_jasonrpeesea::rpc_params!["syncing"],
+                    reth_json_rpc::rpc_params!["syncing"],
                     "eth_unsubscribe",
                 )
                 .await
@@ -316,11 +308,7 @@ async fn test_eth_subscribe_syncing_task_exits_on_disconnect() {
     let mut subs = Vec::with_capacity(SUBSCRIPTIONS);
     for _ in 0..SUBSCRIPTIONS {
         let mut sub: Subscription<Value> = client
-            .subscribe(
-                "eth_subscribe",
-                reth_jasonrpeesea::rpc_params!["syncing"],
-                "eth_unsubscribe",
-            )
+            .subscribe("eth_subscribe", reth_json_rpc::rpc_params!["syncing"], "eth_unsubscribe")
             .await
             .unwrap();
         assert_eq!(sub.next().await.unwrap().unwrap(), Value::Bool(false));

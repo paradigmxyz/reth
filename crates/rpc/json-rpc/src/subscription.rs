@@ -177,24 +177,23 @@ pub struct PendingSubscriptionSink {
 
 impl PendingSubscriptionSink {
     /// Accepts the subscription and sends the subscription id to the client.
+    ///
+    /// Resolves once the response was queued on the connection, so that it precedes all
+    /// notifications.
     pub async fn accept(self) -> Result<SubscriptionSink, PendingSubscriptionAcceptError> {
         let Self { id, sub_id, method, unsubscribe, conn, respond, permit } = self;
-        let response = MethodResponse::response(id, &sub_id, usize::MAX);
+        let (on_sent, sent) = oneshot::channel();
+        let response = MethodResponse::response(id, &sub_id, usize::MAX).with_on_sent(on_sent);
 
         // Register before answering so an immediate unsubscribe finds the subscription.
         let (close, close_rx) = watch::channel(());
         conn.subscriptions.lock().unwrap().insert(sub_id.clone(), (unsubscribe, close_rx));
         let sink = SubscriptionSink { method, sub_id, close, conn, _permit: permit };
 
-        // Write the response to the connection directly so that it precedes all notifications.
-        sink.conn
-            .tx
-            .send(response.into_json())
-            .await
-            .map_err(|_| PendingSubscriptionAcceptError)?;
-        respond
-            .send(MethodResponse::subscription_accepted())
-            .map_err(|_| PendingSubscriptionAcceptError)?;
+        // The response uses the slot the connection reserved for the call, so it never waits for
+        // capacity held by other pending subscriptions.
+        respond.send(response).map_err(|_| PendingSubscriptionAcceptError)?;
+        sent.await.map_err(|_| PendingSubscriptionAcceptError)?;
         Ok(sink)
     }
 

@@ -9,7 +9,10 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use std::sync::Arc;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinSet,
+};
 use tower::Layer;
 
 /// Serves JSON-RPC messages read from `reader` and writes responses and notifications to
@@ -54,8 +57,13 @@ pub async fn serve_connection<R, W, L>(
             }
             let service = service.clone();
             calls.spawn(async move {
-                if let Some(json) = handle_message(&*service, msg, max_response_size).await {
+                if let Some((json, on_sent)) =
+                    handle_message(&*service, msg, max_response_size).await
+                {
                     permit.send(json);
+                    for tx in on_sent {
+                        let _ = tx.send(());
+                    }
                 }
             });
         }
@@ -88,24 +96,27 @@ pub async fn serve_connection<R, W, L>(
 }
 
 /// Handles a single message or batch, returning the response to send, if any.
+///
+/// The returned senders must be notified once the response was queued on the connection.
 pub(crate) async fn handle_message<S: RpcServiceT>(
     service: &S,
     msg: Bytes,
     max_response_size: usize,
-) -> Option<String> {
+) -> Option<(String, Vec<oneshot::Sender<()>>)> {
+    let mut on_sent = Vec::new();
     let entries = match split_batch(&msg) {
         None => {
-            return match parse_message(&msg) {
-                Message::Call(req) => {
-                    let response = service.call(req).await;
-                    (!response.is_subscription()).then(|| response.into_json())
-                }
-                Message::Notification => None,
-                Message::Invalid(id, code) => Some(MethodResponse::error(id, code).into_json()),
-            }
+            let response = match parse_message(&msg) {
+                Message::Call(req) => service.call(req).await,
+                Message::Notification => return None,
+                Message::Invalid(id, code) => MethodResponse::error(id, code),
+            };
+            return Some((response.into_json_with(&mut on_sent), on_sent))
         }
         Some(Ok(entries)) => entries,
-        Some(Err(code)) => return Some(MethodResponse::error(Id::Null, code).into_json()),
+        Some(Err(code)) => {
+            return Some((MethodResponse::error(Id::Null, code).into_json(), on_sent))
+        }
     };
 
     // Invalid entries are answered in place, calls are filled in after the batch completes.
@@ -126,5 +137,5 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
         if reqs.is_empty() { Vec::new() } else { service.batch(reqs).await }.into_iter();
     let responses =
         responses.into_iter().filter_map(|response| response.or_else(|| results.next()));
-    batch_json(responses, max_response_size)
+    batch_json(responses, max_response_size, &mut on_sent).map(|json| (json, on_sent))
 }

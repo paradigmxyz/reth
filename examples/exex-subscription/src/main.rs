@@ -6,7 +6,7 @@ use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
-use reth_jasonrpeesea::{rpc, PendingSubscriptionSink, SubscriptionMessage, SubscriptionResult};
+use reth_json_rpc::{rpc, PendingSubscriptionSink, SubscriptionMessage, SubscriptionResult};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 

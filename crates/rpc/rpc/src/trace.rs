@@ -17,7 +17,7 @@ use alloy_rpc_types_trace::{
 };
 use futures::{FutureExt, StreamExt};
 use reth_chainspec::ChainSpecProvider;
-use reth_jasonrpeesea::RpcResult;
+use reth_json_rpc::RpcResult;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;

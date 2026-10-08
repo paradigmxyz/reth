@@ -7,7 +7,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, PayloadAttributes};
-use reth_jasonrpeesea::rpc;
+use reth_json_rpc::rpc;
 
 pub use alloy_rpc_types_engine::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
@@ -40,7 +40,7 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> reth_jasonrpeesea::RpcResult<ExecutionPayloadEnvelopeV5>;
+    ) -> reth_json_rpc::RpcResult<ExecutionPayloadEnvelopeV5>;
 
     /// Builds a block on top of the current canonical head, inserts it, and makes it canonical.
     ///
@@ -51,5 +51,5 @@ pub trait TestingApi {
         payload_attributes: PayloadAttributes,
         transactions: Option<Vec<Bytes>>,
         extra_data: Option<Bytes>,
-    ) -> reth_jasonrpeesea::RpcResult<B256>;
+    ) -> reth_json_rpc::RpcResult<B256>;
 }

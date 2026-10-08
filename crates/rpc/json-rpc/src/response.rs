@@ -4,15 +4,20 @@ use crate::{
 };
 use serde::Serialize;
 use std::io;
+use tokio::sync::oneshot;
 
 const PREFIX: &[u8] = br#"{"jsonrpc":"2.0","id":"#;
 
 /// A serialized JSON-RPC response to a method call.
-#[derive(Clone, Debug)]
+///
+/// Middleware must return the response of an accepted subscription as is, or the subscription
+/// fails to start.
+#[derive(Debug)]
 pub struct MethodResponse {
     json: String,
     error_code: Option<i32>,
-    subscription: bool,
+    /// Notified once the response was queued on the connection, before any later message.
+    on_sent: Option<oneshot::Sender<()>>,
 }
 
 impl MethodResponse {
@@ -66,13 +71,14 @@ impl MethodResponse {
         }
     }
 
-    /// Marks a subscription that was accepted and already answered on the connection.
-    pub(crate) const fn subscription_accepted() -> Self {
-        Self { json: String::new(), error_code: None, subscription: true }
+    const fn new(json: String, error_code: Option<i32>) -> Self {
+        Self { json, error_code, on_sent: None }
     }
 
-    const fn new(json: String, error_code: Option<i32>) -> Self {
-        Self { json, error_code, subscription: false }
+    /// Notifies `on_sent` once the response was queued on the connection.
+    pub(crate) fn with_on_sent(mut self, on_sent: oneshot::Sender<()>) -> Self {
+        self.on_sent = Some(on_sent);
+        self
     }
 
     /// Returns `true` if the call succeeded.
@@ -90,11 +96,6 @@ impl MethodResponse {
         self.error_code
     }
 
-    /// Returns `true` for an accepted subscription, whose response was already sent.
-    pub const fn is_subscription(&self) -> bool {
-        self.subscription
-    }
-
     /// Returns the serialized response.
     pub fn as_json(&self) -> &str {
         &self.json
@@ -104,22 +105,29 @@ impl MethodResponse {
     pub fn into_json(self) -> String {
         self.json
     }
+
+    /// Consumes the response and returns the serialized JSON, adding its sent notifier to
+    /// `on_sent`.
+    pub(crate) fn into_json_with(self, on_sent: &mut Vec<oneshot::Sender<()>>) -> String {
+        on_sent.extend(self.on_sent);
+        self.json
+    }
 }
 
 /// Joins batch responses into a JSON array, or returns an error if it exceeds `max_size` bytes.
 ///
-/// Returns `None` if no response has to be sent.
+/// Adds the sent notifiers of the joined responses to `on_sent`. Returns `None` if there are no
+/// responses.
 pub(crate) fn batch_json(
     responses: impl IntoIterator<Item = MethodResponse>,
     max_size: usize,
+    on_sent: &mut Vec<oneshot::Sender<()>>,
 ) -> Option<String> {
     let mut json = String::with_capacity(128);
     json.push('[');
     for response in responses {
-        if response.is_subscription() {
-            continue
-        }
         if json.len() + response.json.len() + 1 > max_size {
+            on_sent.clear();
             let err =
                 exceeded_limit(TOO_BIG_BATCH_RESPONSE_CODE, TOO_BIG_BATCH_RESPONSE_MSG, max_size);
             return Some(MethodResponse::error(Id::Null, err).into_json())
@@ -127,7 +135,7 @@ pub(crate) fn batch_json(
         if json.len() > 1 {
             json.push(',');
         }
-        json.push_str(&response.json);
+        json.push_str(&response.into_json_with(on_sent));
     }
     if json.len() == 1 {
         return None
@@ -187,13 +195,22 @@ mod tests {
 
     #[test]
     fn batch() {
-        let a = MethodResponse::response(Id::Number(1), &1, 100);
+        let a = || MethodResponse::response(Id::Number(1), &1, 100);
         let b = MethodResponse::response(Id::Number(2), &2, 100);
+        let (tx, mut rx) = oneshot::channel();
+        let mut on_sent = Vec::new();
         assert_eq!(
-            batch_json([a.clone(), b], 100).unwrap(),
+            batch_json([a(), b.with_on_sent(tx)], 100, &mut on_sent).unwrap(),
             r#"[{"jsonrpc":"2.0","id":1,"result":1},{"jsonrpc":"2.0","id":2,"result":2}]"#
         );
-        assert!(batch_json([a], 10).unwrap().contains("-32011"));
-        assert_eq!(batch_json([MethodResponse::subscription_accepted()], 10), None);
+        assert_eq!(on_sent.len(), 1);
+        on_sent.pop().unwrap().send(()).unwrap();
+        assert!(rx.try_recv().is_ok());
+
+        let (tx, mut rx) = oneshot::channel();
+        assert!(batch_json([a().with_on_sent(tx)], 10, &mut on_sent).unwrap().contains("-32011"));
+        assert!(on_sent.is_empty());
+        assert!(rx.try_recv().is_err());
+        assert_eq!(batch_json([], 10, &mut on_sent), None);
     }
 }
