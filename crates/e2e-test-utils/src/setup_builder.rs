@@ -455,6 +455,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("node_config_modifiers", &self.node_config_modifiers.len())
             .field("storage_v2", &self.storage_v2)
             .field("dev_mining", &self.dev_launcher.is_some())
+            .field("custom_backfill", &self.backfill_launcher.is_some())
             .field("node_builder_modifiers", &self.node_builder_modifiers.len())
             .field("restartable", &self.restartable)
             .finish_non_exhaustive()
