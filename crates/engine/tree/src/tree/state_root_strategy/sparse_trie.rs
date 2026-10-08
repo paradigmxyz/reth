@@ -396,7 +396,7 @@ where
                         .record(wake.duration_since(t));
 
                     let update = message.map_err(|_| StateRootTaskError::Other(
-                        "updates channel disconnected before state root calculation".to_string(),
+                        "updates channel disconnected before state root calculation".into(),
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
@@ -497,11 +497,7 @@ where
                 // the unchanged root node.
                 (self.parent_state_root, TrieUpdates::default())
             }
-            Err(err) => {
-                return Err(StateRootTaskError::Other(format!(
-                    "could not calculate state root: {err:?}"
-                )))
-            }
+            Err(err) => return Err(StateRootTaskError::Other(err.into())),
         };
 
         let end = Instant::now();
@@ -697,8 +693,7 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
-        self.reveal_proof_result(result)
-            .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
+        self.reveal_proof_result(result).map_err(|e| StateRootTaskError::Other(e.into()))
     }
 
     /// Reveals a proof batch.
@@ -1150,7 +1145,7 @@ where
 
                 match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                     targets: proof_targets,
-                    proof_result_sender: ProofResultContext::new(
+                    proof_result_context: ProofResultContext::new(
                         self.proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),
@@ -1161,7 +1156,7 @@ where
                     }
                     Err(e) => {
                         error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::ProofDispatch(e));
+                        dispatch_error = Some(StateRootTaskError::Provider(e));
                     }
                 }
             },
@@ -1677,7 +1672,9 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
+    use reth_trie_common::{
+        BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
+    };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -2164,13 +2161,12 @@ mod tests {
         let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
             unreachable!()
         };
-        // An unfused extension root is unsupported and deterministically panics in set_root.
         work.queue_proofs(&mut vec![ProofTrieNodeV2 {
             path: Nibbles::default(),
-            node: TrieNodeV2::Extension(ExtensionNode::new(
-                Nibbles::from_nibbles([1]),
-                RlpNode::word_rlp(&B256::ZERO),
-            )),
+            node: TrieNodeV2::Branch(BranchNodeV2 {
+                state_mask: TrieMask::from(1),
+                ..Default::default()
+            }),
             masks: None,
         }]);
         let work = check_out_storage(&mut task, address);
@@ -2184,6 +2180,39 @@ mod tests {
         assert!(panic.is_err());
         assert_eq!(task.storage_in_flight, 0);
         assert!(!task.storage.contains_key(&address));
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn unsupported_storage_root_errors_are_returned_to_the_task() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![ProofTrieNodeV2 {
+            path: Nibbles::default(),
+            node: TrieNodeV2::Extension(ExtensionNode::new(
+                Nibbles::from_nibbles([1]),
+                RlpNode::word_rlp(&B256::ZERO),
+            )),
+            masks: None,
+        }]);
+        let work = check_out_storage(&mut task, address);
+        task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
+
+        let message = receive_storage_job(&task);
+        assert!(matches!(&message, StorageJobMessage::Done(done) if done.address == address));
+        let error = task.on_storage_job_message(message).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert_eq!(task.storage_in_flight, 0);
+        assert!(matches!(task.storage.get(&address), Some(StorageTrieState::Idle(_))));
 
         drop(updates_tx);
         drop(task);

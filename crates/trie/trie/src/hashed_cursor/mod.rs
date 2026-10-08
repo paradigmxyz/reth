@@ -67,14 +67,16 @@ pub trait HashedCursor {
 /// The cursor for iterating over hashed storage entries.
 #[auto_impl::auto_impl(&mut)]
 pub trait HashedStorageCursor: HashedCursor {
-    /// Returns `true` if there are no entries for a given key.
+    /// Returns `true` if the current hashed address has no storage entries.
+    ///
+    /// May be called immediately after [`Self::set_hashed_address`], without first seeking.
+    /// This may change the cursor position; seek before iterating entries afterward.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
 
     /// Set the hashed address for the storage cursor.
     ///
-    /// # Important
-    ///
-    /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
+    /// Call [`HashedCursor::seek`] before iterating entries with [`HashedCursor::next`].
+    /// [`Self::is_storage_empty`] may be called before seeking.
     fn set_hashed_address(&mut self, hashed_address: B256);
 }
 

@@ -15,7 +15,7 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use reth_execution_errors::SparseTrieResult;
+use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
@@ -2109,8 +2109,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             "set_root called on a trie that already has revealed nodes"
         );
 
-        self.set_updates(retain_updates);
-
         match root {
             TrieNodeV2::EmptyRoot => {
                 trace!(target: TRACE_TARGET, "Setting empty root");
@@ -2141,11 +2139,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     branch_masks: masks.unwrap_or_default(),
                 });
             }
-            TrieNodeV2::Extension(_) => {
-                panic!("set_root does not support Extension nodes; extensions are represented as branches with a short_key")
+            TrieNodeV2::Extension(node) => {
+                return Err(SparseTrieErrorKind::Reveal {
+                    path: Nibbles::new(),
+                    node: Box::new(node),
+                }
+                .into());
             }
         }
 
+        self.set_updates(retain_updates);
         Ok(())
     }
 
@@ -2888,7 +2891,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::TRACE_TARGET;
+    use super::*;
     use crate::{
         ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
     };
@@ -2901,6 +2904,24 @@ mod tests {
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
+    }
+
+    #[test]
+    fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
+            Nibbles::from_nibbles([1]),
+            RlpNode::word_rlp(&B256::ZERO),
+        ));
+        let error = trie.set_root(root, None, true).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert!(trie.buffers.updates.is_none());
+
+        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
+        assert!(trie.buffers.updates.is_some());
     }
 
     #[test]

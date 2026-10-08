@@ -881,8 +881,8 @@ fn compute_overlay<N: NodePrimitives>(
             let mut parent_input = parent_input;
             extend_overlay(
                 Arc::make_mut(&mut parent_input),
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
+                &trie_data.hashed_state,
+                &trie_data.trie_updates,
             );
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
@@ -911,23 +911,21 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
     let (nodes, state) = rayon::join(
         || {
             TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
+                trie_data.iter().map(|data| Arc::clone(&data.trie_updates)),
             )
         },
         || {
             HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+                trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
             )
         },
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
+        TrieUpdatesSorted::merge_batch(trie_data.iter().map(|data| Arc::clone(&data.trie_updates))),
         HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
+            trie_data.iter().map(|data| Arc::clone(&data.hashed_state)),
         ),
     );
 
@@ -1019,7 +1017,7 @@ mod tests {
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
-    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use revm::{
         bytecode::Bytecode,
         database::BundleState,
@@ -1066,7 +1064,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
         )
     }
 

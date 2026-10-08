@@ -1,6 +1,8 @@
 //! Backfill the engine runs while the node is far behind the chain.
 
+use crate::components::NodeComponents;
 use reth_engine_tree::backfill::{BackfillSync, PipelineSync};
+use reth_network_api::BlockDownloaderProvider;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::Pipeline;
 use reth_tasks::Runtime;
@@ -79,6 +81,10 @@ impl<N: ProviderNodeTypes, C> BackfillSyncBuilder<N, C> for PipelineBackfill {
         Ok(PipelineSync::new(ctx.into_pipeline(), runtime))
     }
 }
+
+/// Client the network of `Components` hands the engine's backfill.
+pub type BackfillClientFor<T, Components> =
+    <<Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client;
 
 #[cfg(test)]
 mod tests {
