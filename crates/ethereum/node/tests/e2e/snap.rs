@@ -1,14 +1,20 @@
 //! End-to-end sync scenarios with `--snap.v2`.
 //!
-//! - A fresh node snap-syncs 100 finalized Amsterdam blocks from a serving peer, with a matching
-//!   head state root and a verified snap attempt.
+//! - A fresh node snap-syncs 100 finalized Amsterdam blocks from a serving peer, with persisted
+//!   state and trie nodes matching the head state root and a verified snap attempt.
 //! - A fresh node syncs 100 finalized Prague blocks through the staged pipeline without starting a
 //!   snap attempt.
+//! - A snap-synced node reads downloaded contract code and storage, then executes a new call that
+//!   updates that storage.
 
 use crate::utils::advance_with_random_transactions;
+use alloy_primitives::{bytes, Bytes, U256};
+use alloy_provider::Provider;
 use rand::{rngs::StdRng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{E2ETestSetupBuilder, E2ETestSetupExt, NodeHelperType};
+use reth_e2e_test_utils::{
+    trie::assert_trie_consistency, E2ETestSetupBuilder, E2ETestSetupExt, NodeHelperType,
+};
 use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
 use reth_provider::{DatabaseProviderFactory, HeaderProvider, MetadataProvider};
 use reth_tasks::Runtime;
@@ -51,13 +57,14 @@ async fn a_fresh_node_snap_syncs_to_the_head() -> eyre::Result<()> {
 
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
 
-    let state_root = |node: &NodeHelperType<EthereumNode>| {
-        node.inner.provider.sealed_header(CHAIN_LENGTH).unwrap().unwrap().state_root
-    };
-    assert_eq!(state_root(&client), state_root(&server));
+    client.wait_for_persisted_block(CHAIN_LENGTH).await?;
+    assert_trie_consistency(&client.inner.provider)?;
     // The state came from snap, not from executing the chain.
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?;
-    assert!(attempt.is_some_and(|attempt| attempt.is_verified()));
+    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let head = server.inner.provider.sealed_header(CHAIN_LENGTH)?.unwrap();
+    assert!(attempt.is_verified());
+    assert_eq!(attempt.pivot(), head.num_hash());
+    assert_eq!(attempt.state_root(), head.state_root);
     Ok(())
 }
 
@@ -69,5 +76,49 @@ async fn a_chain_before_amsterdam_syncs_with_the_staged_pipeline() -> eyre::Resu
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
 
     assert!(client.inner.provider.database_provider_ro()?.snap_attempt()?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let runtime = Runtime::test();
+    let (mut server, wallet) =
+        snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
+    let mut account = wallet.account(0);
+
+    // The runtime increments slot 0: PUSH0 SLOAD PUSH1 1 ADD PUSH0 SSTORE STOP.
+    let code = bytes!("5f546001015f5500");
+    let init_code = bytes!("675f546001015f55005f5260086018f3");
+    let contract = account.next_contract_address();
+    server.mine([account.deploy(init_code).await]).await?.ensure_success()?;
+    server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
+    server.advance_blocks(CHAIN_LENGTH - 2).await?;
+
+    let (mut client, _) = snap_setup(EthereumHardfork::Amsterdam, runtime)
+        .with_backfill(EthereumBackfill::Snap)
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build_single()
+        .await?;
+    client.connect(&mut server).await;
+    client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
+
+    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    assert!(attempt.is_verified());
+    assert_eq!(attempt.pivot().number, CHAIN_LENGTH);
+    let provider = client.rpc_provider();
+    assert_eq!(provider.get_code_at(contract).await?, code);
+    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, U256::ONE);
+
+    let next = server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
+    client.import_payload(next.payload).await?;
+
+    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, U256::from(2));
+    assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
+    client.wait_for_persisted_block(CHAIN_LENGTH + 1).await?;
+    assert_trie_consistency(&client.inner.provider)?;
+    assert_eq!(client.inner.provider.database_provider_ro()?.snap_attempt()?, Some(attempt));
     Ok(())
 }
