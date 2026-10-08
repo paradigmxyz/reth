@@ -17,12 +17,11 @@ use eyre::{ensure, eyre, WrapErr};
 use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
 use reth_db::{init_db, mdbx::DatabaseArguments, test_utils::TempDatabase};
-use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{PayloadAttrTy, TreeConfig};
 use reth_node_builder::{
-    sync::{BackfillSyncBuilder, PipelineBackfill},
-    DebugNode, DebugNodeLauncher, EngineNodeLauncher, Node, NodeBuilder, NodeBuilderWithComponents,
-    NodeComponents, NodeComponentsBuilder, NodeConfig, NodeHandle, NodeTypesWithDBAdapter,
+    sync::{BackfillClientFor, BackfillSyncBuilder, PipelineBackfill},
+    ComponentsFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, Node, NodeBuilder,
+    NodeBuilderWithComponents, NodeConfig, NodeHandle, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     args::{DatadirArgs, DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs, StorageArgs},
@@ -526,9 +525,7 @@ type NodeLauncher<N> = Arc<
 >;
 
 /// Client the network of a test node hands its backfill.
-type BackfillClient<N> = <<<<N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
-    TmpNodeAdapter<N>,
->>::Components as NodeComponents<TmpNodeAdapter<N>>>::Network as BlockDownloaderProvider>::Client;
+type BackfillClient<N> = BackfillClientFor<TmpNodeAdapter<N>, ComponentsFor<TmpNodeAdapter<N>>>;
 
 /// Arguments for launching a single test node.
 pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
