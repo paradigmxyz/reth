@@ -4,7 +4,7 @@ use crate::{
 };
 use http::{header::AUTHORIZATION, HeaderMap};
 use reth_json_rpc::{
-    client::SubscriptionClientT, AlreadyStoppedError, Methods, RegisterMethodError, RpcModule,
+    client::SubscriptionClientT, AlreadyStoppedError, RegisterMethodError, RpcModule,
     RpcServiceBuilder, ServerConfig,
 };
 use reth_rpc_api::servers::*;
@@ -351,7 +351,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
 /// Holds installed modules for the auth server.
 #[derive(Debug, Clone)]
 pub struct AuthRpcModule {
-    pub(crate) inner: RpcModule<()>,
+    pub(crate) inner: RpcModule,
 }
 
 impl AuthRpcModule {
@@ -361,25 +361,22 @@ impl AuthRpcModule {
     }
 
     /// Get a reference to the inner `RpcModule`.
-    pub const fn module_mut(&mut self) -> &mut RpcModule<()> {
+    pub const fn module_mut(&mut self) -> &mut RpcModule {
         &mut self.inner
     }
 
-    /// Merge the given [Methods] in the configured authenticated methods.
+    /// Merge the given [`RpcModule`] in the configured authenticated methods.
     ///
     /// Fails if any of the methods in other is present already.
-    pub fn merge_auth_methods(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        self.module_mut().merge(other.into()).map(|_| true)
+    pub fn merge_auth_methods(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
+        self.module_mut().merge(other).map(|_| true)
     }
 
     /// Removes the method with the given name from the configured authenticated methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
     pub fn remove_auth_method(&mut self, method_name: &'static str) -> bool {
-        self.module_mut().remove_method(method_name).is_some()
+        self.module_mut().remove_method(method_name)
     }
 
     /// Removes the given methods from the configured authenticated methods.
@@ -389,12 +386,8 @@ impl AuthRpcModule {
         }
     }
 
-    /// Replace the given [Methods] in the configured authenticated methods.
-    pub fn replace_auth_methods(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    /// Replace the given [`RpcModule`] in the configured authenticated methods.
+    pub fn replace_auth_methods(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_auth_methods(other.method_names());
         self.merge_auth_methods(other)
     }

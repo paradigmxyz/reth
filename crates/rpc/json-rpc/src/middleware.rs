@@ -1,5 +1,5 @@
 use crate::{
-    module::Callback, subscription::Connection, ErrorCode, Id, MethodResponse, Methods, Request,
+    module::Callback, subscription::Connection, ErrorCode, Id, MethodResponse, Request, RpcModule,
     SubscriptionId,
 };
 use futures_util::future::BoxFuture;
@@ -65,14 +65,14 @@ impl<T: RpcServiceT + ?Sized> RpcServiceT for Arc<T> {
 /// Panics in methods are caught and answered with an internal error.
 #[derive(Clone, Debug)]
 pub struct RpcService {
-    methods: Methods,
+    methods: RpcModule,
     max_response_size: usize,
     conn: Option<Arc<Connection>>,
 }
 
 impl RpcService {
     pub(crate) const fn new(
-        methods: Methods,
+        methods: RpcModule,
         max_response_size: usize,
         conn: Option<Arc<Connection>>,
     ) -> Self {
@@ -89,7 +89,7 @@ impl RpcServiceT for RpcService {
         };
         let internal_error =
             |id| ResponseFuture::ready(MethodResponse::error(id, ErrorCode::InternalError));
-        match &callback.0 {
+        match callback {
             Callback::Sync(callback) => {
                 match catch_unwind(AssertUnwindSafe(|| callback(id.clone(), params, max_size))) {
                     Ok(response) => ResponseFuture::ready(response),

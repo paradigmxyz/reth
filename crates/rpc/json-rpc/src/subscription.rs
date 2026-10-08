@@ -5,7 +5,6 @@ use crate::{
 use rand::{distr::Alphanumeric, Rng};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
-use serde_json::value::RawValue;
 use std::{
     fmt,
     sync::{Arc, Mutex},
@@ -30,24 +29,6 @@ impl StringError {
 impl<T: ToString> From<T> for StringError {
     fn from(value: T) -> Self {
         Self(value.to_string())
-    }
-}
-
-/// Converts the output of a subscription callback into a [`SubscriptionResult`].
-pub trait IntoSubscriptionResult {
-    /// Converts `self` into a [`SubscriptionResult`].
-    fn into_subscription_result(self) -> SubscriptionResult;
-}
-
-impl IntoSubscriptionResult for () {
-    fn into_subscription_result(self) -> SubscriptionResult {
-        Ok(())
-    }
-}
-
-impl IntoSubscriptionResult for SubscriptionResult {
-    fn into_subscription_result(self) -> SubscriptionResult {
-        self
     }
 }
 
@@ -180,7 +161,7 @@ impl PendingSubscriptionSink {
     ///
     /// Resolves once the response was queued on the connection, so that it precedes all
     /// notifications.
-    pub async fn accept(self) -> Result<SubscriptionSink, PendingSubscriptionAcceptError> {
+    pub async fn accept(self) -> Result<SubscriptionSink, DisconnectError> {
         let Self { id, sub_id, method, unsubscribe, conn, respond, permit } = self;
         let (on_sent, sent) = oneshot::channel();
         let response = MethodResponse::response(id, &sub_id, usize::MAX).with_on_sent(on_sent);
@@ -192,24 +173,14 @@ impl PendingSubscriptionSink {
 
         // The response uses the slot the connection reserved for the call, so it never waits for
         // capacity held by other pending subscriptions.
-        respond.send(response).map_err(|_| PendingSubscriptionAcceptError)?;
-        sent.await.map_err(|_| PendingSubscriptionAcceptError)?;
+        respond.send(response).map_err(|_| DisconnectError)?;
+        sent.await.map_err(|_| DisconnectError)?;
         Ok(sink)
     }
 
     /// Rejects the subscription with the given error.
     pub fn reject(self, err: impl Into<ErrorObject>) {
         let _ = self.respond.send(MethodResponse::error(self.id, err));
-    }
-
-    /// Returns the method name used for notifications.
-    pub const fn method_name(&self) -> &'static str {
-        self.method
-    }
-
-    /// Returns the subscription id.
-    pub const fn subscription_id(&self) -> &SubscriptionId {
-        &self.sub_id
     }
 }
 
@@ -227,23 +198,18 @@ pub struct SubscriptionSink {
 }
 
 impl SubscriptionSink {
-    /// Sends a notification, waiting for capacity on the connection.
+    /// Sends a notification with the given result, waiting for capacity on the connection.
     ///
-    /// Fails if the subscription or the connection was closed.
-    pub async fn send(&self, msg: SubscriptionMessage) -> Result<(), DisconnectError> {
+    /// Fails if the subscription or the connection was closed, or if `result` fails to serialize.
+    pub async fn send<T: Serialize + ?Sized>(&self, result: &T) -> Result<(), DisconnectError> {
         if self.is_closed() {
-            return Err(DisconnectError(msg))
+            return Err(DisconnectError)
         }
-        let json = match msg.0 {
-            Inner::Complete(json) => json,
-            Inner::Result(result) => notification(self.method, &self.sub_id, &*result)
-                .map_err(|_| DisconnectError(SubscriptionMessage(Inner::Result(result))))?,
-        };
-        self.conn
-            .tx
-            .send(json)
-            .await
-            .map_err(|err| DisconnectError(SubscriptionMessage(Inner::Complete(err.0))))
+        let json = notification(self.method, &self.sub_id, result).map_err(|err| {
+            tracing::error!(target: "rpc::jsonrpc", %err, "failed to serialize notification");
+            DisconnectError
+        })?;
+        self.conn.tx.send(json).await.map_err(|_| DisconnectError)
     }
 
     /// Resolves once the subscription or the connection is closed.
@@ -258,16 +224,6 @@ impl SubscriptionSink {
     pub fn is_closed(&self) -> bool {
         self.close.is_closed() || self.conn.tx.is_closed()
     }
-
-    /// Returns the method name used for notifications.
-    pub const fn method_name(&self) -> &'static str {
-        self.method
-    }
-
-    /// Returns the subscription id.
-    pub fn subscription_id(&self) -> SubscriptionId {
-        self.sub_id.clone()
-    }
 }
 
 impl Drop for SubscriptionSink {
@@ -280,35 +236,6 @@ impl Drop for SubscriptionSink {
         {
             subscriptions.remove(&self.sub_id);
         }
-    }
-}
-
-/// A subscription notification.
-#[derive(Debug)]
-pub struct SubscriptionMessage(Inner);
-
-#[derive(Debug)]
-enum Inner {
-    /// A complete notification.
-    Complete(String),
-    /// The result of a notification for the sink it is sent to.
-    Result(Box<RawValue>),
-}
-
-impl SubscriptionMessage {
-    /// Serializes a notification for the given subscription.
-    pub fn new<T: Serialize + ?Sized>(
-        method: &str,
-        sub_id: SubscriptionId,
-        result: &T,
-    ) -> Result<Self, serde_json::Error> {
-        notification(method, &sub_id, result).map(|json| Self(Inner::Complete(json)))
-    }
-}
-
-impl From<Box<RawValue>> for SubscriptionMessage {
-    fn from(result: Box<RawValue>) -> Self {
-        Self(Inner::Result(result))
     }
 }
 
@@ -337,12 +264,7 @@ fn notification<T: Serialize + ?Sized>(
     })
 }
 
-/// Error returned when a notification cannot be sent because the subscription was closed.
-#[derive(Debug, thiserror::Error)]
+/// Error returned when a subscription cannot be accepted or notified.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("subscription closed")]
-pub struct DisconnectError(pub SubscriptionMessage);
-
-/// Error returned when a subscription cannot be accepted because the connection was closed.
-#[derive(Debug, thiserror::Error)]
-#[error("failed to accept subscription: connection closed")]
-pub struct PendingSubscriptionAcceptError;
+pub struct DisconnectError;

@@ -1770,8 +1770,8 @@ where
     EngineT: EngineTypes,
     Self: EngineApiServer<EngineT>,
 {
-    fn into_rpc_module(self) -> RpcModule<()> {
-        EngineApiServer::<EngineT>::into_rpc(self).remove_context()
+    fn into_rpc_module(self) -> RpcModule {
+        EngineApiServer::<EngineT>::into_rpc(self)
     }
 }
 

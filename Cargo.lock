@@ -3867,7 +3867,6 @@ dependencies = [
  "clap",
  "reth-ethereum",
  "reth-json-rpc",
- "serde_json",
  "tokio",
 ]
 
@@ -3927,7 +3926,6 @@ dependencies = [
  "reth-ethereum",
  "reth-json-rpc",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]

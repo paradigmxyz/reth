@@ -1,46 +1,117 @@
 use crate::{
-    connection::handle_message, subscription::IntoSubscriptionResult, ErrorObject, Id,
-    MethodResponse, Params, PendingSubscriptionSink, RpcService,
+    connection::handle_message, ErrorObject, Id, MethodResponse, Params, PendingSubscriptionSink,
+    RpcService, SubscriptionResult,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
-use std::{
-    collections::hash_map::Entry,
-    fmt,
-    future::Future,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{collections::hash_map::Entry, fmt, future::Future, sync::Arc};
 
 /// A set of registered methods.
 ///
 /// Cloning is cheap; the methods are only copied when a clone is modified.
 #[derive(Clone, Default)]
-pub struct Methods(Arc<FxHashMap<&'static str, MethodCallback>>);
+pub struct RpcModule(Arc<FxHashMap<&'static str, Callback>>);
 
-impl Methods {
+impl RpcModule {
     /// Creates an empty set of methods.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Inserts a method, failing if one with the same name exists.
-    pub fn verify_and_insert(
+    /// Registers a synchronous method.
+    pub fn register_method<R, F>(
         &mut self,
         name: &'static str,
-        callback: MethodCallback,
-    ) -> Result<&mut MethodCallback, RegisterMethodError> {
-        match Arc::make_mut(&mut self.0).entry(name) {
-            Entry::Occupied(_) => Err(RegisterMethodError::AlreadyRegistered(name.into())),
-            Entry::Vacant(entry) => Ok(entry.insert(callback)),
+        callback: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        R: IntoResponse,
+        F: Fn(Params) -> R + Send + Sync + 'static,
+    {
+        self.insert(
+            name,
+            Callback::Sync(Arc::new(move |id, params, max_size| {
+                callback(params).into_response(id, max_size)
+            })),
+        )
+    }
+
+    /// Registers an asynchronous method.
+    pub fn register_async_method<R, F, Fut>(
+        &mut self,
+        name: &'static str,
+        callback: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        R: IntoResponse,
+        F: Fn(Params) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+    {
+        self.insert(
+            name,
+            Callback::Async(Arc::new(move |id, params, max_size| {
+                let fut = callback(params);
+                Box::pin(async move { fut.await.into_response(id, max_size) })
+            })),
+        )
+    }
+
+    /// Registers a subscription whose callback runs in a new task.
+    ///
+    /// `notification` is the method name of notifications. Errors returned by the callback are
+    /// logged.
+    pub fn register_subscription<F, Fut>(
+        &mut self,
+        subscribe: &'static str,
+        notification: &'static str,
+        unsubscribe: &'static str,
+        callback: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        F: Fn(Params, PendingSubscriptionSink) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = SubscriptionResult> + Send + 'static,
+    {
+        if subscribe == unsubscribe {
+            return Err(RegisterMethodError::SubscriptionNameConflict(subscribe.into()))
         }
+        if self.0.contains_key(subscribe) {
+            return Err(RegisterMethodError::AlreadyRegistered(subscribe.into()))
+        }
+        self.insert(unsubscribe, Callback::Unsubscription { method: unsubscribe })?;
+        self.insert(
+            subscribe,
+            Callback::Subscription {
+                notification,
+                unsubscribe,
+                callback: Arc::new(move |params, pending| {
+                    let fut = callback(params, pending);
+                    tokio::spawn(async move {
+                        if let Err(err) = fut.await {
+                            tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
+                        }
+                    });
+                }),
+            },
+        )
+    }
+
+    /// Registers `alias` as another name for the existing method `name`.
+    pub fn register_alias(
+        &mut self,
+        alias: &'static str,
+        name: &'static str,
+    ) -> Result<(), RegisterMethodError> {
+        let callback = self
+            .method(name)
+            .cloned()
+            .ok_or_else(|| RegisterMethodError::MethodNotFound(name.into()))?;
+        self.insert(alias, callback)
     }
 
     /// Merges `other` into `self`, failing without changes if any method is already registered.
-    pub fn merge(&mut self, other: impl Into<Self>) -> Result<(), RegisterMethodError> {
-        let other = other.into();
+    pub fn merge(&mut self, other: Self) -> Result<(), RegisterMethodError> {
         if let Some(name) = other.method_names().find(|name| self.0.contains_key(name)) {
             return Err(RegisterMethodError::AlreadyRegistered(name.into()))
         }
@@ -52,17 +123,21 @@ impl Methods {
         Ok(())
     }
 
-    /// Returns the method with the given name.
-    pub fn method(&self, name: &str) -> Option<&MethodCallback> {
-        self.0.get(name)
+    /// Removes the method with the given name, returning `true` if it existed.
+    pub fn remove_method(&mut self, name: &str) -> bool {
+        self.0.contains_key(name) && Arc::make_mut(&mut self.0).remove(name).is_some()
     }
 
-    /// Removes the method with the given name.
-    pub fn remove_method(&mut self, name: &str) -> Option<MethodCallback> {
-        if !self.0.contains_key(name) {
-            return None
+    /// Keeps only the methods whose name matches `f`.
+    pub fn retain(&mut self, mut f: impl FnMut(&str) -> bool) {
+        if self.0.keys().any(|name| !f(name)) {
+            Arc::make_mut(&mut self.0).retain(|name, _| f(name));
         }
-        Arc::make_mut(&mut self.0).remove(name)
+    }
+
+    /// Returns `true` if a method with the given name exists.
+    pub fn contains(&self, name: &str) -> bool {
+        self.0.contains_key(name)
     }
 
     /// Returns the names of all methods.
@@ -79,198 +154,29 @@ impl Methods {
             .await
             .map(|(json, _)| json)
     }
+
+    pub(crate) fn method(&self, name: &str) -> Option<&Callback> {
+        self.0.get(name)
+    }
+
+    fn insert(
+        &mut self,
+        name: &'static str,
+        callback: Callback,
+    ) -> Result<(), RegisterMethodError> {
+        match Arc::make_mut(&mut self.0).entry(name) {
+            Entry::Occupied(_) => Err(RegisterMethodError::AlreadyRegistered(name.into())),
+            Entry::Vacant(entry) => {
+                entry.insert(callback);
+                Ok(())
+            }
+        }
+    }
 }
 
-impl fmt::Debug for Methods {
+impl fmt::Debug for RpcModule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set().entries(self.method_names()).finish()
-    }
-}
-
-/// A set of methods that share a context.
-#[derive(Clone)]
-pub struct RpcModule<Ctx> {
-    ctx: Arc<Ctx>,
-    methods: Methods,
-}
-
-impl<Ctx> RpcModule<Ctx> {
-    /// Creates an empty module with the given context.
-    pub fn new(ctx: Ctx) -> Self {
-        Self::from_arc(Arc::new(ctx))
-    }
-
-    /// Creates an empty module with the given shared context.
-    pub fn from_arc(ctx: Arc<Ctx>) -> Self {
-        Self { ctx, methods: Methods::new() }
-    }
-
-    /// Drops the context, keeping the methods.
-    pub fn remove_context(self) -> RpcModule<()> {
-        RpcModule { ctx: Arc::new(()), methods: self.methods }
-    }
-}
-
-impl<Ctx: Send + Sync + 'static> RpcModule<Ctx> {
-    /// Registers a synchronous method.
-    pub fn register_method<R, F>(
-        &mut self,
-        name: &'static str,
-        callback: F,
-    ) -> Result<&mut MethodCallback, RegisterMethodError>
-    where
-        R: IntoResponse,
-        F: Fn(Params, &Ctx) -> R + Send + Sync + 'static,
-    {
-        let ctx = self.ctx.clone();
-        self.methods.verify_and_insert(
-            name,
-            MethodCallback(Callback::Sync(Arc::new(move |id, params, max_size| {
-                callback(params, &ctx).into_response(id, max_size)
-            }))),
-        )
-    }
-
-    /// Registers an asynchronous method.
-    pub fn register_async_method<R, F, Fut>(
-        &mut self,
-        name: &'static str,
-        callback: F,
-    ) -> Result<&mut MethodCallback, RegisterMethodError>
-    where
-        R: IntoResponse,
-        F: Fn(Params, Arc<Ctx>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send + 'static,
-    {
-        let ctx = self.ctx.clone();
-        self.methods.verify_and_insert(
-            name,
-            MethodCallback(Callback::Async(Arc::new(move |id, params, max_size| {
-                let fut = callback(params, ctx.clone());
-                Box::pin(async move { fut.await.into_response(id, max_size) })
-            }))),
-        )
-    }
-
-    /// Registers a subscription whose callback runs in a new task.
-    ///
-    /// `notification` is the method name of notifications. Errors returned by the callback are
-    /// logged.
-    pub fn register_subscription<R, F, Fut>(
-        &mut self,
-        subscribe: &'static str,
-        notification: &'static str,
-        unsubscribe: &'static str,
-        callback: F,
-    ) -> Result<&mut MethodCallback, RegisterMethodError>
-    where
-        R: IntoSubscriptionResult,
-        F: Fn(Params, PendingSubscriptionSink, Arc<Ctx>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send + 'static,
-    {
-        self.register_subscription_raw(subscribe, notification, unsubscribe, move |params, pending, ctx| {
-            let fut = callback(params, pending, ctx);
-            tokio::spawn(async move {
-                if let Err(err) = fut.await.into_subscription_result() {
-                    tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
-                }
-            });
-        })
-    }
-
-    /// Registers a subscription whose callback runs on the connection task.
-    ///
-    /// The callback must not block; it is expected to spawn a task that drives the subscription.
-    pub fn register_subscription_raw<R, F>(
-        &mut self,
-        subscribe: &'static str,
-        notification: &'static str,
-        unsubscribe: &'static str,
-        callback: F,
-    ) -> Result<&mut MethodCallback, RegisterMethodError>
-    where
-        R: IntoSubscriptionResult,
-        F: Fn(Params, PendingSubscriptionSink, Arc<Ctx>) -> R + Send + Sync + 'static,
-    {
-        if subscribe == unsubscribe {
-            return Err(RegisterMethodError::SubscriptionNameConflict(subscribe.into()))
-        }
-        if self.methods.method(subscribe).is_some() {
-            return Err(RegisterMethodError::AlreadyRegistered(subscribe.into()))
-        }
-        self.methods.verify_and_insert(
-            unsubscribe,
-            MethodCallback(Callback::Unsubscription { method: unsubscribe }),
-        )?;
-        let ctx = self.ctx.clone();
-        self.methods.verify_and_insert(
-            subscribe,
-            MethodCallback(Callback::Subscription {
-                notification,
-                unsubscribe,
-                callback: Arc::new(move |params, pending| {
-                    if let Err(err) = callback(params, pending, ctx.clone()).into_subscription_result() {
-                        tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
-                    }
-                }),
-            }),
-        )
-    }
-
-    /// Registers `alias` as another name for the existing method `name`.
-    pub fn register_alias(
-        &mut self,
-        alias: &'static str,
-        name: &'static str,
-    ) -> Result<(), RegisterMethodError> {
-        let callback = self
-            .methods
-            .method(name)
-            .cloned()
-            .ok_or_else(|| RegisterMethodError::MethodNotFound(name.into()))?;
-        self.methods.verify_and_insert(alias, callback)?;
-        Ok(())
-    }
-}
-
-impl<Ctx> Deref for RpcModule<Ctx> {
-    type Target = Methods;
-
-    fn deref(&self) -> &Methods {
-        &self.methods
-    }
-}
-
-impl<Ctx> DerefMut for RpcModule<Ctx> {
-    fn deref_mut(&mut self) -> &mut Methods {
-        &mut self.methods
-    }
-}
-
-impl<Ctx> From<RpcModule<Ctx>> for Methods {
-    fn from(module: RpcModule<Ctx>) -> Self {
-        module.methods
-    }
-}
-
-impl<Ctx> fmt::Debug for RpcModule<Ctx> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.methods.fmt(f)
-    }
-}
-
-/// A registered method.
-#[derive(Clone)]
-pub struct MethodCallback(pub(crate) Callback);
-
-impl fmt::Debug for MethodCallback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self.0 {
-            Callback::Sync(_) => "Sync",
-            Callback::Async(_) => "Async",
-            Callback::Subscription { .. } => "Subscription",
-            Callback::Unsubscription { .. } => "Unsubscription",
-        })
     }
 }
 
@@ -361,44 +267,47 @@ mod tests {
 
     #[test]
     fn register_and_merge() {
-        let mut a = RpcModule::new(());
-        a.register_method("a", |_, _| "a").unwrap();
+        let mut a = RpcModule::new();
+        a.register_method("a", |_| "a").unwrap();
         assert_eq!(
-            a.register_method("a", |_, _| "a").unwrap_err(),
+            a.register_method("a", |_| "a").unwrap_err(),
             RegisterMethodError::AlreadyRegistered("a".into())
         );
         a.register_alias("b", "a").unwrap();
 
-        let mut c = RpcModule::new(());
-        c.register_method("c", |_, _| "c").unwrap();
-        c.register_method("b", |_, _| "b").unwrap();
+        let mut c = RpcModule::new();
+        c.register_method("c", |_| "c").unwrap();
+        c.register_method("b", |_| "b").unwrap();
 
-        let mut methods = Methods::from(a);
+        let mut methods = a;
         assert!(methods.merge(c.clone()).is_err());
-        assert!(methods.method("c").is_none());
-        assert!(c.remove_method("b").is_some());
+        assert!(!methods.contains("c"));
+        assert!(c.remove_method("b"));
         methods.merge(c).unwrap();
 
         let mut names = methods.method_names().collect::<Vec<_>>();
         names.sort_unstable();
         assert_eq!(names, ["a", "b", "c"]);
+
+        methods.retain(|name| name != "b");
+        assert!(!methods.contains("b"));
+        assert!(methods.contains("a"));
     }
 
     #[test]
     fn subscription_names() {
-        let mut m = RpcModule::new(());
-        m.register_subscription_raw("sub", "notif", "unsub", |_, _, _| ()).unwrap();
-        assert!(m.register_subscription_raw("x", "notif", "unsub", |_, _, _| ()).is_err());
-        assert!(m.register_subscription_raw("y", "y", "y", |_, _, _| ()).is_err());
-        assert!(m.method("unsub").is_some());
+        let mut m = RpcModule::new();
+        m.register_subscription("sub", "notif", "unsub", |_, _| async { Ok(()) }).unwrap();
+        assert!(m.register_subscription("x", "notif", "unsub", |_, _| async { Ok(()) }).is_err());
+        assert!(m.register_subscription("y", "y", "y", |_, _| async { Ok(()) }).is_err());
+        assert!(m.contains("unsub"));
     }
 
     #[tokio::test]
     async fn raw_json_request() {
-        let mut m = RpcModule::new(5u64);
-        m.register_method("sync", |params, ctx| params.one::<u64>().map(|n| n + ctx)).unwrap();
-        m.register_async_method("async", |_, ctx| async move { Ok::<_, ErrorObject>(*ctx) })
-            .unwrap();
+        let mut m = RpcModule::new();
+        m.register_method("sync", |params| params.one::<u64>().map(|n| n + 5)).unwrap();
+        m.register_async_method("async", |_| async { Ok::<_, ErrorObject>(5) }).unwrap();
         assert_eq!(
             m.raw_json_request(r#"{"jsonrpc":"2.0","id":1,"method":"sync","params":[1]}"#)
                 .await

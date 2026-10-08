@@ -11,14 +11,14 @@ use alloy_rpc_types_eth::{
 };
 use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_json_rpc::{ErrorObject, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
+use reth_json_rpc::{ErrorObject, PendingSubscriptionSink, SubscriptionSink};
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
     helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcLog, RpcNodeCore,
     RpcTransaction,
 };
-use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
+use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::BlockNumReader;
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
@@ -150,14 +150,7 @@ where
                 let current_sub_res = self.sync_status(initial_sync_status);
 
                 // send the current status immediately
-                let msg = SubscriptionMessage::new(
-                    accepted_sink.method_name(),
-                    accepted_sink.subscription_id(),
-                    &current_sub_res,
-                )
-                .map_err(SubscriptionSerializeError::new)?;
-
-                if accepted_sink.send(msg).await.is_err() {
+                if accepted_sink.send(&current_sub_res).await.is_err() {
                     return Ok(())
                 }
 
@@ -181,14 +174,7 @@ where
 
                         // send a new message now that the status changed
                         let sync_status = self.sync_status(current_syncing);
-                        let msg = SubscriptionMessage::new(
-                            accepted_sink.method_name(),
-                            accepted_sink.subscription_id(),
-                            &sync_status,
-                        )
-                        .map_err(SubscriptionSerializeError::new)?;
-
-                        if accepted_sink.send(msg).await.is_err() {
+                        if accepted_sink.send(&sync_status).await.is_err() {
                             break
                         }
                     }
@@ -237,23 +223,6 @@ where
     }
 }
 
-/// Helper to convert a serde error into an [`ErrorObject`]
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to serialize subscription item: {0}")]
-pub struct SubscriptionSerializeError(#[from] serde_json::Error);
-
-impl SubscriptionSerializeError {
-    const fn new(err: serde_json::Error) -> Self {
-        Self(err)
-    }
-}
-
-impl From<SubscriptionSerializeError> for ErrorObject {
-    fn from(value: SubscriptionSerializeError) -> Self {
-        internal_rpc_err(value.to_string())
-    }
-}
-
 /// Pipes all stream items to the subscription sink.
 async fn pipe_from_stream<T, St>(sink: SubscriptionSink, mut stream: St) -> Result<(), ErrorObject>
 where
@@ -274,13 +243,7 @@ where
                         break  Ok(())
                     },
                 };
-                let msg = SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &item
-                ).map_err(SubscriptionSerializeError::new)?;
-
-                if sink.send(msg).await.is_err() {
+                if sink.send(&item).await.is_err() {
                     break Ok(());
                 }
             }

@@ -7,7 +7,7 @@ use futures::{channel::mpsc, StreamExt};
 use reth_json_rpc::{
     client::{BoxError, Client, ClientBuilder, ClientT, Error, SubscriptionClientT},
     rpc, serve_connection, stop_channel, PendingSubscriptionSink, RpcModule, RpcResult,
-    RpcServiceBuilder, ServerConfig, SubscriptionMessage, SubscriptionResult, INVALID_PARAMS_CODE,
+    RpcServiceBuilder, ServerConfig, SubscriptionResult, INVALID_PARAMS_CODE,
 };
 use std::time::Duration;
 use tokio::time::timeout;
@@ -49,8 +49,7 @@ impl TestServer<String> for TestImpl {
     async fn subscribe(&self, pending: PendingSubscriptionSink, n: u64) -> SubscriptionResult {
         let sink = pending.accept().await?;
         for i in 0..n {
-            sink.send(SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &i)?)
-                .await?;
+            sink.send(&i).await?;
         }
         sink.closed().await;
         Ok(())
@@ -59,8 +58,7 @@ impl TestServer<String> for TestImpl {
     fn subscribe_sync(&self, pending: PendingSubscriptionSink) -> SubscriptionResult {
         tokio::spawn(async move {
             let sink = pending.accept().await.unwrap();
-            let msg = SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &7u64);
-            sink.send(msg.unwrap()).await.unwrap();
+            sink.send(&7u64).await.unwrap();
             sink.closed().await;
         });
         Ok(())
@@ -68,8 +66,8 @@ impl TestServer<String> for TestImpl {
 }
 
 /// Serves a connection over in-memory channels.
-fn serve<Ctx: Send + Sync + 'static>(
-    module: RpcModule<Ctx>,
+fn serve(
+    module: RpcModule,
     config: ServerConfig,
 ) -> (mpsc::UnboundedSender<String>, mpsc::UnboundedReceiver<String>) {
     let (client_tx, server_rx) = mpsc::unbounded::<String>();
@@ -77,22 +75,14 @@ fn serve<Ctx: Send + Sync + 'static>(
     let (stop, handle) = stop_channel();
     tokio::spawn(async move {
         let reader = server_rx.map(Bytes::from);
-        serve_connection(
-            reader,
-            server_tx,
-            module.into(),
-            &RpcServiceBuilder::new(),
-            &config,
-            stop,
-        )
-        .await;
+        serve_connection(reader, server_tx, module, &RpcServiceBuilder::new(), &config, stop).await;
         drop(handle);
     });
     (client_tx, client_rx)
 }
 
 /// Connects a client to a server over in-memory channels.
-fn connect<Ctx: Send + Sync + 'static>(module: RpcModule<Ctx>) -> Client {
+fn connect(module: RpcModule) -> Client {
     let (client_tx, client_rx) = serve(module, ServerConfig::default());
     ClientBuilder::default().build(client_rx.map(Ok::<_, BoxError>), client_tx)
 }

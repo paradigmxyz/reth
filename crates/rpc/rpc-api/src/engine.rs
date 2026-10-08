@@ -30,7 +30,7 @@ use serde_json::Value;
 pub trait IntoEngineApiRpcModule {
     /// Consumes the type and returns all the methods and subscriptions defined in the trait and
     /// returns them as a single [`RpcModule`]
-    fn into_rpc_module(self) -> RpcModule<()>;
+    fn into_rpc_module(self) -> RpcModule;
 }
 
 // NOTE: We can't use associated types in the `EngineApi` trait because of the rpc macro, so we use

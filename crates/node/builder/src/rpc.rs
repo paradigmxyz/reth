@@ -1636,8 +1636,8 @@ impl<N: FullNodeComponents> EngineApiBuilder<N> for NoopEngineApiBuilder {
 pub struct NoopEngineApi;
 
 impl IntoEngineApiRpcModule for NoopEngineApi {
-    fn into_rpc_module(self) -> RpcModule<()> {
-        RpcModule::new(())
+    fn into_rpc_module(self) -> RpcModule {
+        RpcModule::new()
     }
 }
 

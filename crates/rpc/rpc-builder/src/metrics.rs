@@ -26,7 +26,7 @@ pub(crate) struct RpcRequestMetrics {
 }
 
 impl RpcRequestMetrics {
-    pub(crate) fn new(module: &RpcModule<()>, transport: RpcTransport) -> Self {
+    pub(crate) fn new(module: &RpcModule, transport: RpcTransport) -> Self {
         Self {
             inner: Arc::new(RpcServerMetricsInner {
                 connection_metrics: transport.connection_metrics(),
@@ -41,7 +41,7 @@ impl RpcRequestMetrics {
     }
 
     /// Creates a new instance of the metrics layer for HTTP.
-    pub(crate) fn http(module: &RpcModule<()>) -> Self {
+    pub(crate) fn http(module: &RpcModule) -> Self {
         Self::new(module, RpcTransport::Http)
     }
 
@@ -49,17 +49,17 @@ impl RpcRequestMetrics {
     ///
     /// Note: the server does not tell HTTP and WS apart on the same port, so this uses the HTTP
     /// metrics.
-    pub(crate) fn same_port(module: &RpcModule<()>) -> Self {
+    pub(crate) fn same_port(module: &RpcModule) -> Self {
         Self::http(module)
     }
 
     /// Creates a new instance of the metrics layer for Ws.
-    pub(crate) fn ws(module: &RpcModule<()>) -> Self {
+    pub(crate) fn ws(module: &RpcModule) -> Self {
         Self::new(module, RpcTransport::WebSocket)
     }
 
     /// Creates a new instance of the metrics layer for Ipc.
-    pub(crate) fn ipc(module: &RpcModule<()>) -> Self {
+    pub(crate) fn ipc(module: &RpcModule) -> Self {
         Self::new(module, RpcTransport::Ipc)
     }
 }

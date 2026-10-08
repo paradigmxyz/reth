@@ -6,7 +6,7 @@ use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
-use reth_json_rpc::{rpc, PendingSubscriptionSink, SubscriptionMessage, SubscriptionResult};
+use reth_json_rpc::{rpc, PendingSubscriptionSink, SubscriptionResult};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
@@ -84,10 +84,7 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
                     diff = rx.recv() => diff,
                 };
                 let Some(diff) = diff else { break };
-                let msg = SubscriptionMessage::from(
-                    serde_json::value::to_raw_value(&diff).expect("serialize"),
-                );
-                if sink.send(msg).await.is_err() {
+                if sink.send(&diff).await.is_err() {
                     break;
                 }
             }

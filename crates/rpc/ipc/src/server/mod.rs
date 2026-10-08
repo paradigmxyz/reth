@@ -8,7 +8,7 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use reth_json_rpc::{
-    serve_connection, stop_channel, IdProvider, Methods, RpcService, RpcServiceBuilder,
+    serve_connection, stop_channel, IdProvider, RpcModule, RpcService, RpcServiceBuilder,
     RpcServiceT, ServerConfig, ServerHandle, StopHandle,
 };
 use std::{future::ready, io, pin::pin, sync::Arc};
@@ -54,8 +54,8 @@ where
     /// use reth_json_rpc::RpcModule;
     /// async fn run_server() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds".into());
-    ///     let mut module = RpcModule::new(());
-    ///     module.register_method("say_hello", |_, _| "lo")?;
+    ///     let mut module = RpcModule::new();
+    ///     module.register_method("say_hello", |_| "lo")?;
     ///     let handle = server.start(module).await?;
     ///
     ///     // In this example we don't care about doing shutdown so let's it run forever.
@@ -65,11 +65,7 @@ where
     ///     Ok(())
     /// }
     /// ```
-    pub async fn start(
-        self,
-        methods: impl Into<Methods>,
-    ) -> Result<ServerHandle, IpcServerStartError> {
-        let methods = methods.into();
+    pub async fn start(self, methods: RpcModule) -> Result<ServerHandle, IpcServerStartError> {
         let (stop, handle) = stop_channel();
         // Bind on the server runtime so the listener is registered with its reactor.
         let (on_ready, ready) = oneshot::channel();
@@ -114,7 +110,7 @@ where
         Ok(listener)
     }
 
-    async fn run(self, listener: LocalSocketListener, methods: Methods, stop: StopHandle) {
+    async fn run(self, listener: LocalSocketListener, methods: RpcModule, stop: StopHandle) {
         let Self { config, rpc_middleware, .. } = self;
         let config = Arc::new(config);
         let rpc_middleware = Arc::new(rpc_middleware);
@@ -298,7 +294,7 @@ mod tests {
     use reth_json_rpc::{
         client::{BatchRequestBuilder, ClientT, Error, Subscription, SubscriptionClientT},
         rpc_params, MethodResponse, PendingSubscriptionSink, Request, RpcModule,
-        SubscriptionMessage, INTERNAL_ERROR_CODE, TOO_MANY_SUBSCRIPTIONS_CODE,
+        INTERNAL_ERROR_CODE, TOO_MANY_SUBSCRIPTIONS_CODE,
     };
     use reth_tracing::init_test_tracing;
     use std::future::Future;
@@ -314,7 +310,7 @@ mod tests {
         let server = Builder::default()
             .set_ipc_socket_permissions(Some(perms.to_string()))
             .build(endpoint.clone());
-        let module = RpcModule::new(());
+        let module = RpcModule::new();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -340,13 +336,10 @@ mod tests {
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
-                    let raw_value = serde_json::value::to_raw_value(&item)?;
-                    let notif = SubscriptionMessage::from(raw_value);
-
                     // NOTE: this will block until there a spot in the queue
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
-                    if sink.send(notif).await.is_err() {
+                    if sink.send(&item).await.is_err() {
                         break Ok(());
                     }
 
@@ -372,8 +365,8 @@ mod tests {
         // init_test_tracing();
         let endpoint = &dummy_name();
         let server = Builder::default().max_response_body_size(100).build(endpoint.clone());
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "a".repeat(101)).unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "a".repeat(101)).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -387,8 +380,8 @@ mod tests {
         init_test_tracing();
         let endpoint = &dummy_name();
         let server = Builder::default().max_request_body_size(100).build(endpoint.clone());
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -414,8 +407,8 @@ mod tests {
 
         let endpoint = &dummy_name();
         let server = Builder::default().max_connections(2).build(endpoint.clone());
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -450,14 +443,18 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let (started_tx, started_rx) = oneshot::channel::<()>();
         let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
-        let mut module = RpcModule::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
+        let ctx = Arc::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
+        let mut module = RpcModule::new();
         module
-            .register_async_method("hang", |_, ctx| async move {
-                // `dropped_tx` is dropped together with the call
-                let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
-                let _ = started_tx.send(());
-                std::future::pending::<()>().await;
-                "unreachable"
+            .register_async_method("hang", move |_| {
+                let ctx = ctx.clone();
+                async move {
+                    // `dropped_tx` is dropped together with the call
+                    let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
+                    let _ = started_tx.send(());
+                    std::future::pending::<()>().await;
+                    "unreachable"
+                }
             })
             .unwrap();
         let handle = server.start(module).await.unwrap();
@@ -480,9 +477,9 @@ mod tests {
 
         let endpoint = &dummy_name();
         let server = Builder::default().build(endpoint.clone());
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         module
-            .register_async_method("maybe_panic", |params, _| async move {
+            .register_async_method("maybe_panic", |params| async move {
                 assert!(!params.one::<bool>().unwrap(), "requested panic");
                 "ok"
             })
@@ -507,9 +504,9 @@ mod tests {
         init_test_tracing();
         let endpoint = &dummy_name();
         let server = Builder::default().build(endpoint.clone());
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
-        module.register_method("eth_chainId", move |_, _| msg).unwrap();
+        module.register_method("eth_chainId", move |_| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -522,8 +519,8 @@ mod tests {
     async fn test_batch_request() {
         let endpoint = &dummy_name();
         let server = Builder::default().build(endpoint.clone());
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "ok").unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "ok").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -547,9 +544,9 @@ mod tests {
         reth_tracing::init_test_tracing();
         let endpoint = &dummy_name();
         let server = Builder::default().build(endpoint.clone());
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
-        module.register_method("rpc_modules", move |_, _| msg).unwrap();
+        module.register_method("rpc_modules", move |_| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -564,19 +561,24 @@ mod tests {
         let server = Builder::default().build(endpoint.clone());
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
-        let mut module = RpcModule::new(tx.clone());
-        std::thread::spawn(move || produce_items(tx));
+        let mut module = RpcModule::new();
+        std::thread::spawn({
+            let tx = tx.clone();
+            move || produce_items(tx)
+        });
 
         module
             .register_subscription(
                 "subscribe_hello",
                 "s_hello",
                 "unsubscribe_hello",
-                |_, pending, tx| async move {
+                move |_, pending| {
                     let rx = tx.subscribe();
-                    let stream = BroadcastStream::new(rx);
-                    pipe_from_stream_with_bounded_buffer(pending, stream).await?;
-                    Ok(())
+                    async move {
+                        let stream = BroadcastStream::new(rx);
+                        pipe_from_stream_with_bounded_buffer(pending, stream).await?;
+                        Ok(())
+                    }
                 },
             )
             .unwrap();
@@ -596,16 +598,17 @@ mod tests {
     async fn test_max_subscriptions_per_connection() {
         let endpoint = &dummy_name();
         let server = Builder::default().max_subscriptions_per_connection(1).build(endpoint.clone());
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         module
             .register_subscription(
                 "subscribe_hello",
                 "s_hello",
                 "unsubscribe_hello",
-                |_, pending, _| async move {
+                |_, pending| async move {
                     if let Ok(sink) = pending.accept().await {
                         sink.closed().await;
                     }
+                    Ok(())
                 },
             )
             .unwrap();
@@ -649,11 +652,11 @@ mod tests {
         let rpc_middleware = RpcServiceBuilder::new().layer_fn(ModifyRequestIf);
         let server = Builder::default().set_rpc_middleware(rpc_middleware).build(endpoint.clone());
 
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         let goodbye_msg = r#"{"jsonrpc":"2.0","id":1,"result":"goodbye"}"#;
         let hello_msg = r#"{"jsonrpc":"2.0","id":2,"result":"hello"}"#;
-        module.register_method("say_hello", move |_, _| hello_msg).unwrap();
-        module.register_method("say_goodbye", move |_, _| goodbye_msg).unwrap();
+        module.register_method("say_hello", move |_| hello_msg).unwrap();
+        module.register_method("say_goodbye", move |_| goodbye_msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -670,8 +673,8 @@ mod tests {
     async fn invalid_and_oversized_messages() {
         let endpoint = &dummy_name();
         let server = Builder::default().max_request_body_size(64).build(endpoint.clone());
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 

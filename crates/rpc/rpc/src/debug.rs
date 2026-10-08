@@ -19,7 +19,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionMessage};
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
@@ -1093,18 +1093,7 @@ where
                     hash: block.hash(),
                     traces,
                 };
-                let message = match SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &result,
-                ) {
-                    Ok(message) => message,
-                    Err(err) => {
-                        tracing::warn!(target: "rpc::debug", %number, %err, "Failed to serialize chain trace");
-                        break
-                    }
-                };
-                if sink.send(message).await.is_err() {
+                if sink.send(&result).await.is_err() {
                     break
                 }
             }

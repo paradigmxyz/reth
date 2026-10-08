@@ -20,9 +20,7 @@ use reth_ethereum::{
     node::EthereumNode,
     pool::TransactionPool,
 };
-use reth_json_rpc::{
-    rpc, PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionResult,
-};
+use reth_json_rpc::{rpc, PendingSubscriptionSink, RpcResult, SubscriptionResult};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -129,10 +127,7 @@ where
                     _ = sleep(Duration::from_secs(delay)) => {}
                 }
 
-                let msg = SubscriptionMessage::from(
-                    serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
-                );
-                if sink.send(msg).await.is_err() {
+                if sink.send(&pool.pool_size().total).await.is_err() {
                     break;
                 }
             }
@@ -189,12 +184,7 @@ mod tests {
                         _ = sink.closed() => break,
                         _ = sleep(Duration::from_millis(delay)) => {}
                     }
-                    let message = SubscriptionMessage::from(
-                        serde_json::value::to_raw_value(&pool.pool_size().total)
-                            .expect("serialize usize"),
-                    );
-
-                    if sink.send(message).await.is_err() {
+                    if sink.send(&pool.pool_size().total).await.is_err() {
                         break;
                     }
                 }

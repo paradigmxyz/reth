@@ -11,7 +11,7 @@ use reth_chain_state::{
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionMessage, SubscriptionSink};
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionSink};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -317,14 +317,7 @@ where
                 let Some(item) = maybe_item else {
                     break
                 };
-                let msg = match SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &item) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize subscription message");
-                        break
-                    }
-                };
-                if sink.send(msg).await.is_err() {
+                if sink.send(&item).await.is_err() {
                     break;
                 }
             }
@@ -401,18 +394,7 @@ async fn finalized_chain_notifications<N>(
 
                 committed.sort_by_key(|n| *n.committed().range().start());
 
-                let msg = match SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &committed,
-                ) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize finalized chain notification");
-                        break
-                    }
-                };
-                if sink.send(msg).await.is_err() {
+                if sink.send(&committed).await.is_err() {
                     break;
                 }
             }

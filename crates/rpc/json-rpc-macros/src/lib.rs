@@ -185,6 +185,7 @@ impl Rpc {
             let rust_name = &m.func.sig.ident;
             let call = quote!(<Self as #name #ty_generics>::#rust_name);
             let is_async = m.func.sig.asyncness.is_some();
+            let wait = is_async.then(|| quote!(.await));
             let args = m.args.iter().map(|(ident, _)| ident);
             let params = if m.args.is_empty() { quote!(_) } else { quote!(__params) };
             let register = match &m.kind {
@@ -193,16 +194,19 @@ impl Rpc {
                         return ::reth_json_rpc::__private::MethodResult::Err(__err)
                     };
                     let parse = parse_args(&m.args, &on_err);
-                    let (ctx, wait) =
-                        if is_async { (quote!(&__ctx), quote!(.await)) } else { (quote!(__ctx), quote!()) };
-                    let mut body = quote!(#call(#ctx #(, #args)*) #wait);
+                    let mut body = quote!(#call(&__ctx #(, #args)*) #wait);
                     if !m.args.is_empty() {
                         body = quote!(#parse ::reth_json_rpc::__private::MethodResult::Ok(#body));
                     }
                     if is_async {
-                        quote!(rpc.register_async_method(#rpc_name, |#params, __ctx| async move { #body }))
+                        quote! {
+                            rpc.register_async_method(#rpc_name, move |#params| {
+                                let __ctx = __ctx.clone();
+                                async move { #body }
+                            })
+                        }
                     } else {
-                        quote!(rpc.register_method(#rpc_name, |#params, __ctx| { #body }))
+                        quote!(rpc.register_method(#rpc_name, move |#params| { #body }))
                     }
                 }
                 Kind::Subscription { notification, unsubscribe, .. } => {
@@ -211,34 +215,27 @@ impl Rpc {
                         return ::core::result::Result::Ok(())
                     }};
                     let parse = parse_args(&m.args, &on_err);
-                    let wait = is_async.then(|| quote!(.await));
-                    let body = quote! {
-                        #parse
-                        ::reth_json_rpc::IntoSubscriptionResult::into_subscription_result(
-                            #call(&__ctx, __pending #(, #args)*) #wait
+                    quote! {
+                        rpc.register_subscription(
+                            #rpc_name, #notification, #unsubscribe,
+                            move |#params, __pending| {
+                                let __ctx = __ctx.clone();
+                                async move {
+                                    #parse
+                                    #call(&__ctx, __pending #(, #args)*) #wait
+                                }
+                            },
                         )
-                    };
-                    if is_async {
-                        quote! {
-                            rpc.register_subscription(
-                                #rpc_name, #notification, #unsubscribe,
-                                |#params, __pending, __ctx| async move { #body },
-                            )
-                        }
-                    } else {
-                        quote! {
-                            rpc.register_subscription_raw(
-                                #rpc_name, #notification, #unsubscribe,
-                                |#params, __pending, __ctx| { #body },
-                            )
-                        }
                     }
                 }
             };
             let aliases = &m.aliases;
             // Names are checked for duplicates above, so registration cannot fail.
             quote! {
-                let _ = #register;
+                {
+                    let __ctx = __ctx.clone();
+                    let _ = #register;
+                }
                 #(let _ = rpc.register_alias(#aliases, #rpc_name);)*
             }
         });
@@ -254,11 +251,12 @@ impl Rpc {
 
                 /// Collects all methods and subscriptions into an `RpcModule`.
                 #[allow(deprecated)]
-                fn into_rpc(self) -> ::reth_json_rpc::RpcModule<Self>
+                fn into_rpc(self) -> ::reth_json_rpc::RpcModule
                 where
                     #(#bounds,)*
                 {
-                    let mut rpc = ::reth_json_rpc::RpcModule::new(self);
+                    let __ctx = ::std::sync::Arc::new(self);
+                    let mut rpc = ::reth_json_rpc::RpcModule::new();
                     #(#registrations)*
                     rpc
                 }

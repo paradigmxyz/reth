@@ -38,7 +38,7 @@ mod middleware;
 pub use middleware::{RpcService, RpcServiceBuilder, RpcServiceT};
 
 mod module;
-pub use module::{IntoResponse, MethodCallback, Methods, RegisterMethodError, RpcModule};
+pub use module::{IntoResponse, RegisterMethodError, RpcModule};
 
 mod params;
 pub use params::{Params, ParamsSequence};
@@ -51,9 +51,8 @@ pub use response::MethodResponse;
 
 mod subscription;
 pub use subscription::{
-    DisconnectError, IdProvider, IntoSubscriptionResult, PendingSubscriptionAcceptError,
-    PendingSubscriptionSink, RandomIntegerIdProvider, RandomStringIdProvider, StringError,
-    SubscriptionMessage, SubscriptionResult, SubscriptionSink,
+    DisconnectError, IdProvider, PendingSubscriptionSink, RandomIntegerIdProvider,
+    RandomStringIdProvider, StringError, SubscriptionResult, SubscriptionSink,
 };
 
 #[cfg(feature = "client")]

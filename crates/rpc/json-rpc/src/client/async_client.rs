@@ -402,7 +402,7 @@ mod tests {
     use futures_util::StreamExt;
 
     /// Connects a client to a server over in-memory channels.
-    fn connect(module: RpcModule<()>) -> Client {
+    fn connect(module: RpcModule) -> Client {
         let (client_tx, server_rx) = futures::channel::mpsc::unbounded::<String>();
         let (server_tx, client_rx) = futures::channel::mpsc::unbounded::<String>();
         let (stop, handle) = stop_channel();
@@ -411,7 +411,7 @@ mod tests {
             serve_connection(
                 reader,
                 server_tx,
-                module.into(),
+                module,
                 &RpcServiceBuilder::new(),
                 &ServerConfig::default(),
                 stop,
@@ -424,21 +424,16 @@ mod tests {
 
     #[tokio::test]
     async fn request_batch_subscribe() {
-        let mut module = RpcModule::new(());
+        let mut module = RpcModule::new();
         module
-            .register_method("add", |params, _| params.parse::<(u64, u64)>().map(|(a, b)| a + b))
+            .register_method("add", |params| params.parse::<(u64, u64)>().map(|(a, b)| a + b))
             .unwrap();
         module
-            .register_subscription("sub", "notif", "unsub", |params, pending, _| async move {
+            .register_subscription("sub", "notif", "unsub", |params, pending| async move {
                 let n = params.one::<u64>()?;
                 let sink = pending.accept().await?;
                 for i in 0..n {
-                    let msg = crate::SubscriptionMessage::new(
-                        sink.method_name(),
-                        sink.subscription_id(),
-                        &i,
-                    )?;
-                    sink.send(msg).await?;
+                    sink.send(&i).await?;
                 }
                 sink.closed().await;
                 Ok(())

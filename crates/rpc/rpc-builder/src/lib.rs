@@ -30,7 +30,7 @@ use reth_consensus::FullConsensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
 use reth_json_rpc::{
-    AlreadyStoppedError, IdProvider, Methods, RegisterMethodError, RpcModule, RpcServiceBuilder,
+    AlreadyStoppedError, IdProvider, RegisterMethodError, RpcModule, RpcServiceBuilder,
     ServerConfig, ServerHandle,
 };
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -390,7 +390,7 @@ where
         module_config: TransportRpcModuleConfig,
         eth: EthApi,
         engine_events: EventSender<ConsensusEngineEvent<N>>,
-    ) -> TransportRpcModules<()>
+    ) -> TransportRpcModules
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
@@ -499,8 +499,8 @@ pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmCon
     eth: EthHandlers<EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
-    /// Contains the [Methods] of a module
-    modules: HashMap<RethRpcModule, Methods>,
+    /// Contains the [`RpcModule`] of a module
+    modules: HashMap<RethRpcModule, RpcModule>,
     /// eth config settings
     eth_config: EthConfig,
     /// Notification channel for engine API events
@@ -599,13 +599,13 @@ where
     }
 
     /// Returns all installed methods
-    pub fn methods(&self) -> Vec<Methods> {
+    pub fn methods(&self) -> Vec<RpcModule> {
         self.modules.values().cloned().collect()
     }
 
     /// Returns a merged `RpcModule`
-    pub fn module(&self) -> RpcModule<()> {
-        let mut module = RpcModule::new(());
+    pub fn module(&self) -> RpcModule {
+        let mut module = RpcModule::new();
         for methods in self.modules.values().cloned() {
             module.merge(methods).expect("No conflicts");
         }
@@ -642,14 +642,14 @@ where
         Pool: TransactionPool + Clone + 'static,
     {
         let adminapi = self.admin_api();
-        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
+        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc());
         self
     }
 
     /// Register Web3 Namespace
     pub fn register_web3(&mut self) -> &mut Self {
         let web3api = self.web3_api();
-        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc());
         self
     }
 }
@@ -685,7 +685,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api().clone();
-        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc());
         self
     }
 
@@ -699,7 +699,7 @@ where
         EthApi: TraceExt + EthTransactions<Primitives = N>,
     {
         let otterscan_api = self.otterscan_api();
-        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc());
         self
     }
 
@@ -713,7 +713,7 @@ where
         EthApi: EthTransactions + TraceExt,
     {
         let debug_api = self.debug_api();
-        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc());
         self
     }
 
@@ -727,7 +727,7 @@ where
         EthApi: TraceExt,
     {
         let trace_api = self.trace_api();
-        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc());
         self
     }
 
@@ -743,7 +743,7 @@ where
         EthApi: EthApiSpec + 'static,
     {
         let netapi = self.net_api();
-        self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
+        self.modules.insert(RethRpcModule::Net, netapi.into_rpc());
         self
     }
 
@@ -756,7 +756,7 @@ where
     /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
-        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
+        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc());
         self
     }
 
@@ -886,7 +886,7 @@ where
         // Merge reth_* endpoints
         let reth_engine_api = RethEngineApi::new(beacon_engine_handle);
         module
-            .merge(RethEngineApiServer::into_rpc(reth_engine_api).remove_context())
+            .merge(RethEngineApiServer::into_rpc(reth_engine_api))
             .expect("No conflicting methods");
 
         // also merge a subset of `eth_` handlers
@@ -899,7 +899,7 @@ where
     }
 
     /// Helper function to create a [`RpcModule`] if it's not `None`
-    fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
+    fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule> {
         config.map(|config| self.module_for(config))
     }
 
@@ -909,7 +909,7 @@ where
     pub fn create_transport_rpc_modules(
         &mut self,
         config: TransportRpcModuleConfig,
-    ) -> TransportRpcModules<()> {
+    ) -> TransportRpcModules {
         let mut modules = TransportRpcModules::default();
         let http = self.maybe_module(config.http.as_ref());
         let ws = self.maybe_module(config.ws.as_ref());
@@ -924,8 +924,8 @@ where
 
     /// Populates a new [`RpcModule`] based on the selected [`RethRpcModule`]s in the given
     /// [`RpcModuleSelection`]
-    pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
-        let mut module = RpcModule::new(());
+    pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule {
+        let mut module = RpcModule::new();
         let all_methods = self.reth_methods(config.iter_selection());
         for methods in all_methods {
             module.merge(methods).expect("No conflicts");
@@ -933,7 +933,7 @@ where
         module
     }
 
-    /// Returns the [Methods] for the given [`RethRpcModule`]
+    /// Returns the [`RpcModule`] for the given [`RethRpcModule`]
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
@@ -944,7 +944,7 @@ where
     pub fn reth_methods(
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
-    ) -> Vec<Methods> {
+    ) -> Vec<RpcModule> {
         let EthHandlers { api: eth_api, filter: eth_filter, pubsub: eth_pubsub, .. } =
             self.eth_handlers().clone();
 
@@ -961,16 +961,14 @@ where
                             self.provider.chain_spec(),
                             self.pool.clone(),
                         )
-                        .into_rpc()
-                        .into(),
+                        .into_rpc(),
                         RethRpcModule::Debug => DebugApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
                             &self.executor,
                             self.engine_events.new_listener(),
                         )
-                        .into_rpc()
-                        .into(),
+                        .into_rpc(),
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
@@ -986,47 +984,42 @@ where
                                 )
                                 .expect("No conflicts");
 
-                            module.into()
+                            module
                         }
                         RethRpcModule::Net => {
-                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
+                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc()
                         }
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
                             self.eth_config.clone(),
                         )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
+                        .into_rpc(),
+                        RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
                             dyn_clone::clone(self.eth.api.converter()),
                         )
-                        .into_rpc()
-                        .into(),
+                        .into_rpc(),
                         RethRpcModule::Rpc => RPCApi::new(
                             namespaces
                                 .iter()
                                 .map(|module| (module.to_string(), "1.0".to_string()))
                                 .collect(),
                         )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
+                        .into_rpc(),
+                        RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc(),
                         RethRpcModule::Reth => RethApi::new(
                             self.provider.clone(),
                             self.evm_config.clone(),
                             self.blocking_pool_guard.clone(),
                             self.executor.clone(),
                         )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
+                        .into_rpc(),
+                        RethRpcModule::Miner => MinerApi::default().into_rpc(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
-                                .into()
                         }
                         // these are implementation specific and need to be handled during
                         // initialization and should be registered via extend_rpc_modules in the
@@ -1759,15 +1752,15 @@ impl TransportRpcModuleConfig {
 
 /// Holds installed modules per transport type.
 #[derive(Debug, Clone, Default)]
-pub struct TransportRpcModules<Context = ()> {
+pub struct TransportRpcModules {
     /// The original config
     config: TransportRpcModuleConfig,
     /// rpcs module for http
-    http: Option<RpcModule<Context>>,
+    http: Option<RpcModule>,
     /// rpcs module for ws
-    ws: Option<RpcModule<Context>>,
+    ws: Option<RpcModule>,
     /// rpcs module for ipc
-    ipc: Option<RpcModule<Context>>,
+    ipc: Option<RpcModule>,
 }
 
 // === impl TransportRpcModules ===
@@ -1782,21 +1775,21 @@ impl TransportRpcModules {
 
     /// Sets the [`RpcModule`] for the http transport.
     /// This will overwrite current module, if any.
-    pub fn with_http(mut self, http: RpcModule<()>) -> Self {
+    pub fn with_http(mut self, http: RpcModule) -> Self {
         self.http = Some(http);
         self
     }
 
     /// Sets the [`RpcModule`] for the ws transport.
     /// This will overwrite current module, if any.
-    pub fn with_ws(mut self, ws: RpcModule<()>) -> Self {
+    pub fn with_ws(mut self, ws: RpcModule) -> Self {
         self.ws = Some(ws);
         self
     }
 
     /// Sets the [`RpcModule`] for the ipc transport.
     /// This will overwrite current module, if any.
-    pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
+    pub fn with_ipc(mut self, ipc: RpcModule) -> Self {
         self.ipc = Some(ipc);
         self
     }
@@ -1806,16 +1799,15 @@ impl TransportRpcModules {
         &self.config
     }
 
-    /// Merge the given [`Methods`] in all configured transport modules if the given
+    /// Merge the given [`RpcModule`] in all configured transport modules if the given
     /// [`RethRpcModule`] is configured for the transport.
     ///
     /// Fails if any of the methods in other is present already.
     pub fn merge_if_module_configured(
         &mut self,
         module: RethRpcModule,
-        other: impl Into<Methods>,
+        other: RpcModule,
     ) -> Result<(), RegisterMethodError> {
-        let other = other.into();
         if self.module_config().contains_http(&module) {
             self.merge_http(other.clone())?;
         }
@@ -1829,7 +1821,7 @@ impl TransportRpcModules {
         Ok(())
     }
 
-    /// Merge the given [`Methods`] in all configured transport modules if the given
+    /// Merge the given [`RpcModule`] in all configured transport modules if the given
     /// [`RethRpcModule`] is configured for the transport, using a closure to lazily
     /// create the methods only when needed.
     ///
@@ -1841,7 +1833,7 @@ impl TransportRpcModules {
         f: F,
     ) -> Result<(), RegisterMethodError>
     where
-        F: FnOnce() -> Methods,
+        F: FnOnce() -> RpcModule,
     {
         // Early return if module not configured for any transport
         if !self.module_config().contains_any(&module) {
@@ -1850,50 +1842,46 @@ impl TransportRpcModules {
         self.merge_if_module_configured(module, f())
     }
 
-    /// Merge the given [Methods] in the configured http methods.
+    /// Merge the given [`RpcModule`] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no http transport is configured.
-    pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+    pub fn merge_http(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other).map(|_| true)
         }
         Ok(false)
     }
 
-    /// Merge the given [Methods] in the configured ws methods.
+    /// Merge the given [`RpcModule`] in the configured ws methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no ws transport is configured.
-    pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+    pub fn merge_ws(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other).map(|_| true)
         }
         Ok(false)
     }
 
-    /// Merge the given [Methods] in the configured ipc methods.
+    /// Merge the given [`RpcModule`] in the configured ipc methods.
     ///
     /// Fails if any of the methods in other is present already.
     ///
     /// Returns [Ok(false)] if no ipc transport is configured.
-    pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+    pub fn merge_ipc(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other).map(|_| true)
         }
         Ok(false)
     }
 
-    /// Merge the given [`Methods`] in all configured methods.
+    /// Merge the given [`RpcModule`] in all configured methods.
     ///
     /// Fails if any of the methods in other is present already.
-    pub fn merge_configured(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<(), RegisterMethodError> {
-        let other = other.into();
+    pub fn merge_configured(&mut self, other: RpcModule) -> Result<(), RegisterMethodError> {
         self.merge_http(other.clone())?;
         self.merge_ws(other.clone())?;
         self.merge_ipc(other)?;
@@ -1903,22 +1891,21 @@ impl TransportRpcModules {
     /// Returns all unique endpoints installed for the given module.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by_module(&self, module: RethRpcModule) -> Methods {
+    pub fn methods_by_module(&self, module: RethRpcModule) -> RpcModule {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
     /// Returns all unique endpoints installed in any of the configured modules.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by<F>(&self, mut filter: F) -> Methods
+    pub fn methods_by<F>(&self, mut filter: F) -> RpcModule
     where
         F: FnMut(&str) -> bool,
     {
-        let mut methods = Methods::new();
+        let mut methods = RpcModule::new();
 
         // filter that matches the given filter and also removes duplicates we already have
-        let mut f =
-            |name: &str, mm: &Methods| filter(name) && !mm.method_names().any(|m| m == name);
+        let mut f = |name: &str, mm: &RpcModule| filter(name) && !mm.contains(name);
 
         if let Some(m) = self.http_methods(|name| f(name, &methods)) {
             let _ = methods.merge(m);
@@ -1932,30 +1919,30 @@ impl TransportRpcModules {
         methods
     }
 
-    /// Returns all [`Methods`] installed for the http server based in the given closure.
+    /// Returns all [`RpcModule`] installed for the http server based in the given closure.
     ///
     /// Returns `None` if no http support is configured.
-    pub fn http_methods<F>(&self, filter: F) -> Option<Methods>
+    pub fn http_methods<F>(&self, filter: F) -> Option<RpcModule>
     where
         F: FnMut(&str) -> bool,
     {
         self.http.as_ref().map(|module| methods_by(module, filter))
     }
 
-    /// Returns all [`Methods`] installed for the ws server based in the given closure.
+    /// Returns all [`RpcModule`] installed for the ws server based in the given closure.
     ///
     /// Returns `None` if no ws support is configured.
-    pub fn ws_methods<F>(&self, filter: F) -> Option<Methods>
+    pub fn ws_methods<F>(&self, filter: F) -> Option<RpcModule>
     where
         F: FnMut(&str) -> bool,
     {
         self.ws.as_ref().map(|module| methods_by(module, filter))
     }
 
-    /// Returns all [`Methods`] installed for the ipc server based in the given closure.
+    /// Returns all [`RpcModule`] installed for the ipc server based in the given closure.
     ///
     /// Returns `None` if no ipc support is configured.
-    pub fn ipc_methods<F>(&self, filter: F) -> Option<Methods>
+    pub fn ipc_methods<F>(&self, filter: F) -> Option<RpcModule>
     where
         F: FnMut(&str) -> bool,
     {
@@ -1971,7 +1958,7 @@ impl TransportRpcModules {
     /// subscriptions.
     pub fn remove_http_method(&mut self, method_name: &'static str) -> bool {
         if let Some(http_module) = &mut self.http {
-            http_module.remove_method(method_name).is_some()
+            http_module.remove_method(method_name)
         } else {
             false
         }
@@ -1993,7 +1980,7 @@ impl TransportRpcModules {
     /// subscriptions.
     pub fn remove_ws_method(&mut self, method_name: &'static str) -> bool {
         if let Some(ws_module) = &mut self.ws {
-            ws_module.remove_method(method_name).is_some()
+            ws_module.remove_method(method_name)
         } else {
             false
         }
@@ -2015,7 +2002,7 @@ impl TransportRpcModules {
     /// subscriptions.
     pub fn remove_ipc_method(&mut self, method_name: &'static str) -> bool {
         if let Some(ipc_module) = &mut self.ipc {
-            ipc_module.remove_method(method_name).is_some()
+            ipc_module.remove_method(method_name)
         } else {
             false
         }
@@ -2045,7 +2032,7 @@ impl TransportRpcModules {
     pub fn rename(
         &mut self,
         old_name: &'static str,
-        new_method: impl Into<Methods>,
+        new_method: RpcModule,
     ) -> Result<(), RegisterMethodError> {
         // Remove the old method from all configured transports
         self.remove_method_from_configured(old_name);
@@ -2054,38 +2041,35 @@ impl TransportRpcModules {
         self.merge_configured(new_method)
     }
 
-    /// Replace the given [`Methods`] in the configured http methods.
+    /// Replace the given [`RpcModule`] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already or if the method being removed is
     /// not present
     ///
     /// Returns [Ok(false)] if no http transport is configured.
-    pub fn replace_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn replace_http(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_http_methods(other.method_names());
         self.merge_http(other)
     }
 
-    /// Replace the given [Methods] in the configured ipc methods.
+    /// Replace the given [`RpcModule`] in the configured ipc methods.
     ///
     /// Fails if any of the methods in other is present already or if the method being removed is
     /// not present
     ///
     /// Returns [Ok(false)] if no ipc transport is configured.
-    pub fn replace_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn replace_ipc(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_ipc_methods(other.method_names());
         self.merge_ipc(other)
     }
 
-    /// Replace the given [Methods] in the configured ws methods.
+    /// Replace the given [`RpcModule`] in the configured ws methods.
     ///
     /// Fails if any of the methods in other is present already or if the method being removed is
     /// not present
     ///
     /// Returns [Ok(false)] if no ws transport is configured.
-    pub fn replace_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn replace_ws(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_ws_methods(other.method_names());
         self.merge_ws(other)
     }
@@ -2093,72 +2077,54 @@ impl TransportRpcModules {
     /// Replaces the method with the given name from all configured transports.
     ///
     /// Returns `true` if the method was found and replaced, `false` otherwise
-    pub fn replace_configured(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn replace_configured(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.replace_http(other.clone())?;
         self.replace_ws(other.clone())?;
         self.replace_ipc(other)?;
         Ok(true)
     }
 
-    /// Adds or replaces given [`Methods`] in http module.
+    /// Adds or replaces given [`RpcModule`] in http module.
     ///
     /// Returns `true` if the methods were replaced or added, `false` otherwise.
-    pub fn add_or_replace_http(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn add_or_replace_http(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_http_methods(other.method_names());
         self.merge_http(other)
     }
 
-    /// Adds or replaces given [`Methods`] in ws module.
+    /// Adds or replaces given [`RpcModule`] in ws module.
     ///
     /// Returns `true` if the methods were replaced or added, `false` otherwise.
-    pub fn add_or_replace_ws(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn add_or_replace_ws(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_ws_methods(other.method_names());
         self.merge_ws(other)
     }
 
-    /// Adds or replaces given [`Methods`] in ipc module.
+    /// Adds or replaces given [`RpcModule`] in ipc module.
     ///
     /// Returns `true` if the methods were replaced or added, `false` otherwise.
-    pub fn add_or_replace_ipc(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
-        let other = other.into();
+    pub fn add_or_replace_ipc(&mut self, other: RpcModule) -> Result<bool, RegisterMethodError> {
         self.remove_ipc_methods(other.method_names());
         self.merge_ipc(other)
     }
 
-    /// Adds or replaces given [`Methods`] in all configured network modules.
+    /// Adds or replaces given [`RpcModule`] in all configured network modules.
     pub fn add_or_replace_configured(
         &mut self,
-        other: impl Into<Methods>,
+        other: RpcModule,
     ) -> Result<(), RegisterMethodError> {
-        let other = other.into();
         self.add_or_replace_http(other.clone())?;
         self.add_or_replace_ws(other.clone())?;
         self.add_or_replace_ipc(other)?;
         Ok(())
     }
-    /// Adds or replaces the given [`Methods`] in the transport modules where the specified
+    /// Adds or replaces the given [`RpcModule`] in the transport modules where the specified
     /// [`RethRpcModule`] is configured.
     pub fn add_or_replace_if_module_configured(
         &mut self,
         module: RethRpcModule,
-        other: impl Into<Methods>,
+        other: RpcModule,
     ) -> Result<(), RegisterMethodError> {
-        let other = other.into();
         if self.module_config().contains_http(&module) {
             self.add_or_replace_http(other.clone())?;
         }
@@ -2173,19 +2139,9 @@ impl TransportRpcModules {
 }
 
 /// Returns the methods installed in the given module that match the given filter.
-fn methods_by<T, F>(module: &RpcModule<T>, mut filter: F) -> Methods
-where
-    F: FnMut(&str) -> bool,
-{
-    let mut methods = Methods::new();
-    let method_names = module.method_names().filter(|name| filter(name));
-
-    for name in method_names {
-        if let Some(matched_method) = module.method(name).cloned() {
-            let _ = methods.verify_and_insert(name, matched_method);
-        }
-    }
-
+fn methods_by(module: &RpcModule, filter: impl FnMut(&str) -> bool) -> RpcModule {
+    let mut methods = module.clone();
+    methods.retain(filter);
     methods
 }
 
@@ -2541,9 +2497,9 @@ mod tests {
         )
     }
 
-    fn create_test_module() -> RpcModule<()> {
-        let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+    fn create_test_module() -> RpcModule {
+        let mut module = RpcModule::new();
+        module.register_method("anything", |_| "succeed").unwrap();
         module
     }
 
@@ -2558,7 +2514,7 @@ mod tests {
         assert!(!modules.remove_http_method("non_existent_method"));
 
         // Verify that the method was removed
-        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
+        assert!(!modules.http.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2573,7 +2529,7 @@ mod tests {
         assert!(!modules.remove_ws_method("non_existent_method"));
 
         // Verify that the method was removed
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
+        assert!(!modules.ws.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2588,7 +2544,7 @@ mod tests {
         assert!(!modules.remove_ipc_method("non_existent_method"));
 
         // Verify that the method was removed
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+        assert!(!modules.ipc.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2610,9 +2566,9 @@ mod tests {
         assert!(!modules.remove_method_from_configured("non_existent_method"));
 
         // Verify that the method was removed from all transports
-        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+        assert!(!modules.http.as_ref().unwrap().contains("anything"));
+        assert!(!modules.ws.as_ref().unwrap().contains("anything"));
+        assert!(!modules.ipc.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2625,31 +2581,31 @@ mod tests {
         };
 
         // Verify that the old we want to rename exists at the start
-        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("anything"));
+        assert!(modules.ws.as_ref().unwrap().contains("anything"));
+        assert!(modules.ipc.as_ref().unwrap().contains("anything"));
 
         // Verify that the new method does not exist at the start
-        assert!(modules.http.as_ref().unwrap().method("something").is_none());
-        assert!(modules.ws.as_ref().unwrap().method("something").is_none());
-        assert!(modules.ipc.as_ref().unwrap().method("something").is_none());
+        assert!(!modules.http.as_ref().unwrap().contains("something"));
+        assert!(!modules.ws.as_ref().unwrap().contains("something"));
+        assert!(!modules.ipc.as_ref().unwrap().contains("something"));
 
         // Create another module
-        let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        let mut other_module = RpcModule::new();
+        other_module.register_method("something", |_| "fails").unwrap();
 
         // Rename the method
         modules.rename("anything", other_module).expect("rename failed");
 
         // Verify that the old method was removed from all transports
-        assert!(modules.http.as_ref().unwrap().method("anything").is_none());
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_none());
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_none());
+        assert!(!modules.http.as_ref().unwrap().contains("anything"));
+        assert!(!modules.ws.as_ref().unwrap().contains("anything"));
+        assert!(!modules.ipc.as_ref().unwrap().contains("anything"));
 
         // Verify that the new method was added to all transports
-        assert!(modules.http.as_ref().unwrap().method("something").is_some());
-        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
-        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("something"));
+        assert!(modules.ws.as_ref().unwrap().contains("something"));
+        assert!(modules.ipc.as_ref().unwrap().contains("something"));
     }
 
     #[test]
@@ -2657,51 +2613,51 @@ mod tests {
         let mut modules =
             TransportRpcModules { http: Some(create_test_module()), ..Default::default() };
 
-        let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        let mut other_module = RpcModule::new();
+        other_module.register_method("something", |_| "fails").unwrap();
 
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
-        assert!(modules.http.as_ref().unwrap().method("something").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("something"));
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module.register_method("anything", |_| "fails").unwrap();
         assert!(modules.replace_http(other_module.clone()).unwrap());
 
-        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("anything"));
     }
     #[test]
     fn test_replace_ipc_method() {
         let mut modules =
             TransportRpcModules { ipc: Some(create_test_module()), ..Default::default() };
 
-        let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        let mut other_module = RpcModule::new();
+        other_module.register_method("something", |_| "fails").unwrap();
 
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
-        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ipc.as_ref().unwrap().contains("something"));
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module.register_method("anything", |_| "fails").unwrap();
         assert!(modules.replace_ipc(other_module.clone()).unwrap());
 
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ipc.as_ref().unwrap().contains("anything"));
     }
     #[test]
     fn test_replace_ws_method() {
         let mut modules =
             TransportRpcModules { ws: Some(create_test_module()), ..Default::default() };
 
-        let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        let mut other_module = RpcModule::new();
+        other_module.register_method("something", |_| "fails").unwrap();
 
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
-        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
+        assert!(modules.ws.as_ref().unwrap().contains("something"));
 
-        other_module.register_method("anything", |_, _| "fails").unwrap();
+        other_module.register_method("anything", |_| "fails").unwrap();
         assert!(modules.replace_ws(other_module.clone()).unwrap());
 
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.ws.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2712,19 +2668,19 @@ mod tests {
             ipc: Some(create_test_module()),
             ..Default::default()
         };
-        let mut other_module = RpcModule::new(());
-        other_module.register_method("something", |_, _| "fails").unwrap();
+        let mut other_module = RpcModule::new();
+        other_module.register_method("something", |_| "fails").unwrap();
 
         assert!(modules.replace_configured(other_module).unwrap());
 
         // Verify that the other_method was added
-        assert!(modules.http.as_ref().unwrap().method("something").is_some());
-        assert!(modules.ipc.as_ref().unwrap().method("something").is_some());
-        assert!(modules.ws.as_ref().unwrap().method("something").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("something"));
+        assert!(modules.ipc.as_ref().unwrap().contains("something"));
+        assert!(modules.ws.as_ref().unwrap().contains("something"));
 
-        assert!(modules.http.as_ref().unwrap().method("anything").is_some());
-        assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
-        assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("anything"));
+        assert!(modules.ipc.as_ref().unwrap().contains("anything"));
+        assert!(modules.ws.as_ref().unwrap().contains("anything"));
     }
 
     #[test]
@@ -2735,15 +2691,15 @@ mod tests {
             .with_ws([RethRpcModule::Eth]);
 
         // Create HTTP module with an existing method (to test "replace")
-        let mut http_module = RpcModule::new(());
-        http_module.register_method("eth_existing", |_, _| "original").unwrap();
+        let mut http_module = RpcModule::new();
+        http_module.register_method("eth_existing", |_| "original").unwrap();
 
         // Create WS module with the same existing method
-        let mut ws_module = RpcModule::new(());
-        ws_module.register_method("eth_existing", |_, _| "original").unwrap();
+        let mut ws_module = RpcModule::new();
+        ws_module.register_method("eth_existing", |_| "original").unwrap();
 
         // Create IPC module (empty, to ensure no changes)
-        let ipc_module = RpcModule::new(());
+        let ipc_module = RpcModule::new();
 
         // Set up TransportRpcModules with the config and modules
         let mut modules = TransportRpcModules {
@@ -2754,29 +2710,28 @@ mod tests {
         };
 
         // Create new methods: one to replace an existing method, one to add a new one
-        let mut new_module = RpcModule::new(());
-        new_module.register_method("eth_existing", |_, _| "replaced").unwrap(); // Replace
-        new_module.register_method("eth_new", |_, _| "added").unwrap(); // Add
-        let new_methods: Methods = new_module.into();
+        let mut new_module = RpcModule::new();
+        new_module.register_method("eth_existing", |_| "replaced").unwrap(); // Replace
+        new_module.register_method("eth_new", |_| "added").unwrap(); // Add
 
         // Call the function for RethRpcModule::Eth
-        let result = modules.add_or_replace_if_module_configured(RethRpcModule::Eth, new_methods);
+        let result = modules.add_or_replace_if_module_configured(RethRpcModule::Eth, new_module);
         assert!(result.is_ok(), "Function should succeed");
 
         // Verify HTTP: existing method still exists (replaced), new method added
         let http = modules.http.as_ref().unwrap();
-        assert!(http.method("eth_existing").is_some());
-        assert!(http.method("eth_new").is_some());
+        assert!(http.contains("eth_existing"));
+        assert!(http.contains("eth_new"));
 
         // Verify WS: existing method still exists (replaced), new method added
         let ws = modules.ws.as_ref().unwrap();
-        assert!(ws.method("eth_existing").is_some());
-        assert!(ws.method("eth_new").is_some());
+        assert!(ws.contains("eth_existing"));
+        assert!(ws.contains("eth_new"));
 
         // Verify IPC: no changes (Eth not configured for IPC)
         let ipc = modules.ipc.as_ref().unwrap();
-        assert!(ipc.method("eth_existing").is_none());
-        assert!(ipc.method("eth_new").is_none());
+        assert!(!ipc.contains("eth_existing"));
+        assert!(!ipc.contains("eth_new"));
     }
 
     #[test]
@@ -2785,7 +2740,7 @@ mod tests {
         let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
 
         let mut modules =
-            TransportRpcModules { config, http: Some(RpcModule::new(())), ws: None, ipc: None };
+            TransportRpcModules { config, http: Some(RpcModule::new()), ws: None, ipc: None };
 
         // Track whether closure was called
         let mut closure_called = false;
@@ -2793,20 +2748,20 @@ mod tests {
         // Test with configured module - closure should be called
         let result = modules.merge_if_module_configured_with(RethRpcModule::Eth, || {
             closure_called = true;
-            let mut methods = RpcModule::new(());
-            methods.register_method("eth_test", |_, _| "test").unwrap();
-            methods.into()
+            let mut methods = RpcModule::new();
+            methods.register_method("eth_test", |_| "test").unwrap();
+            methods
         });
 
         assert!(result.is_ok());
         assert!(closure_called, "Closure should be called when module is configured");
-        assert!(modules.http.as_ref().unwrap().method("eth_test").is_some());
+        assert!(modules.http.as_ref().unwrap().contains("eth_test"));
 
         // Reset and test with unconfigured module - closure should NOT be called
         closure_called = false;
         let result = modules.merge_if_module_configured_with(RethRpcModule::Debug, || {
             closure_called = true;
-            RpcModule::new(()).into()
+            RpcModule::new()
         });
 
         assert!(result.is_ok());

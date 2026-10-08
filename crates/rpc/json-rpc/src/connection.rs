@@ -3,7 +3,7 @@ use crate::{
     request::{parse_message, split_batch, Message},
     response::batch_json,
     subscription::Connection,
-    Id, MethodResponse, Methods, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
+    Id, MethodResponse, RpcModule, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
     StopHandle, OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG,
 };
 use bytes::Bytes;
@@ -22,7 +22,7 @@ use tower::Layer;
 pub async fn serve_connection<R, W, L>(
     mut reader: R,
     writer: W,
-    methods: Methods,
+    methods: RpcModule,
     rpc_middleware: &RpcServiceBuilder<L>,
     config: &ServerConfig,
     stop: StopHandle,

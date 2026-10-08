@@ -2,7 +2,7 @@
 
 use crate::{
     connection::handle_message, error::exceeded_limit, serve_connection, stop_channel, Id,
-    MethodResponse, Methods, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
+    MethodResponse, RpcModule, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
     ServerHandle, StopHandle, OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG,
 };
 use bytes::Bytes;
@@ -130,14 +130,14 @@ where
     /// Starts serving the given methods.
     ///
     /// The server stops when [`ServerHandle::stop`] is called or every handle is dropped.
-    pub fn start(self, methods: impl Into<Methods>) -> ServerHandle {
+    pub fn start(self, methods: RpcModule) -> ServerHandle {
         let (stop, handle) = stop_channel();
         let config = self.config.clone();
-        config.spawn(self.run(methods.into(), stop));
+        config.spawn(self.run(methods, stop));
         handle
     }
 
-    async fn run(self, methods: Methods, stop: StopHandle) {
+    async fn run(self, methods: RpcModule, stop: StopHandle) {
         let Self { listener, config, http_middleware, rpc_middleware } = self;
         let connections = Arc::new(Semaphore::new(config.max_connections as usize));
         let max_response_size = config.max_response_body_size as usize;
@@ -181,7 +181,7 @@ where
 }
 
 struct Shared<RL> {
-    methods: Methods,
+    methods: RpcModule,
     rpc_middleware: RpcServiceBuilder<RL>,
     config: ServerConfig,
 }
@@ -403,17 +403,16 @@ mod tests {
     use super::*;
     use crate::{
         client::{ClientT, Error, HttpClientBuilder, SubscriptionClientT, WsClientBuilder},
-        rpc_params, RpcModule, SubscriptionMessage,
+        rpc_params,
     };
 
     async fn start(config: ServerConfig) -> (SocketAddr, ServerHandle) {
-        let mut module = RpcModule::new(());
-        module.register_method("echo", |params, _| params.one::<String>()).unwrap();
+        let mut module = RpcModule::new();
+        module.register_method("echo", |params| params.one::<String>()).unwrap();
         module
-            .register_subscription("sub", "notif", "unsub", |_, pending, _| async move {
+            .register_subscription("sub", "notif", "unsub", |_, pending| async move {
                 let sink = pending.accept().await?;
-                let msg = SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &1)?;
-                sink.send(msg).await?;
+                sink.send(&1).await?;
                 sink.closed().await;
                 Ok(())
             })
