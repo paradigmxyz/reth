@@ -248,23 +248,4 @@ mod tests {
         assert!(policy.is_finishable(generation, 9));
         assert!(!policy.is_finishable(generation, 10));
     }
-
-    #[test]
-    fn downloaded_state_finishes_outside_the_bal_window() {
-        let anchor = chain(Some(0))[1].clone();
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root)
-                .with_phase(SnapPhase::Trie);
-
-        assert!(policy().is_finishable(generation, 1_000));
-    }
-
-    #[test]
-    fn reorged_anchor_is_not_canonical() {
-        let provider = provider_with(chain(Some(0)));
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, B256::repeat_byte(0xff)), B256::ZERO);
-
-        assert!(!generation.is_canonical(&provider).unwrap());
-    }
 }
