@@ -205,18 +205,28 @@ pub trait IndexEntry: Sized {
 
         // Extract count from last 8 bytes
         let count_bytes = &entry.data[entry.data.len() - 8..];
-        let count = i64::from_le_bytes(
+        let declared_count = i64::from_le_bytes(
             count_bytes
                 .try_into()
                 .map_err(|_| E2sError::Ssz("Failed to read count bytes".to_string()))?,
-        ) as usize;
+        );
 
-        // Verify entry has correct size
-        let expected_len = 8 + count * 8 + 8;
-        if entry.data.len() != expected_len {
+        // Derive the offset count from the actual entry length, not the untrusted `count`, so a
+        // crafted `count` can't overflow `* 8` and drive a huge `Vec::with_capacity`.
+        let offsets_bytes = entry.data.len() - 16; // len >= 16 checked above
+        if !offsets_bytes.is_multiple_of(8) {
             return Err(E2sError::Ssz(format!(
-                "Index entry has incorrect length: expected {expected_len}, got {}",
-                entry.data.len()
+                "Index entry has incorrect length: offset section of {offsets_bytes} bytes is not \
+                 8-byte aligned"
+            )));
+        }
+        let count = offsets_bytes / 8;
+
+        // Verify the declared count matches the stored offsets
+        if usize::try_from(declared_count).ok() != Some(count) {
+            return Err(E2sError::Ssz(format!(
+                "Index entry has incorrect length: count {declared_count} does not match the \
+                 {count} stored offsets"
             )));
         }
 
