@@ -38,9 +38,6 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     /// When enabled, all children of a branch become unskippable if the branch path itself
     /// matches the prefix set, even if a given child path does not.
     walk_all_changed_branch_children: bool,
-    /// Whether a freshly loaded root still needs orphan cleanup. Resumed stacks were already
-    /// cleaned before their first checkpoint.
-    cleanup_root: bool,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
     /// Provided when it's necessary not to skip certain nodes during proof generation.
@@ -92,7 +89,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             stack,
             can_skip_current_node: false,
             walk_all_changed_branch_children: false,
-            cleanup_root: false,
             removed_keys: None,
             added_removed_keys: None,
             #[cfg(feature = "metrics")]
@@ -119,7 +115,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             can_skip_current_node: self.can_skip_current_node,
             changes: self.changes,
             walk_all_changed_branch_children: self.walk_all_changed_branch_children,
-            cleanup_root: self.cleanup_root,
             removed_keys: self.removed_keys,
             added_removed_keys,
             #[cfg(feature = "metrics")]
@@ -260,7 +255,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             walk_all_changed_branch_children: false,
-            cleanup_root: true,
             removed_keys: None,
             added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
@@ -284,13 +278,6 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     ///
     /// * `Result<(), Error>` - Unit on success or an error.
     pub fn advance(&mut self) -> Result<(), DatabaseError> {
-        if std::mem::take(&mut self.cleanup_root) &&
-            let Some(subnode) = self.stack.first() &&
-            let Some(node) = &subnode.node
-        {
-            self.remove_orphaned_descendants(subnode.key, node.tree_mask)?;
-        }
-
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 trace!(
@@ -623,30 +610,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn initial_root_removes_orphans() {
-        let orphan = Nibbles::from_nibbles([0xf, 0x1]);
-        let factory = MockTrieCursorFactory::new(
-            BTreeMap::from([
-                (Nibbles::default(), root_branch_node(0b11, 0, 0b11)),
-                (orphan, branch_node(0b11, 0, 0b11)),
-            ]),
-            B256Map::default(),
-        );
-        let changes = PrefixSetMut::from([Nibbles::from_nibbles([0x0, 0x1])]).freeze();
-        let mut walker =
-            TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
-                .with_walk_all_changed_branch_children(true)
-                .with_deletions_retained(true);
-
-        walker.advance().unwrap();
-        assert_eq!(walker.key().copied(), Some(Nibbles::from_nibbles([0x0])));
-        while walker.key().is_some() {
-            walker.advance().unwrap();
-        }
-        assert_eq!(walker.take_removed_keys(), HashSet::from_iter([orphan]));
     }
 
     fn storage_root_with_progress(
