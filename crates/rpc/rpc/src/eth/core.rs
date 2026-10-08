@@ -1534,4 +1534,114 @@ mod tests {
                 .unwrap();
         assert_eq!(repeated, result);
     }
+
+    #[tokio::test]
+    async fn simulate_roots_include_overrides_across_blocks() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        let added = Address::repeat_byte(0xbb);
+        let slot = |n: u64| B256::from(U256::from(n));
+        let genesis =
+            Genesis::default().with_gas_limit(30_000_000).with_base_fee(Some(0)).extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(1_000_000))),
+                (
+                    contract,
+                    GenesisAccount::default()
+                        .with_nonce(Some(1))
+                        .with_storage(Some([(slot(0), slot(1)), (slot(1), slot(2))].into())),
+                ),
+            ]);
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis.clone()).build(),
+        );
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .compute_state_root_for_eth_simulate(true)
+        .build();
+        // The first block leaves the overridden accounts untouched. The second replaces storage
+        // (including a slot introduced by the first override), then execution overwrites slot zero.
+        let code = alloy_primitives::bytes!("600960005500");
+        let first = SimBlock {
+            state_overrides: Some(StateOverride::from_iter([
+                (
+                    contract,
+                    AccountOverride {
+                        balance: Some(U256::from(7)),
+                        nonce: Some(2),
+                        code: Some(code.clone()),
+                        state_diff: Some([(slot(2), slot(3))].into_iter().collect()),
+                        ..Default::default()
+                    },
+                ),
+                (added, AccountOverride { balance: Some(U256::from(4)), ..Default::default() }),
+            ])),
+            ..Default::default()
+        };
+        let second = SimBlock {
+            state_overrides: Some(StateOverride::from_iter([(
+                contract,
+                AccountOverride {
+                    state: Some([(slot(0), slot(5))].into_iter().collect()),
+                    ..Default::default()
+                },
+            )])),
+            ..Default::default()
+        }
+        .call(
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(contract)
+                .with_nonce(0)
+                .with_gas_limit(100_000)
+                .with_gas_price(0),
+        );
+        let blocks = EthCall::simulate_v1(
+            &api,
+            SimulatePayload {
+                validation: true,
+                block_state_calls: vec![first, second],
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(blocks[1].calls[0].status);
+
+        // Genesis trie construction supplies an independent root for the expected full state.
+        for (index, storage) in [
+            [(slot(0), slot(1)), (slot(1), slot(2)), (slot(2), slot(3))].into_iter().collect(),
+            [(slot(0), slot(9))].into_iter().collect(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let expected = genesis.clone().extend_accounts([
+                (
+                    sender,
+                    GenesisAccount::default()
+                        .with_balance(U256::from(1_000_000))
+                        .with_nonce(Some(index as u64)),
+                ),
+                (
+                    contract,
+                    GenesisAccount::default()
+                        .with_balance(U256::from(7))
+                        .with_nonce(Some(2))
+                        .with_code(Some(code.clone()))
+                        .with_storage(Some(storage)),
+                ),
+                (added, GenesisAccount::default().with_balance(U256::from(4))),
+            ]);
+            let expected = ChainSpecBuilder::mainnet().cancun_activated().genesis(expected).build();
+            assert_eq!(blocks[index].inner.header.state_root, expected.genesis_header().state_root);
+        }
+    }
 }

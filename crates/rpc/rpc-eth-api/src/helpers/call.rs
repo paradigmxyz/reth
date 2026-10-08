@@ -22,14 +22,18 @@ use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    BundleState, ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor,
+    TxResultWithStateFor,
 };
-use reth_execution_types::{BundleSource, HashedPostState};
+use reth_execution_types::{BlockState, BundleSource};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides, attach_bal_before_tx},
+    cache::db::{
+        apply_block_overrides, apply_state_overrides, apply_state_overrides_with_state,
+        attach_bal_before_tx,
+    },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
@@ -104,8 +108,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     (&state_provider).into_evm_state_provider(),
                 )));
                 let mut parent = parent;
-                let mut hashed_state =
-                    this.compute_state_root_for_eth_simulate().then(HashedPostState::default);
+                let mut simulation_state =
+                    this.compute_state_root_for_eth_simulate().then(BundleState::default);
 
                 let chain_id = this.provider().chain_spec().chain_id();
 
@@ -179,8 +183,19 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env);
                     }
                     if let Some(ref state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides.clone(), &mut db)
-                            .map_err(Self::Error::from_eth_err)?;
+                        let mut overrides_state =
+                            simulation_state.as_ref().map(|_| BlockState::new());
+                        apply_state_overrides_with_state(
+                            state_overrides.clone(),
+                            &mut db,
+                            overrides_state.as_mut(),
+                        )
+                        .map_err(Self::Error::from_eth_err)?;
+                        if let Some(state) = simulation_state.as_mut() &&
+                            let Some(overrides) = overrides_state
+                        {
+                            state.extend(overrides.into_bundle());
+                        }
                     }
 
                     let chain_id = evm_env.chain_id();
@@ -232,7 +247,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            hashed_state.as_mut(),
+                            simulation_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -261,7 +276,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            hashed_state.as_mut(),
+                            simulation_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
