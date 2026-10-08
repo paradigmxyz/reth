@@ -8,15 +8,6 @@ use alloy_trie::{proof::AddedRemovedKeys, TrieMask};
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
-#[cfg(test)]
-use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
-
-#[cfg(test)]
-use alloy_primitives::map::B256Map;
-
-#[cfg(test)]
-use std::collections::BTreeMap;
-
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
@@ -123,6 +114,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     }
 
     /// Configures the walker to treat every child of a matching branch path as unskippable.
+    ///
+    /// When deletions are retained, also collects stored descendants hidden by a matching
+    /// branch's tree mask. These keys appear in the deletion set even if traversal never visits
+    /// them. Root calculations can replace these deletions with regenerated branch updates.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -425,15 +420,23 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         key: Nibbles,
         tree_mask: TrieMask,
     ) -> Result<(), DatabaseError> {
+        let missing_children = !tree_mask;
         if self.walk_all_changed_branch_children &&
+            !missing_children.is_empty() &&
             let Some(removed_keys) = &mut self.removed_keys &&
             self.changes.contains(&key)
         {
-            while let Some((path, _)) = self.cursor.next()? &&
-                path.starts_with(&key)
-            {
-                if !tree_mask.is_bit_set(path.get_unchecked(key.len())) {
+            for nibble in missing_children.iter() {
+                let mut prefix = key;
+                prefix.push(nibble);
+                let mut entry = self.cursor.seek(prefix)?;
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_branch_nodes_seeked();
+                while let Some((path, _)) = entry &&
+                    path.starts_with(&prefix)
+                {
                     removed_keys.insert(path);
+                    entry = self.cursor.next()?;
                 }
             }
             self.cursor.seek_exact(key)?;
@@ -448,13 +451,16 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
 mod tests {
     use super::*;
     use crate::{
+        mock::KeyVisitType,
         prefix_set::PrefixSetMut,
         progress::StorageRootProgress,
         test_utils::{storage_root_prehashed, TrieTestHarness},
+        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
         updates::StorageTrieUpdates,
         StorageRoot,
     };
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::{map::B256Map, B256, U256};
+    use std::collections::BTreeMap;
 
     fn branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {
         let hash_count = hash_mask.count_ones() as usize;
@@ -652,5 +658,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn orphan_cleanup_skips_live_subtrees() {
+        let parent = Nibbles::from_nibbles([0x3]);
+        let tree_mask = TrieMask::from_nibble(0xa);
+        let orphans = [
+            Nibbles::from_nibbles([0x3, 0xb]),
+            Nibbles::from_nibbles([0x3, 0xb, 0x5]),
+            Nibbles::from_nibbles([0x3, 0xb, 0x5, 0xf]),
+        ];
+        let mut nodes = BTreeMap::from([
+            (parent, branch_node((1 << 0xa) | (1 << 0xb), tree_mask.get(), 0)),
+            (Nibbles::from_nibbles([0x3, 0xa]), branch_node(0b11, 0, 0)),
+            (Nibbles::from_nibbles([0x4]), branch_node(0b11, 0, 0)),
+        ]);
+        for index in 0..128 {
+            nodes.insert(
+                Nibbles::from_nibbles([0x3, 0xa, index / 16, index % 16]),
+                branch_node(0b11, 0, 0),
+            );
+        }
+        nodes.extend(orphans.into_iter().map(|path| (path, branch_node(0b11, 0, 0))));
+        let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
+        let changes = PrefixSetMut::from([Nibbles::from_nibbles([0x3, 0xa])]).freeze();
+        let mut walker =
+            TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
+                .with_walk_all_changed_branch_children(true)
+                .with_deletions_retained(true);
+        walker.cursor.seek_exact(parent).unwrap();
+        factory.visited_account_keys().clear();
+        walker.remove_orphaned_descendants(parent, tree_mask).unwrap();
+
+        assert_eq!(walker.take_removed_keys(), HashSet::from_iter(orphans));
+        assert_eq!(walker.cursor.current().unwrap(), Some(parent));
+        let next_count = factory
+            .visited_account_keys()
+            .iter()
+            .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
+            .count();
+        assert!(next_count <= 4, "cleanup walked {next_count} entries for 3 orphan nodes");
     }
 }
