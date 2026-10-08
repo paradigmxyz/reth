@@ -92,7 +92,7 @@ async fn a_chain_before_amsterdam_syncs_with_the_staged_pipeline() -> eyre::Resu
     assert!(client.inner.provider.database_provider_ro()?.snap_attempt()?.is_none());
     // The pipeline executed the chain.
     let execution = client.inner.provider.get_stage_checkpoint(StageId::Execution)?.unwrap();
-    assert!(execution.block_number > 0);
+    assert_eq!(execution.block_number, CHAIN_LENGTH);
     Ok(())
 }
 
