@@ -10,6 +10,7 @@
 
 //! Entrypoint for running commands.
 
+use bedrock_assertions::{Assertion, Condition, Location};
 use reth_tasks::{PanickedTaskError, TaskExecutor};
 use std::{
     fs::OpenOptions,
@@ -199,16 +200,15 @@ fn install_bedrock_panic_hook() {
                 .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
                 .unwrap_or("non-string panic payload");
             let location = info.location();
-            let record = serde_json::json!({"Always": {
-                "condition": {"Bool": false},
-                "result": false,
-                "message": format!("E1/panic: {payload}"),
-                "location": {
-                    "file": location.map_or("", |loc| loc.file()),
-                    "line": location.map_or(0, |loc| loc.line()),
-                    "column": location.map_or(0, |loc| loc.column()),
-                }
-            }});
+            let record = Assertion::always(
+                Condition::Bool(false),
+                format!("E1/panic: {payload}"),
+                Location::new(
+                    location.map_or("", |loc| loc.file()),
+                    location.map_or(0, |loc| loc.line()),
+                    location.map_or(0, |loc| loc.column()),
+                ),
+            );
             if let Ok(mut line) = serde_json::to_vec(&record) {
                 line.push(b'\n');
                 if let Ok(mut file) = OpenOptions::new().append(true).open(&path) {

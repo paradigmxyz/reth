@@ -11,6 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+bedrock-assertions = { git = "https://github.com/tempoxyz/bedrock", rev = "181cd20340e8892dda9f97665fbd222a3f1fc431" }
+
 # reth
 reth-tasks.workspace = true
 

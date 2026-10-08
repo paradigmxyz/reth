@@ -1700,6 +1700,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
+name = "bedrock-assertions"
+version = "0.1.0"
+source = "git+https://github.com/tempoxyz/bedrock?rev=181cd20340e8892dda9f97665fbd222a3f1fc431#181cd20340e8892dda9f97665fbd222a3f1fc431"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bimap"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8068,6 +8076,7 @@ dependencies = [
 name = "reth-cli-runner"
 version = "2.7.0"
 dependencies = [
+ "bedrock-assertions",
  "reth-tasks",
  "serde_json",
  "tokio",
