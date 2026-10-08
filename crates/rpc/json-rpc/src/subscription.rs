@@ -245,6 +245,35 @@ impl SubscriptionSink {
         self.conn.tx.send(json).await.map_err(|_| DisconnectError)
     }
 
+    /// Sends a notification with the given result if the connection has capacity for it.
+    ///
+    /// Fails with [`TrySendError::Closed`] if `result` fails to serialize, like [`Self::send`].
+    pub fn try_send<T: Serialize + ?Sized>(&self, result: &T) -> Result<(), TrySendError> {
+        if self.is_closed() {
+            return Err(TrySendError::Closed)
+        }
+        let permit = self.conn.tx.try_reserve().map_err(|err| match err {
+            mpsc::error::TrySendError::Full(()) => TrySendError::Full,
+            mpsc::error::TrySendError::Closed(()) => TrySendError::Closed,
+        })?;
+        let json = notification(self.method, &self.sub_id, result).map_err(|err| {
+            tracing::error!(target: "rpc::jsonrpc", %err, "failed to serialize notification");
+            TrySendError::Closed
+        })?;
+        permit.send(json);
+        Ok(())
+    }
+
+    /// Returns the number of messages the connection can queue before sends wait.
+    pub fn capacity(&self) -> usize {
+        self.conn.tx.capacity()
+    }
+
+    /// Returns the maximum number of messages the connection can queue.
+    pub fn max_capacity(&self) -> usize {
+        self.conn.tx.max_capacity()
+    }
+
     /// Resolves once the subscription or the connection is closed.
     pub async fn closed(&self) {
         tokio::select! {
@@ -316,3 +345,14 @@ fn notification<T: Serialize + ?Sized>(
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("subscription closed")]
 pub struct DisconnectError;
+
+/// Error returned by [`SubscriptionSink::try_send`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TrySendError {
+    /// The subscription or the connection was closed.
+    #[error("subscription closed")]
+    Closed,
+    /// The connection has no capacity for another message.
+    #[error("connection buffer full")]
+    Full,
+}

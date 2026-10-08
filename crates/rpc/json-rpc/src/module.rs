@@ -1,13 +1,16 @@
 use crate::{
-    connection::handle_message, BatchRequestConfig, ErrorCode, ErrorObject, Id,
-    IntoSubscriptionResult, MethodResponse, Params, PendingSubscriptionSink, RpcService,
+    connection::handle_message, subscription::Connection, BatchRequestConfig, ConnectionId,
+    ErrorCode, ErrorObject, Id, IntoSubscriptionResult, MethodResponse, Params,
+    PendingSubscriptionSink, RandomIntegerIdProvider, RpcService, SubscriptionId,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use http::Extensions;
 use rustc_hash::FxHashMap;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::{collections::hash_map::Entry, fmt, future::Future, sync::Arc};
+use tokio::sync::mpsc;
 
 /// A set of registered methods.
 ///
@@ -208,6 +211,40 @@ impl RpcModule {
             .map(|(json, _)| json)
     }
 
+    /// Calls a method without a connection and deserializes its result.
+    ///
+    /// `params` must serialize to an array or object, or to `null` for no parameters.
+    pub async fn call<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: impl Serialize,
+    ) -> Result<T, MethodsError> {
+        let service = RpcService::new(self.clone(), usize::MAX, None);
+        let json = call_json(&service, method, params).await?.0;
+        parse_result(&json)
+    }
+
+    /// Subscribes without a connection, buffering up to `buffer` notifications.
+    ///
+    /// The subscription closes when the returned [`ModuleSubscription`] is dropped.
+    pub async fn subscribe(
+        &self,
+        method: &str,
+        params: impl Serialize,
+        buffer: usize,
+    ) -> Result<ModuleSubscription, MethodsError> {
+        let (tx, rx) = mpsc::channel(buffer.max(1));
+        let id_provider = Arc::new(RandomIntegerIdProvider);
+        let conn = Connection::new(ConnectionId::next(), tx, u32::MAX, id_provider);
+        let service = RpcService::new(self.clone(), usize::MAX, Some(Arc::new(conn)));
+        let (json, on_sent) = call_json(&service, method, params).await?;
+        let sub_id = parse_result(&json)?;
+        for tx in on_sent {
+            let _ = tx.send(());
+        }
+        Ok(ModuleSubscription { sub_id, rx })
+    }
+
     pub(crate) fn method(&self, name: &str) -> Option<&Callback> {
         self.0.get(name)
     }
@@ -252,6 +289,52 @@ pub(crate) enum Callback {
     },
 }
 
+/// Error returned by [`RpcModule::call`] and [`RpcModule::subscribe`].
+#[derive(Debug, thiserror::Error)]
+pub enum MethodsError {
+    /// The method returned an error.
+    #[error(transparent)]
+    JsonRpc(#[from] ErrorObject),
+    /// The parameters or the result failed to (de)serialize.
+    #[error(transparent)]
+    Parse(#[from] serde_json::Error),
+}
+
+/// A subscription created by [`RpcModule::subscribe`].
+#[derive(Debug)]
+pub struct ModuleSubscription {
+    sub_id: SubscriptionId,
+    rx: mpsc::Receiver<String>,
+}
+
+impl ModuleSubscription {
+    /// Returns the subscription id.
+    pub const fn subscription_id(&self) -> &SubscriptionId {
+        &self.sub_id
+    }
+
+    /// Receives the next notification result, or `None` once the subscription closed.
+    pub async fn next<T: DeserializeOwned>(&mut self) -> Option<Result<T, serde_json::Error>> {
+        #[derive(Deserialize)]
+        struct Notification<'a> {
+            #[serde(borrow)]
+            params: NotificationParams<'a>,
+        }
+
+        #[derive(Deserialize)]
+        struct NotificationParams<'a> {
+            #[serde(borrow)]
+            result: &'a RawValue,
+        }
+
+        let json = self.rx.recv().await?;
+        Some(
+            serde_json::from_str::<Notification<'_>>(&json)
+                .and_then(|n| serde_json::from_str(n.params.result.get())),
+        )
+    }
+}
+
 /// Error returned when registering a method fails.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RegisterMethodError {
@@ -264,6 +347,46 @@ pub enum RegisterMethodError {
     /// The aliased method does not exist.
     #[error("method `{0}` not found")]
     MethodNotFound(String),
+}
+
+/// Sends a request for `method` to `service` and returns the response.
+async fn call_json(
+    service: &RpcService,
+    method: &str,
+    params: impl Serialize,
+) -> Result<(String, Vec<tokio::sync::oneshot::Sender<()>>), MethodsError> {
+    #[derive(Serialize)]
+    struct Request<'a, P> {
+        jsonrpc: &'static str,
+        id: u8,
+        method: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        params: Option<P>,
+    }
+
+    let params = serde_json::to_value(params)?;
+    let params = (!params.is_null()).then_some(params);
+    let request = serde_json::to_vec(&Request { jsonrpc: "2.0", id: 0, method, params })?;
+    let config = BatchRequestConfig::Unlimited;
+    let response =
+        handle_message(service, request.into(), usize::MAX, config, &Extensions::new()).await;
+    Ok(response.expect("requests with an id get a response"))
+}
+
+/// Parses the result of a JSON-RPC response.
+fn parse_result<T: DeserializeOwned>(json: &str) -> Result<T, MethodsError> {
+    #[derive(Deserialize)]
+    struct Response<'a> {
+        #[serde(borrow)]
+        result: Option<&'a RawValue>,
+        error: Option<ErrorObject>,
+    }
+
+    let response = serde_json::from_str::<Response<'_>>(json)?;
+    if let Some(err) = response.error {
+        return Err(err.into())
+    }
+    Ok(serde_json::from_str(response.result.map_or("null", RawValue::get))?)
 }
 
 /// Converts the output of a method into a response.
@@ -424,5 +547,43 @@ mod tests {
             r#"[{"jsonrpc":"2.0","id":1,"result":5},{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method not found"}}]"#
         );
         assert_eq!(m.raw_json_request(r#"{"jsonrpc":"2.0","method":"x"}"#).await, None);
+    }
+
+    #[tokio::test]
+    async fn call_and_subscribe() {
+        let mut m = RpcModule::new();
+        m.register_method("add", |params, _| params.parse::<(u64, u64)>().map(|(a, b)| a + b))
+            .unwrap();
+        m.register_method("none", |params, _| params.is_none()).unwrap();
+        m.register_subscription("sub", "notif", "unsub", |params, pending, _| async move {
+            let n = match params.one::<u64>() {
+                Ok(n) => n,
+                Err(err) => {
+                    pending.reject(err);
+                    return Ok(())
+                }
+            };
+            let sink = pending.accept().await?;
+            for i in 0..n {
+                sink.send(&i).await?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(m.call::<u64>("add", (1, 2)).await.unwrap(), 3);
+        assert!(m.call::<bool>("none", ()).await.unwrap());
+        let err = m.call::<u64>("add", ["x"]).await.unwrap_err();
+        assert!(matches!(err, MethodsError::JsonRpc(err) if err.code() == -32602));
+        let err = m.call::<u64>("missing", ()).await.unwrap_err();
+        assert!(matches!(err, MethodsError::JsonRpc(err) if err.code() == -32601));
+        assert!(matches!(m.call::<String>("add", (1, 2)).await, Err(MethodsError::Parse(_))));
+
+        let mut sub = m.subscribe("sub", [2], 1).await.unwrap();
+        assert_eq!(sub.next::<u64>().await.unwrap().unwrap(), 0);
+        assert_eq!(sub.next::<u64>().await.unwrap().unwrap(), 1);
+        assert!(sub.next::<u64>().await.is_none());
+        let err = m.subscribe("sub", ["x"], 1).await.unwrap_err();
+        assert!(matches!(err, MethodsError::JsonRpc(err) if err.code() == -32602));
     }
 }

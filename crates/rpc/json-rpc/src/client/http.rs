@@ -279,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn notification_and_size_limits() {
         let mut module = RpcModule::new();
-        module.register_method("echo", |params| params.one::<String>()).unwrap();
+        module.register_method("echo", |params, _| params.one::<String>()).unwrap();
         let (url, _handle) = start(module).await;
 
         let client = HttpClientBuilder::default().max_request_size(200).build(&url).unwrap();
@@ -302,7 +302,7 @@ mod tests {
         let running = Arc::new(Semaphore::new(1));
         let mut module = RpcModule::new();
         module
-            .register_async_method("alone", move |_| {
+            .register_async_method("alone", move |_, _| {
                 let running = Arc::clone(&running);
                 async move {
                     let permit = running.try_acquire();

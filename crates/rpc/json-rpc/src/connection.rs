@@ -181,8 +181,11 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Notification;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use crate::{stop_channel, Notification, TrySendError};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
 
     struct CountNotifications<S>(S, Arc<AtomicUsize>);
 
@@ -231,5 +234,40 @@ mod tests {
             ""
         );
         assert_eq!(count.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn try_send_until_full() {
+        let (result_tx, result_rx) = oneshot::channel();
+        let result_tx = Mutex::new(Some(result_tx));
+        let mut methods = RpcModule::new();
+        methods
+            .register_subscription("sub", "notif", "unsub", move |_, pending, _| {
+                let result_tx = result_tx.lock().unwrap().take().unwrap();
+                async move {
+                    let sink = pending.accept().await?;
+                    while sink.try_send(&1).is_ok() {}
+                    let res = (sink.try_send(&1), sink.capacity(), sink.max_capacity());
+                    let _ = result_tx.send(res);
+                    sink.closed().await;
+                    Ok(())
+                }
+            })
+            .unwrap();
+
+        let (req_tx, req_rx) = futures::channel::mpsc::unbounded();
+        // The writer is never read, so the connection buffer fills up.
+        let (writer, _responses) = futures::channel::mpsc::channel::<String>(0);
+        let config = ServerConfig::default().set_message_buffer_capacity(4);
+        let (stop, _handle) = stop_channel();
+        tokio::spawn(async move {
+            let middleware = RpcServiceBuilder::new();
+            serve_connection(req_rx, writer, methods, &middleware, &config, stop, Extensions::new())
+                .await
+        });
+        req_tx
+            .unbounded_send(Bytes::from_static(br#"{"jsonrpc":"2.0","id":1,"method":"sub"}"#))
+            .unwrap();
+        assert_eq!(result_rx.await.unwrap(), (Err(TrySendError::Full), 0, 4));
     }
 }

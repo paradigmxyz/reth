@@ -24,6 +24,11 @@ impl Params {
         self.0.is_none()
     }
 
+    /// Returns `true` if the parameters are a JSON object.
+    pub fn is_object(&self) -> bool {
+        self.as_str().is_some_and(|raw| raw.trim_start().starts_with('{'))
+    }
+
     /// Parses the parameters as `T`, treating missing parameters as `null`.
     pub fn parse<'a, T: Deserialize<'a>>(&'a self) -> Result<T, ErrorObject> {
         serde_json::from_str(self.as_str().unwrap_or("null")).map_err(invalid_params)
@@ -47,8 +52,8 @@ impl Params {
         &'a self,
         names: &'a [&'a [&'a str]],
     ) -> Result<ParamsSequence<'a>, ErrorObject> {
-        match self.as_str().map(str::trim_start) {
-            Some(json) if json.starts_with('{') => {
+        match self.as_str() {
+            Some(json) if self.is_object() => {
                 let values = serde_json::from_str(json).map_err(invalid_params)?;
                 Ok(ParamsSequence(Seq::Object { values, names: names.iter() }))
             }
@@ -174,7 +179,9 @@ mod tests {
     fn sequence_named() {
         const NAMES: &[&[&str]] = &[&["block_number", "blockNumber"], &["full"], &["extra"]];
 
-        let p = params(r#"{"blockNumber": 5, "full": true, "unknown": 1}"#);
+        let p = params(r#" {"blockNumber": 5, "full": true, "unknown": 1}"#);
+        assert!(p.is_object());
+        assert!(!params("[1]").is_object());
         let mut seq = p.sequence_named(NAMES).unwrap();
         assert_eq!(seq.next::<u64>().unwrap(), 5);
         assert!(seq.next::<bool>().unwrap());
@@ -193,7 +200,7 @@ mod tests {
         assert_eq!(seq.next::<u64>().unwrap(), 5);
         assert!(seq.next::<bool>().unwrap());
 
-        assert!(params(r#"{"full": tru}"#).sequence_named(NAMES).is_err());
+        assert!(params(r#"{"full":}"#).sequence_named(NAMES).is_err());
     }
 
     #[test]

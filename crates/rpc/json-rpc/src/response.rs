@@ -90,6 +90,11 @@ impl MethodResponse {
         self.error_code
     }
 
+    /// Returns `true` if this is the response of an accepted subscription.
+    pub const fn is_subscription(&self) -> bool {
+        self.on_sent.is_some()
+    }
+
     /// Returns the serialized response.
     pub fn as_json(&self) -> &str {
         &self.json

@@ -30,7 +30,8 @@ use syn::{
 ///   - `unsubscribe_aliases = [".."]`: aliases of the unsubscribe method, with no namespace.
 ///
 /// Both take `with_extensions`, which passes the request's `&Extensions` to the server method
-/// after `&self` and the subscription sink.
+/// after `&self` and the subscription sink, and `param_kind = map`, which makes the client send
+/// named parameters.
 ///
 /// Parameters are positional, or named by their name or its `lowerCamelCase` form. A trailing
 /// `Option` parameter may be omitted. `#[argument(rename = "..")]` sets the parameter name.
@@ -89,6 +90,7 @@ struct Method {
     aliases: Vec<String>,
     args: Vec<Arg>,
     with_extensions: bool,
+    named_params: bool,
     kind: Kind,
 }
 
@@ -130,7 +132,8 @@ impl Rpc {
             if func.sig.receiver().is_none() {
                 return Err(syn::Error::new_spanned(&func.sig, "expected a `&self` receiver"))
             }
-            let MethodAttr { name, aliases, with_extensions, kind } = parse_method_attr(func)?;
+            let MethodAttr { name, aliases, with_extensions, named_params, kind } =
+                parse_method_attr(func)?;
             let (name, kind) = match kind {
                 Kind::Method { blocking } => {
                     if blocking && func.sig.asyncness.is_some() {
@@ -175,7 +178,15 @@ impl Rpc {
                     Err(syn::Error::new_spanned(arg, "expected an identifier"))
                 })
                 .collect::<syn::Result<_>>()?;
-            methods.push(Method { func: func.clone(), name, aliases, args, with_extensions, kind });
+            methods.push(Method {
+                func: func.clone(),
+                name,
+                aliases,
+                args,
+                with_extensions,
+                named_params,
+                kind,
+            });
         }
 
         Ok(Self { args, item, methods })
@@ -373,16 +384,29 @@ impl Rpc {
                 > + ::core::marker::Send
             };
             let attrs = &m.func.attrs;
-            let args = m.args.iter().map(|arg| &arg.ident);
+            let (params, inserts) = if m.named_params {
+                let inserts = m.args.iter().map(|arg| {
+                    let ident = &arg.ident;
+                    let name = arg.rename.clone().unwrap_or_else(|| ident.unraw().to_string());
+                    quote!(__rpc_params.insert(#name, #ident))
+                });
+                (quote!(ObjectParams), inserts.collect::<Vec<_>>())
+            } else {
+                let inserts = m.args.iter().map(|arg| {
+                    let ident = &arg.ident;
+                    quote!(__rpc_params.insert(#ident))
+                });
+                (quote!(ArrayParams), inserts.collect())
+            };
             quote! {
                 #(#attrs)*
                 #[allow(non_snake_case, clippy::used_underscore_binding)]
                 #sig {
                     async move {
                         #[allow(unused_mut)]
-                        let mut __rpc_params = ::reth_json_rpc::client::ArrayParams::new();
+                        let mut __rpc_params = ::reth_json_rpc::client::#params::new();
                         #(
-                            if let ::core::result::Result::Err(__err) = __rpc_params.insert(#args) {
+                            if let ::core::result::Result::Err(__err) = #inserts {
                                 return ::core::result::Result::Err(
                                     ::reth_json_rpc::client::Error::ParseError(__err),
                                 );
@@ -453,6 +477,7 @@ struct MethodAttr {
     name: String,
     aliases: Vec<String>,
     with_extensions: bool,
+    named_params: bool,
     kind: Kind,
 }
 
@@ -476,6 +501,7 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<MethodAttr> {
     let mut item = None;
     let mut blocking = false;
     let mut with_extensions = false;
+    let mut named_params = false;
     attr.parse_nested_meta(|meta| {
         if meta.path.is_ident("name") {
             let input = meta.value()?;
@@ -488,6 +514,13 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<MethodAttr> {
             aliases = parse_names(&meta)?;
         } else if meta.path.is_ident("with_extensions") {
             with_extensions = true;
+        } else if meta.path.is_ident("param_kind") {
+            let kind = meta.value()?.parse::<Ident>()?;
+            named_params = match kind.to_string().as_str() {
+                "map" => true,
+                "array" => false,
+                _ => return Err(syn::Error::new_spanned(kind, "expected `map` or `array`")),
+            };
         } else if !is_subscription && meta.path.is_ident("blocking") {
             blocking = true;
         } else if is_subscription && meta.path.is_ident("unsubscribe_aliases") {
@@ -504,7 +537,8 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<MethodAttr> {
 
     let name = name.ok_or_else(|| syn::Error::new_spanned(&attr, "missing `name`"))?;
     if !is_subscription {
-        return Ok(MethodAttr { name, aliases, with_extensions, kind: Kind::Method { blocking } })
+        let kind = Kind::Method { blocking };
+        return Ok(MethodAttr { name, aliases, with_extensions, named_params, kind })
     }
     let item = item.ok_or_else(|| syn::Error::new_spanned(&attr, "missing `item`"))?;
     let unsubscribe = unsubscribe
@@ -512,7 +546,7 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<MethodAttr> {
         .ok_or_else(|| syn::Error::new_spanned(&attr, "missing `unsubscribe`"))?;
     let notification = notification.unwrap_or_else(|| name.clone());
     let kind = Kind::Subscription { notification, unsubscribe, unsubscribe_aliases, item };
-    Ok(MethodAttr { name, aliases, with_extensions, kind })
+    Ok(MethodAttr { name, aliases, with_extensions, named_params, kind })
 }
 
 /// Removes the `#[argument]` attributes from a parameter and returns its `rename`, if any.

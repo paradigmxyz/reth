@@ -225,6 +225,12 @@ impl<L> RpcServiceBuilder<L> {
         RpcServiceBuilder(self.0.layer_fn(f))
     }
 
+    /// Adds an [`RpcLogger`], which traces every call and its response, truncated to
+    /// `max_log_len` bytes.
+    pub fn rpc_logger(self, max_log_len: u32) -> RpcServiceBuilder<Stack<RpcLoggerLayer, L>> {
+        self.layer(RpcLoggerLayer::new(max_log_len))
+    }
+
     /// Wraps `service` in the middleware layers.
     pub fn service<S>(&self, service: S) -> L::Service
     where
@@ -232,4 +238,68 @@ impl<L> RpcServiceBuilder<L> {
     {
         self.0.service(service)
     }
+}
+
+/// Layer that wraps services in an [`RpcLogger`].
+#[derive(Clone, Copy, Debug)]
+pub struct RpcLoggerLayer(usize);
+
+impl RpcLoggerLayer {
+    /// Creates a layer that truncates logged messages to `max_log_len` bytes.
+    pub const fn new(max_log_len: u32) -> Self {
+        Self(max_log_len as usize)
+    }
+}
+
+impl<S> Layer<S> for RpcLoggerLayer {
+    type Service = RpcLogger<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        RpcLogger { service, max_log_len: self.0 }
+    }
+}
+
+/// Middleware that traces calls, notifications and responses.
+#[derive(Clone, Debug)]
+pub struct RpcLogger<S> {
+    service: S,
+    max_log_len: usize,
+}
+
+impl<S: RpcServiceT> RpcServiceT for RpcLogger<S> {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
+        let max = self.max_log_len;
+        tracing::trace!(
+            target: "rpc::jsonrpc",
+            id = ?req.id,
+            method = %req.method,
+            params = truncate(req.params.as_str().unwrap_or_default(), max),
+            "call"
+        );
+        let fut = self.service.call(req);
+        async move {
+            let response = fut.await;
+            tracing::trace!(target: "rpc::jsonrpc", response = truncate(response.as_json(), max));
+            response
+        }
+    }
+
+    fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
+        tracing::trace!(target: "rpc::jsonrpc", len = reqs.len(), "batch");
+        futures_util::future::join_all(reqs.into_iter().map(|req| self.call(req)))
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        tracing::trace!(
+            target: "rpc::jsonrpc",
+            method = %n.method,
+            params = truncate(n.params.as_str().unwrap_or_default(), self.max_log_len),
+            "notification"
+        );
+        self.service.notification(n)
+    }
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    &s[..s.floor_char_boundary(max)]
 }

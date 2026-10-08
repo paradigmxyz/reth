@@ -66,9 +66,9 @@ impl TestServer<String> for TestImpl {
     }
 }
 
-#[rpc(server, namespace = "extra", namespace_separator = ".")]
+#[rpc(server, client, namespace = "extra", namespace_separator = ".")]
 trait Extra {
-    #[method(name = "sub", blocking)]
+    #[method(name = "sub", blocking, param_kind = map)]
     fn sub(&self, a: u64, #[argument(rename = "rhs")] b: u64) -> RpcResult<u64>;
 
     #[method(name = "connectionId", with_extensions)]
@@ -252,6 +252,7 @@ async fn method_attributes() {
 
     let client = connect(module);
     assert_eq!(client.request::<u64, _>("extra.sub", rpc_params![5, 2]).await.unwrap(), 3);
+    assert_eq!(ExtraClient::sub(&client, 5, 2).await.unwrap(), 3);
     let id = client.request::<u64, _>("extra.connectionId", rpc_params![]).await.unwrap();
     let params = rpc_params![];
     let mut sub =
