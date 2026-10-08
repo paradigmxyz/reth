@@ -1,7 +1,8 @@
 //! End-to-end sync scenarios with `--snap.v2`.
 //!
-//! - A fresh node snap-syncs 100 finalized Amsterdam blocks from a serving peer, with persisted
-//!   state and trie nodes matching the head state root and a verified snap attempt.
+//! - A fresh node snap-syncs the state at the finalized block of a 100 block Amsterdam chain from a
+//!   serving peer, then executes the blocks above it with the staged pipeline, with persisted state
+//!   and trie nodes matching the head state root.
 //! - A fresh node syncs 100 finalized Prague blocks through the staged pipeline without starting a
 //!   snap attempt.
 //! - A snap-synced node reads downloaded contract code and storage, then executes a new call that
@@ -10,6 +11,7 @@
 use crate::utils::advance_with_random_transactions;
 use alloy_primitives::{bytes, Bytes, U256};
 use alloy_provider::Provider;
+use alloy_rpc_types_engine::ForkchoiceState;
 use rand::{rngs::StdRng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
@@ -22,11 +24,16 @@ use reth_provider::{
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
 
-// Blocks the serving node builds: more than the backfill threshold and the snap pivot distance,
-// and within the blocks peers serve state for.
+// Blocks the serving node builds: more than the backfill threshold, and few enough that it still
+// serves the state of every block, see `SNAPSHOT_STATE_RETENTION`.
 const CHAIN_LENGTH: u64 = 100;
 
-// A node on `fork` that serves snap/2 from the storage layout snap writes.
+// Finalized block a syncing node anchors its snap pivot to. It is below the head, so the staged
+// pipeline executes the blocks above it on the downloaded state.
+const FINALIZED: u64 = 80;
+
+// A node on `fork` that serves snap/2 from the storage layout snap writes, and picks its backfill
+// from `--snap.v2` like `reth node` does.
 fn snap_setup(fork: EthereumHardfork, runtime: Runtime) -> E2ETestSetupBuilder<EthereumNode> {
     EthereumNode::test_setup_for(fork)
         .with_runtime(runtime)
@@ -66,17 +73,25 @@ async fn syncing_client(
 async fn a_fresh_node_snap_syncs_to_the_head() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (server, client) = serving_and_syncing(EthereumHardfork::Amsterdam).await?;
+    let finalized = server.block_hash(FINALIZED);
 
-    client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
+    client
+        .sync_to_forkchoice(ForkchoiceState {
+            head_block_hash: server.block_hash(CHAIN_LENGTH),
+            safe_block_hash: finalized,
+            finalized_block_hash: finalized,
+        })
+        .await?;
 
+    // The state at the pivot came from snap, not from executing the chain.
+    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let pivot = server.inner.provider.sealed_header(FINALIZED)?.unwrap();
+    assert!(attempt.is_verified());
+    assert_eq!(attempt.pivot(), pivot.num_hash());
+    assert_eq!(attempt.state_root(), pivot.state_root);
+    // The staged pipeline executed the blocks above the pivot on that state.
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
     assert_trie_consistency(&client.inner.provider)?;
-    // The state came from snap, not from executing the chain.
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
-    let head = server.inner.provider.sealed_header(CHAIN_LENGTH)?.unwrap();
-    assert!(attempt.is_verified());
-    assert_eq!(attempt.pivot(), head.num_hash());
-    assert_eq!(attempt.state_root(), head.state_root);
     Ok(())
 }
 

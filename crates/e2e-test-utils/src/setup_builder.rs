@@ -258,25 +258,6 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         })
     }
 
-    /// Launches nodes with the engine's backfill that `backfill` builds from each node's
-    /// configuration, instead of the staged pipeline, e.g. `EthereumBackfill::new`.
-    ///
-    /// Cannot be combined with [dev mining](Self::with_dev_mining), whose launcher currently
-    /// uses the default pipeline backfill.
-    pub fn with_backfill<F, B>(mut self, backfill: F) -> Self
-    where
-        F: Fn(&NodeConfig<N::ChainSpec>) -> B + Send + Sync + 'static,
-        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, TmpDB>, BackfillClient<N>>
-            + Send
-            + 'static,
-    {
-        self.backfill_launcher = Some(Arc::new(move |args, database| {
-            let backfill = backfill(&args.node_config);
-            Box::pin(launch_test_node(args, database, backfill))
-        }));
-        self
-    }
-
     /// Maps the payload attributes of the blocks built by the local miner of
     /// [dev mining](Self::with_dev_mining) nodes, e.g. to set the fee recipient.
     ///
@@ -290,6 +271,27 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             Some(prev) => Arc::new(move |attributes| map(prev(attributes))),
             None => Arc::new(map),
         });
+        self
+    }
+
+    /// Launches each node with the engine's backfill built by the [`BackfillSyncBuilder`] that
+    /// `backfill` returns for the node's final configuration, instead of the staged pipeline.
+    ///
+    /// Like a node launched from the command line, the backfill follows the node's flags, e.g.
+    /// `with_backfill(EthereumBackfill::new)` snap syncs once a node configuration modifier sets
+    /// `--snap.v2`. A restarted node builds its backfill again from its configuration.
+    ///
+    /// Cannot be combined with [dev mining](Self::with_dev_mining): the harness launches dev mining
+    /// nodes with the staged pipeline.
+    pub fn with_backfill<F, B>(mut self, backfill: F) -> Self
+    where
+        F: Fn(&NodeConfig<N::ChainSpec>) -> B + Send + Sync + 'static,
+        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, TmpDB>, BackfillClient<N>> + 'static,
+    {
+        self.backfill_launcher = Some(Arc::new(move |args, database| {
+            let backfill = backfill(&args.node_config);
+            Box::pin(launch_test_node(args, database, backfill))
+        }));
         self
     }
 
@@ -353,7 +355,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         );
         ensure!(
             self.dev_launcher.is_none() || self.backfill_launcher.is_none(),
-            "dev mining nodes use the default backfill"
+            "dev mining nodes backfill with the staged pipeline and can not use the backfill set \
+             with `with_backfill`"
         );
         // The pipeline would silently replace the snap sync the flag opts into.
         ensure!(
@@ -597,7 +600,7 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     config
 }
 
-/// Launches a test node with a custom backfill.
+/// Launches a test node with the engine launcher and the engine's backfill built by `backfill`.
 pub(crate) async fn launch_test_node<N, B>(
     args: LaunchArgs<N>,
     database: TmpDB,
