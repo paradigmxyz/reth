@@ -571,7 +571,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
     ///
-    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]).
+    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]). Starting a network
+    /// with both configured returns [`NetworkError::SnapWithExtraProtocols`].
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
         self
