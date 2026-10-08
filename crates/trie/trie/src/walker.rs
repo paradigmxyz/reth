@@ -415,8 +415,8 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     ///
     /// For example, a change under `0x3a` can leave stored `0x3c` and `0x3c4...` entries while
     /// parent `0x3` has tree-mask bit `c` clear. The walker skips those entries and therefore never
-    /// records their keys for deletion. During recovery, `TrieNodeIter` supplies the hashed-state
-    /// leaves under `0x3c` to `HashBuilder`, which computes the subtree and its branch updates.
+    /// records their keys for deletion.
+    ///
     /// Collect the hidden cache keys without using their hashes; regenerated branch updates take
     /// precedence over these deletions. The cursor must be positioned on this parent; restore that
     /// position afterwards so traversal continues unchanged.
