@@ -76,8 +76,9 @@ pub fn apply_state_overrides<DB: DynDatabase>(
     db: &mut CacheDB<DB>,
 ) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
     for (address, account_override) in overrides {
-        let mut account =
-            db.get_account(&address).map_err(StateOverrideError::Database)?.unwrap_or_default();
+        let account = db.get_account(&address).map_err(StateOverrideError::Database)?;
+        let existed = account.is_some();
+        let mut account = account.unwrap_or_default();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;
@@ -99,7 +100,11 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             (None, None) => None,
         };
 
-        db.insert_account_info(&address, account);
+        // Account existence affects authorization refunds and new-account gas charges.
+        if existed || !account.is_empty() || storage.as_ref().is_some_and(|state| !state.is_empty())
+        {
+            db.insert_account_info(&address, account);
+        }
         if let Some(storage) = storage {
             for (key, value) in storage {
                 db.insert_account_storage(
