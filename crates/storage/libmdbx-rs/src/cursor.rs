@@ -283,6 +283,21 @@ where
         self.get_value(Some(key), None, MDBX_SET)
     }
 
+    /// Returns whether `key` is stored, without reading its value.
+    pub fn contains_key(&mut self, key: &[u8]) -> Result<bool> {
+        // SAFETY: key remains valid for the synchronous cursor lookup.
+        let mut key_val = unsafe { slice_to_val(Some(key)) };
+        self.txn.txn_execute(|_| unsafe {
+            // SAFETY: the transaction guard protects the cursor and key_val is valid for this call.
+            // A null data pointer makes MDBX skip the value, including large-value pages.
+            match ffi::mdbx_cursor_get(self.cursor, &mut key_val, ptr::null_mut(), MDBX_SET) {
+                ffi::MDBX_SUCCESS => Ok(true),
+                ffi::MDBX_NOTFOUND => Ok(false),
+                code => Err(Error::from_err_code(code)),
+            }
+        })?
+    }
+
     /// Position at specified key, return both key and data.
     pub fn set_key<Key, Value>(&mut self, key: &[u8]) -> Result<Option<(Key, Value)>>
     where

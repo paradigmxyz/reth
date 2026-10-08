@@ -6,6 +6,7 @@
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{keccak256, Bytes, B256};
 use reth_db_api::{
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -51,12 +52,13 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
     {
         self.authorize_snap_write(write)?;
         let mut missing = Vec::new();
+        let mut code = self.tx_ref().cursor_read::<tables::Bytecodes>()?;
         for hash in hashes {
             if missing.len() == limit {
                 break
             }
             // Only presence matters, so stored code is neither copied nor decoded.
-            if !self.tx_ref().contains_key::<tables::Bytecodes>(*hash)? {
+            if !code.contains_key(*hash)? {
                 missing.push(*hash);
             }
         }

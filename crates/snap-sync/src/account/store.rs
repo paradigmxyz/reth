@@ -12,6 +12,7 @@ use alloy_primitives::{
     B256, KECCAK256_EMPTY, U256,
 };
 use reth_db_api::{
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -366,6 +367,7 @@ impl RangeDependencies {
         let mut available = self.supplied_code()?;
         let mut contracts = B256Set::default();
         let mut persisted = Vec::new();
+        let mut code = tx.cursor_read::<tables::Bytecodes>()?;
         for (hash, account) in accounts {
             if account.storage_root != EMPTY_ROOT_HASH {
                 contracts.insert(*hash);
@@ -376,7 +378,7 @@ impl RangeDependencies {
             // Only presence matters, so stored code is neither copied nor decoded.
             if account.code_hash != KECCAK256_EMPTY &&
                 available.insert(account.code_hash) &&
-                !tx.contains_key::<tables::Bytecodes>(account.code_hash)?
+                !code.contains_key(account.code_hash)?
             {
                 return Err(SnapSyncError::MissingCode { hash: account.code_hash })
             }

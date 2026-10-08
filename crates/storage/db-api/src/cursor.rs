@@ -58,6 +58,13 @@ pub trait DbCursorRO<T: Table> {
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
+
+    /// Returns whether `key` is stored.
+    ///
+    /// Backends can override this to skip reading the value.
+    fn contains_key(&mut self, key: T::Key) -> Result<bool, DatabaseError> {
+        Ok(self.seek_exact(key)?.is_some())
+    }
 }
 
 /// A read-only cursor over the dup table `T`.
