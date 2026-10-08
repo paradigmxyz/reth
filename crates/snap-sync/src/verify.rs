@@ -281,6 +281,7 @@ fn ensure_code_present(
 ) -> Result<(), SnapSyncError> {
     let chunk = chunk.max(1);
     let mut cursor = tx.cursor_read::<tables::HashedAccounts>()?;
+    let mut code = tx.cursor_read::<tables::Bytecodes>()?;
     for (scanned, entry) in cursor.walk(None)?.enumerate() {
         if (scanned as u64).is_multiple_of(chunk) && cancel.is_cancelled() {
             return Err(SnapSyncError::Cancelled)
@@ -288,7 +289,7 @@ fn ensure_code_present(
         let (_, account) = entry?;
         // Only presence matters, so stored code is neither copied nor decoded.
         if let Some(hash) = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY) &&
-            !tx.contains_key::<tables::Bytecodes>(hash)?
+            !code.contains_key(hash)?
         {
             return Err(SnapSyncError::MissingCode { hash })
         }

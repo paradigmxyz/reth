@@ -155,6 +155,10 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 
         Ok(ReverseWalker::new(self, start))
     }
+
+    fn contains_key(&mut self, key: T::Key) -> Result<bool, DatabaseError> {
+        self.inner.contains_key(key.encode().as_ref()).map_err(|e| DatabaseError::Read(e.into()))
+    }
 }
 
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {

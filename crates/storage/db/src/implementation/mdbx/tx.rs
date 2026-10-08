@@ -465,7 +465,8 @@ mod tests {
     };
     use alloy_primitives::B256;
     use reth_db_api::{
-        database::Database, models::ClientVersion, transaction::DbTx, RawKey, RawTable, RawValue,
+        cursor::DbCursorRO, database::Database, models::ClientVersion, transaction::DbTx, RawKey,
+        RawTable, RawValue,
     };
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
@@ -596,5 +597,29 @@ mod tests {
                 start.elapsed().as_micros()
             );
         }
+    }
+
+    #[test]
+    fn cursor_contains_key_does_not_decode_the_value() {
+        let db = create_test_rw_db();
+        let tx = db.tx_mut().unwrap();
+        let hash = B256::with_last_byte(1);
+        DbTxMut::put::<RawTable<tables::HeaderNumbers>>(
+            &tx,
+            RawKey::new(hash),
+            RawValue::from_vec(vec![0xff; 32]),
+        )
+        .unwrap();
+        let mut cursor = tx.cursor_read::<tables::HeaderNumbers>().unwrap();
+        assert!(cursor.contains_key(hash).unwrap());
+        assert!(!cursor.contains_key(B256::ZERO).unwrap());
+        // A reused cursor still sees later writes.
+        DbTxMut::put::<RawTable<tables::HeaderNumbers>>(
+            &tx,
+            RawKey::new(B256::ZERO),
+            RawValue::from_vec(vec![0xff; 32]),
+        )
+        .unwrap();
+        assert!(cursor.contains_key(B256::ZERO).unwrap());
     }
 }

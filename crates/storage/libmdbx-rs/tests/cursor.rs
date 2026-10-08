@@ -343,3 +343,49 @@ fn test_put_del() {
         Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
     );
 }
+
+#[test]
+fn test_contains_key() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let dbi = txn.open_db(None).unwrap().dbi();
+    // A value larger than a page lives on large-value pages.
+    txn.put(dbi, b"big", vec![7; 64 * 1024], WriteFlags::empty()).unwrap();
+    txn.put(dbi, b"small", b"val", WriteFlags::empty()).unwrap();
+
+    let mut cursor = txn.cursor(dbi).unwrap();
+    assert!(cursor.contains_key(b"big").unwrap());
+    assert!(cursor.contains_key(b"small").unwrap());
+    assert!(!cursor.contains_key(b"missing").unwrap());
+
+    txn.del(dbi, b"big", None).unwrap();
+    assert!(!txn.cursor(dbi).unwrap().contains_key(b"big").unwrap());
+    txn.commit().unwrap();
+
+    let txn = env.begin_ro_txn().unwrap();
+    let mut cursor = txn.cursor(txn.open_db(None).unwrap().dbi()).unwrap();
+    assert!(cursor.contains_key(b"small").unwrap());
+    assert!(!cursor.contains_key(b"big").unwrap());
+}
+
+#[test]
+fn test_contains_key_dup() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let dbi = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap().dbi();
+    txn.put(dbi, b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.put(dbi, b"key1", b"val2", WriteFlags::empty()).unwrap();
+    // Enough duplicates to move them into a nested tree.
+    for i in 0..1000u32 {
+        txn.put(dbi, b"key2", i.to_be_bytes(), WriteFlags::empty()).unwrap();
+    }
+
+    let mut cursor = txn.cursor(dbi).unwrap();
+    assert!(cursor.contains_key(b"key1").unwrap());
+    assert!(cursor.contains_key(b"key2").unwrap());
+    assert!(!cursor.contains_key(b"key3").unwrap());
+}
