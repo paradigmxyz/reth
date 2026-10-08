@@ -81,8 +81,8 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     tree_config_modifiers: Vec<TreeConfigModifier>,
     node_config_modifiers: Vec<NodeConfigModifier<N::ChainSpec>>,
     storage_v2: bool,
-    dev_mining: bool,
-    launcher: Option<NodeLauncher<N>>,
+    dev_launcher: Option<NodeLauncher<N>>,
+    backfill_launcher: Option<NodeLauncher<N>>,
     dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
     node_factory: NodeFactory<N>,
     node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
@@ -128,8 +128,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             tree_config_modifiers: Vec::new(),
             node_config_modifiers: Vec::new(),
             storage_v2: StorageArgs::default().v2,
-            dev_mining: false,
-            launcher: None,
+            dev_launcher: None,
+            backfill_launcher: None,
             dev_payload_attributes: None,
             node_factory: Arc::new(|_| N::default()),
             node_builder_modifiers: Vec::new(),
@@ -250,8 +250,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     where
         N: DebugNode<Adapter<N>>,
     {
-        self.dev_mining = true;
-        self.launcher.get_or_insert_with(|| Self::backfill_launcher(|_| PipelineBackfill));
+        self.dev_launcher =
+            Some(Arc::new(|args, database| Box::pin(launch_dev_node::<N>(args, database))));
         self.with_node_config_modifier(move |mut config| {
             config.dev.dev = true;
             config.dev.block_time = block_time;
@@ -261,15 +261,20 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
 
     /// Launches nodes with the engine's backfill that `backfill` builds from each node's
     /// configuration, instead of the staged pipeline, e.g. `EthereumBackfill::new`.
+    ///
+    /// Cannot be combined with [dev mining](Self::with_dev_mining), whose launcher currently
+    /// uses the default pipeline backfill.
     pub fn with_backfill<F, B>(mut self, backfill: F) -> Self
     where
-        N: DebugNode<Adapter<N>>,
         F: Fn(&NodeConfig<N::ChainSpec>) -> B + Send + Sync + 'static,
         B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, TmpDB>, BackfillClient<N>>
             + Send
             + 'static,
     {
-        self.launcher = Some(Self::backfill_launcher(backfill));
+        self.backfill_launcher = Some(Arc::new(move |args, database| {
+            let backfill = backfill(&args.node_config);
+            Box::pin(launch_test_node(args, database, backfill))
+        }));
         self
     }
 
@@ -338,7 +343,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     /// Builds and launches the test nodes.
     pub async fn build(self) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
         ensure!(
-            !self.dev_mining || self.num_nodes == 1,
+            self.dev_launcher.is_none() || self.num_nodes == 1,
             "dev mining requires a single node setup, got {} nodes",
             self.num_nodes
         );
@@ -347,9 +352,14 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             "restartable nodes run on a runtime of their own and can not use the runtime set with \
              `with_runtime`"
         );
-        let dev_mining = self.dev_mining;
-        let launch = self.launcher.clone().unwrap_or_else(|| {
-            Arc::new(|args, database, _| {
+        ensure!(
+            self.dev_launcher.is_none() || self.backfill_launcher.is_none(),
+            "dev mining nodes use the default backfill"
+        );
+        let dev_mining = self.dev_launcher.is_some();
+        let launch = self.dev_launcher.as_ref().or(self.backfill_launcher.as_ref()).cloned();
+        let launch = launch.unwrap_or_else(|| {
+            Arc::new(|args, database| {
                 Box::pin(async move {
                     // The pipeline would silently replace the snap sync the flag opts into.
                     ensure!(
@@ -437,26 +447,6 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             .fold(node_config.tree_config(), |config, modifier| modifier(config));
         (node_config, tree_config)
     }
-
-    /// Returns a launcher whose nodes sync with the backfill `backfill` builds from their
-    /// configuration, and that launches mining nodes with the dev launcher.
-    fn backfill_launcher<F, B>(backfill: F) -> NodeLauncher<N>
-    where
-        N: DebugNode<Adapter<N>>,
-        F: Fn(&NodeConfig<N::ChainSpec>) -> B + Send + Sync + 'static,
-        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, TmpDB>, BackfillClient<N>>
-            + Send
-            + 'static,
-    {
-        Arc::new(move |args, database, mines| {
-            let backfill = backfill(&args.node_config);
-            if mines {
-                Box::pin(launch_dev_node(args, database, backfill))
-            } else {
-                Box::pin(launch_test_node(args, database, backfill))
-            }
-        })
-    }
 }
 
 impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
@@ -468,7 +458,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("tree_config_modifiers", &self.tree_config_modifiers.len())
             .field("node_config_modifiers", &self.node_config_modifiers.len())
             .field("storage_v2", &self.storage_v2)
-            .field("dev_mining", &self.dev_mining)
+            .field("dev_mining", &self.dev_launcher.is_some())
             .field("node_builder_modifiers", &self.node_builder_modifiers.len())
             .field("restartable", &self.restartable)
             .finish_non_exhaustive()
@@ -531,10 +521,9 @@ type NodeFactory<N> = Arc<dyn Fn(usize) -> N + Send + Sync>;
 /// Closure that modifies the node builder of each test node.
 type NodeBuilderModifier<N> = Arc<dyn Fn(TestNodeBuilder<N>) -> TestNodeBuilder<N> + Send + Sync>;
 
-/// Closure that launches a single test node on the given database in its datadir, with the dev
-/// launcher if the node mines.
+/// Closure that launches a single test node on the given database in its datadir.
 type NodeLauncher<N> = Arc<
-    dyn Fn(LaunchArgs<N>, TmpDB, bool) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>
+    dyn Fn(LaunchArgs<N>, TmpDB) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>
         + Send
         + Sync,
 >;
@@ -653,16 +642,10 @@ where
     Ok(node)
 }
 
-/// Launches a test node with the debug launcher, which runs a local miner in dev mode, and a
-/// custom backfill.
-async fn launch_dev_node<N, B>(
-    args: LaunchArgs<N>,
-    database: TmpDB,
-    backfill: B,
-) -> eyre::Result<NodeHelperType<N>>
+/// Launches a test node with the debug launcher, which runs a local miner in dev mode.
+async fn launch_dev_node<N>(args: LaunchArgs<N>, database: TmpDB) -> eyre::Result<NodeHelperType<N>>
 where
     N: NodeBuilderHelper + DebugNode<Adapter<N>>,
-    B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, TmpDB>, BackfillClient<N>> + 'static,
 {
     let LaunchArgs {
         idx,
@@ -683,9 +666,11 @@ where
         &node_builder_modifiers,
     );
     let runtime = runtime.unwrap_or_else(Runtime::test);
-    let launch = builder.launch_with(DebugNodeLauncher::new(
-        EngineNodeLauncher::new(runtime, datadir, tree_config).with_backfill(backfill),
-    ));
+    let launch = builder.launch_with(DebugNodeLauncher::new(EngineNodeLauncher::new(
+        runtime,
+        datadir,
+        tree_config,
+    )));
     let launch = match dev_payload_attributes {
         Some(map) => launch.map_debug_payload_attributes(move |attributes| map(attributes)),
         None => launch,
@@ -736,7 +721,7 @@ fn launch_node<N: NodeBuilderHelper>(
     Box::pin(async move {
         let database = open_test_database(&args.datadir)?;
         let relaunch_args = restartable.then(|| args.clone());
-        let mut node = launch(args, database.clone(), mines).await?;
+        let mut node = launch(args, database.clone()).await?;
         if let Some(args) = relaunch_args {
             let relaunch: Relaunch<_> =
                 Arc::new(move || relaunch_node(launch.clone(), args.clone(), mines));
