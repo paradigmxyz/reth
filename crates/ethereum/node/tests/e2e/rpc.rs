@@ -1,3 +1,4 @@
+use alloy_consensus::Header;
 use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
@@ -24,7 +25,10 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{EthChainSpec, EthereumHardfork};
+use reth_chainspec::{
+    hoodi::{HOODI_AMSTERDAM_TIMESTAMP, HOODI_BPO2_TIMESTAMP},
+    EthChainSpec, EthereumHardfork, HOODI,
+};
 use reth_e2e_test_utils::{
     receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
@@ -38,7 +42,8 @@ use reth_node_core::{
 };
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SealedHeader};
+use reth_provider::CanonChainTracker;
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
@@ -1311,5 +1316,39 @@ async fn test_mine_signed() -> eyre::Result<()> {
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_hoodi_amsterdam_eth_config() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup(1, HOODI.clone()).build_single().await?;
+    let provider = node.rpc_provider();
+
+    // eth_config reads the canonical header; move it across the fork without syncing the testnet.
+    for timestamp in
+        [HOODI_AMSTERDAM_TIMESTAMP - 1, HOODI_AMSTERDAM_TIMESTAMP, HOODI_AMSTERDAM_TIMESTAMP + 1]
+    {
+        node.inner.provider.set_canonical_head(SealedHeader::seal_slow(Header {
+            number: 5_000_000,
+            timestamp,
+            base_fee_per_gas: Some(1_000_000_000),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        }));
+        let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
+        if timestamp < HOODI_AMSTERDAM_TIMESTAMP {
+            assert_eq!(config.current.activation_time, HOODI_BPO2_TIMESTAMP);
+            assert_eq!(config.current.fork_id, bytes!("23aa1351"));
+            let next = config.next.unwrap();
+            assert_eq!(next.activation_time, HOODI_AMSTERDAM_TIMESTAMP);
+            assert_eq!(next.fork_id, bytes!("3d068b59"));
+            assert_eq!(config.last.unwrap(), next);
+        } else {
+            assert_eq!(config.current.activation_time, HOODI_AMSTERDAM_TIMESTAMP);
+            assert_eq!(config.current.fork_id, bytes!("3d068b59"));
+            assert!(config.next.is_none());
+            assert!(config.last.is_none());
+        }
+    }
     Ok(())
 }
