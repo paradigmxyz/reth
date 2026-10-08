@@ -2143,6 +2143,34 @@ fn test_on_new_payload_backfill_buffering() {
     assert_eq!(*buffered_block, sealed, "Buffered block should match submitted payload");
 }
 
+/// Test that a payload for a known block is valid during backfill sync, not buffered
+#[test]
+fn test_on_new_payload_backfill_known_block() {
+    reth_tracing::init_test_tracing();
+
+    let s = include_str!("../../test-data/holesky/1.rlp");
+    let sealed = Block::decode(&mut Bytes::from_str(s).unwrap().as_ref()).unwrap().seal_slow();
+    let hash = sealed.hash();
+    let block = sealed.clone().into_block();
+    let payload = ExecutionPayloadV1::from_block_unchecked(hash, &block);
+
+    let mut test_harness =
+        TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
+    test_harness.provider.add_block(hash, block);
+    test_harness.tree.persistence_state.last_persisted_block = sealed.num_hash();
+
+    let outcome = test_harness
+        .tree
+        .on_new_payload(ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        })
+        .unwrap();
+
+    assert_eq!(outcome.outcome, PayloadStatus::new(PayloadStatusEnum::Valid, Some(hash)));
+    assert!(test_harness.tree.state.buffer.block(&hash).is_none());
+}
+
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
 #[test]
 fn test_on_new_payload_malformed_payload() {
