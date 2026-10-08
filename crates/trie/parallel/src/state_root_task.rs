@@ -2,7 +2,7 @@
 //!
 //! The "state-root task" is the background multiproof and sparse-trie pipeline that computes
 //! state roots incrementally while a block executes. This module holds its boundary types:
-//! the input messages, the [`StateRootSink`] and
+//! the input messages and
 //! stream views that feed it, and the handles
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
@@ -361,7 +361,7 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 ///
 /// These callbacks submit messages without reporting task completion or failure. Consumers must
 /// obtain the computation result separately, for example through [`StateRootHandle::state_root`].
-pub trait StateRootSink: Send + Sync + 'static {
+trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
@@ -389,7 +389,7 @@ impl fmt::Debug for StateRootHintStream {
 
 impl StateRootHintStream {
     /// Creates a new hint stream view.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -401,9 +401,9 @@ impl StateRootHintStream {
 
 /// Authoritative update capability of a state-root stream.
 ///
-/// Exactly one of these exists per state-root task, so exactly one producer can end the
-/// update stream: either the EVM state hook made with [`Self::into_state_hook`] (finishes on
-/// drop) or a pre-hashed update producer such as BAL streaming (calls [`Self::finish`]). The
+/// A [`StateRootHandle`] provides this capability exactly once, so its producer can end the
+/// update stream either through the EVM state hook made with [`Self::into_state_hook`] (finishes
+/// on drop) or through a pre-hashed update stream (calls [`Self::finish`]). The
 /// type is deliberately not `Clone` and finishing consumes it, so a second end-of-stream
 /// signal cannot be produced.
 ///
@@ -422,7 +422,7 @@ impl fmt::Debug for StateRootUpdateStream {
 
 impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -445,7 +445,7 @@ impl StateRootUpdateStream {
     }
 }
 
-/// EVM hook that forwards state updates into a [`StateRootSink`].
+/// EVM hook that forwards state updates to the state-root task.
 ///
 /// Dropping the hook signals the end of the update stream, so the hook is deliberately not
 /// `Clone`: a second copy would fire a spurious end-of-stream signal.
