@@ -217,7 +217,7 @@ where
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             *key,
                             self.walker.hash().unwrap(),
-                            self.walker.children_are_in_trie()?,
+                            self.walker.children_are_in_trie(),
                         ))))
                     }
                 }
@@ -283,7 +283,7 @@ where
                     // that we seeked to.
                     if can_skip_node &&
                         self.walker.key().is_some_and(|key| key.starts_with(&seek_prefix)) &&
-                        self.walker.children_are_in_trie()?
+                        self.walker.children_are_in_trie()
                     {
                         trace!(
                             target: "trie::node_iter",
@@ -508,14 +508,11 @@ mod tests {
                     visited_key: Some(branch_node_0.0)
                 },
                 KeyVisit {
-                    // Probe child 0; the lookahead already identifies the stored child 1.
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0; 62])),
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0),
                     visited_key: Some(branch_node_2.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles(
-                        [vec![0; 61], vec![1, 0]].concat(),
-                    )),
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
                     visited_key: None
                 }
             ]
