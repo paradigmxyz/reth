@@ -16,7 +16,10 @@ use reth_e2e_test_utils::{
     trie::assert_trie_consistency, E2ETestSetupBuilder, E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
-use reth_provider::{DatabaseProviderFactory, HeaderProvider, MetadataProvider};
+use reth_provider::{
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, StageCheckpointReader,
+};
+use reth_stages_types::StageId;
 use reth_tasks::Runtime;
 
 // Blocks the serving node builds: more than the backfill threshold and the snap pivot distance,
@@ -32,10 +35,11 @@ fn snap_setup(fork: EthereumHardfork, runtime: Runtime) -> E2ETestSetupBuilder<E
             config.network.snap_v2 = true;
             config
         })
+        .with_backfill(EthereumBackfill::new)
 }
 
 // A serving node with `CHAIN_LENGTH` finalized blocks of random transactions, and a fresh node
-// that syncs with the snap backfill, connected to it.
+// connected to it.
 async fn serving_and_syncing(
     fork: EthereumHardfork,
 ) -> eyre::Result<(NodeHelperType<EthereumNode>, NodeHelperType<EthereumNode>)> {
@@ -44,8 +48,7 @@ async fn serving_and_syncing(
     let mut rng = StdRng::seed_from_u64(1);
     advance_with_random_transactions(&mut server, CHAIN_LENGTH as usize, &mut rng, true).await?;
 
-    let (mut client, _) =
-        snap_setup(fork, runtime).with_backfill(EthereumBackfill::Snap).build_single().await?;
+    let (mut client, _) = snap_setup(fork, runtime).build_single().await?;
     client.connect(&mut server).await;
     Ok((server, client))
 }
@@ -75,7 +78,12 @@ async fn a_chain_before_amsterdam_syncs_with_the_staged_pipeline() -> eyre::Resu
 
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
 
+    client.wait_for_persisted_block(CHAIN_LENGTH).await?;
+    assert_trie_consistency(&client.inner.provider)?;
     assert!(client.inner.provider.database_provider_ro()?.snap_attempt()?.is_none());
+    // The pipeline executed the chain.
+    let execution = client.inner.provider.get_stage_checkpoint(StageId::Execution)?.unwrap();
+    assert!(execution.block_number > 0);
     Ok(())
 }
 
@@ -96,7 +104,6 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
 
     let (mut client, _) = snap_setup(EthereumHardfork::Amsterdam, runtime)
-        .with_backfill(EthereumBackfill::Snap)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
@@ -104,6 +111,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
         .await?;
     client.connect(&mut server).await;
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
+    client.wait_for_persisted_block(CHAIN_LENGTH).await?;
 
     let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
     assert!(attempt.is_verified());
