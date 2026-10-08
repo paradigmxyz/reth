@@ -11,7 +11,14 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{PanickedTaskError, TaskExecutor};
-use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use std::{
+    fs::OpenOptions,
+    future::Future,
+    io::Write,
+    pin::pin,
+    sync::{mpsc, Once},
+    time::Duration,
+};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -37,6 +44,7 @@ impl CliRunner {
     pub fn try_with_runtime_config(
         config: reth_tasks::RuntimeConfig,
     ) -> Result<Self, reth_tasks::RuntimeBuildError> {
+        install_bedrock_panic_hook();
         let runtime = reth_tasks::RuntimeBuilder::new(config).build()?;
         Ok(Self { config: CliRunnerConfig::default(), runtime })
     }
@@ -174,6 +182,42 @@ impl CliRunner {
 
         Ok(())
     }
+}
+
+/// Report panics from any thread, including panics later caught by a task runner.
+/// Bedrock mounts this file into the node container and sets the path for DST runs.
+fn install_bedrock_panic_hook() {
+    let Some(path) = std::env::var_os("BEDROCK_ASSERTIONS_PATH") else { return };
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let payload = info
+                .payload()
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("non-string panic payload");
+            let location = info.location();
+            let record = serde_json::json!({"Always": {
+                "condition": {"Bool": false},
+                "result": false,
+                "message": format!("E1/panic: {payload}"),
+                "location": {
+                    "file": location.map_or("", |loc| loc.file()),
+                    "line": location.map_or(0, |loc| loc.line()),
+                    "column": location.map_or(0, |loc| loc.column()),
+                }
+            }});
+            if let Ok(mut line) = serde_json::to_vec(&record) {
+                line.push(b'\n');
+                if let Ok(mut file) = OpenOptions::new().append(true).open(&path) {
+                    let _ = file.write_all(&line);
+                }
+            }
+            previous(info);
+        }));
+    });
 }
 
 /// Extracts the task manager handle from the runtime and creates the [`CliContext`].
@@ -320,6 +364,41 @@ fn runtime_shutdown(rt: reth_tasks::Runtime, wait: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caught_worker_panic_is_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let assertions = dir.path().join("assertions.jsonl");
+        std::fs::File::create(&assertions).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::panic_hook_child"])
+            .env("BEDROCK_ASSERTIONS_PATH", &assertions)
+            .env("RETH_PANIC_HOOK_TEST_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+        let contents = std::fs::read_to_string(assertions).unwrap();
+        let record: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+        assert_eq!(record["Always"]["result"], false);
+        assert_eq!(record["Always"]["condition"]["Bool"], false);
+        assert_eq!(record["Always"]["message"], "E1/panic: caught worker panic");
+        assert_eq!(record["Always"]["location"]["file"], file!());
+    }
+
+    #[test]
+    fn panic_hook_child() {
+        if std::env::var_os("RETH_PANIC_HOOK_TEST_CHILD").is_none() {
+            return;
+        }
+        let _runner = CliRunner::try_default_runtime().unwrap();
+        let caught = std::thread::spawn(|| {
+            std::panic::catch_unwind(|| panic!("caught worker panic")).is_err()
+        })
+        .join()
+        .unwrap();
+        assert!(caught);
+    }
 
     #[test]
     fn runtime_shutdown_stops_tasks_with_live_runtime_clones() {
