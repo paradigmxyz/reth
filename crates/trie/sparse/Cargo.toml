@@ -48,7 +48,6 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
-# Disable expensive debug validation for deterministic simulation testing.
 dst = []
 default = ["std", "metrics"]
 std = [

@@ -68,7 +68,6 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
-# Skip transaction-open backtraces for deterministic simulation testing.
 dst = ["reth-libmdbx?/dst"]
 default = ["mdbx"]
 mdbx = [

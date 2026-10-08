@@ -26,7 +26,6 @@ tracing.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 
 [features]
-# Skip transaction-open backtraces for deterministic simulation testing.
 dst = []
 default = []
 return-borrowed = []

@@ -64,7 +64,6 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-# Disable expensive debug validation for deterministic simulation testing.
 dst = ["reth-trie-sparse/dst"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
