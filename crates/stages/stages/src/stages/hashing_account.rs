@@ -268,7 +268,6 @@ where
             provider.insert_account_for_hashing(accounts)?;
 
             let exhausted = total_entries < self.commit_entries;
-            let done = exhausted && is_final_range;
             let progress_block = if exhausted { to_block } else { last_block };
 
             let checkpoint = StageCheckpoint::new(progress_block)
@@ -277,6 +276,7 @@ where
                     ..Default::default()
                 });
 
+            let done = exhausted && is_final_range;
             Ok(ExecOutput { checkpoint, done })
         }
     }

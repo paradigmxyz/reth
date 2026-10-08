@@ -103,10 +103,9 @@ impl ChangesetOffsetWriter {
             std::cmp::Ordering::Equal => {}
         }
 
-        let records_written = committed_len;
         let file = OpenOptions::new().create(true).append(true).open(path)?;
 
-        Ok(Self { file, records_written })
+        Ok(Self { file, records_written: committed_len })
     }
 
     /// Appends a single changeset offset record.

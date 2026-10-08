@@ -214,7 +214,6 @@ where
             let latest_block = env
                 .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
-            let block_number = latest_block.number;
             let timestamp =
                 env.active_node_state()?.latest_header_time + env.block_timestamp_increment;
             let payload_attributes = PayloadAttributes {
@@ -230,7 +229,7 @@ where
             env.active_node_state_mut()?
                 .payload_attributes
                 .insert(latest_block.number + 1, payload_attributes);
-            debug!("Stored payload attributes for block {}", block_number + 1);
+            debug!("Stored payload attributes for block {}", latest_block.number + 1);
             Ok(())
         })
     }

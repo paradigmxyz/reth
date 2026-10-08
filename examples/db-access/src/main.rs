@@ -161,7 +161,6 @@ fn receipts_provider_example<
     provider: T,
 ) -> eyre::Result<()> {
     let txid = 5;
-    let header_num = 100;
 
     // Query a receipt by txid
     let receipt = provider.receipt(txid)?.ok_or(eyre::eyre!("tx receipt not found"))?;
@@ -181,6 +180,7 @@ fn receipts_provider_example<
     // Can check if an address/topic filter is present in a header, if it is we query the block and
     // receipts and do something with the data
     // 1. get the bloom from the header
+    let header_num = 100;
     let header = provider.header_by_number(header_num)?.unwrap();
     let bloom = header.logs_bloom();
 

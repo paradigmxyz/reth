@@ -591,7 +591,6 @@ where
                 }
 
                 let info = self.provider().chain_info()?;
-                let start_block = info.best_number;
                 // Without a pending block to serve, a `pending` bound resolves to the head on both
                 // ends instead of to whatever payload the engine currently holds
                 let from = from_block
@@ -616,7 +615,7 @@ where
                 }
 
                 let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from, to, start_block, info)?;
+                    logs_utils::get_filter_block_range(from, to, info.best_number, info)?;
 
                 // Check if the requested range overlaps with pruned history (EIP-4444)
                 let earliest_block = self.provider().earliest_block_number()?;
