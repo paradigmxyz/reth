@@ -8,7 +8,8 @@ use alloy_primitives::B256;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory};
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
-use std::fmt;
+use std::{fmt, sync::Arc};
+use tokio::sync::Mutex;
 
 /// Default soft response limit for snap requests, matching common peer limits.
 pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
@@ -25,11 +26,20 @@ pub(crate) struct DownloadContext<C, F> {
     response_bytes: u64,
     // Distinguishes responses to reissued requests.
     request_id: u64,
+    // Concurrent domains share a writer gate rather than entering MDBX's busy retry loop.
+    commit_lock: Option<Arc<Mutex<()>>>,
 }
 
 impl<C, F> DownloadContext<C, F> {
     pub(crate) const fn new(client: C, factory: F, runtime: Runtime) -> Self {
-        Self { client, factory, runtime, response_bytes: DEFAULT_RESPONSE_BYTES, request_id: 0 }
+        Self {
+            client,
+            factory,
+            runtime,
+            response_bytes: DEFAULT_RESPONSE_BYTES,
+            request_id: 0,
+            commit_lock: None,
+        }
     }
 
     pub(crate) const fn client(&self) -> &C {
@@ -57,6 +67,12 @@ impl<C, F> DownloadContext<C, F> {
         self.request_id = self.request_id.wrapping_add(1);
         self.request_id
     }
+
+    /// Coordinates commits with another domain while leaving requests and reads concurrent.
+    pub(crate) fn with_commit_lock(mut self, lock: Arc<Mutex<()>>) -> Self {
+        self.commit_lock = Some(lock);
+        self
+    }
 }
 
 impl<C, F> DownloadContext<C, F>
@@ -81,9 +97,16 @@ where
         &self,
         write: impl FnOnce(&F::ProviderRW) -> Result<T, SnapSyncError> + Send + 'static,
     ) -> Result<T, SnapSyncError> {
+        let guard = if let Some(lock) = &self.commit_lock {
+            Some(lock.clone().lock_owned().await)
+        } else {
+            None
+        };
         let factory = self.factory.clone();
         self.runtime
             .spawn_blocking(move || -> Result<T, SnapSyncError> {
+                // The blocking task retains the gate even if its awaiting future is cancelled.
+                let _guard = guard;
                 let provider = factory.database_provider_rw()?;
                 let output = write(&provider)?;
                 provider.commit()?;
@@ -100,5 +123,100 @@ impl<C, F> fmt::Debug for DownloadContext<C, F> {
             .field("response_bytes", &self.response_bytes)
             .field("request_id", &self.request_id)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{hashed_factory, key};
+    use reth_db_api::{
+        tables,
+        transaction::{DbTx, DbTxMut},
+    };
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    use tokio::sync::oneshot;
+
+    #[tokio::test]
+    async fn cancelled_commit_retains_the_shared_gate_until_its_writer_finishes() {
+        let factory = hashed_factory();
+        let lock = Arc::new(Mutex::new(()));
+        let first = DownloadContext::new((), factory.clone(), Runtime::test())
+            .with_commit_lock(lock.clone());
+        let second = DownloadContext::new((), factory.clone(), Runtime::test())
+            .with_commit_lock(lock.clone());
+        let (entered, started) = oneshot::channel();
+        let (release, released) = mpsc::channel();
+        let mut commit = Box::pin(first.commit(move |provider| {
+            provider.tx_ref().put::<tables::HeaderNumbers>(key(1), 11).unwrap();
+            entered.send(()).unwrap();
+            let _ = released.recv();
+            Ok(())
+        }));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                result = &mut commit => panic!("the writer is still gated: {result:?}"),
+                result = started => result.unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+        drop(commit);
+        assert!(lock.try_lock().is_err());
+
+        let mut next = Box::pin(second.commit(move |provider| {
+            assert_eq!(provider.tx_ref().get::<tables::HeaderNumbers>(key(1)).unwrap(), Some(11));
+            provider.tx_ref().put::<tables::HeaderNumbers>(key(2), 22).unwrap();
+            Ok(())
+        }));
+        assert!(futures::poll!(&mut next).is_pending());
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), next).await.unwrap().unwrap();
+        assert!(lock.try_lock().is_ok());
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.tx_ref().get::<tables::HeaderNumbers>(key(2)).unwrap(), Some(22));
+    }
+
+    #[tokio::test]
+    #[ignore = "manual performance measurement"]
+    async fn concurrent_commit_latency_measurement() {
+        for serialize in [false, true] {
+            let started = Instant::now();
+            for _ in 0..6 {
+                let factory = hashed_factory();
+                let lock = Arc::new(Mutex::new(()));
+                let mut first = DownloadContext::new((), factory.clone(), Runtime::test());
+                let mut second = DownloadContext::new((), factory, Runtime::test());
+                if serialize {
+                    first = first.with_commit_lock(lock.clone());
+                    second = second.with_commit_lock(lock);
+                }
+                let (entered, ready) = oneshot::channel();
+                let (release, released) = mpsc::channel();
+                let mut one = Box::pin(first.commit(move |_| {
+                    entered.send(()).unwrap();
+                    let _ = released.recv();
+                    Ok(())
+                }));
+                tokio::select! {
+                    result = &mut one => panic!("the writer is still gated: {result:?}"),
+                    result = ready => result.unwrap(),
+                }
+                let mut two = Box::pin(second.commit(|_| Ok(())));
+                assert!(futures::poll!(&mut two).is_pending());
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                release.send(()).unwrap();
+                let (one, two) = futures::future::join(one, two).await;
+                one.unwrap();
+                two.unwrap();
+            }
+            println!(
+                "concurrent_commits pairs=6 writer_hold_ms=30 serialized={serialize} elapsed_ms={}",
+                started.elapsed().as_millis()
+            );
+        }
     }
 }

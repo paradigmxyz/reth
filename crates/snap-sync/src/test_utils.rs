@@ -8,7 +8,7 @@ use alloy_consensus::Header;
 use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
 use alloy_primitives::{Bytes, B256, U256};
-use futures::future::{ready, Ready};
+use futures::Future;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     table::Table,
@@ -49,8 +49,11 @@ use reth_trie_common::{
 use std::{
     collections::VecDeque,
     ops::Range,
-    sync::{Mutex, MutexGuard},
+    pin::Pin,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
 };
+use tokio::sync::Notify;
 
 /// Small bounds keep header fixtures short without changing the policy's decisions.
 pub(crate) fn policy() -> SnapPivotPolicy {
@@ -430,6 +433,8 @@ pub(crate) struct ScriptedSnapClient {
     block_requests: Mutex<Vec<Vec<B256>>>,
     on_block_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     on_storage_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    response_gates: Mutex<VecDeque<Option<Arc<Notify>>>>,
+    response_delay: Duration,
 }
 
 impl ScriptedSnapClient {
@@ -444,6 +449,8 @@ impl ScriptedSnapClient {
             block_requests: Mutex::new(Vec::new()),
             on_block_request: Mutex::new(None),
             on_storage_request: Mutex::new(None),
+            response_gates: Mutex::new(VecDeque::new()),
+            response_delay: Duration::ZERO,
         }
     }
 
@@ -479,9 +486,34 @@ impl ScriptedSnapClient {
         self.block_requests.lock().unwrap()
     }
 
-    fn next_response(&self) -> Ready<PeerRequestResult<SnapResponse>> {
+    fn next_response(&self) -> <Self as SnapClient>::Output {
         let response = self.responses.lock().unwrap().pop_front();
-        ready(response.unwrap_or(Err(RequestError::ChannelClosed)))
+        let gate = self.response_gates.lock().unwrap().pop_front().flatten();
+        let delay = self.response_delay;
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            response.unwrap_or(Err(RequestError::ChannelClosed))
+        })
+    }
+
+    /// Holds the `index`th response until `gate` is notified.
+    pub(crate) fn with_response_gate(self, index: usize, gate: Arc<Notify>) -> Self {
+        let mut gates = self.response_gates.lock().unwrap();
+        gates.resize_with(index + 1, || None);
+        gates[index] = Some(gate);
+        drop(gates);
+        self
+    }
+
+    /// Delays every response to measure request overlap independently of proof and disk costs.
+    pub(crate) const fn with_response_delay(mut self, delay: Duration) -> Self {
+        self.response_delay = delay;
+        self
     }
 }
 
@@ -500,7 +532,7 @@ impl DownloadClient for ScriptedSnapClient {
 }
 
 impl SnapClient for ScriptedSnapClient {
-    type Output = Ready<PeerRequestResult<SnapResponse>>;
+    type Output = Pin<Box<dyn Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync>>;
 
     fn get_account_range_with_priority(
         &self,

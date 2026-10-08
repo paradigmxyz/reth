@@ -19,7 +19,11 @@ This crate owns the synchronization logic and its progress. Requests and proof c
    block the sync waits.
 2. **Download the state at the pivot.** Accounts are fetched in key-order ranges, proved against the
    pivot's state root. A range commits only once its contracts' storage and code are persisted,
-   whether supplied with it or stored beforehand.
+   whether supplied with it or stored beforehand. Storage batches are prefetched with at most four
+   requests or verified responses retained, and commit in key order. Partial contracts finish before
+   later batches commit. Storage and bytecode download concurrently; neither advances account
+   coverage until both finish. Their commits share an asynchronous writer gate to avoid MDBX's
+   busy retry sleeps; a running commit retains the gate even if its waiting future is dropped.
 3. **Advance the pivot.** Peers only keep recent state, so once the pivot lags more than 96 blocks
    by default the sync re-anchors to a newer block. BALs of the blocks in between carry the state
    already downloaded forward, applied strictly in block order, and the remaining ranges download at
