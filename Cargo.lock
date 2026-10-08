@@ -8070,7 +8070,6 @@ version = "2.7.0"
 dependencies = [
  "reth-tasks",
  "serde_json",
- "tempfile",
  "tokio",
  "tracing",
 ]

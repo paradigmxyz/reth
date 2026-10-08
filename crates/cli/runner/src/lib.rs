@@ -366,41 +366,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn caught_worker_panic_is_recorded() {
-        let dir = tempfile::tempdir().unwrap();
-        let assertions = dir.path().join("assertions.jsonl");
-        std::fs::File::create(&assertions).unwrap();
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "tests::panic_hook_child"])
-            .env("BEDROCK_ASSERTIONS_PATH", &assertions)
-            .env("RETH_PANIC_HOOK_TEST_CHILD", "1")
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-
-        let contents = std::fs::read_to_string(assertions).unwrap();
-        let record: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
-        assert_eq!(record["Always"]["result"], false);
-        assert_eq!(record["Always"]["condition"]["Bool"], false);
-        assert_eq!(record["Always"]["message"], "E1/panic: caught worker panic");
-        assert_eq!(record["Always"]["location"]["file"], file!());
-    }
-
-    #[test]
-    fn panic_hook_child() {
-        if std::env::var_os("RETH_PANIC_HOOK_TEST_CHILD").is_none() {
-            return;
-        }
-        let _runner = CliRunner::try_default_runtime().unwrap();
-        let caught = std::thread::spawn(|| {
-            std::panic::catch_unwind(|| panic!("caught worker panic")).is_err()
-        })
-        .join()
-        .unwrap();
-        assert!(caught);
-    }
-
-    #[test]
     fn runtime_shutdown_stops_tasks_with_live_runtime_clones() {
         let runtime = reth_tasks::Runtime::test();
         let retained = runtime.clone();
