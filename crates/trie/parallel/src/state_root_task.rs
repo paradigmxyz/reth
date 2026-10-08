@@ -2,7 +2,7 @@
 //!
 //! The "state-root task" is the background multiproof and sparse-trie pipeline that computes
 //! state roots incrementally while a block executes. This module holds its boundary types:
-//! the input messages, the [`StateRootSink`] and
+//! the input messages and
 //! stream views that feed it, and the handles
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
@@ -47,11 +47,8 @@ pub struct StateRootComputeOutcome {
 
 /// Handle to a background sparse trie state root computation.
 ///
-/// Used by both the engine (during `newPayload`) and the payload builder (during `FCU`-triggered
-/// block building). Provides channels for streaming state updates into the pipeline and receiving
-/// the final computed state root.
-///
-/// Created by the engine's state-root strategy.
+/// Provides best-effort access hints, one authoritative update stream, and the final computation
+/// result. Dropping the handle cancels the task if it is still running.
 #[derive(Debug)]
 pub struct StateRootHandle {
     /// The state root that the cached sparse trie is anchored at (parent block's state root).
@@ -145,7 +142,7 @@ impl StateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("sparse trie task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -293,7 +290,7 @@ impl PayloadStateRootHandle {
             .take()
             .expect("state_root already taken")
             .recv()
-            .map_err(|_| StateRootTaskError::Other("state root task dropped".to_string()))?
+            .map_err(|_| StateRootTaskError::Other("state root task dropped".into()))?
     }
 
     /// Takes the state root receiver for use with custom waiting logic (e.g., timeouts).
@@ -321,8 +318,7 @@ impl PayloadStateRootHandle {
 /// Hashed account and storage keys that a state-root task may want to prefetch.
 ///
 /// Hints are not authoritative. They may be missing, duplicated, stale, or ignored by a task.
-/// The conversions from and to proof-target types allocate; that cost is accepted because
-/// hints are produced on prewarm workers, off the block-execution thread.
+/// Conversions to and from proof-target types allocate new collections.
 #[derive(Debug, Clone, Default)]
 pub struct StateAccessHint {
     /// Hashed account keys that may be touched later in the block.
@@ -362,7 +358,10 @@ impl From<StateAccessHint> for MultiProofTargetsV2 {
 }
 
 /// Semantic update stream consumed by state-root tasks.
-pub trait StateRootSink: Send + Sync + 'static {
+///
+/// These callbacks submit messages without reporting task completion or failure. Consumers must
+/// obtain the computation result separately, for example through [`StateRootHandle::state_root`].
+trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
@@ -390,7 +389,7 @@ impl fmt::Debug for StateRootHintStream {
 
 impl StateRootHintStream {
     /// Creates a new hint stream view.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -402,9 +401,9 @@ impl StateRootHintStream {
 
 /// Authoritative update capability of a state-root stream.
 ///
-/// Exactly one of these exists per state-root task, so exactly one producer can end the
-/// update stream: either the EVM state hook made with [`Self::into_state_hook`] (finishes on
-/// drop) or a pre-hashed update producer such as BAL streaming (calls [`Self::finish`]). The
+/// A [`StateRootHandle`] provides this capability exactly once, so its producer can end the
+/// update stream either through the EVM state hook made with [`Self::into_state_hook`] (finishes
+/// on drop) or through a pre-hashed update stream (calls [`Self::finish`]). The
 /// type is deliberately not `Clone` and finishing consumes it, so a second end-of-stream
 /// signal cannot be produced.
 ///
@@ -423,7 +422,7 @@ impl fmt::Debug for StateRootUpdateStream {
 
 impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
-    pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
+    fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
     }
 
@@ -446,7 +445,7 @@ impl StateRootUpdateStream {
     }
 }
 
-/// EVM hook that forwards state updates into a [`StateRootSink`].
+/// EVM hook that forwards state updates to the state-root task.
 ///
 /// Dropping the hook signals the end of the update stream, so the hook is deliberately not
 /// `Clone`: a second copy would fire a spurious end-of-stream signal.
@@ -496,6 +495,10 @@ impl SparseTrieStateRootSink {
     }
 }
 
+// Send errors mean the receiving pipeline has stopped, so further updates and the finish
+// signal cannot be processed. Task errors are delivered through the separate result channel;
+// if the task drops that channel without a result, StateRootHandle::state_root reports an error.
+// Cancellation abandons the result. Ignoring send errors here does not report a successful root.
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
@@ -576,7 +579,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.info.nonce = 1;
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -598,7 +601,7 @@ mod tests {
         assert!(account.mark_selfdestructed_locally());
         account.selfdestruct();
         account.storage.insert(
-            U256::from(1),
+            U256::ONE,
             EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
         );
 
@@ -619,7 +622,7 @@ mod tests {
         let address = Address::repeat_byte(0x05);
         let mut account = Account::default();
         // Pre-state: the account exists and holds a balance.
-        account.info.balance = U256::from(1);
+        account.info.balance = U256::ONE;
         account.set_current_info_as_original();
         // This block drains it. Not selfdestructed: an ordinary value transfer out.
         account.mark_touch();
@@ -670,7 +673,7 @@ mod tests {
         };
 
         let address = Address::repeat_byte(0x07);
-        let pre = AccountInfo { balance: U256::from(1), ..Default::default() };
+        let pre = AccountInfo { balance: U256::ONE, ..Default::default() };
 
         // The EvmState the state hook observes: a funded account drained to empty.
         let mut account = Account::from(pre.clone());

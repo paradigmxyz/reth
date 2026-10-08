@@ -210,6 +210,15 @@ pub enum ProviderError {
         /// Attempt that owns the unverified state.
         attempt: u64,
     },
+    /// The staged pipeline was selected on a database holding state a snap attempt left
+    /// unverified, which only snap can finish or replace.
+    #[error(
+        "snap attempt {attempt} left unverified state, restart with snap sync or wipe the database"
+    )]
+    SnapStateRequiresSnapSync {
+        /// Attempt that owns the unverified state.
+        attempt: u64,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
@@ -244,7 +253,7 @@ impl ProviderError {
     /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
 

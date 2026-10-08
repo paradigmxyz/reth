@@ -1005,10 +1005,14 @@ mod tests {
     use super::*;
     use crate::{
         providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
+        test_utils::{
+            blocks::TEST_BLOCK, create_test_provider_factory,
+            create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
+        },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         StageCheckpointWriter, TransactionsProvider,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -1016,9 +1020,10 @@ mod tests {
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_db_api::tables;
+    use reth_db_api::{models::SnapAttempt, tables};
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
+    use reth_storage_api::MetadataWriter;
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1329,5 +1334,96 @@ mod tests {
             );
             assert_eq!(factory.static_file_provider().check_consistency(&provider).unwrap(), None);
         }
+    }
+
+    #[test]
+    fn a_sync_the_database_cannot_continue_is_refused() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        // Without snap state, either sync may run.
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.ensure_sync_mode(false).is_ok());
+        assert!(provider.ensure_sync_mode(true).is_ok());
+        drop(provider);
+
+        let unfinished = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        let mut abandoned = unfinished;
+        abandoned.abandon();
+        let mut verified = unfinished;
+        verified.verify();
+
+        // Only snap finishes or replaces what an unverified attempt left in the state tables.
+        for attempt in [unfinished, abandoned] {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.commit().unwrap();
+
+            let provider = factory.database_provider_ro().unwrap();
+            assert!(matches!(
+                provider.ensure_sync_mode(false).err(),
+                Some(ProviderError::SnapStateRequiresSnapSync { attempt: 0 })
+            ));
+            assert!(provider.ensure_sync_mode(true).is_ok());
+        }
+
+        // A verified attempt leaves the pipeline free to continue above the pivot.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_snap_attempt(&verified).unwrap();
+        provider.commit().unwrap();
+        assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(false).is_ok());
+    }
+
+    #[test]
+    fn the_legacy_layout_refuses_snap_until_execution_passes_genesis() {
+        // Databases from before stored settings fall back to the legacy layout.
+        let factory = create_test_provider_factory_with_genesis_block_number(5);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(5)).unwrap();
+        provider.commit().unwrap();
+
+        // A fresh database would snap sync into a layout snap can't write.
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
+
+        // Executed state keeps the staged pipeline, so its layout doesn't matter.
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42)).unwrap();
+        provider.commit().unwrap();
+        assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
+
+        // An unverified attempt is finished by snap whatever executed, so the layout matters again.
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_snap_attempt(&SnapAttempt::start(
+                None,
+                BlockNumHash::new(10, B256::repeat_byte(1)),
+                B256::repeat_byte(2),
+            ))
+            .unwrap();
+        provider.commit().unwrap();
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
+    }
+
+    #[test]
+    fn a_database_without_an_execution_checkpoint_needs_the_snap_layout() {
+        // Startup checks run after genesis, so a missing checkpoint counts as nothing executed.
+        let factory = create_test_provider_factory();
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_sync_mode(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
     }
 }

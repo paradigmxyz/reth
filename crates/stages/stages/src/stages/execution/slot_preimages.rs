@@ -140,7 +140,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     let mut seen_hashes = HashSet::new();
     for account in state.bundle.state().values() {
         for &slot_key in account.storage.keys() {
-            let plain = B256::from(slot_key.to_be_bytes());
+            let plain = B256::from(slot_key);
             let hashed = keccak256(plain);
             if seen_hashes.insert(hashed) {
                 preimage_entries.push((hashed, plain));
@@ -150,7 +150,7 @@ pub(super) fn inject_plain_wipe_slots<P: DBProvider, R>(
     for block_reverts in state.bundle.reverts.iter() {
         for (_, revert) in block_reverts {
             for &slot_key in revert.storage.keys() {
-                let plain = B256::from(slot_key.to_be_bytes());
+                let plain = B256::from(slot_key);
                 let hashed = keccak256(plain);
                 if seen_hashes.insert(hashed) {
                     preimage_entries.push((hashed, plain));

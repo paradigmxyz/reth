@@ -474,7 +474,7 @@ mod tests {
         let transaction = TxLegacy {
             gas_limit: 21_000,
             to: TxKind::Call(Address::repeat_byte(recipient)),
-            value: U256::from(1),
+            value: U256::ONE,
             ..Default::default()
         };
         let hash = B256::repeat_byte(recipient);

@@ -1095,7 +1095,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, SortedTrieData};
     use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
         collections::{BTreeMap, HashMap},
@@ -1113,7 +1113,7 @@ mod tests {
         let address = Address::with_last_byte(1);
         let other_address = Address::with_last_byte(2);
         let hashed_address = keccak256(address);
-        let account = Account { balance: U256::from(1), ..Default::default() };
+        let account = Account { balance: U256::ONE, ..Default::default() };
         // Branches 00, 01 and 02 share the cached row at 0. The first two change
         // in different blocks; the third keeps proof-v2's branch-collapse path inactive.
         let slots: Vec<B256> = (0..=2u8)
@@ -1124,7 +1124,7 @@ mod tests {
                     .take(2)
             })
             .collect();
-        let mut storage: BTreeMap<_, _> = slots.iter().map(|&slot| (slot, U256::from(1))).collect();
+        let mut storage: BTreeMap<_, _> = slots.iter().map(|&slot| (slot, U256::ONE)).collect();
         let mut trie = TrieTestHarness::new(
             storage.iter().map(|(slot, value)| (keccak256(slot), *value)).collect(),
         );
@@ -1160,14 +1160,10 @@ mod tests {
                     .state_present_account_info(address, info)
                     .state_storage(
                         address,
-                        std::iter::once((U256::from_be_bytes(slot.0), (U256::from(1), value)))
+                        std::iter::once((U256::from_be_bytes(slot.0), (U256::ONE, value)))
                             .collect(),
                     )
-                    .revert_storage(
-                        number,
-                        address,
-                        vec![(U256::from_be_bytes(slot.0), U256::from(1))],
-                    )
+                    .revert_storage(number, address, vec![(U256::from_be_bytes(slot.0), U256::ONE)])
                     .build();
                 (
                     HashedPostState::from_hashed_storage(
@@ -1199,10 +1195,7 @@ mod tests {
             blocks.push(ExecutedBlock::new(
                 Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
                 Arc::new(output),
-                ComputedTrieData::new(
-                    Arc::new(state.into_sorted()),
-                    Arc::new(updates.into_sorted()),
-                ),
+                SortedTrieData::new(Arc::new(state.into_sorted()), Arc::new(updates.into_sorted())),
             ));
         }
 
@@ -3308,7 +3301,7 @@ mod tests {
         let executed = ExecutedBlock::new(
             Arc::new(block),
             Arc::new(execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
@@ -3363,7 +3356,7 @@ mod tests {
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
 
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );
@@ -3412,7 +3405,7 @@ mod tests {
         .unseal();
         block.header.state_root = unique_root;
         let block = block.seal_slow().try_recover().expect("failed to seal block with senders");
-        let trie_data = ComputedTrieData::new(
+        let trie_data = SortedTrieData::new(
             Arc::new(target_state.into_sorted()),
             Arc::new(TrieUpdates::default().into_sorted()),
         );
@@ -3483,7 +3476,7 @@ mod tests {
         let slot_key = B256::with_last_byte(1);
         let slot = U256::from_be_bytes(slot_key.0);
         let hashed_slot = keccak256(slot_key);
-        let value_a = U256::from(1);
+        let value_a = U256::ONE;
 
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;

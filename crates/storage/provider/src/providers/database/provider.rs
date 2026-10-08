@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -1499,6 +1499,37 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             Err(ProviderError::SnapStorageLayoutUnsupported)
         }
     }
+
+    /// Returns whether snap sync bootstraps this database: an attempt is left to finish or
+    /// replace, or nothing has executed past genesis.
+    ///
+    /// Call this after genesis is initialized: until then the cached settings fall back to the
+    /// legacy layout and no execution checkpoint exists.
+    pub fn snap_bootstraps(&self) -> ProviderResult<bool> {
+        if let Some(attempt) = self.snap_attempt()? {
+            return Ok(!attempt.is_verified())
+        }
+        let genesis = self.chain_spec().genesis_header().number();
+        Ok(self
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_none_or(|checkpoint| checkpoint.block_number == genesis))
+    }
+
+    /// Refuses a database the selected sync can't continue: snap needs the hashed state layout
+    /// when it bootstraps, and only snap can finish or replace an unverified snap attempt.
+    ///
+    /// Call this after genesis is initialized, see [`Self::snap_bootstraps`].
+    pub fn ensure_sync_mode(&self, snap_enabled: bool) -> ProviderResult<()> {
+        if snap_enabled {
+            return if self.snap_bootstraps()? { self.ensure_snap_sync_layout() } else { Ok(()) }
+        }
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::SnapStateRequiresSnapSync { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
@@ -2342,7 +2373,7 @@ impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvide
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
-        if id == StageId::Finish {
+        if id.is_finish() {
             self.ensure_finish_may_advance(&checkpoint)?;
         }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
@@ -2682,7 +2713,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                     let mut storage = storage_revert
                         .into_iter()
-                        .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
+                        .map(|(k, v)| (B256::from(k), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
@@ -3632,7 +3663,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -3823,7 +3854,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = B256::from(storage_key.to_be_bytes());
+                        let key = B256::from(*storage_key);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
@@ -4545,8 +4576,8 @@ mod tests {
         }
 
         // Pre-populate storage tries with data
-        let storage_address1 = B256::from([1u8; 32]);
-        let storage_address2 = B256::from([2u8; 32]);
+        let storage_address1 = B256::repeat_byte(1u8);
+        let storage_address2 = B256::repeat_byte(2u8);
         {
             let tx = provider_rw.tx_ref();
             let mut storage_cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
@@ -4760,10 +4791,7 @@ mod tests {
                 (masked_account, Some(Account { nonce: 1, ..Default::default() })),
             ],
             B256Map::from_iter([
-                (
-                    kept_storage,
-                    HashedStorageSorted { storage_slots: vec![(kept_slot, U256::from(1))] },
-                ),
+                (kept_storage, HashedStorageSorted { storage_slots: vec![(kept_slot, U256::ONE)] }),
                 (
                     masked_storage,
                     HashedStorageSorted { storage_slots: vec![(masked_slot, U256::from(2))] },
@@ -4794,7 +4822,7 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(full_persist_hashed_state),
                 Arc::new(full_persist_trie_updates),
             ),
@@ -4819,7 +4847,7 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(deferred_trie_hashed_state),
                 Arc::new(deferred_trie_updates),
             ),
@@ -5530,7 +5558,7 @@ mod tests {
 
         let genesis = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
             SealedHeader::new(
-                Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                Header { number: 0, difficulty: U256::ONE, ..Default::default() },
                 B256::ZERO,
             ),
             Default::default(),
@@ -5547,7 +5575,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5596,7 +5624,7 @@ mod tests {
             let header = Header {
                 number: block_num,
                 parent_hash,
-                difficulty: U256::from(1),
+                difficulty: U256::ONE,
                 ..Default::default()
             };
             let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
@@ -5616,9 +5644,7 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData {
-                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                },
+                SortedTrieData::new(Arc::new(hashed_state), Default::default()),
             );
             blocks.push(executed);
         }
@@ -5943,7 +5969,7 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
 
         let address = Address::with_last_byte(1);
-        let slot_key = B256::from(U256::from(42));
+        let slot_key = B256::with_last_byte(42);
 
         {
             let rocksdb = factory.rocksdb_provider();

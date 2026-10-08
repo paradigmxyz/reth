@@ -594,7 +594,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
                         StorageBeforeTx {
                             address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
+                            key: key.into(),
                             value: revert_to_slot.to_previous_value(),
                         }
                     })
@@ -3229,7 +3229,7 @@ mod tests {
                 .with_blocks_per_file_for_segment(StaticFileSegment::Receipts, 2)
                 .build()?;
 
-        let hash_0 = B256::from([0x10; 32]);
+        let hash_0 = B256::repeat_byte(0x10);
         let header_0 = Header { number: 0, ..Default::default() };
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
@@ -3267,7 +3267,7 @@ mod tests {
 
         // Publish a newer snapshot of the same header jar, then simulate unrelated segment
         // pruning invalidating the whole cache while the old load remains in flight.
-        let hash_1 = B256::from([0x11; 32]);
+        let hash_1 = B256::repeat_byte(0x11);
         let header_1 = Header { number: 1, ..Default::default() };
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
@@ -3292,7 +3292,7 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
         let static_files: StaticFileProvider<EthPrimitives> =
             StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
-        let hash = B256::from([0x10; 32]);
+        let hash = B256::repeat_byte(0x10);
         {
             let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
             writer.append_header(&Header::default(), &hash)?;

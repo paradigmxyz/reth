@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes, Address, U256};
+use alloy_primitives::{address, bytes, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -24,8 +24,8 @@ async fn test_simulate_v1_transfer_logs_across_amsterdam() -> eyre::Result<()> {
             (from, AccountOverride::default().with_balance(U256::from(100)).with_nonce(0)),
             (reverting, AccountOverride::default().with_code(bytes!("5f5ffd"))),
         ]))
-        .call(TransactionRequest::default().from(from).to(to).value(U256::from(1)))
-        .call(TransactionRequest::default().from(from).to(reverting).value(U256::from(1)));
+        .call(TransactionRequest::default().from(from).to(to).value(U256::ONE))
+        .call(TransactionRequest::default().from(from).to(reverting).value(U256::ONE));
     let mut untraced: Option<Vec<SimulatedBlock>> = None;
     for trace_transfers in [false, true] {
         let mut payload = SimulatePayload::default()
@@ -179,7 +179,7 @@ async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::R
     let (node, wallet) = EthereumNode::test_setup_for(fork).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
-    let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
+    let from = address!("0xc000000000000000000000000000000000000000");
     let state_overrides =
         StateOverridesBuilder::default().with_balance(from, U256::from(1_000_000_000u64)).build();
     let tx = TransactionRequest::default()
@@ -305,8 +305,8 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
     node.advance_block().await?;
 
-    let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
-    let to: Address = "0xc100000000000000000000000000000000000000".parse()?;
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let to = address!("0xc100000000000000000000000000000000000000");
 
     let tx = TransactionRequest::default()
         .from(from)

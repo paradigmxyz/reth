@@ -15,7 +15,7 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use reth_execution_errors::SparseTrieResult;
+use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
     ProofV2TargetParent, RlpNode, TrieNodeV2, EMPTY_ROOT_HASH,
@@ -1658,9 +1658,7 @@ impl ArenaParallelSparseTrie {
         // would fail the `num_removals != num_changed` check, skip the proof
         // request for the blinded sibling, and later panic in
         // `maybe_collapse_or_remove_branch` when the subtrie empties inline.
-        let num_changed =
-            subtrie_updates.iter().filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_))).count()
-                as u64;
+        let num_changed = subtrie_updates.iter().filter(|(_, _, u)| u.is_changed()).count() as u64;
 
         if num_removals == 0 || num_removals != num_changed {
             return None;
@@ -2111,8 +2109,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
             "set_root called on a trie that already has revealed nodes"
         );
 
-        self.set_updates(retain_updates);
-
         match root {
             TrieNodeV2::EmptyRoot => {
                 trace!(target: TRACE_TARGET, "Setting empty root");
@@ -2143,11 +2139,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     branch_masks: masks.unwrap_or_default(),
                 });
             }
-            TrieNodeV2::Extension(_) => {
-                panic!("set_root does not support Extension nodes; extensions are represented as branches with a short_key")
+            TrieNodeV2::Extension(node) => {
+                return Err(SparseTrieErrorKind::Reveal {
+                    path: Nibbles::new(),
+                    node: Box::new(node),
+                }
+                .into());
             }
         }
 
+        self.set_updates(retain_updates);
         Ok(())
     }
 
@@ -2675,7 +2676,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         // Filter out Touched, as they don't affect the structure of the trie. So an
                         // update set with 2 removals and one Touched could still result in an empty
                         // sub trie.
-                        .filter(|(_, _, u)| matches!(u, LeafUpdate::Changed(_)))
+                        .filter(|(_, _, u)| u.is_changed())
                         .all(|(_, _, u)| matches!(u, LeafUpdate::Changed(v) if v.is_empty()));
                     let subtrie_num_leaves = match &self.upper_arena[child_idx] {
                         ArenaSparseNode::Subtrie(s) => s.num_leaves,
@@ -2890,7 +2891,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::TRACE_TARGET;
+    use super::*;
     use crate::{
         ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
     };
@@ -2903,6 +2904,24 @@ mod tests {
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
+    }
+
+    #[test]
+    fn unsupported_root_preserves_update_retention_and_allows_valid_root() {
+        let mut trie = ArenaParallelSparseTrie::default();
+        let root = TrieNodeV2::Extension(reth_trie_common::ExtensionNode::new(
+            Nibbles::from_nibbles([1]),
+            RlpNode::word_rlp(&B256::ZERO),
+        ));
+        let error = trie.set_root(root, None, true).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert!(trie.buffers.updates.is_none());
+
+        trie.set_root(TrieNodeV2::EmptyRoot, None, true).unwrap();
+        assert_eq!(trie.root(epoch(1)), EMPTY_ROOT_HASH);
+        assert!(trie.buffers.updates.is_some());
     }
 
     #[test]
@@ -3001,7 +3020,7 @@ mod tests {
             let mut leaf_updates: B256Map<LeafUpdate> = changes
                 .iter()
                 .map(|(&slot, &value)| {
-                    let rlp_value = if value == U256::ZERO {
+                    let rlp_value = if value.is_zero() {
                         Vec::new()
                     } else {
                         alloy_rlp::encode_fixed_size(&value).to_vec()
@@ -3115,7 +3134,7 @@ mod tests {
 
             // Filter out zero-valued entries from the initial dataset (zeros mean "absent").
             let initial: BTreeMap<B256, U256> = initial.into_iter()
-                .filter(|(_, v)| *v != U256::ZERO)
+                .filter(|(_, v)| !v.is_zero())
                 .collect();
 
             let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);

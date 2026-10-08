@@ -1,8 +1,9 @@
-//! Proof calculation version 2: Leaf-only implementation.
+//! Proof calculation version 2 using leaf data and cached branch hashes.
 //!
 //! This module provides a rewritten proof calculator that:
-//! - Uses only leaf data (HashedAccounts/Storages) to generate proofs
-//! - Returns proof nodes sorted lexicographically by path
+//! - Combines hashed account or storage leaves with cached branch hashes from a trie cursor.
+//! - Recalculates subtries containing proof targets or changed keys instead of using cached hashes.
+//! - Returns proof nodes in depth-first post-order (children before parents).
 //! - Automatically resets after each calculation
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
@@ -37,11 +38,15 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
-/// A proof calculator that generates merkle proofs using only leaf data.
+/// A proof calculator that generates Merkle proofs from leaf data and cached branch hashes.
+///
+/// The hashed cursor supplies leaves, while the trie cursor supplies cached branch hashes to skip
+/// subtries. Subtries containing proof targets or keys in the configured prefix set are
+/// recalculated.
 ///
 /// The calculator:
-/// - Accepts one or more B256 proof targets sorted lexicographically
-/// - Returns proof nodes sorted lexicographically by path
+/// - Accepts proof targets in any order and sorts them in place by parent context, then key.
+/// - Returns proof nodes in depth-first post-order (children before parents).
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
@@ -1094,7 +1099,7 @@ where
 
                 // `take_cached_branch` replaces hashes with zero when their nodes must be
                 // revealed to support a possible branch collapse.
-                if hash != B256::ZERO {
+                if !hash.is_zero() {
                     let mut probed_targets = targets.clone();
                     if !self.should_retain(&mut probed_targets, &child_path, false) {
                         trace!(
@@ -1487,11 +1492,10 @@ where
     /// Generate a proof for the given targets.
     ///
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted depth-first by path.
+    /// returned nodes are sorted in depth-first post-order (children before parents).
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
+    /// context, then by key within each group.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
@@ -1602,11 +1606,10 @@ where
     /// Generate a proof for a storage trie at the given hashed address.
     ///
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted depth-first by path.
+    /// returned nodes are sorted in depth-first post-order (children before parents).
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
+    /// context, then by key within each group.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
     pub fn storage_proof(
         &mut self,
@@ -2130,7 +2133,7 @@ mod tests {
     #[test]
     fn test_root_node_reuse_with_overlay() {
         let storage = BTreeMap::from([
-            (B256::right_padding_from(&[0x10]), U256::from(1)),
+            (B256::right_padding_from(&[0x10]), U256::ONE),
             (B256::right_padding_from(&[0x20]), U256::from(2)),
         ]);
         let harness = ProofTestHarness::new(storage.clone());
@@ -2166,10 +2169,8 @@ mod tests {
     fn test_partial_storage_proof_after_root_calculation() {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
-        let harness = ProofTestHarness::new(BTreeMap::from([
-            (slot_a, U256::from(1)),
-            (slot_b, U256::from(2)),
-        ]));
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
         let hashed_address = harness.hashed_address();
         let trie_cursor =
             harness.trie_cursor_factory().storage_trie_cursor(hashed_address).unwrap();
@@ -2203,7 +2204,7 @@ mod tests {
                 slots
                     .into_iter()
                     .map(|(slot_bytes, value)| (B256::from(slot_bytes), U256::from(value)))
-                    .filter(|(_, v)| *v != U256::ZERO)
+                    .filter(|(_, v)| !v.is_zero())
                     .collect()
             })
         }
@@ -2274,7 +2275,7 @@ mod tests {
         let slot_82 = B256::right_padding_from(&[0x82]);
         let slot_f0 = B256::right_padding_from(&[0xf0]);
         let storage = BTreeMap::from([
-            (slot_80, U256::from(1)),
+            (slot_80, U256::ONE),
             (slot_82, U256::from(2)),
             (slot_f0, U256::from(3)),
         ]);
@@ -2291,7 +2292,7 @@ mod tests {
     fn test_rebases_singleton_subtrie_root_below_known_parent() {
         let slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let slot_nibbles = Nibbles::unpack(slot);
-        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
         let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
@@ -2309,7 +2310,7 @@ mod tests {
     fn test_rebases_singleton_leaf_at_max_parent_depth() {
         let slot = B256::repeat_byte(0xae);
         let slot_nibbles = Nibbles::unpack(slot);
-        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
         let mut targets = [ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(63))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
@@ -2327,7 +2328,7 @@ mod tests {
     fn test_root_and_root_parent_targets_retain_both_singleton_representations() {
         let slot = B256::right_padding_from(&[0x20]);
         let slot_nibbles = Nibbles::unpack(slot);
-        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::from(1))]));
+        let harness = ProofTestHarness::new(BTreeMap::from([(slot, U256::ONE)]));
         let mut targets = [
             ProofV2Target::new(slot),
             ProofV2Target::new(slot).with_parent(ProofV2TargetParent::new(0)),
@@ -2355,7 +2356,7 @@ mod tests {
         let last = B256::with_last_byte(1);
         let last_nibbles = Nibbles::unpack(last);
         let harness =
-            ProofTestHarness::new(BTreeMap::from([(first, U256::from(1)), (last, U256::from(2))]));
+            ProofTestHarness::new(BTreeMap::from([(first, U256::ONE), (last, U256::from(2))]));
         let mut targets = [
             ProofV2Target::new(first),
             ProofV2Target::new(last).with_parent(ProofV2TargetParent::new(63)),
@@ -2377,10 +2378,8 @@ mod tests {
         let slot_a = B256::right_padding_from(&[0xae, 0xd4, 0x00]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4, 0x10]);
         let slot_nibbles = Nibbles::unpack(slot_a);
-        let harness = ProofTestHarness::new(BTreeMap::from([
-            (slot_a, U256::from(1)),
-            (slot_b, U256::from(2)),
-        ]));
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
         let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
@@ -2401,10 +2400,8 @@ mod tests {
         let slot_a = B256::right_padding_from(&[0xae, 0xd2]);
         let slot_b = B256::right_padding_from(&[0xae, 0xd4]);
         let slot_nibbles = Nibbles::unpack(slot_a);
-        let harness = ProofTestHarness::new(BTreeMap::from([
-            (slot_a, U256::from(1)),
-            (slot_b, U256::from(2)),
-        ]));
+        let harness =
+            ProofTestHarness::new(BTreeMap::from([(slot_a, U256::ONE), (slot_b, U256::from(2))]));
         let mut targets = [ProofV2Target::new(slot_a).with_parent(ProofV2TargetParent::new(3))];
 
         let (proof, root) = harness.proof_v2(&mut targets);
@@ -2419,7 +2416,7 @@ mod tests {
         let stored_slot = B256::right_padding_from(&[0xae, 0xd4, 0x09]);
         let same_child_target = B256::right_padding_from(&[0xae, 0xd4, 0xff]);
         let other_child_target = B256::right_padding_from(&[0xae, 0xd5]);
-        let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::from(1))]));
+        let harness = ProofTestHarness::new(BTreeMap::from([(stored_slot, U256::ONE)]));
 
         let mut same_child =
             [ProofV2Target::new(same_child_target).with_parent(ProofV2TargetParent::new(3))];
@@ -2440,7 +2437,7 @@ mod tests {
         let target_a = B256::right_padding_from(&[0xea, 0x1f]);
         let target_c = B256::right_padding_from(&[0xec, 0x1f]);
         let harness = ProofTestHarness::new(BTreeMap::from([
-            (stored_slot_a, U256::from(1)),
+            (stored_slot_a, U256::ONE),
             (stored_slot_b, U256::from(2)),
             (stored_slot_c, U256::from(3)),
         ]));
@@ -2478,7 +2475,7 @@ mod tests {
         let storage_nodes = BTreeMap::from([(Nibbles::from_nibbles([0xe]), stale_parent)]);
 
         let mut harness = TrieTestHarness::new(BTreeMap::from([
-            (stored_slot_a, U256::from(1)),
+            (stored_slot_a, U256::ONE),
             (stored_slot, U256::from(2)),
             (stored_slot_c, U256::from(3)),
         ]));
@@ -2531,7 +2528,7 @@ mod tests {
         let mut storage = BTreeMap::new();
         for _ in 0..10240 {
             let hashed_slot = rand_b256();
-            storage.insert(hashed_slot, U256::from(1u64));
+            storage.insert(hashed_slot, U256::ONE);
         }
 
         // Collect targets; partially from real keys, partially random keys which probably won't
@@ -2836,7 +2833,7 @@ mod tests {
     fn assert_branch_collapse(remaining_nibble: u8, removed_nibble: u8) {
         reth_tracing::init_test_tracing();
 
-        let val = U256::from(1u64);
+        let val = U256::ONE;
         let child_keys = |nibble| {
             [
                 B256::right_padding_from(&[0x20 | nibble, 0x00]),
@@ -2919,7 +2916,7 @@ mod tests {
             B256::right_padding_from(&[0x12]),
         ]
         .into_iter()
-        .map(|key| (key, U256::from(1u64)))
+        .map(|key| (key, U256::ONE))
         .collect();
 
         let harness = ProofTestHarness::new(storage);
@@ -3198,7 +3195,7 @@ mod tests {
     fn test_skipped_parent_branch_with_unskipped_child() {
         reth_tracing::init_test_tracing();
 
-        let val = U256::from(1u64);
+        let val = U256::ONE;
         let updated_val = U256::from(2u64);
 
         // We need cached branches at [2], [2,f], and [3] in the trie DB.
@@ -3265,7 +3262,7 @@ mod tests {
     #[test]
     fn test_blinded_local_root_returns_trie_inconsistency() {
         let key = B256::right_padding_from(&[0x63, 0xaa]);
-        let value = U256::from(1);
+        let value = U256::ONE;
         let hash = storage_leaf_hash(&Nibbles::unpack(key).slice(2..), &value);
         let mask = TrieMask::from_nibble(3);
         let cached_branch =

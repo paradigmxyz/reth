@@ -137,7 +137,7 @@ pub(crate) fn key(value: u64) -> B256 {
 
 /// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
-    TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
+    TrieAccount { nonce, balance: U256::ONE, ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.

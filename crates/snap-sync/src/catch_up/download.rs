@@ -522,7 +522,7 @@ mod tests {
         let step = catch_up.next(write, PIVOT + 3).await.unwrap();
 
         assert!(matches!(step, CatchUpStep::Unavailable { .. }));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]
@@ -534,7 +534,7 @@ mod tests {
         let progress = applied(&mut catch_up, write, PIVOT + 1).await;
 
         assert_eq!(progress.applied(), chain.block(1));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]

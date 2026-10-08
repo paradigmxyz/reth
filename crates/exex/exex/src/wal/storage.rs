@@ -191,8 +191,8 @@ mod tests {
     use reth_trie_common::{
         serde_bincode_compat,
         updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
-        LazyTrieData, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted, LazyTrieData,
+        Nibbles, SortedTrieData,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -233,7 +233,7 @@ mod tests {
         let decoded: StorageTrieUpdatesSorted = decoded.into();
         assert_eq!(decoded.storage_nodes, storage_nodes);
 
-        let storage_slots = vec![(B256::from([1; 32]), U256::from(1))];
+        let storage_slots = vec![(B256::repeat_byte(1), U256::ONE)];
         let encoded = rmp_serde::encode::to_vec(&(&storage_slots, false))?;
         let decoded: serde_bincode_compat::hashed_state::HashedStorageSorted<'_> =
             rmp_serde::decode::from_slice(&encoded)?;
@@ -286,8 +286,8 @@ mod tests {
         let block = Block::default().seal_slow().try_recover()?;
         let block_number = block.header().number();
 
-        let hashed_address = B256::from([1; 32]);
-        let storage_key = B256::from([2; 32]);
+        let hashed_address = B256::repeat_byte(1);
+        let storage_key = B256::repeat_byte(2);
 
         let trie_updates = TrieUpdates {
             account_nodes: HashMap::from_iter([
@@ -318,7 +318,7 @@ mod tests {
             )]),
         };
 
-        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
+        let trie_data = LazyTrieData::ready(SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(trie_updates.into_sorted()),
         ));

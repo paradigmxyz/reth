@@ -467,7 +467,7 @@ mod tests {
         let offsets = (0..(block_count as u64 * component_count) as i64).collect();
         let index = DynamicBlockIndex::new(start_block, component_count, offsets);
 
-        let accumulator = with_accumulator.then(|| Accumulator::new(B256::from([0xAA; 32])));
+        let accumulator = with_accumulator.then(|| Accumulator::new(B256::repeat_byte(0xAA)));
         let group = EreGroup::new(blocks, accumulator, index);
         let id = EreId::new(network, start_block, block_count as u32);
 
@@ -748,8 +748,8 @@ mod tests {
         {
             let mut writer = E2StoreWriter::new(&mut buffer);
             writer.write_version().unwrap();
-            writer.write_entry(&Accumulator::new(B256::from([0x11; 32])).to_entry()).unwrap();
-            writer.write_entry(&Accumulator::new(B256::from([0x22; 32])).to_entry()).unwrap();
+            writer.write_entry(&Accumulator::new(B256::repeat_byte(0x11)).to_entry()).unwrap();
+            writer.write_entry(&Accumulator::new(B256::repeat_byte(0x22)).to_entry()).unwrap();
             writer.write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).to_entry()).unwrap();
             writer.flush().unwrap();
         }
