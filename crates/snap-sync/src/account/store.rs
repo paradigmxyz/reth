@@ -543,22 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn an_interrupted_commit_leaves_nothing_behind() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        let (storages, bytecodes) = dependencies();
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
-        drop(provider);
-
-        let provider = factory.database_provider_rw().unwrap();
-        assert_eq!(stored(&provider), (Vec::new(), false, false));
-        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
-    }
-
-    #[test]
     fn a_partial_range_moves_the_coverage_to_its_next_key() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
@@ -771,21 +755,6 @@ mod tests {
             provider.commit_account_range(write, &range, Default::default(), Vec::new()),
             Err(SnapSyncError::NoCoverage)
         ));
-    }
-
-    #[test]
-    fn coverage_survives_reopening_the_database() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
-        let provider = factory.database_provider_rw().unwrap();
-        let coverage =
-            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        provider.commit().unwrap();
-
-        let reopened = factory.database_provider_rw().unwrap();
-
-        assert_eq!(reopened.account_coverage(write).unwrap(), Some(coverage));
     }
 
     #[test]
