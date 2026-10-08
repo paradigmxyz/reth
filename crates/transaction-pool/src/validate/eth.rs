@@ -9,8 +9,9 @@ use crate::{
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::ValidTransaction,
-    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+    Address, BlockGasLimitPolicy, EthBlobTransactionSidecar, EthPoolTransaction,
+    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
 
 use alloy_consensus::{
@@ -534,7 +535,10 @@ where
         // Checks for gas limit
         let transaction_gas_limit = transaction.gas_limit();
         let block_gas_limit = self.max_gas_limit();
-        if transaction_gas_limit > block_gas_limit {
+        if self
+            .block_gas_limit_policy()
+            .exceeds_block_gas_limit(transaction_gas_limit, block_gas_limit)
+        {
             return Err(InvalidPoolTransactionError::ExceedsGasLimit(
                 transaction_gas_limit,
                 block_gas_limit,
@@ -1022,6 +1026,17 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         Self::on_new_head_block(self, new_tip_block.header())
+    }
+
+    fn block_gas_limit_policy(&self) -> BlockGasLimitPolicy {
+        let rules = self.transaction_validation_gas_rules.load();
+        if rules.version.feature(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK) {
+            BlockGasLimitPolicy::TotalGas
+        } else if rules.version.feature(evm2::EvmFeatures::EIP8037) {
+            BlockGasLimitPolicy::ExecutionGas { tx_gas_limit_cap: rules.version.tx_gas_limit_cap }
+        } else {
+            BlockGasLimitPolicy::Disabled
+        }
     }
 }
 
@@ -1604,6 +1619,7 @@ mod tests {
     use crate::{
         blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
         traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        TransactionPoolExt,
     };
     use alloy_consensus::{Header, Transaction};
     use alloy_eips::{
@@ -1920,6 +1936,207 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn block_gas_policy_preserves_real_head_and_operator_limit() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .set_block_gas_limit(1_000_000)
+            .with_max_tx_gas_limit(Some(2_000_000))
+            .build(blob_store.clone());
+        assert_eq!(validator.block_gas_limit_policy(), BlockGasLimitPolicy::TotalGas);
+        let mut rules = EvmTransactionValidationGasRules {
+            version: evm2::Version::new(evm2::SpecId::AMSTERDAM),
+        };
+        rules.version.tx_gas_limit_cap = 1_000_000;
+        rules.version.features.remove(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK);
+        validator.transaction_validation_gas_rules.store(rules);
+        assert_eq!(
+            validator.block_gas_limit_policy(),
+            BlockGasLimitPolicy::ExecutionGas { tx_gas_limit_cap: 1_000_000 }
+        );
+        assert_eq!(validator.block_gas_limit(), 1_000_000);
+        assert!(validator
+            .validate_one(TransactionOrigin::External, transaction.clone())
+            .is_valid());
+
+        // An operator's total-gas cap is independent of the protocol's block-gas policy.
+        let mut validator = validator;
+        validator.max_tx_gas_limit = Some(1_000_000);
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction),
+            Err(InvalidPoolTransactionError::MaxTxGasLimitExceeded(1_015_288, 1_000_000))
+        ));
+        validator.max_tx_gas_limit = Some(2_000_000);
+
+        // The insertion guard receives the policy through the task executor as well.
+        let (validator, task) = TransactionValidationTaskExecutor::new(validator);
+        let task = tokio::spawn(task.run());
+        let pool = Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            crate::PoolConfig { gas_limit: 1_000_000, ..Default::default() },
+        );
+        assert_eq!(
+            pool.validator().block_gas_limit_policy(),
+            BlockGasLimitPolicy::ExecutionGas { tx_gas_limit_cap: 1_000_000 }
+        );
+        pool.add_external_transaction(transaction.clone()).await.unwrap();
+        assert_eq!(pool.block_info().block_gas_limit, 1_000_000);
+
+        // Returning to a head with ordinary gas accounting restores both guards.
+        let head = SealedBlock::seal_slow(reth_ethereum_primitives::Block {
+            header: Header { gas_limit: 900_000, number: 1, ..Default::default() },
+            body: Default::default(),
+        });
+        pool.on_canonical_state_change(crate::CanonicalStateUpdate {
+            new_tip: &head,
+            pending_block_base_fee: 0,
+            pending_block_blob_fee: None,
+            changed_accounts: vec![],
+            mined_transactions: vec![*transaction.hash()],
+            update_kind: crate::PoolUpdateKind::Reorg,
+        });
+        assert_eq!(pool.validator().block_gas_limit_policy(), BlockGasLimitPolicy::TotalGas);
+        assert_eq!(pool.block_info().block_gas_limit, 900_000);
+        assert_eq!(pool.block_info().last_seen_block_hash, head.hash());
+        assert!(matches!(
+            pool.add_external_transaction(transaction).await.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::ExceedsGasLimit(
+                1_015_288, 900_000
+            ))
+        ));
+        task.abort();
+    }
+
+    #[test]
+    fn eip8037_rejects_execution_intrinsic_and_floor_above_cap() {
+        let sender = Address::repeat_byte(1);
+        for floor_enabled in [false, true] {
+            // Raise the pool's size limit to exercise protocol validation independently of
+            // the default 128 KiB admission policy.
+            let input_len = if floor_enabled { 300_000 } else { 1_100_000 };
+            let tx = alloy_consensus::TxEip1559 {
+                chain_id: 1,
+                gas_limit: 25_000_000,
+                max_fee_per_gas: 1,
+                to: Address::repeat_byte(2).into(),
+                input: Bytes::from(vec![1; input_len]),
+                ..Default::default()
+            };
+            let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+                tx.into(),
+                alloy_primitives::Signature::test_signature(),
+            );
+            let encoded_length = signed.encode_2718_len();
+            let transaction = EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(signed, sender),
+                encoded_length,
+            );
+            let provider = MockEthProvider::default().with_genesis_block();
+            provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+            let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+                .set_block_gas_limit(30_000_000)
+                .with_max_tx_input_bytes(2_000_000)
+                .build(InMemoryBlobStore::default());
+            let mut rules = EvmTransactionValidationGasRules {
+                version: evm2::Version::new(evm2::SpecId::AMSTERDAM),
+            };
+            rules.version.features.set(evm2::EvmFeatures::EIP7623, floor_enabled);
+            let gas = rules.calculate(
+                sender,
+                transaction.kind(),
+                transaction.value(),
+                transaction.input(),
+                0,
+                0,
+                0,
+            );
+            let required = gas.intrinsic_gas.max(gas.floor_gas);
+            assert!(required > rules.version.tx_gas_limit_cap);
+            assert!(required < transaction.gas_limit());
+            assert_eq!(gas.floor_gas > gas.intrinsic_gas, floor_enabled);
+            // Cover the production cap and both sides of the exact boundary.
+            for (cap, valid) in [
+                (rules.version.tx_gas_limit_cap, false),
+                (required - 1, false),
+                (required, true),
+                (required + 1, true),
+            ] {
+                rules.version.tx_gas_limit_cap = cap;
+                validator.store_validation_rules(TransactionValidationRules {
+                    max_initcode_size: rules.version.max_initcode_size,
+                    tx_gas_limit_cap: 0,
+                    gas_rules: rules,
+                });
+                let outcome =
+                    validator.validate_one(TransactionOrigin::External, transaction.clone());
+                if valid {
+                    assert!(outcome.is_valid(), "cap={cap}, outcome={outcome:?}");
+                } else {
+                    assert!(
+                        matches!(
+                            outcome,
+                            TransactionValidationOutcome::Invalid(
+                                _,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::GasTooHigh
+                                )
+                            )
+                        ),
+                        "cap={cap}, outcome={outcome:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn eip8037_block_budgets_in_admission() {
+        let sender = Address::repeat_byte(1);
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let cap = 16_777_216;
+        // Total gas bounds Ethereum's state budget. Exempting state gas must retain the
+        // execution budget check, including when the block limit is smaller than the cap.
+        for (check_total, block_limit, gas_limit, valid) in [
+            (true, cap, cap, true),
+            (true, cap, cap + 1, false),
+            (false, cap, cap + 1, true),
+            (false, cap - 1, cap + 1, false),
+            (false, cap - 1, cap - 1, true),
+        ] {
+            let mut rules = EvmTransactionValidationGasRules {
+                version: evm2::Version::new(evm2::SpecId::AMSTERDAM),
+            };
+            rules.version.features.set(evm2::EvmFeatures::BLOCK_GAS_LIMIT_CHECK, check_total);
+            validator.store_validation_rules(TransactionValidationRules {
+                max_initcode_size: rules.version.max_initcode_size,
+                tx_gas_limit_cap: 0,
+                gas_rules: rules,
+            });
+            validator.block_gas_limit.store(block_limit, std::sync::atomic::Ordering::Relaxed);
+            let tx = eip1559_tx(Address::repeat_byte(2), sender, 0, gas_limit);
+            let outcome = validator.validate_one(TransactionOrigin::External, tx);
+            if valid {
+                assert!(outcome.is_valid(), "outcome={outcome:?}");
+            } else {
+                assert!(matches!(outcome,
+                    TransactionValidationOutcome::Invalid(_, InvalidPoolTransactionError::ExceedsGasLimit(gas, block))
+                        if gas == gas_limit && block == block_limit
+                ));
+            }
+        }
     }
 
     #[tokio::test]

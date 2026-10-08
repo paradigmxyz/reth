@@ -56,7 +56,9 @@ where
     pub cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
-    separate_block_gas: bool,
+    eip8037_enabled: bool,
+    check_block_state_gas_limit: bool,
+    block_gas_refunds: bool,
     /// Total blob gas used.
     pub blob_gas_used: u64,
     bal_index_offset: u64,
@@ -113,7 +115,7 @@ where
         #[allow(clippy::useless_conversion)]
         let spec_id = evm.spec_id().into();
         let block_number = evm.block_env().number.to::<u64>();
-        let separate_block_gas = evm.version().feature(evm2::EvmFeatures::EIP8037);
+        let eip8037_enabled = evm.version().feature(evm2::EvmFeatures::EIP8037);
         let dao_fork_transition = chain_spec
             .ethereum_fork_activation(EthereumHardfork::Dao)
             .transitions_at_block(block_number);
@@ -134,9 +136,41 @@ where
             cumulative_gas_used: 0,
             block_regular_gas_used: 0,
             block_state_gas_used: 0,
-            separate_block_gas,
+            eip8037_enabled,
+            check_block_state_gas_limit: true,
+            block_gas_refunds: false,
             blob_gas_used: 0,
             bal_index_offset: 0,
+        }
+    }
+
+    /// Configures admission against the remaining EIP-8037 block state-gas budget.
+    ///
+    /// Enabled by default. Disabling this check preserves execution-gas admission and all
+    /// gas accounting; chains with different header gas semantics must still supply them.
+    pub const fn with_block_state_gas_limit(mut self, enabled: bool) -> Self {
+        self.check_block_state_gas_limit = enabled;
+        self
+    }
+
+    /// Configures whether refunds reduce EIP-8037 block execution-gas usage.
+    ///
+    /// Disabled by default (Ethereum's EIP-7778 accounting). When enabled, refunds are
+    /// deducted before applying the calldata floor. Receipt and state gas are unaffected.
+    pub const fn with_block_gas_refunds(mut self, enabled: bool) -> Self {
+        self.block_gas_refunds = enabled;
+        self
+    }
+
+    fn execution_gas_used(&self, result: &evm2::TxResult<T>) -> u64 {
+        if self.eip8037_enabled && self.block_gas_refunds {
+            result
+                .total_gas_spent
+                .saturating_sub(result.state_gas_spent)
+                .saturating_sub(result.refunded)
+                .max(result.floor_gas)
+        } else {
+            result.execution_gas_spent()
         }
     }
 
@@ -276,13 +310,13 @@ where
         transaction_gas_limit: u64,
     ) -> Result<(), BlockExecutionError> {
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
-        let unavailable = if self.separate_block_gas {
+        let unavailable = if self.eip8037_enabled {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
             let state_available = block_gas_limit.saturating_sub(self.block_state_gas_used);
             let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
             if regular_limit > regular_available {
                 Some((transaction_gas_limit, regular_available))
-            } else if transaction_gas_limit > state_available {
+            } else if self.check_block_state_gas_limit && transaction_gas_limit > state_available {
                 Some((transaction_gas_limit, state_available))
             } else {
                 None
@@ -325,7 +359,7 @@ where
             return Ok(None);
         };
         let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.execution_gas_spent();
+        let regular_gas_used = self.execution_gas_used(&outcome);
         let state_gas_used = outcome.state_gas_spent();
         self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
         self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
@@ -369,7 +403,7 @@ where
             result,
         );
         let tx_gas_used = outcome.tx_gas_used();
-        let regular_gas_used = outcome.execution_gas_spent();
+        let regular_gas_used = self.execution_gas_used(&outcome);
         let state_gas_used = outcome.state_gas_spent();
         self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
         self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
@@ -443,7 +477,7 @@ where
 
         let block_access_list = self.evm.state_mut().take_bal_builder();
         let block_gas_used = final_block_gas_used(
-            self.separate_block_gas,
+            self.eip8037_enabled,
             self.cumulative_gas_used,
             self.block_regular_gas_used,
             self.block_state_gas_used,
@@ -657,7 +691,7 @@ where
             .ethereum_fork_activation(EthereumHardfork::Dao)
             .transitions_at_block(block_number);
         self.inner.ctx = segment.ctx.clone();
-        self.inner.separate_block_gas = env.version.feature(evm2::EvmFeatures::EIP8037);
+        self.inner.eip8037_enabled = env.version.feature(evm2::EvmFeatures::EIP8037);
         self.inner.bal_index_offset = segment_idx as u64 * 2;
         self.inner.cumulative_gas_used = 0;
         self.inner.block_regular_gas_used = 0;
@@ -749,7 +783,7 @@ where
         Ok(FinishedBigBlockSegment {
             requests,
             gas_used: final_block_gas_used(
-                self.inner.separate_block_gas,
+                self.inner.eip8037_enabled,
                 self.inner.cumulative_gas_used,
                 self.inner.block_regular_gas_used,
                 self.inner.block_state_gas_used,
@@ -953,12 +987,12 @@ where
 }
 
 const fn final_block_gas_used(
-    separate_block_gas: bool,
+    eip8037_enabled: bool,
     cumulative_gas_used: u64,
     block_regular_gas_used: u64,
     block_state_gas_used: u64,
 ) -> u64 {
-    if separate_block_gas {
+    if eip8037_enabled {
         if block_regular_gas_used > block_state_gas_used {
             block_regular_gas_used
         } else {
@@ -1161,6 +1195,80 @@ mod tests {
             executor.block_regular_gas_used = 0;
             assert!(executor.validate_transaction_gas_limit(500_000).is_err());
             assert!(executor.validate_transaction_gas_limit(400_000).is_ok());
+        }
+    }
+
+    #[test]
+    fn disabling_state_gas_limit_preserves_execution_admission() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+        ));
+        let mut env = EthEvmEnv::new(
+            SpecId::AMSTERDAM,
+            BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(1_000_000), ..Default::default() },
+            1,
+        );
+        env.version.tx_gas_limit_cap = 400_000;
+        let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+        let mut executor = factory
+            .create_executor(evm, segment(0, 1, B256::ZERO).ctx)
+            .with_block_state_gas_limit(false);
+        executor.block_state_gas_used = 2_000_000;
+        executor.block_regular_gas_used = 600_000;
+        // State gas can exceed the entire block budget; execution still fits exactly.
+        assert!(executor.validate_transaction_gas_limit(2_000_000).is_ok());
+        executor.block_regular_gas_used += 1;
+        assert!(executor.validate_transaction_gas_limit(2_000_000).is_err());
+        assert!(executor.validate_transaction_gas_limit(400_000).is_err());
+        assert!(executor.validate_transaction_gas_limit(399_999).is_ok());
+    }
+
+    #[test]
+    fn block_gas_refunds_affect_next_admission_without_changing_receipts() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+        ));
+        for refunds in [false, true] {
+            for (floor, post_refund) in [(21_000, 50_000), (53_000, 53_000)] {
+                let mut env = EthEvmEnv::new(
+                    SpecId::AMSTERDAM,
+                    BlockEnv::<BaseEvmTypes> {
+                        gas_limit: U256::from(1_000_000),
+                        ..Default::default()
+                    },
+                    1,
+                );
+                env.version.tx_gas_limit_cap = 1_000_000;
+                let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+                let mut executor = factory
+                    .create_executor(evm, segment(0, 1, B256::ZERO).ctx)
+                    .with_block_state_gas_limit(false)
+                    .with_block_gas_refunds(refunds);
+                let gas = executor
+                    .commit_transaction(EthTransactionResultWithState::new(
+                        TxResultWithState {
+                            result: evm2::TxResult::<BaseEvmTypes> {
+                                status: true,
+                                total_gas_spent: 300_000,
+                                state_gas_spent: 245_000,
+                                refunded: 5_000,
+                                floor_gas: floor,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                        EthTxType::Legacy,
+                        0,
+                    ))
+                    .unwrap();
+                let execution = if refunds { post_refund } else { 55_000 };
+                assert_eq!(gas.regular_gas_used(), execution);
+                assert_eq!(gas.state_gas_used(), 245_000);
+                assert_eq!(gas.tx_gas_used(), 295_000);
+                assert_eq!(executor.receipts()[0].cumulative_gas_used, 295_000);
+                assert!(executor.validate_transaction_gas_limit(1_000_000 - execution).is_ok());
+                assert!(executor.validate_transaction_gas_limit(1_000_001 - execution).is_err());
+            }
         }
     }
 
