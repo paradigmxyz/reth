@@ -7,10 +7,10 @@ use alloy_eips::{
 };
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
+use reth_jasonrpeesea::{rpc, RpcResult};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::header::HeaderMut;
 use reth_revm::db::EmptyDB;

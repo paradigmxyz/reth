@@ -118,7 +118,7 @@ where
 async fn get_healthy_node_client<C>(
     config: &NodeConfig<C>,
     chain_id: u64,
-) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>>
+) -> eyre::Result<Option<reth_jasonrpeesea::client::HttpClient>>
 where
     C: EthChainSpec,
 {
@@ -126,7 +126,7 @@ where
         return Ok(None);
     };
 
-    let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+    let client = reth_jasonrpeesea::client::HttpClientBuilder::default().build(url)?;
 
     // Verify that the healthy node is running the same chain as the current node.
     let healthy_chain_id = EthApiClient::<

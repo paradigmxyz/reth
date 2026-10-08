@@ -1,6 +1,6 @@
 use super::AuthValidator;
-use jsonrpsee_http_client::{HttpRequest, HttpResponse};
 use pin_project::pin_project;
+use reth_jasonrpeesea::server::{HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,
@@ -16,7 +16,7 @@ use tower::{Layer, Service};
 /// # How to integrate
 /// ```rust
 /// async fn build_layered_rpc_server() {
-///     use jsonrpsee::server::ServerBuilder;
+///     use reth_jasonrpeesea::server::ServerBuilder;
 ///     use reth_rpc_layer::{AuthLayer, JwtAuthValidator, JwtSecret};
 ///     use std::net::SocketAddr;
 ///
@@ -154,11 +154,10 @@ mod tests {
     use super::*;
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
-    use jsonrpsee::{
-        server::{RandomStringIdProvider, ServerBuilder, ServerConfig, ServerHandle},
-        RpcModule,
-    };
     use reqwest::{header, StatusCode};
+    use reth_jasonrpeesea::{
+        server::ServerBuilder, RandomStringIdProvider, RpcModule, ServerConfig, ServerHandle,
+    };
     use std::{
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},
@@ -260,9 +259,7 @@ mod tests {
 
         // Create a layered server
         let server = ServerBuilder::default()
-            .set_config(
-                ServerConfig::builder().set_id_provider(RandomStringIdProvider::new(16)).build(),
-            )
+            .set_config(ServerConfig::default().set_id_provider(RandomStringIdProvider::new(16)))
             .set_http_middleware(middleware)
             .build(addr.parse::<SocketAddr>().unwrap())
             .await
@@ -270,7 +267,7 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _, _| "You are the dark lord").unwrap();
+        module.register_method("greet_melkor", |_, _| "You are the dark lord").unwrap();
 
         server.start(module)
     }

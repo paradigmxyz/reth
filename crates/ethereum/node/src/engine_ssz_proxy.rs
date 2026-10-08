@@ -30,10 +30,10 @@ use alloy_rpc_types_engine::{
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
-use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_jasonrpeesea::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
@@ -828,7 +828,7 @@ where
 
 fn engine_error_response(err: EngineApiError) -> HttpResponse {
     let detail = err.to_string();
-    let error: jsonrpsee::types::ErrorObjectOwned = err.into();
+    let error: reth_jasonrpeesea::ErrorObject = err.into();
     let (status, problem_type) = match error.code() {
         -32700 => (STATUS_BAD_REQUEST, "parse-error"),
         -32600 => (STATUS_BAD_REQUEST, "invalid-request"),

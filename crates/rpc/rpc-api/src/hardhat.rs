@@ -1,9 +1,9 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_anvil::{Forking, Metadata};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_jasonrpeesea::{rpc, RpcResult};
 
 /// Hardhat rpc interface.
-/// https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods
+/// <https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "hardhat"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "hardhat"))]
 pub trait HardhatApi {

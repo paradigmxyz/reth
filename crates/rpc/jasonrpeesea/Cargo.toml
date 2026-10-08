@@ -1,0 +1,59 @@
+[package]
+name = "reth-jasonrpeesea"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Minimal JSON-RPC 2.0 server and client"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+futures-util = { workspace = true, features = ["sink", "std"] }
+rand.workspace = true
+rustc-hash = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["raw_value", "std"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tower = { workspace = true, features = ["util"] }
+tracing.workspace = true
+
+# macros
+reth-jasonrpeesea-macros = { workspace = true, optional = true }
+
+# server
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"], optional = true }
+hyper-util = { workspace = true, features = ["http1", "http2", "server-auto", "server-graceful", "service", "tokio"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+
+# client
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[features]
+default = []
+macros = ["dep:reth-jasonrpeesea-macros"]
+server = [
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:tokio-tungstenite",
+    "tokio/net",
+    "tokio/time",
+]
+client = ["tokio/time"]
+http-client = ["client", "dep:reqwest"]
+ws-client = ["client", "dep:tokio-tungstenite", "tokio/net"]

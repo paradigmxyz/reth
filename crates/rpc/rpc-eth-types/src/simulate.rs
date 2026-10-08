@@ -14,11 +14,11 @@ use alloy_rpc_types_eth::{
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm, HaltReasonFor,
 };
+use reth_jasonrpeesea::{ErrorObject, INTERNAL_ERROR_CODE};
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
@@ -147,7 +147,7 @@ impl EthSimulateError {
 }
 
 impl ToRpcError for EthSimulateError {
-    fn to_rpc_error(&self) -> ErrorObject<'static> {
+    fn to_rpc_error(&self) -> ErrorObject {
         rpc_err(self.error_code(), self.to_string(), None)
     }
 }
@@ -513,7 +513,7 @@ where
         + FromEthApiError
         + FromEvmError<T::Evm>
         + From<T::Error>
-        + Into<jsonrpsee_types::ErrorObject<'static>>,
+        + Into<reth_jasonrpeesea::ErrorObject>,
     T: RpcConvert,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());

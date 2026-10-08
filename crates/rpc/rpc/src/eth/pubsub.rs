@@ -10,10 +10,10 @@ use alloy_rpc_types_eth::{
     Filter,
 };
 use futures::StreamExt;
-use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
-};
 use reth_chain_state::CanonStateSubscriptions;
+use reth_jasonrpeesea::{
+    ErrorObject, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink,
+};
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
@@ -87,7 +87,7 @@ where
         accepted_sink: SubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> Result<(), ErrorObject<'static>> {
+    ) -> Result<(), ErrorObject> {
         #[allow(unreachable_patterns)]
         match kind {
             SubscriptionKind::NewHeads => {
@@ -218,7 +218,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
     Eth: EthSubscriptions,
@@ -229,7 +228,7 @@ where
         pending: PendingSubscriptionSink,
         kind: SubscriptionKind,
         params: Option<Params>,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> reth_jasonrpeesea::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
@@ -251,17 +250,14 @@ impl SubscriptionSerializeError {
     }
 }
 
-impl From<SubscriptionSerializeError> for ErrorObject<'static> {
+impl From<SubscriptionSerializeError> for ErrorObject {
     fn from(value: SubscriptionSerializeError) -> Self {
         internal_rpc_err(value.to_string())
     }
 }
 
 /// Pipes all stream items to the subscription sink.
-async fn pipe_from_stream<T, St>(
-    sink: SubscriptionSink,
-    mut stream: St,
-) -> Result<(), ErrorObject<'static>>
+async fn pipe_from_stream<T, St>(sink: SubscriptionSink, mut stream: St) -> Result<(), ErrorObject>
 where
     St: Stream<Item = T> + Unpin,
     T: Serialize,

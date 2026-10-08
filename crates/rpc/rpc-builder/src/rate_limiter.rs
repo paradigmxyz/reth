@@ -1,6 +1,6 @@
-//! [`jsonrpsee`] helper layer for rate limiting certain methods.
+//! RPC middleware for rate limiting certain methods.
 
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request};
+use reth_jasonrpeesea::{MethodResponse, Request, RpcServiceT};
 use std::{
     future::Future,
     pin::Pin,
@@ -65,11 +65,7 @@ impl<S> RpcServiceT for RpcRequestRateLimitingService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
         let method_name = req.method_name();
         if method_name.starts_with("trace_") || method_name.starts_with("debug_") {
             RateLimitingRequestFuture {
@@ -84,18 +80,8 @@ where
         }
     }
 
-    fn batch<'a>(
-        &self,
-        requests: jsonrpsee::core::middleware::Batch<'a>,
-    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.inner.batch(requests)
-    }
-
-    fn notification<'a>(
-        &self,
-        n: jsonrpsee::core::middleware::Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
-        self.inner.notification(n)
+    fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
+        self.inner.batch(reqs)
     }
 }
 

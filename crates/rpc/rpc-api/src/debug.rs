@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
 use alloy_rpc_types_trace::geth::{
     GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_jasonrpeesea::{rpc, RpcResult};
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
 /// Debug rpc interface.
@@ -61,7 +61,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> jsonrpsee::core::SubscriptionResult;
+    ) -> reth_jasonrpeesea::SubscriptionResult;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
     /// transaction that were included in this block.

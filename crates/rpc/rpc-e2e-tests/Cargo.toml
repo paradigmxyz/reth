@@ -23,7 +23,7 @@ futures-util.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-jsonrpsee.workspace = true
+reth-jasonrpeesea = { workspace = true, features = ["client"] }
 
 # required for the Action trait
 reth-node-api.workspace = true

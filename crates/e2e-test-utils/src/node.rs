@@ -25,10 +25,10 @@ use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
 };
-use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only};
 use reth_engine_primitives::BeaconForkChoiceUpdateError;
+use reth_jasonrpeesea::client::{ClientT, HttpClient};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
     Block, BlockBody, BlockTy, FullNodeComponents, NodePrimitives, PayloadTypes, PrimitivesTy,

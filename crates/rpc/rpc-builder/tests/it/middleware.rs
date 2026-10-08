@@ -1,11 +1,7 @@
 use crate::utils::{test_address, test_rpc_builder};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
-use jsonrpsee::{
-    core::middleware::{Batch, Notification},
-    server::middleware::rpc::RpcServiceT,
-    types::Request,
-};
 use reth_ethereum_primitives::TransactionSigned;
+use reth_jasonrpeesea::{MethodResponse, Request, RpcServiceT};
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -42,11 +38,7 @@ impl<S> RpcServiceT for MyMiddlewareService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
         tracing::info!("MyMiddleware processed call {}", req.method);
         let count = self.count.clone();
         let service = self.service.clone();
@@ -58,15 +50,8 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.service.batch(req)
-    }
-
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
-        self.service.notification(n)
+    fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
+        self.service.batch(reqs)
     }
 }
 

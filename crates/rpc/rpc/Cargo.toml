@@ -69,9 +69,8 @@ alloy-serde.workspace = true
 revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee", "memory_limit"] }
 
 # rpc
-jsonrpsee.workspace = true
+reth-jasonrpeesea.workspace = true
 serde_json.workspace = true
-jsonrpsee-types.workspace = true
 
 # async
 async-trait.workspace = true
@@ -102,7 +101,7 @@ reth-storage-overlay.workspace = true
 
 rand.workspace = true
 
-jsonrpsee = { workspace = true, features = ["client"] }
+reth-jasonrpeesea = { workspace = true, features = ["client"] }
 
 [features]
 js-tracer = [

@@ -18,7 +18,7 @@ use std::error::Error;
 /// receipts with additional data.
 pub trait EthApiTypes: Send + Sync + Clone {
     /// Extension of [`FromEthApiError`], with network specific errors.
-    type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
+    type Error: Into<reth_jasonrpeesea::ErrorObject>
         + FromEthApiError
         + AsEthApiError
         + From<<Self::RpcConvert as RpcConvert>::Error>

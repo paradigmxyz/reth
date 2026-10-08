@@ -2,25 +2,20 @@ use crate::{
     error::{RpcError, ServerKind},
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
 };
-use http::header::AUTHORIZATION;
-use jsonrpsee::{
-    core::{client::SubscriptionClientT, RegisterMethodError},
-    http_client::HeaderMap,
-    server::{AlreadyStoppedError, RpcModule, ServerConfig, ServerConfigBuilder},
-    ws_client::RpcServiceBuilder,
-    Methods,
+use http::{header::AUTHORIZATION, HeaderMap};
+use reth_jasonrpeesea::{
+    client::SubscriptionClientT, AlreadyStoppedError, Methods, RegisterMethodError, RpcModule,
+    RpcServiceBuilder, ServerConfig,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
-use reth_rpc_layer::{
-    secret_to_bearer_header, AuthClientLayer, AuthLayer, JwtAuthValidator, JwtSecret,
-};
+use reth_rpc_layer::{secret_to_bearer_header, AuthLayer, JwtAuthValidator, JwtSecret};
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
-pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::Builder as IpcServerBuilder;
+pub use reth_jasonrpeesea::server::ServerBuilder;
 
 /// Server configuration for the auth server.
 #[derive(Debug)]
@@ -30,9 +25,9 @@ pub struct AuthServerConfig<RpcMiddleware = Identity, HttpMiddleware = Identity>
     /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
-    pub(crate) server_config: ServerConfigBuilder,
+    pub(crate) server_config: ServerConfig,
     /// Configs for IPC server
-    pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
+    pub(crate) ipc_server_config: Option<IpcServerBuilder>,
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
     /// Configurable RPC middleware
@@ -131,7 +126,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfig<RpcMiddleware, HttpMiddlewa
 
         // By default, both http and ws are enabled.
         let server = ServerBuilder::new()
-            .set_config(server_config.build())
+            .set_config(server_config)
             .set_http_middleware(middleware)
             .set_rpc_middleware(rpc_middleware)
             .build(socket_addr)
@@ -195,8 +190,8 @@ where
 pub struct AuthServerConfigBuilder<RpcMiddleware = Identity, HttpMiddleware = Identity> {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
-    server_config: Option<ServerConfigBuilder>,
-    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
+    server_config: Option<ServerConfig>,
+    ipc_server_config: Option<IpcServerBuilder>,
     ipc_endpoint: Option<String>,
     rpc_middleware: RpcMiddleware,
     http_middleware: HttpMiddleware,
@@ -294,8 +289,8 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
     /// Configures the JSON-RPC server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`]
-    /// [`IdProvider`](jsonrpsee::server::IdProvider) for convenience.
-    pub fn with_server_config(mut self, config: ServerConfigBuilder) -> Self {
+    /// [`IdProvider`](reth_jasonrpeesea::IdProvider) for convenience.
+    pub fn with_server_config(mut self, config: ServerConfig) -> Self {
         self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -309,7 +304,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
     /// Configures the IPC server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`]
-    pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_ipc_config(mut self, config: IpcServerBuilder) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -322,7 +317,7 @@ impl<RpcMiddleware, HttpMiddleware> AuthServerConfigBuilder<RpcMiddleware, HttpM
             }),
             secret: self.secret,
             server_config: self.server_config.unwrap_or_else(|| {
-                ServerConfig::builder()
+                ServerConfig::default()
                     // This needs to large enough to handle large eth_getLogs responses and
                     // maximum payload bodies limit for
                     // `engine_getPayloadBodiesByRangeV` ~750MB per
@@ -425,10 +420,10 @@ impl AuthRpcModule {
 #[must_use = "Server stops if dropped"]
 pub struct AuthServerHandle {
     local_addr: SocketAddr,
-    handle: Option<jsonrpsee::server::ServerHandle>,
+    handle: Option<reth_jasonrpeesea::ServerHandle>,
     secret: JwtSecret,
     ipc_endpoint: Option<String>,
-    ipc_handle: Option<jsonrpsee::server::ServerHandle>,
+    ipc_handle: Option<reth_jasonrpeesea::ServerHandle>,
 }
 
 // === impl AuthServerHandle ===
@@ -489,19 +484,20 @@ impl AuthServerHandle {
     pub fn http_client(
         &self,
     ) -> impl SubscriptionClientT + use<> + Clone + Send + Sync + Unpin + 'static {
-        // Create a middleware that adds a new JWT token to every request.
-        let secret_layer = AuthClientLayer::new(self.secret);
-        let middleware = tower::ServiceBuilder::default().layer(secret_layer);
-        jsonrpsee::http_client::HttpClientBuilder::default()
-            .set_http_middleware(middleware)
+        // Add a new JWT token to every request.
+        let secret = self.secret;
+        reth_jasonrpeesea::client::HttpClientBuilder::default()
+            .set_headers_fn(move || {
+                HeaderMap::from_iter([(AUTHORIZATION, secret_to_bearer_header(&secret))])
+            })
             .build(self.http_url())
             .expect("Failed to create http client")
     }
 
     /// Returns a ws client connected to the server. Note that the connection can only be
     /// be established within 1 minute due to the JWT token expiration.
-    pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
-        jsonrpsee::ws_client::WsClientBuilder::default()
+    pub async fn ws_client(&self) -> reth_jasonrpeesea::client::WsClient {
+        reth_jasonrpeesea::client::WsClientBuilder::default()
             .set_headers(HeaderMap::from_iter([(
                 AUTHORIZATION,
                 secret_to_bearer_header(&self.secret),
@@ -513,7 +509,7 @@ impl AuthServerHandle {
 
     /// Returns an ipc client connected to the server.
     #[cfg(unix)]
-    pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
+    pub async fn ipc_client(&self) -> Option<reth_jasonrpeesea::client::Client> {
         use reth_ipc::client::IpcClientBuilder;
 
         if let Some(ipc_endpoint) = &self.ipc_endpoint {
@@ -528,7 +524,7 @@ impl AuthServerHandle {
     }
 
     /// Returns an ipc handle
-    pub fn ipc_handle(&self) -> Option<jsonrpsee::server::ServerHandle> {
+    pub fn ipc_handle(&self) -> Option<reth_jasonrpeesea::ServerHandle> {
         self.ipc_handle.clone()
     }
 

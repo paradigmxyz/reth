@@ -1,4 +1,4 @@
-//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
+//! Implementation of the RPC macro generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
@@ -15,7 +15,7 @@ use alloy_rpc_types_eth::{
     StateContext, SyncStatus, Work,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_jasonrpeesea::{rpc, RpcResult};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
@@ -453,7 +453,6 @@ pub trait EthApi<
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
-#[async_trait::async_trait]
 impl<T>
     EthApiServer<
         RpcTxReq<T::NetworkTypes>,
@@ -465,7 +464,7 @@ impl<T>
     > for T
 where
     T: FullEthApi,
-    jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
+    reth_jasonrpeesea::ErrorObject: From<T::Error>,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {

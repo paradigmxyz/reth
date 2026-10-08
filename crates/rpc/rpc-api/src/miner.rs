@@ -1,5 +1,5 @@
 use alloy_primitives::{Bytes, U128};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_jasonrpeesea::{rpc, RpcResult};
 
 /// Miner namespace rpc interface that can control miner/builder settings
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "miner"))]

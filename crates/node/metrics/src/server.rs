@@ -182,9 +182,13 @@ impl MetricServer {
 
             let mut shutdown = signal.clone().ignore_guard();
             tokio::task::spawn(async move {
-                let _ = jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
-                    .await
-                    .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+                let _ = reth_jasonrpeesea::server::serve_with_graceful_shutdown(
+                    io,
+                    service,
+                    &mut shutdown,
+                )
+                .await
+                .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
             });
         });
 

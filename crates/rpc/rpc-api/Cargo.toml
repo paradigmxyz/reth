@@ -37,17 +37,16 @@ alloy-rpc-types-engine.workspace = true
 alloy-genesis.workspace = true
 
 # misc
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
+reth-jasonrpeesea = { workspace = true, features = ["macros"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
 [features]
 client = [
-    "jsonrpsee/client",
-    "jsonrpsee/async-client",
+    "reth-jasonrpeesea/client",
     "reth-rpc-eth-api/client",
 ]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }
+reth-jasonrpeesea = { workspace = true, features = ["http-client"] }

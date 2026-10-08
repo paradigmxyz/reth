@@ -2,13 +2,11 @@
 //! requested address.
 use alloy_primitives::{map::AddressMap, Address, U256};
 use futures::TryStreamExt;
-use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
-};
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
+use reth_jasonrpeesea::{rpc, PendingSubscriptionSink, SubscriptionMessage, SubscriptionResult};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 

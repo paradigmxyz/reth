@@ -16,21 +16,18 @@ workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tokio-stream.workspace = true
-pin-project.workspace = true
 tower.workspace = true
 
 # misc
-jsonrpsee = { workspace = true, features = ["server", "client"] }
-serde_json.workspace = true
+reth-jasonrpeesea = { workspace = true, features = ["client"] }
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
-futures-util.workspace = true
 interprocess = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
 serde.workspace = true
+serde_json.workspace = true
 reth-tracing.workspace = true
 rand.workspace = true

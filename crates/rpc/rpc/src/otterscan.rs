@@ -11,9 +11,8 @@ use alloy_rpc_types_trace::{
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
-use async_trait::async_trait;
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_chainspec::ChainSpecProvider;
+use reth_jasonrpeesea::{ErrorObject, RpcResult};
 use reth_primitives_traits::{BlockBody, TxTy};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_convert::RpcTxReq;
@@ -80,7 +79,7 @@ where
                     self.eth
                         .recovered_block(block.header.hash().into())
                         .await
-                        .map_err(Into::<ErrorObjectOwned>::into)?
+                        .map_err(Into::<ErrorObject>::into)?
                         .ok_or(EthApiError::HeaderNotFound(block.header.hash().into()))?,
                 )
             };
@@ -105,7 +104,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>
     for OtterscanApi<Eth>
 where
@@ -333,7 +331,7 @@ where
         }
 
         let permit = self.acquire_trace_permit().await?;
-        let num = binary_search::<_, _, ErrorObjectOwned>(
+        let num = binary_search::<_, _, ErrorObject>(
             1,
             self.eth.block_number()?.saturating_to(),
             |mid| {

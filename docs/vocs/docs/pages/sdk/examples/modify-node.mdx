@@ -26,8 +26,8 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
-jsonrpsee = { version = "0.22", features = ["macros", "server", "http-server", "ws-server"] }
 reth-ethereum = { path = "../../crates/ethereum" }
+reth-jasonrpeesea = { path = "../../crates/rpc/jasonrpeesea", features = ["macros"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -35,7 +35,7 @@ tokio = { version = "1.0", features = ["full"] }
 
 The complete implementation can be found in the [node-custom-rpc example](https://github.com/paradigmxyz/reth/tree/main/examples/node-custom-rpc). Here's a summary of the key components:
 
-1. **RPC Interface**: Define your custom RPC methods using `jsonrpsee` proc macros with a custom namespace
+1. **RPC Interface**: Define your custom RPC methods using the `reth-jasonrpeesea` `#[rpc]` macro with a custom namespace
 2. **RPC Handler**: Implement the trait with access to node components like the transaction pool
 3. **CLI Extension**: Add custom CLI arguments to control your extensions
 4. **Node Integration**: Use `extend_rpc_modules` to integrate your custom functionality

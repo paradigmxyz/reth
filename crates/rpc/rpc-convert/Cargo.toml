@@ -26,7 +26,7 @@ alloy-json-rpc.workspace = true
 alloy-evm = { workspace = true, features = ["rpc"] }
 
 # io
-jsonrpsee-types.workspace = true
+reth-jasonrpeesea.workspace = true
 
 # error
 thiserror.workspace = true

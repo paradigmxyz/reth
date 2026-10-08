@@ -2,11 +2,11 @@
 
 use eyre::{eyre, Result};
 use futures_util::future::BoxFuture;
-use jsonrpsee::core::client::ClientT;
 use reth_e2e_test_utils::testsuite::{
     actions::{expect_fcu_valid, Action},
     BlockInfo, Environment,
 };
+use reth_jasonrpeesea::client::ClientT;
 use reth_node_api::EngineTypes;
 use serde_json::Value;
 use std::path::Path;
@@ -170,11 +170,11 @@ impl RunRpcCompatTests {
 
         let params = test_case.request.get("params").cloned().unwrap_or(Value::Array(vec![]));
 
-        // Make the RPC request using jsonrpsee
+        // Make the RPC request
         // We need to handle the case where the RPC might return an error
-        use jsonrpsee::core::params::ArrayParams;
+        use reth_jasonrpeesea::client::ArrayParams;
 
-        let response_result: Result<Value, jsonrpsee::core::client::Error> = match params {
+        let response_result: Result<Value, reth_jasonrpeesea::client::Error> = match params {
             Value::Array(ref arr) => {
                 // Use ArrayParams for array parameters
                 let mut array_params = ArrayParams::new();

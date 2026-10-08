@@ -1,6 +1,5 @@
 use alloy_primitives::{Bytes, U128};
-use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use reth_jasonrpeesea::RpcResult;
 use reth_rpc_api::MinerApiServer;
 
 /// `miner` API implementation.
@@ -9,7 +8,6 @@ use reth_rpc_api::MinerApiServer;
 #[derive(Clone, Debug, Default)]
 pub struct MinerApi {}
 
-#[async_trait]
 impl MinerApiServer for MinerApi {
     fn set_extra(&self, _record: Bytes) -> RpcResult<bool> {
         Ok(false)

@@ -6,8 +6,7 @@ use alloy_primitives::Address;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
-use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use reth_jasonrpeesea::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_convert::RpcConvert;
@@ -86,7 +85,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Pool, Eth> TxPoolApiServer<RpcTransaction<Eth::Network>> for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
@@ -146,7 +144,7 @@ where
         from: Address,
     ) -> RpcResult<TxpoolContentFrom<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
-        Ok(self.content_from(from).map_err(Into::into)?)
+        self.content_from(from).map_err(Into::into)
     }
 
     /// Returns the details of all transactions currently pending for inclusion in the next
@@ -156,7 +154,7 @@ where
     /// Handler for `txpool_content`
     async fn txpool_content(&self) -> RpcResult<TxpoolContent<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
-        Ok(self.content().map_err(Into::into)?)
+        self.content().map_err(Into::into)
     }
 }
 

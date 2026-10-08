@@ -138,7 +138,7 @@ There is also a crate to easily configure an RPC server: [`rpc/rpc-builder`](../
 
 #### Transports
 
-The RPC component is based on the [`jsonrpsee`][jsonrpsee] crate which provides JSONRPC over WebSockets and HTTP.
+The JSON-RPC server, client and `#[rpc]` macro live in [`rpc/jasonrpeesea`](../../crates/rpc/jasonrpeesea), which serves HTTP and WebSockets.
 
 The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 
@@ -208,7 +208,6 @@ Small utility crates.
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx
 [discv4]: https://github.com/ethereum/devp2p/blob/master/discv4.md
-[jsonrpsee]: https://github.com/paritytech/jsonrpsee/
 [tracing]: https://crates.io/crates/tracing
 [eip-1459]: https://eips.ethereum.org/EIPS/eip-1459
 [engine-spec]: https://github.com/ethereum/execution-apis/tree/main/src/engine

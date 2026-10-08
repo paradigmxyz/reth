@@ -17,10 +17,9 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
     MAX_BYTES_PER_INCLUSION_LIST,
 };
-use async_trait::async_trait;
-use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_jasonrpeesea::{RpcModule, RpcResult};
 use reth_network_api::{CellCustody, NetworkInfo};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
@@ -57,7 +56,7 @@ const MAX_BLOB_LIMIT: usize = 128;
 ///
 /// ## Implementers
 ///
-/// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
+/// Implementing support for an engine API RPC handler is done by defining the engine API
 /// server trait and implementing it on a type that can either wrap this [`EngineApi`] type or
 /// use a custom [`EngineTypes`] implementation if it mirrors ethereum's versioned engine API
 /// endpoints (e.g. opstack).
@@ -1331,7 +1330,6 @@ where
 }
 
 // This is the concrete ethereum engine API implementation.
-#[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
@@ -1380,7 +1378,7 @@ where
             }),
         };
 
-        Ok(self.new_payload_v3_metered(payload).await?)
+        self.new_payload_v3_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV4`
@@ -1407,7 +1405,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v4_metered(payload).await?)
+        self.new_payload_v4_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV5`
@@ -1436,7 +1434,7 @@ where
             ),
         };
 
-        Ok(self.new_payload_v5_metered(payload).await?)
+        self.new_payload_v5_metered(payload).await
     }
 
     /// Handler for `engine_newPayloadV6`.

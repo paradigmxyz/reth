@@ -133,7 +133,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     type Network: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<Self::Primitives>>>;
 
     /// An associated RPC conversion error.
-    type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
+    type Error: error::Error + Into<reth_jasonrpeesea::ErrorObject>;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -703,7 +703,7 @@ where
                        + Unpin
                        + Sync
                        + Send
-                       + Into<jsonrpsee_types::ErrorObject<'static>>,
+                       + Into<reth_jasonrpeesea::ErrorObject>,
         > + Send
         + Sync
         + Unpin

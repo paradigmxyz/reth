@@ -2,7 +2,7 @@
 use reth_ethereum::{provider::BlockReaderIdExt, rpc::eth::EthResult, Block};
 
 // Rpc related imports
-use jsonrpsee::proc_macros::rpc;
+use reth_jasonrpeesea::rpc;
 
 /// trait interface for a custom rpc namespace: `myrpcExt`
 ///

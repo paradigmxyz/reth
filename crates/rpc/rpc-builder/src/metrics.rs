@@ -1,9 +1,4 @@
-use jsonrpsee::{
-    core::middleware::{Batch, Notification},
-    server::middleware::rpc::RpcServiceT,
-    types::Request,
-    MethodResponse, RpcModule,
-};
+use reth_jasonrpeesea::{MethodResponse, Request, RpcModule, RpcServiceT};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -52,7 +47,8 @@ impl RpcRequestMetrics {
 
     /// Creates a new instance of the metrics layer for same port.
     ///
-    /// Note: currently it's not possible to track transport specific metrics for a server that runs http and ws on the same port: <https://github.com/paritytech/jsonrpsee/issues/1345> until we have this feature we will use the http metrics for this case.
+    /// Note: the server does not tell HTTP and WS apart on the same port, so this uses the HTTP
+    /// metrics.
     pub(crate) fn same_port(module: &RpcModule<()>) -> Self {
         Self::http(module)
     }
@@ -106,15 +102,11 @@ impl<S> RpcRequestMetricsService<S> {
 
 impl<S> RpcServiceT for RpcRequestMetricsService<S>
 where
-    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = S::MethodResponse> + Send + 'a {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
         self.metrics.inner.connection_metrics.requests_started_total.increment(1);
-        let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
+        let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method_name());
         if let Some((_, call_metrics)) = &call_metrics {
             call_metrics.started_total.increment(1);
         }
@@ -126,10 +118,10 @@ where
         }
     }
 
-    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+    fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
         self.metrics.inner.connection_metrics.batches_started_total.increment(1);
 
-        for batch_entry in req.iter().flatten() {
+        for batch_entry in &reqs {
             let method_name = batch_entry.method_name();
             if let Some(call_metrics) = self.metrics.inner.call_metrics.get(method_name) {
                 call_metrics.batched_total.increment(1);
@@ -137,17 +129,10 @@ where
         }
 
         MeteredBatchRequestsFuture {
-            fut: self.inner.batch(req),
+            fut: self.inner.batch(reqs),
             started_at: Instant::now(),
             metrics: self.metrics.clone(),
         }
-    }
-
-    fn notification<'a>(
-        &self,
-        n: Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
-        self.inner.notification(n)
     }
 }
 
@@ -301,7 +286,7 @@ struct RpcServerCallMetrics {
     failed_total: Counter,
     /// The number of calls received as batch entries.
     ///
-    /// jsonrpsee dispatches batch entries internally without invoking this middleware's `call`,
+    /// Batch entries go to the inner service's `batch` without invoking this middleware's `call`,
     /// so only their per-method volume can be tracked; batched calls are excluded from
     /// `started_total`, `successful_total`, `failed_total` and `time_seconds`.
     batched_total: Counter,
