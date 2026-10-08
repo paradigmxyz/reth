@@ -151,8 +151,13 @@ where
         let backfill_sync = backfill(pipeline, pipeline_task_spawner)?;
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle =
-            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
+        let persistence_handle = PersistenceHandle::<N::Primitives>::spawn_service_with_hooks(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            payload_validator.save_blocks_hook(),
+            payload_validator.remove_blocks_hook(),
+        );
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 

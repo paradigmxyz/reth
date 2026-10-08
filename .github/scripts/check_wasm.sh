@@ -83,6 +83,7 @@ exclude_crates=(
   reth-ecies          # secp256k1-sys via enr
   reth-network-api    # secp256k1-sys via enr
   reth-nippy-jar      # zstd-sys (direct dependency)
+  reth-qmdb          # native actor runtime, secp256k1-sys and zstd-sys
   reth-node-types     # zstd-sys via reth-codecs -> reth-zstd-compressors
   reth-rpc-server-types # secp256k1-sys via reth-network-api -> enr
   reth-storage-overlay  # zstd-sys via reth-trie-db

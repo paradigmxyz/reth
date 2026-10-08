@@ -305,6 +305,10 @@ where
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
+    #[debug(skip)]
+    save_blocks_hook: Option<crate::persistence::SaveBlocksHook<Evm::Primitives>>,
+    #[debug(skip)]
+    remove_blocks_hook: Option<crate::persistence::RemoveBlocksHook>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -372,7 +376,20 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            save_blocks_hook: None,
+            remove_blocks_hook: None,
         }
+    }
+
+    /// Installs persistence hooks for a custom durable state store.
+    pub fn with_persistence_hooks(
+        mut self,
+        save_blocks_hook: Option<crate::persistence::SaveBlocksHook<N>>,
+        remove_blocks_hook: Option<crate::persistence::RemoveBlocksHook>,
+    ) -> Self {
+        self.save_blocks_hook = save_blocks_hook;
+        self.remove_blocks_hook = remove_blocks_hook;
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
@@ -1804,6 +1821,16 @@ pub trait EngineValidator<
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> PayloadBuilderResources;
+
+    /// Returns the custom canonical save hook, if configured.
+    fn save_blocks_hook(&self) -> Option<crate::persistence::SaveBlocksHook<N>> {
+        None
+    }
+
+    /// Returns the custom canonical unwind hook, if configured.
+    fn remove_blocks_hook(&self) -> Option<crate::persistence::RemoveBlocksHook> {
+        None
+    }
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1838,6 +1865,14 @@ where
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
+    fn save_blocks_hook(&self) -> Option<crate::persistence::SaveBlocksHook<N>> {
+        self.save_blocks_hook.clone()
+    }
+
+    fn remove_blocks_hook(&self) -> Option<crate::persistence::RemoveBlocksHook> {
+        self.remove_blocks_hook.clone()
+    }
+
     fn validate_payload_attributes_against_header(
         &self,
         attr: &Types::PayloadAttributes,
