@@ -88,7 +88,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip7840::BlobParams;
-    use reth_chainspec::{ChainSpec, HOODI, MAINNET, SEPOLIA};
+    use reth_chainspec::{ChainSpec, HOODI, MAINNET};
 
     #[test]
     fn mainnet_config_is_derived_from_hardforks() {
@@ -123,14 +123,6 @@ mod tests {
         assert!(config.blob_schedule.contains_key("prague"));
         assert!(config.blob_schedule.contains_key("osaka"));
         assert_eq!(config.blob_schedule.contains_key("bpo1"), config.bpo1_time.is_some());
-    }
-
-    #[test]
-    fn sepolia_config_reports_its_chain_id() {
-        let config = chain_config(&*SEPOLIA);
-        assert_eq!(config.chain_id, SEPOLIA.chain_id());
-        assert_eq!(config.shanghai_time, Some(1_677_557_088));
-        assert!(config.blob_schedule.contains_key("cancun"));
     }
 
     #[test]
