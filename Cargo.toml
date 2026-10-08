@@ -294,6 +294,11 @@ inherits = "release"
 debug = "full"
 strip = "none"
 
+[profile.dst]
+inherits = "profiling"
+debug-assertions = true
+overflow-checks = true
+
 # Include debug info in benchmarks too.
 [profile.bench]
 inherits = "profiling"
