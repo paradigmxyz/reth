@@ -61,6 +61,8 @@ assert_eq!(policy.pivot_block(4, None), None);
   state, instead of maintaining one during the download.
 - **Starting over is the fallback.** An attempt restarts when catch-up falls behind the BALs peers
   still serve, or when a reorg across its pivot cannot be repaired.
+- **Code presence checks do not copy blobs.** Download, account commit and completeness
+  checks use database key presence; MDBX avoids copying and decoding stored bytecode.
 
 ## Reorgs across the pivot
 
