@@ -1,9 +1,9 @@
 use super::{
-    decode, decode_batch, write_batch, write_request, BatchRequestBuilder, BoxError, ClientT,
-    Error, RawResponse, SubscriptionClientT, ToRpcParams,
+    decode, decode_batch, write_batch, write_notification, write_request, BatchRequestBuilder,
+    BoxError, ClientT, Error, RawResponse, SubscriptionClientT, ToRpcParams,
 };
 use crate::{ErrorObject, SubscriptionId};
-use futures_util::{Sink, SinkExt, Stream, StreamExt};
+use futures_util::{stream, Sink, SinkExt, Stream, StreamExt};
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
@@ -11,29 +11,38 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{
+    mpsc::{self, error::TrySendError},
+    oneshot, Semaphore, SemaphorePermit,
+};
 
 type CallResult = Result<Box<RawValue>, ErrorObject>;
 /// The outer error means the server rejected the whole message the call was part of.
 type CallMessageResult = Result<CallResult, ErrorObject>;
-type SubscribeResult = Result<(SubscriptionId, mpsc::Receiver<Box<RawValue>>), ErrorObject>;
+type SubscribeResult =
+    Result<(SubscriptionId, mpsc::Receiver<Box<RawValue>>, Arc<AtomicBool>), ErrorObject>;
 
 /// Builds a [`Client`] over a message transport.
 #[derive(Clone, Copy, Debug)]
 pub struct ClientBuilder {
     request_timeout: Duration,
     subscription_buffer: usize,
+    max_concurrent_requests: usize,
 }
 
 impl Default for ClientBuilder {
     fn default() -> Self {
-        Self { request_timeout: Duration::from_secs(60), subscription_buffer: 1024 }
+        Self {
+            request_timeout: Duration::from_secs(60),
+            subscription_buffer: 1024,
+            max_concurrent_requests: 256,
+        }
     }
 }
 
@@ -52,6 +61,15 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the maximum number of requests, batches and subscription calls awaiting a response.
+    /// Default is 256.
+    ///
+    /// Further calls wait until an earlier one completes.
+    pub const fn max_concurrent_requests(mut self, max: usize) -> Self {
+        self.max_concurrent_requests = max;
+        self
+    }
+
     /// Creates a client that reads messages from `reader` and writes them to `writer`.
     ///
     /// Spawns a task that drives the connection until the client and all its subscriptions are
@@ -64,9 +82,35 @@ impl ClientBuilder {
         W: Sink<String> + Send + Unpin + 'static,
         W::Error: Into<BoxError> + Send + 'static,
     {
+        self.build_with_keepalive(reader, writer, stream::pending())
+    }
+
+    /// Like [`Self::build`], but also writes the messages yielded by `keepalive`.
+    pub(super) fn build_with_keepalive<R, T, E, W, M, K>(
+        self,
+        reader: R,
+        writer: W,
+        keepalive: K,
+    ) -> Client
+    where
+        R: Stream<Item = Result<T, E>> + Send + Unpin + 'static,
+        T: AsRef<[u8]> + Send + 'static,
+        E: Into<BoxError> + Send + 'static,
+        W: Sink<M> + Send + Unpin + 'static,
+        W::Error: Into<BoxError> + Send + 'static,
+        M: From<String> + Send + 'static,
+        K: Stream<Item = M> + Send + Unpin + 'static,
+    {
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(drive(reader, writer, rx, self.subscription_buffer));
-        Client { tx, next_id: Arc::default(), request_timeout: self.request_timeout }
+        tokio::spawn(drive(reader, writer, keepalive, rx, self.subscription_buffer));
+        Client {
+            tx,
+            next_id: Arc::default(),
+            request_timeout: self.request_timeout,
+            requests: Arc::new(Semaphore::new(
+                self.max_concurrent_requests.min(Semaphore::MAX_PERMITS),
+            )),
+        }
     }
 }
 
@@ -76,6 +120,7 @@ pub struct Client {
     tx: mpsc::UnboundedSender<Command>,
     next_id: Arc<AtomicU64>,
     request_timeout: Duration,
+    requests: Arc<Semaphore>,
 }
 
 impl Client {
@@ -84,12 +129,26 @@ impl Client {
         !self.tx.is_closed()
     }
 
+    /// Resolves once the connection is closed.
+    pub async fn on_disconnect(&self) {
+        self.tx.closed().await
+    }
+
+    /// Returns the request timeout.
+    pub const fn request_timeout(&self) -> Duration {
+        self.request_timeout
+    }
+
     fn next_ids(&self, n: u64) -> u64 {
         self.next_id.fetch_add(n, Ordering::Relaxed)
     }
 
     fn send(&self, json: String, pending: Vec<(u64, Pending)>) -> Result<(), Error> {
         self.tx.send(Command::Send { json, pending }).map_err(|_| Error::Closed)
+    }
+
+    async fn acquire(&self) -> Result<SemaphorePermit<'_>, Error> {
+        self.requests.acquire().await.map_err(|_| Error::Closed)
     }
 
     async fn wait<T>(&self, rx: oneshot::Receiver<T>) -> Result<T, Error> {
@@ -108,6 +167,7 @@ impl ClientT for Client {
         P: ToRpcParams + Send,
     {
         let params = params.to_rpc_params()?;
+        let _permit = self.acquire().await?;
         let id = self.next_ids(1);
         let mut json = String::new();
         write_request(&mut json, id, method, params.as_deref());
@@ -123,6 +183,7 @@ impl ClientT for Client {
     where
         R: DeserializeOwned,
     {
+        let _permit = self.acquire().await?;
         let first_id = self.next_ids(batch.0.len() as u64);
         let json = write_batch(&batch, first_id);
         let (pending, receivers): (Vec<_>, Vec<_>) = (first_id..)
@@ -139,6 +200,16 @@ impl ClientT for Client {
         }
         decode_batch(results)
     }
+
+    async fn notification<P>(&self, method: &str, params: P) -> Result<(), Error>
+    where
+        P: ToRpcParams + Send,
+    {
+        let params = params.to_rpc_params()?;
+        let mut json = String::new();
+        write_notification(&mut json, method, params.as_deref());
+        self.send(json, Vec::new())
+    }
 }
 
 impl SubscriptionClientT for Client {
@@ -153,14 +224,17 @@ impl SubscriptionClientT for Client {
         P: ToRpcParams + Send,
     {
         let params = params.to_rpc_params()?;
+        let permit = self.acquire().await?;
         let id = self.next_ids(1);
         let mut json = String::new();
         write_request(&mut json, id, subscribe, params.as_deref());
         let (tx, rx) = oneshot::channel();
         self.send(json, vec![(id, Pending::Subscribe(tx))])?;
-        let (sub_id, rx) = self.wait(rx).await?.map_err(Error::Call)?;
+        let (sub_id, rx, lagged) = self.wait(rx).await?.map_err(Error::Call)?;
+        drop(permit);
         Ok(Subscription {
             rx,
+            lagged,
             sub_id,
             unsubscribe: Some(unsubscribe.to_owned()),
             client: self.clone(),
@@ -172,9 +246,13 @@ impl SubscriptionClientT for Client {
 /// A stream of subscription notifications.
 ///
 /// Dropping it unsubscribes.
+///
+/// The client buffers notifications until they are read, and closes the subscription once the
+/// buffer is full. [`Subscription::close_reason`] tells why it was closed.
 #[derive(Debug)]
 pub struct Subscription<T> {
     rx: mpsc::Receiver<Box<RawValue>>,
+    lagged: Arc<AtomicBool>,
     sub_id: SubscriptionId,
     unsubscribe: Option<String>,
     client: Client,
@@ -194,6 +272,19 @@ impl<T> Subscription<T> {
     {
         let item = self.rx.recv().await?;
         Some(serde_json::from_str(item.get()))
+    }
+
+    /// Returns why the subscription was closed, or `None` if it is open.
+    ///
+    /// Notifications received before it was closed can still be read.
+    pub fn close_reason(&self) -> Option<SubscriptionCloseReason> {
+        if self.lagged.load(Ordering::Relaxed) {
+            Some(SubscriptionCloseReason::Lagged)
+        } else if self.rx.is_closed() {
+            Some(SubscriptionCloseReason::ConnectionClosed)
+        } else {
+            None
+        }
     }
 
     /// Unsubscribes and waits for the server to confirm.
@@ -225,6 +316,15 @@ impl<T> Drop for Subscription<T> {
                 .send(Command::Unsubscribe { json: Some(json), sub_id: self.sub_id.clone() });
         }
     }
+}
+
+/// Why a [`Subscription`] was closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubscriptionCloseReason {
+    /// The connection was closed.
+    ConnectionClosed,
+    /// The subscription was not read fast enough and its buffer filled up.
+    Lagged,
 }
 
 #[derive(Debug)]
@@ -264,53 +364,62 @@ struct State {
     pending: FxHashMap<u64, (u64, Pending)>,
     /// Number of pending calls at which to remove the ones nobody waits for.
     prune_at: usize,
-    subscriptions: FxHashMap<SubscriptionId, mpsc::Sender<Box<RawValue>>>,
+    /// Notification senders and lag flags of open subscriptions.
+    subscriptions: FxHashMap<SubscriptionId, (mpsc::Sender<Box<RawValue>>, Arc<AtomicBool>)>,
     subscription_buffer: usize,
 }
 
-async fn drive<R, T, E, W>(
+async fn drive<R, T, E, W, M, K>(
     mut reader: R,
     mut writer: W,
+    mut keepalive: K,
     mut commands: mpsc::UnboundedReceiver<Command>,
     subscription_buffer: usize,
 ) where
     R: Stream<Item = Result<T, E>> + Unpin,
     T: AsRef<[u8]>,
     E: Into<BoxError>,
-    W: Sink<String> + Unpin,
+    W: Sink<M> + Unpin,
     W::Error: Into<BoxError>,
+    M: From<String>,
+    K: Stream<Item = M> + Unpin,
 {
     let mut state = State { subscription_buffer, ..Default::default() };
     loop {
-        tokio::select! {
-            command = commands.recv() => {
-                let json = match command {
-                    Some(Command::Send { json, pending }) => {
-                        state.add_pending(pending);
-                        json
-                    }
-                    Some(Command::Unsubscribe { json, sub_id }) => {
-                        state.subscriptions.remove(&sub_id);
-                        let Some(json) = json else { continue };
-                        json
-                    }
-                    None => break,
-                };
-                if let Err(err) = writer.send(json).await {
-                    tracing::debug!(target: "rpc::jsonrpc", err = %err.into(), "failed to send request");
-                    break
+        let msg = tokio::select! {
+            command = commands.recv() => match command {
+                Some(Command::Send { json, pending }) => {
+                    state.add_pending(pending);
+                    M::from(json)
                 }
-            }
-            msg = reader.next() => match msg {
-                Some(Ok(msg)) => state.handle(msg.as_ref()),
-                Some(Err(err)) => {
-                    tracing::debug!(target: "rpc::jsonrpc", err = %err.into(), "failed to receive response");
-                    break
+                Some(Command::Unsubscribe { json, sub_id }) => {
+                    state.subscriptions.remove(&sub_id);
+                    let Some(json) = json else { continue };
+                    M::from(json)
                 }
                 None => break,
             },
+            Some(msg) = keepalive.next() => msg,
+            msg = reader.next() => {
+                match msg {
+                    Some(Ok(msg)) => state.handle(msg.as_ref()),
+                    Some(Err(err)) => {
+                        tracing::debug!(target: "rpc::jsonrpc", err = %err.into(), "failed to receive response");
+                        break
+                    }
+                    None => break,
+                }
+                continue
+            }
+        };
+        if let Err(err) = writer.send(msg).await {
+            tracing::debug!(target: "rpc::jsonrpc", err = %err.into(), "failed to send request");
+            break
         }
     }
+    // Fail pending calls and signal the disconnect before closing the transport.
+    drop(commands);
+    drop(state);
     let _ = writer.close().await;
 }
 
@@ -346,9 +455,12 @@ impl State {
         if response.method.is_some() &&
             let Some(params) = response.params
         {
-            let Some(tx) = self.subscriptions.get(&params.subscription) else { return };
+            let Some((tx, lagged)) = self.subscriptions.get(&params.subscription) else { return };
             // Close subscriptions that are dropped or lag behind.
-            if tx.try_send(params.result.to_owned()).is_err() {
+            if let Err(err) = tx.try_send(params.result.to_owned()) {
+                if matches!(err, TrySendError::Full(_)) {
+                    lagged.store(true, Ordering::Relaxed);
+                }
                 self.subscriptions.remove(&params.subscription);
             }
             return
@@ -381,10 +493,11 @@ impl State {
                 });
                 let result = result.map(|sub_id| {
                     let (sub_tx, sub_rx) = mpsc::channel(self.subscription_buffer.max(1));
-                    self.subscriptions.insert(sub_id.clone(), sub_tx);
-                    (sub_id, sub_rx)
+                    let lagged = Arc::default();
+                    self.subscriptions.insert(sub_id.clone(), (sub_tx, Arc::clone(&lagged)));
+                    (sub_id, sub_rx, lagged)
                 });
-                if let Err(Ok((sub_id, _))) = tx.send(result) {
+                if let Err(Ok((sub_id, ..))) = tx.send(result) {
                     self.subscriptions.remove(&sub_id);
                 }
             }
@@ -399,7 +512,9 @@ mod tests {
         connection::serve_connection, stop_channel, RpcModule, RpcServiceBuilder, ServerConfig,
     };
     use bytes::Bytes;
+    use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
     use futures_util::StreamExt;
+    use serde_json::json;
 
     /// Connects a client to a server over in-memory channels.
     fn connect(module: RpcModule) -> Client {
@@ -420,6 +535,52 @@ mod tests {
             drop(handle);
         });
         ClientBuilder::default().build(client_rx.map(Ok::<_, BoxError>), client_tx)
+    }
+
+    /// The server side of [`connect_raw`].
+    struct RawServer {
+        rx: UnboundedReceiver<String>,
+        tx: UnboundedSender<String>,
+    }
+
+    impl RawServer {
+        /// Receives a request and returns its id.
+        async fn recv_id(&mut self) -> u64 {
+            let msg = self.rx.next().await.unwrap();
+            serde_json::from_str::<serde_json::Value>(&msg).unwrap()["id"].as_u64().unwrap()
+        }
+
+        fn send(&self, msg: serde_json::Value) {
+            self.tx.unbounded_send(msg.to_string()).unwrap();
+        }
+
+        fn respond(&self, id: u64, result: u64) {
+            self.send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        }
+
+        fn notify(&self, subscription: u64, result: u64) {
+            self.send(json!({
+                "jsonrpc": "2.0",
+                "method": "notif",
+                "params": { "subscription": subscription, "result": result },
+            }));
+        }
+    }
+
+    /// Connects a client to in-memory channels that the test answers.
+    fn connect_raw(builder: ClientBuilder) -> (Client, RawServer) {
+        let (client_tx, rx) = futures::channel::mpsc::unbounded::<String>();
+        let (tx, client_rx) = futures::channel::mpsc::unbounded::<String>();
+        (builder.build(client_rx.map(Ok::<_, BoxError>), client_tx), RawServer { rx, tx })
+    }
+
+    async fn subscribe(client: &Client, server: &mut RawServer, sub_id: u64) -> Subscription<u64> {
+        let (sub, ()) =
+            tokio::join!(client.subscribe("sub", crate::rpc_params![], "unsub"), async {
+                let id = server.recv_id().await;
+                server.respond(id, sub_id);
+            });
+        sub.unwrap()
     }
 
     #[tokio::test]
@@ -506,5 +667,68 @@ mod tests {
         state.add_pending(vec![(3, Pending::Call(tx3)), (4, Pending::Call(tx4))]);
         state.handle(error);
         assert!(rx3.try_recv().unwrap().is_err() && rx4.try_recv().unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn notification_and_disconnect() {
+        let (client, mut server) = connect_raw(ClientBuilder::default());
+        assert_eq!(client.request_timeout(), Duration::from_secs(60));
+
+        client.notification("n", crate::rpc_params![1]).await.unwrap();
+        assert_eq!(
+            server.rx.next().await.unwrap(),
+            r#"{"jsonrpc":"2.0","method":"n","params":[1]}"#
+        );
+
+        assert!(client.is_connected());
+        drop(server);
+        tokio::time::timeout(Duration::from_secs(5), client.on_disconnect()).await.unwrap();
+        assert!(!client.is_connected());
+        let err = client.notification("n", crate::rpc_params![]).await.unwrap_err();
+        assert!(matches!(err, Error::Closed));
+    }
+
+    #[tokio::test]
+    async fn max_concurrent_requests() {
+        let (client, mut server) = connect_raw(ClientBuilder::default().max_concurrent_requests(1));
+        let requests = [client.clone(), client].map(|client| {
+            tokio::spawn(async move { client.request::<u64, _>("m", crate::rpc_params![]).await })
+        });
+
+        let first = server.recv_id().await;
+        assert!(tokio::time::timeout(Duration::from_millis(50), server.rx.next()).await.is_err());
+        server.respond(first, 1);
+        let second = server.recv_id().await;
+        server.respond(second, 1);
+        for request in requests {
+            assert_eq!(request.await.unwrap().unwrap(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn subscription_close_reason() {
+        let (client, mut server) =
+            connect_raw(ClientBuilder::default().max_buffer_capacity_per_subscription(1));
+        let mut lagging = subscribe(&client, &mut server, 1).await;
+        let mut closed = subscribe(&client, &mut server, 2).await;
+        assert_eq!(lagging.close_reason(), None);
+
+        server.notify(1, 10);
+        server.notify(1, 11);
+        // The response arrives after the notifications were handled.
+        let (result, ()) =
+            tokio::join!(client.request::<u64, _>("m", crate::rpc_params![]), async {
+                let id = server.recv_id().await;
+                server.respond(id, 0);
+            });
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(lagging.close_reason(), Some(SubscriptionCloseReason::Lagged));
+        assert_eq!(lagging.next().await.unwrap().unwrap(), 10);
+        assert!(lagging.next().await.is_none());
+
+        assert_eq!(closed.close_reason(), None);
+        drop(server);
+        assert!(closed.next().await.is_none());
+        assert_eq!(closed.close_reason(), Some(SubscriptionCloseReason::ConnectionClosed));
     }
 }
