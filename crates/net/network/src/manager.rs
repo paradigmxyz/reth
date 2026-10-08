@@ -42,7 +42,7 @@ use crate::{
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_chainspec::EnrForkIdEntry;
-use reth_eth_wire::{Capability, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::MemoryBoundedSender;
 use reth_network_api::{
@@ -247,6 +247,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     pub async fn new<C: BlockNumReader + 'static>(
         config: NetworkConfig<C, N>,
     ) -> Result<Self, NetworkError> {
+        config.ensure_snap_compatible()?;
+        let snap_enabled = config.snap_enabled();
+
         let NetworkConfig {
             client,
             secret_key,
@@ -273,17 +276,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             eth_max_message_size,
             required_block_hashes,
         } = config;
-
-        let snap_enabled =
-            hello_message.protocols.iter().any(|protocol| protocol.cap == Capability::snap_2());
-        if snap_enabled &&
-            (!extra_protocols.is_empty() ||
-                hello_message.protocols.iter().any(|protocol| {
-                    protocol.cap.name != "eth" && protocol.cap.name != "snap"
-                }))
-        {
-            return Err(NetworkError::SnapWithExtraProtocols)
-        }
 
         let peers_manager = PeersManager::new(peers_config);
         let peers_handle = peers_manager.handle();
