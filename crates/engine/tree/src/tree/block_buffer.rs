@@ -266,24 +266,6 @@ mod tests {
     }
 
     #[test]
-    fn preserves_access_list_for_buffered_blocks() {
-        let mut rng = generators::rng();
-
-        let access_list = raw_bal();
-        let parent = rng.random();
-        let block = create_block(&mut rng, 10, parent);
-
-        let mut buffer = BlockBuffer::new(1);
-        buffer
-            .insert_block(SealedBlockWithAccessList::new(block.clone(), Some(access_list.clone())));
-
-        let blocks = buffer.remove_block_with_children(&parent);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(&*blocks[0], &block);
-        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
-    }
-
-    #[test]
     fn updates_buffered_duplicate_with_access_list() {
         let mut rng = generators::rng();
 

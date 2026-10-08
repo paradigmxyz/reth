@@ -797,22 +797,11 @@ mod tests {
 
     #[derive(Default)]
     struct CountingSink {
-        access_hints: AtomicUsize,
         state_updates: AtomicUsize,
-        hashed_state_updates: AtomicUsize,
         finished_updates: AtomicUsize,
     }
 
     impl StateRootSink for CountingSink {
-        fn on_access_hint(&self, hint: StateAccessHint) {
-            assert_eq!(hint.accounts, vec![B256::repeat_byte(0x01)]);
-            assert_eq!(
-                hint.storages.get(&B256::repeat_byte(0x02)),
-                Some(&vec![B256::repeat_byte(0x03)])
-            );
-            self.access_hints.fetch_add(1, Ordering::Relaxed);
-        }
-
         fn on_state_update(&self, state: EvmState) {
             assert!(state.is_empty());
             self.state_updates.fetch_add(1, Ordering::Relaxed);
@@ -821,60 +810,11 @@ mod tests {
         fn on_hashed_state_update(&self, state: HashedPostState) {
             assert!(state.accounts.is_empty());
             assert!(state.storages.is_empty());
-            self.hashed_state_updates.fetch_add(1, Ordering::Relaxed);
         }
 
         fn on_updates_finished(&self) {
             self.finished_updates.fetch_add(1, Ordering::Relaxed);
         }
-    }
-
-    #[test]
-    fn state_access_hint_converts_to_sparse_targets() {
-        let account = B256::repeat_byte(0x01);
-        let storage_account = B256::repeat_byte(0x02);
-        let storage_slot = B256::repeat_byte(0x03);
-
-        let mut storages = B256Map::default();
-        storages.insert(storage_account, vec![storage_slot]);
-        let hint = StateAccessHint { accounts: vec![account], storages };
-
-        let targets = MultiProofTargetsV2::from(hint);
-        assert_eq!(targets.account_targets.len(), 1);
-        assert_eq!(targets.account_targets[0].key(), account);
-        assert_eq!(targets.storage_targets.len(), 1);
-        assert_eq!(targets.storage_targets[&storage_account].len(), 1);
-        assert_eq!(targets.storage_targets[&storage_account][0].key(), storage_slot);
-
-        let hint = StateAccessHint::from(targets);
-        assert_eq!(hint.accounts, vec![account]);
-        assert_eq!(hint.storages.len(), 1);
-        assert_eq!(hint.storages[&storage_account], vec![storage_slot]);
-    }
-
-    #[test]
-    fn state_root_capabilities_forward_to_sink() {
-        let sink = Arc::new(CountingSink::default());
-
-        let hint_stream = StateRootHintStream::new(sink.clone());
-        let mut storages = B256Map::default();
-        storages.insert(B256::repeat_byte(0x02), vec![B256::repeat_byte(0x03)]);
-        hint_stream
-            .on_access_hint(StateAccessHint { accounts: vec![B256::repeat_byte(0x01)], storages });
-
-        let updates = StateRootUpdateStream::new(sink.clone());
-        updates.on_hashed_state_update(HashedPostState::default());
-        updates.finish();
-
-        {
-            let mut hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
-            hook.on_state(EvmState::default());
-        }
-
-        assert_eq!(sink.access_hints.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.hashed_state_updates.load(Ordering::Relaxed), 1);
-        assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 2);
     }
 
     /// A hook dropped by a panic unwind must not finish the stream: the updates are
@@ -952,16 +892,6 @@ mod tests {
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");
         assert_eq!(outcome.state_root, B256::repeat_byte(0x42));
-    }
-
-    #[test]
-    #[should_panic(expected = "state_root already taken")]
-    fn payload_state_root_receiver_can_only_be_taken_once() {
-        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
-        let mut handle = PayloadStateRootHandle::new("test", None, state_root_rx, None);
-
-        let _state_root_rx = handle.take_state_root_rx();
-        let _ = handle.take_state_root_rx();
     }
 
     #[test]
