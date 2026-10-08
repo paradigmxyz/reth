@@ -722,6 +722,21 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 }
 
+// The derived drop recurses once per ancestor released here, which can overflow the stack on deep
+// in-memory chains, so detach parents in a loop instead.
+impl<N: NodePrimitives> Drop for BlockState<N> {
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(state) = parent {
+            // A shared parent is left to its last owner, which continues the drain. Unlike
+            // `try_unwrap`, `into_inner` hands it to exactly one of several concurrent releasers.
+            let Some(mut state) = Arc::into_inner(state) else { break };
+            // Detach the next parent so dropping `state` here doesn't recurse.
+            parent = state.parent.take();
+        }
+    }
+}
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
@@ -1488,5 +1503,39 @@ mod tests {
         assert_eq!(block.hash(), block1.recovered_block.hash());
         assert_eq!(Some(bal), block1.bal());
         assert!(blocks_and_bals.next().is_none());
+    }
+
+    fn block_state_chain(depth: usize, mut parent: Option<Arc<BlockState>>) -> Arc<BlockState> {
+        let block = ExecutedBlock::default();
+        for _ in 0..depth {
+            parent = Some(Arc::new(BlockState::with_parent(block.clone(), parent)));
+        }
+        parent.expect("nonempty chain")
+    }
+
+    #[test]
+    fn deep_chain_drop_preserves_shared_tail() {
+        const DEPTH: usize = 100_000;
+
+        // A recursive drop of either chain would overflow this stack.
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let tail = block_state_chain(DEPTH, None);
+                let tail_payload = Arc::downgrade(&tail.block_ref().execution_output);
+                let head = block_state_chain(DEPTH, Some(tail.clone()));
+                let head_payload = Arc::downgrade(&head.block_ref().execution_output);
+
+                drop(head);
+                assert_eq!(head_payload.strong_count(), 0);
+                assert_eq!(Arc::strong_count(&tail), 1);
+                assert_eq!(tail_payload.strong_count(), DEPTH);
+
+                drop(tail);
+                assert_eq!(tail_payload.strong_count(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
