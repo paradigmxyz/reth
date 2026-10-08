@@ -32,6 +32,24 @@ impl<T: ToString> From<T> for StringError {
     }
 }
 
+/// Converts the output of a subscription callback into a [`SubscriptionResult`].
+pub trait IntoSubscriptionResult {
+    /// Converts `self` into a [`SubscriptionResult`].
+    fn into_subscription_result(self) -> SubscriptionResult;
+}
+
+impl IntoSubscriptionResult for () {
+    fn into_subscription_result(self) -> SubscriptionResult {
+        Ok(())
+    }
+}
+
+impl IntoSubscriptionResult for SubscriptionResult {
+    fn into_subscription_result(self) -> SubscriptionResult {
+        self
+    }
+}
+
 /// Generates subscription ids.
 pub trait IdProvider: Send + Sync + fmt::Debug {
     /// Returns the next subscription id.
@@ -182,6 +200,16 @@ impl PendingSubscriptionSink {
     pub fn reject(self, err: impl Into<ErrorObject>) {
         let _ = self.respond.send(MethodResponse::error(self.id, err));
     }
+
+    /// Returns the method name used for notifications.
+    pub const fn method_name(&self) -> &'static str {
+        self.method
+    }
+
+    /// Returns the subscription id.
+    pub const fn subscription_id(&self) -> &SubscriptionId {
+        &self.sub_id
+    }
 }
 
 /// An accepted subscription.
@@ -223,6 +251,16 @@ impl SubscriptionSink {
     /// Returns `true` if the subscription or the connection is closed.
     pub fn is_closed(&self) -> bool {
         self.close.is_closed() || self.conn.tx.is_closed()
+    }
+
+    /// Returns the method name used for notifications.
+    pub const fn method_name(&self) -> &'static str {
+        self.method
+    }
+
+    /// Returns the subscription id.
+    pub const fn subscription_id(&self) -> &SubscriptionId {
+        &self.sub_id
     }
 }
 

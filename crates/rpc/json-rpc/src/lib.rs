@@ -51,8 +51,9 @@ pub use response::MethodResponse;
 
 mod subscription;
 pub use subscription::{
-    DisconnectError, IdProvider, PendingSubscriptionSink, RandomIntegerIdProvider,
-    RandomStringIdProvider, StringError, SubscriptionResult, SubscriptionSink,
+    DisconnectError, IdProvider, IntoSubscriptionResult, PendingSubscriptionSink,
+    RandomIntegerIdProvider, RandomStringIdProvider, StringError, SubscriptionResult,
+    SubscriptionSink,
 };
 
 #[cfg(feature = "client")]

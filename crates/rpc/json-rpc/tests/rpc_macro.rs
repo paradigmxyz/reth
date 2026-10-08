@@ -138,6 +138,27 @@ async fn server_and_client() {
     assert!(matches!(res, Err(Error::Call(err)) if err.code() == INVALID_PARAMS_CODE));
 }
 
+#[tokio::test]
+async fn named_params() {
+    let module = TestImpl.into_rpc();
+    for (params, response) in [
+        (r#"{"a":1,"b":2}"#, r#""result":3"#),
+        (r#"{"b":2,"a":1,"c":0}"#, r#""result":3"#),
+        (r#"{"a":1}"#, r#""result":1"#),
+        (
+            r#"{"b":2}"#,
+            r#""error":{"code":-32602,"message":"Invalid params","data":"Missing param \"a\""}"#,
+        ),
+    ] {
+        let request =
+            format!(r#"{{"jsonrpc":"2.0","id":1,"method":"test_add","params":{params}}}"#);
+        assert_eq!(
+            module.raw_json_request(&request).await.unwrap(),
+            format!(r#"{{"jsonrpc":"2.0","id":1,{response}}}"#)
+        );
+    }
+}
+
 /// Subscriptions accepted while all response slots are taken do not wait for each other.
 #[tokio::test]
 async fn pipelined_subscriptions() {

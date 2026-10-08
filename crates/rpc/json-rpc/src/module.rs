@@ -1,6 +1,6 @@
 use crate::{
-    connection::handle_message, ErrorObject, Id, MethodResponse, Params, PendingSubscriptionSink,
-    RpcService, SubscriptionResult,
+    connection::handle_message, ErrorObject, Id, IntoSubscriptionResult, MethodResponse, Params,
+    PendingSubscriptionSink, RpcService,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
@@ -62,7 +62,7 @@ impl RpcModule {
     ///
     /// `notification` is the method name of notifications. Errors returned by the callback are
     /// logged.
-    pub fn register_subscription<F, Fut>(
+    pub fn register_subscription<R, F, Fut>(
         &mut self,
         subscribe: &'static str,
         notification: &'static str,
@@ -70,8 +70,33 @@ impl RpcModule {
         callback: F,
     ) -> Result<(), RegisterMethodError>
     where
+        R: IntoSubscriptionResult,
         F: Fn(Params, PendingSubscriptionSink) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = SubscriptionResult> + Send + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+    {
+        self.register_subscription_raw(subscribe, notification, unsubscribe, move |params, pending| {
+            let fut = callback(params, pending);
+            tokio::spawn(async move {
+                if let Err(err) = fut.await.into_subscription_result() {
+                    tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
+                }
+            });
+        })
+    }
+
+    /// Registers a subscription whose callback runs on the connection task.
+    ///
+    /// The callback must not block; it is expected to spawn a task that drives the subscription.
+    pub fn register_subscription_raw<R, F>(
+        &mut self,
+        subscribe: &'static str,
+        notification: &'static str,
+        unsubscribe: &'static str,
+        callback: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        R: IntoSubscriptionResult,
+        F: Fn(Params, PendingSubscriptionSink) -> R + Send + Sync + 'static,
     {
         if subscribe == unsubscribe {
             return Err(RegisterMethodError::SubscriptionNameConflict(subscribe.into()))
@@ -86,12 +111,9 @@ impl RpcModule {
                 notification,
                 unsubscribe,
                 callback: Arc::new(move |params, pending| {
-                    let fut = callback(params, pending);
-                    tokio::spawn(async move {
-                        if let Err(err) = fut.await {
-                            tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
-                        }
-                    });
+                    if let Err(err) = callback(params, pending).into_subscription_result() {
+                        tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
+                    }
                 }),
             },
         )

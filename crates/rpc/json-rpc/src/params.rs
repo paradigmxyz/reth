@@ -1,5 +1,8 @@
 use crate::{invalid_params, ByteStr, ErrorObject};
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
+use serde_json::value::RawValue;
+use std::{borrow::Cow, slice};
 
 /// Raw JSON parameters of a request.
 #[derive(Clone, Debug, Default)]
@@ -33,44 +36,84 @@ impl Params {
 
     /// Returns an iterator-like parser over positional parameters.
     pub fn sequence(&self) -> ParamsSequence<'_> {
-        ParamsSequence(self.as_str().map(str::trim_start).unwrap_or(""))
+        ParamsSequence(Seq::Array(self.as_str().map(str::trim_start).unwrap_or("")))
+    }
+
+    /// Returns an iterator-like parser over parameters given either by position or by name.
+    ///
+    /// Each entry of `names` lists the keys accepted for the parameter at that position when the
+    /// parameters are a JSON object. Unknown keys are ignored.
+    pub fn sequence_named<'a>(
+        &'a self,
+        names: &'a [&'a [&'a str]],
+    ) -> Result<ParamsSequence<'a>, ErrorObject> {
+        match self.as_str().map(str::trim_start) {
+            Some(json) if json.starts_with('{') => {
+                let values = serde_json::from_str(json).map_err(invalid_params)?;
+                Ok(ParamsSequence(Seq::Object { values, names: names.iter() }))
+            }
+            _ => Ok(self.sequence()),
+        }
     }
 }
 
-/// Positional parameter parser created by [`Params::sequence`].
-#[derive(Clone, Copy, Debug)]
-pub struct ParamsSequence<'a>(&'a str);
+/// Parameter parser created by [`Params::sequence`] or [`Params::sequence_named`].
+#[derive(Clone, Debug)]
+pub struct ParamsSequence<'a>(Seq<'a>);
+
+#[derive(Clone, Debug)]
+enum Seq<'a> {
+    Array(&'a str),
+    Object { values: FxHashMap<Cow<'a, str>, &'a RawValue>, names: slice::Iter<'a, &'a [&'a str]> },
+}
 
 impl<'a> ParamsSequence<'a> {
-    fn next_inner<T: Deserialize<'a>>(&mut self) -> Option<Result<T, ErrorObject>> {
-        let mut json = self.0;
-        match json.as_bytes().first()? {
-            b']' => {
-                self.0 = "";
-                return None
+    /// Parses the next parameter, returning `None` if it is missing.
+    fn next_inner<T: Deserialize<'a>>(&mut self) -> Result<Option<T>, ErrorObject> {
+        let json = match &mut self.0 {
+            Seq::Array(json) => json,
+            Seq::Object { values, names } => {
+                let Some(raw) =
+                    names.next().and_then(|keys| keys.iter().find_map(|k| values.get(*k)))
+                else {
+                    return Ok(None)
+                };
+                return serde_json::from_str(raw.get()).map(Some).map_err(invalid_params)
             }
-            b'[' if json[1..].trim_start().starts_with(']') => {
-                self.0 = "";
-                return None
+        };
+        let mut rest = *json;
+        match rest.as_bytes().first() {
+            None => return Ok(None),
+            Some(b']') => {
+                *json = "";
+                return Ok(None)
             }
-            b'[' | b',' => json = &json[1..],
-            _ => {
-                self.0 = "";
-                return Some(Err(invalid_params(format_args!(
-                    "Expected one of '[', ']' or ',' but found {json:?}"
-                ))));
+            Some(b'[') if rest[1..].trim_start().starts_with(']') => {
+                *json = "";
+                return Ok(None)
+            }
+            Some(b'[' | b',') => rest = &rest[1..],
+            Some(_) => {
+                *json = "";
+                return Err(invalid_params(format_args!(
+                    "Expected one of '[', ']' or ',' but found {rest:?}"
+                )));
             }
         }
 
-        let mut iter = serde_json::Deserializer::from_str(json).into_iter::<T>();
-        match iter.next()? {
-            Ok(value) => {
-                self.0 = json[iter.byte_offset()..].trim_start();
-                Some(Ok(value))
+        let mut iter = serde_json::Deserializer::from_str(rest).into_iter::<T>();
+        match iter.next() {
+            None => {
+                *json = "";
+                Ok(None)
             }
-            Err(err) => {
-                self.0 = "";
-                Some(Err(invalid_params(err)))
+            Some(Ok(value)) => {
+                *json = rest[iter.byte_offset()..].trim_start();
+                Ok(Some(value))
+            }
+            Some(Err(err)) => {
+                *json = "";
+                Err(invalid_params(err))
             }
         }
     }
@@ -78,12 +121,19 @@ impl<'a> ParamsSequence<'a> {
     /// Parses the next parameter.
     #[expect(clippy::should_implement_trait)]
     pub fn next<T: Deserialize<'a>>(&mut self) -> Result<T, ErrorObject> {
-        self.next_inner().unwrap_or_else(|| Err(invalid_params("No more params")))
+        let name = match &self.0 {
+            Seq::Array(_) => None,
+            Seq::Object { names, .. } => names.as_slice().first().and_then(|keys| keys.first()),
+        };
+        self.next_inner()?.ok_or_else(|| match name {
+            Some(name) => invalid_params(format_args!("Missing param {name:?}")),
+            None => invalid_params("No more params"),
+        })
     }
 
     /// Parses the next optional parameter, returning `None` for `null` or missing values.
     pub fn optional_next<T: Deserialize<'a>>(&mut self) -> Result<Option<T>, ErrorObject> {
-        self.next_inner::<Option<T>>().unwrap_or(Ok(None))
+        self.next_inner::<Option<T>>().map(Option::flatten)
     }
 }
 
@@ -118,6 +168,32 @@ mod tests {
         let p = Params::new(None);
         assert_eq!(p.sequence().optional_next::<u8>().unwrap(), None);
         assert!(p.sequence().next::<u8>().is_err());
+    }
+
+    #[test]
+    fn sequence_named() {
+        const NAMES: &[&[&str]] = &[&["block_number", "blockNumber"], &["full"], &["extra"]];
+
+        let p = params(r#"{"blockNumber": 5, "full": true, "unknown": 1}"#);
+        let mut seq = p.sequence_named(NAMES).unwrap();
+        assert_eq!(seq.next::<u64>().unwrap(), 5);
+        assert!(seq.next::<bool>().unwrap());
+        assert_eq!(seq.optional_next::<u8>().unwrap(), None);
+        assert!(seq.next::<u8>().is_err());
+
+        let p = params(r#"{"full": true}"#);
+        let mut seq = p.sequence_named(NAMES).unwrap();
+        assert_eq!(
+            seq.next::<u64>().unwrap_err().data().unwrap().get(),
+            r#""Missing param \"block_number\"""#
+        );
+
+        let p = params("[5, true]");
+        let mut seq = p.sequence_named(NAMES).unwrap();
+        assert_eq!(seq.next::<u64>().unwrap(), 5);
+        assert!(seq.next::<bool>().unwrap());
+
+        assert!(params(r#"{"full": tru}"#).sequence_named(NAMES).is_err());
     }
 
     #[test]

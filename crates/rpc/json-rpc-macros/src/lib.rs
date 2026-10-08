@@ -5,9 +5,9 @@ use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, ToTokens};
 use std::collections::HashSet;
 use syn::{
-    bracketed, meta::ParseNestedMeta, parenthesized, parse::Parse, parse_macro_input, parse_quote,
-    Attribute, FnArg, GenericArgument, Ident, ItemTrait, LitStr, Pat, PathArguments, ReturnType,
-    Token, TraitItem, TraitItemFn, Type, WherePredicate,
+    bracketed, ext::IdentExt, meta::ParseNestedMeta, parenthesized, parse::Parse,
+    parse_macro_input, parse_quote, Attribute, FnArg, GenericArgument, Ident, ItemTrait, LitStr,
+    Pat, PathArguments, ReturnType, Token, TraitItem, TraitItemFn, Type, WherePredicate,
 };
 
 /// Generates `{Trait}Server` and `{Trait}Client` traits from an RPC API definition.
@@ -468,10 +468,39 @@ fn parse_args(args: &[(Ident, Type)], on_err: &TokenStream2) -> TokenStream2 {
             };
         }
     });
+    let names = args.iter().map(|(ident, _)| {
+        let name = ident.unraw().to_string();
+        let camel = lower_camel_case(&name);
+        if camel == name {
+            quote!(&[#name])
+        } else {
+            quote!(&[#name, #camel])
+        }
+    });
     quote! {
-        let mut __seq = __params.sequence();
+        let mut __seq = match __params.sequence_named(&[#(#names),*]) {
+            ::core::result::Result::Ok(seq) => seq,
+            ::core::result::Result::Err(__err) => #on_err,
+        };
         #(#lets)*
     }
+}
+
+/// Converts a `snake_case` name to `lowerCamelCase`.
+fn lower_camel_case(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut upper = false;
+    for c in name.trim_start_matches('_').chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.extend(c.to_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn is_option(ty: &Type) -> bool {

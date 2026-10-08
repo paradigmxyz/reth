@@ -1,9 +1,9 @@
 //! IPC client.
 
 use crate::stream_codec::StreamCodec;
-use futures::TryFutureExt;
+use futures::{Sink, Stream, TryFutureExt};
 use interprocess::local_socket::{tokio::prelude::*, GenericFilePath};
-use reth_json_rpc::client::{Client, ClientBuilder};
+use reth_json_rpc::client::{BoxError, Client, ClientBuilder};
 use std::{io, time::Duration};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -38,10 +38,22 @@ impl IpcClientBuilder {
             .await
             .map_err(|err| IpcError::FailedToConnect { path: name.to_string(), err })?;
         let (recv, send) = conn.split();
-        Ok(ClientBuilder::default().request_timeout(self.request_timeout).build(
+        Ok(self.build_with_tokio(
             FramedRead::new(recv, StreamCodec::stream_incoming()),
             FramedWrite::new(send, StreamCodec::stream_incoming()),
         ))
+    }
+
+    /// Creates a client that reads messages from `reader` and writes them to `writer`.
+    pub fn build_with_tokio<R, T, E, W>(self, reader: R, writer: W) -> Client
+    where
+        R: Stream<Item = Result<T, E>> + Send + Unpin + 'static,
+        T: AsRef<[u8]> + Send + 'static,
+        E: Into<BoxError> + Send + 'static,
+        W: Sink<String> + Send + Unpin + 'static,
+        W::Error: Into<BoxError> + Send + 'static,
+    {
+        ClientBuilder::default().request_timeout(self.request_timeout).build(reader, writer)
     }
 
     /// Set request timeout (default is 60 seconds).
