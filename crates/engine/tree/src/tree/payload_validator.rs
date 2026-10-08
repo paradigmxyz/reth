@@ -1571,10 +1571,10 @@ where
             // Record sizes of the computed trie data
             block_validation_metrics
                 .hashed_post_state_size
-                .record(computed.sorted.hashed_state.total_len() as f64);
+                .record(computed.hashed_state.total_len() as f64);
             block_validation_metrics
                 .trie_updates_sorted_size
-                .record(computed.sorted.trie_updates.total_len() as f64);
+                .record(computed.trie_updates.total_len() as f64);
         };
 
         // Spawn task that computes trie data asynchronously.

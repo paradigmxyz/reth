@@ -1,4 +1,4 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::storage_proof::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
@@ -52,8 +52,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// The receiver for the storage proof result. This is an `Option` so that `encode` can
         /// take ownership of the receiver, preventing the `Drop` impl from trying to receive on
         /// it again.
-        proof_result_rx:
-            Option<Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>>,
+        proof_result_rx: Option<CrossbeamReceiver<StorageProofResultMessage>>,
         /// Shared storage proof results.
         storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
         /// Shared stats for tracking wait time and counts.
@@ -87,11 +86,9 @@ impl<TC, HC> Drop for AsyncAccountDeferredValueEncoder<TC, HC> {
             let Some(proof_result_rx) = proof_result_rx.take() else { return };
 
             (|| -> Result<(), StateProofError> {
-                let rx = proof_result_rx?;
-
                 collect_storage_proof(
                     *hashed_address,
-                    &rx,
+                    &proof_result_rx,
                     &mut storage_proof_results.borrow_mut(),
                     &mut stats.borrow_mut(),
                 )?;
@@ -131,7 +128,7 @@ where
                     .expect("encode called on already-consumed Dispatched encoder");
                 let root = collect_storage_proof(
                     hashed_address,
-                    &proof_result_rx?,
+                    &proof_result_rx,
                     &mut storage_proof_results.borrow_mut(),
                     &mut stats.borrow_mut(),
                 )?;
@@ -266,7 +263,7 @@ where
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
-                proof_result_rx: Some(Ok(rx)),
+                proof_result_rx: Some(rx),
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
