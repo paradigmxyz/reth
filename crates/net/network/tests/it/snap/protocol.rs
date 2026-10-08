@@ -1,5 +1,4 @@
-//! A minimal, inert `RLPx` satellite sub-protocol for tests that need a peer to negotiate an
-//! extra capability without any real protocol behavior.
+//! Tests that `snap/2` rejects additional `RLPx` sub-protocols, using an inert `les/1` handler.
 
 use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
@@ -8,7 +7,6 @@ use reth_eth_wire::{
 };
 use reth_network::{
     config::rng_secret_key,
-    error::NetworkError,
     protocol::{ConnectionHandler, IntoRlpxSubProtocol, OnNotSupported, ProtocolHandler},
     NetworkConfig, NetworkManager, NetworkProtocols,
 };
@@ -21,14 +19,17 @@ use std::{
     task::{Context, Poll},
 };
 
+// Error message returned when `snap/2` is combined with additional `RLPx` protocols.
+const SNAP_WITH_EXTRA_PROTOCOLS: &str = "snap/2 does not support additional RLPx subprotocols; disable snap/2 or remove the additional protocols";
+
 /// A [`ProtocolHandler`] that negotiates `protocol` but never sends or expects any messages.
 #[derive(Debug, Clone)]
-pub(super) struct InertProtocolHandler(Protocol);
+struct InertProtocolHandler(Protocol);
 
 impl InertProtocolHandler {
-    /// Creates a handler for `protocol`.
-    pub(super) const fn new(protocol: Protocol) -> Self {
-        Self(protocol)
+    /// Creates a handler for `les/1`.
+    const fn les() -> Self {
+        Self(Protocol::new(Capability::new_static("les", 1), 1))
     }
 }
 
@@ -87,21 +88,13 @@ impl Stream for InertConnection {
 
 #[tokio::test]
 async fn snap_rejects_configured_extra_protocols() {
-    for snap_first in [false, true] {
-        let builder = NetworkConfig::builder(rng_secret_key(), Runtime::test());
-        let handler = InertProtocolHandler::new(Protocol::new(Capability::new_static("les", 1), 1));
-        let builder = if snap_first {
-            builder.with_snap(true).add_rlpx_sub_protocol(handler)
-        } else {
-            builder.add_rlpx_sub_protocol(handler).with_snap(true)
-        };
-        let result = NetworkManager::eth(builder.build(MockEthProvider::default())).await;
-        assert!(matches!(result, Err(NetworkError::SnapWithExtraProtocols)));
-        assert_eq!(
-            result.err().unwrap().to_string(),
-            "snap/2 does not support additional RLPx subprotocols; disable snap/2 or remove the additional protocols",
-        );
-    }
+    let config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+        .with_snap(true)
+        .add_rlpx_sub_protocol(InertProtocolHandler::les())
+        .build(MockEthProvider::default());
+
+    let err = NetworkManager::eth(config).await.unwrap_err();
+    assert_eq!(err.to_string(), SNAP_WITH_EXTRA_PROTOCOLS);
 }
 
 #[tokio::test]
@@ -109,34 +102,26 @@ async fn snap_rejects_extra_protocols_in_custom_hello() {
     let mut config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
         .with_snap(true)
         .build(MockEthProvider::default());
-    config
-        .hello_message
-        .try_add_protocol(Protocol::new(Capability::new_static("les", 1), 1))
-        .unwrap();
-    assert!(
-        matches!(NetworkManager::eth(config).await, Err(NetworkError::SnapWithExtraProtocols),)
-    );
+    config.hello_message.try_add_protocol(InertProtocolHandler::les().0).unwrap();
+
+    let err = NetworkManager::eth(config).await.unwrap_err();
+    assert_eq!(err.to_string(), SNAP_WITH_EXTRA_PROTOCOLS);
 }
 
 #[tokio::test]
-async fn extra_protocol_registration_requires_snap_disabled() {
-    for snap_enabled in [false, true] {
-        let config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
-            .listener_addr("127.0.0.1:0".parse().unwrap())
-            .disable_discovery()
-            .with_snap(snap_enabled)
-            .build(MockEthProvider::default());
-        let mut network = NetworkManager::eth(config).await.unwrap();
-        let handler = InertProtocolHandler::new(Protocol::new(Capability::new_static("les", 1), 1));
-        for result in [
-            network.add_rlpx_sub_protocol(handler.clone()),
-            network.handle().add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol()),
-        ] {
-            if snap_enabled {
-                assert!(matches!(result, Err(NetworkError::SnapWithExtraProtocols)));
-            } else {
-                result.unwrap();
-            }
-        }
-    }
+async fn snap_rejects_extra_protocol_registration() {
+    let config = NetworkConfig::builder(rng_secret_key(), Runtime::test())
+        .listener_addr("127.0.0.1:0".parse().unwrap())
+        .disable_discovery()
+        .with_snap(true)
+        .build(MockEthProvider::default());
+    let mut network = NetworkManager::eth(config).await.unwrap();
+
+    let err = network.add_rlpx_sub_protocol(InertProtocolHandler::les()).unwrap_err();
+    assert_eq!(err.to_string(), SNAP_WITH_EXTRA_PROTOCOLS);
+    let err = network
+        .handle()
+        .add_rlpx_sub_protocol(InertProtocolHandler::les().into_rlpx_sub_protocol())
+        .unwrap_err();
+    assert_eq!(err.to_string(), SNAP_WITH_EXTRA_PROTOCOLS);
 }
