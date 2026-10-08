@@ -6,7 +6,7 @@ use serde_json::value::RawValue;
 use std::{fmt::Write as _, future::Future};
 
 mod async_client;
-pub use async_client::{Client, ClientBuilder, Subscription};
+pub use async_client::{Client, ClientBuilder, Subscription, SubscriptionCloseReason};
 
 #[cfg(feature = "http-client")]
 mod http;
@@ -16,7 +16,7 @@ pub use http::{HttpClient, HttpClientBuilder};
 #[cfg(feature = "ws-client")]
 mod ws;
 #[cfg(feature = "ws-client")]
-pub use ws::{WsClient, WsClientBuilder};
+pub use ws::{PingConfig, WsClient, WsClientBuilder};
 
 /// Boxed error type of transports.
 pub type BoxError = Box<dyn core::error::Error + Send + Sync>;
@@ -63,6 +63,15 @@ pub trait ClientT: Send + Sync {
     ) -> impl Future<Output = Result<Vec<Result<R, ErrorObject>>, Error>> + Send
     where
         R: DeserializeOwned;
+
+    /// Sends a notification, which gets no response.
+    fn notification<P>(
+        &self,
+        method: &str,
+        params: P,
+    ) -> impl Future<Output = Result<(), Error>> + Send
+    where
+        P: ToRpcParams + Send;
 }
 
 /// A JSON-RPC client that supports subscriptions.
@@ -150,6 +159,37 @@ impl ToRpcParams for ArrayParams {
     }
 }
 
+/// Named parameters.
+#[derive(Clone, Debug, Default)]
+pub struct ObjectParams(String);
+
+impl ObjectParams {
+    /// Creates empty parameters.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts a parameter.
+    pub fn insert<P: Serialize>(&mut self, name: &str, value: P) -> Result<(), serde_json::Error> {
+        self.0.push(if self.0.is_empty() { '{' } else { ',' });
+        // SAFETY: `serde_json` only writes valid UTF-8.
+        let buf = unsafe { self.0.as_mut_vec() };
+        serde_json::to_writer(&mut *buf, name)?;
+        buf.push(b':');
+        serde_json::to_writer(buf, &value)
+    }
+}
+
+impl ToRpcParams for ObjectParams {
+    fn to_rpc_params(mut self) -> Result<Option<Box<RawValue>>, serde_json::Error> {
+        if self.0.is_empty() {
+            return Ok(None)
+        }
+        self.0.push('}');
+        RawValue::from_string(self.0).map(Some)
+    }
+}
+
 /// Builds [`ArrayParams`] from the given values, panicking if any fails to serialize.
 #[macro_export]
 macro_rules! rpc_params {
@@ -193,7 +233,19 @@ impl BatchRequestBuilder {
 
 /// Serializes a request with the given id.
 fn write_request(buf: &mut String, id: u64, method: &str, params: Option<&RawValue>) {
-    let _ = write!(buf, r#"{{"jsonrpc":"2.0","id":{id},"method":"#);
+    let _ = write!(buf, r#"{{"jsonrpc":"2.0","id":{id},"#);
+    write_call(buf, method, params);
+}
+
+/// Serializes a notification.
+fn write_notification(buf: &mut String, method: &str, params: Option<&RawValue>) {
+    buf.push_str(r#"{"jsonrpc":"2.0","#);
+    write_call(buf, method, params);
+}
+
+/// Serializes the method and parameters of a request and closes it.
+fn write_call(buf: &mut String, method: &str, params: Option<&RawValue>) {
+    buf.push_str(r#""method":"#);
     // SAFETY: `serde_json` only writes valid UTF-8.
     let _ = serde_json::to_writer(unsafe { buf.as_mut_vec() }, method);
     if let Some(params) = params {
@@ -291,6 +343,19 @@ mod tests {
             write_batch(&batch, 3),
             r#"[{"jsonrpc":"2.0","id":3,"method":"a"},{"jsonrpc":"2.0","id":4,"method":"b","params":[1]}]"#
         );
+
+        let mut buf = String::new();
+        write_notification(&mut buf, "n", None);
+        assert_eq!(buf, r#"{"jsonrpc":"2.0","method":"n"}"#);
+    }
+
+    #[test]
+    fn object_params() {
+        assert!(ObjectParams::new().to_rpc_params().unwrap().is_none());
+        let mut params = ObjectParams::new();
+        params.insert("a", 1).unwrap();
+        params.insert("b\"", ["x"]).unwrap();
+        assert_eq!(params.to_rpc_params().unwrap().unwrap().get(), r#"{"a":1,"b\"":["x"]}"#);
     }
 
     #[test]
