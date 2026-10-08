@@ -1,13 +1,18 @@
 use crate::{
-    error::exceeded_limit,
+    reject_too_big_batch_request, reject_too_big_request,
     request::{parse_message, split_batch, Message},
     response::batch_json,
     subscription::Connection,
-    Id, MethodResponse, RpcModule, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
-    StopHandle, OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG,
+    BatchRequestConfig, ConnectionId, ErrorObject, Id, MethodResponse, RpcModule, RpcService,
+    RpcServiceBuilder, RpcServiceT, ServerConfig, StopHandle, BATCHES_NOT_SUPPORTED_CODE,
+    BATCHES_NOT_SUPPORTED_MSG,
 };
 use bytes::Bytes;
-use futures_util::{Sink, SinkExt, Stream, StreamExt};
+use futures_util::{
+    future::{join, join_all},
+    Sink, SinkExt, Stream, StreamExt,
+};
+use http::Extensions;
 use std::sync::Arc;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -18,7 +23,8 @@ use tower::Layer;
 /// Serves JSON-RPC messages read from `reader` and writes responses and notifications to
 /// `writer`, until either closes or the server stops.
 ///
-/// Calls run concurrently and are aborted when the connection ends.
+/// Calls run concurrently and are aborted when the connection ends. `extensions` are attached to
+/// every request, together with a new [`ConnectionId`] unless they already contain one.
 pub async fn serve_connection<R, W, L>(
     mut reader: R,
     writer: W,
@@ -26,6 +32,7 @@ pub async fn serve_connection<R, W, L>(
     rpc_middleware: &RpcServiceBuilder<L>,
     config: &ServerConfig,
     stop: StopHandle,
+    mut extensions: Extensions,
 ) where
     R: Stream<Item = Bytes> + Unpin,
     W: Sink<String> + Unpin,
@@ -33,13 +40,17 @@ pub async fn serve_connection<R, W, L>(
     L::Service: RpcServiceT + 'static,
 {
     let (tx, mut rx) = mpsc::channel::<String>(config.message_buffer_capacity.max(1) as usize);
+    let conn_id = *extensions.get_or_insert_with(ConnectionId::next);
+    let extensions = Arc::new(extensions);
     let conn = Arc::new(Connection::new(
+        conn_id,
         tx.clone(),
         config.max_subscriptions_per_connection,
         config.id_provider.clone(),
     ));
     let max_request_size = config.max_request_body_size as usize;
     let max_response_size = config.max_response_body_size as usize;
+    let batch_config = config.batch_config;
     let service =
         Arc::new(rpc_middleware.service(RpcService::new(methods, max_response_size, Some(conn))));
     let mut calls = JoinSet::new();
@@ -50,15 +61,16 @@ pub async fn serve_connection<R, W, L>(
             // Reserve the response slot first to apply backpressure on the reader.
             let Ok(permit) = tx.clone().reserve_owned().await else { break };
             if msg.len() > max_request_size {
-                let err =
-                    exceeded_limit(OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG, max_request_size);
+                let err = reject_too_big_request(max_request_size);
                 permit.send(MethodResponse::error(Id::Null, err).into_json());
                 continue
             }
             let service = service.clone();
+            let extensions = extensions.clone();
             calls.spawn(async move {
                 if let Some((json, on_sent)) =
-                    handle_message(&*service, msg, max_response_size).await
+                    handle_message(&*service, msg, max_response_size, batch_config, &extensions)
+                        .await
                 {
                     permit.send(json);
                     for tx in on_sent {
@@ -97,18 +109,24 @@ pub async fn serve_connection<R, W, L>(
 
 /// Handles a single message or batch, returning the response to send, if any.
 ///
-/// The returned senders must be notified once the response was queued on the connection.
+/// `extensions` are attached to every call and notification. The returned senders must be
+/// notified once the response was queued on the connection.
 pub(crate) async fn handle_message<S: RpcServiceT>(
     service: &S,
     msg: Bytes,
     max_response_size: usize,
+    batch_config: BatchRequestConfig,
+    extensions: &Extensions,
 ) -> Option<(String, Vec<oneshot::Sender<()>>)> {
     let mut on_sent = Vec::new();
     let entries = match split_batch(&msg) {
         None => {
-            let response = match parse_message(&msg) {
+            let response = match parse_message(&msg, extensions) {
                 Message::Call(req) => service.call(req).await,
-                Message::Notification => return None,
+                Message::Notification(n) => {
+                    service.notification(n).await;
+                    return None
+                }
                 Message::Invalid(id, code) => MethodResponse::error(id, code),
             };
             return Some((response.into_json_with(&mut on_sent), on_sent))
@@ -118,24 +136,100 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
             return Some((MethodResponse::error(Id::Null, code).into_json(), on_sent))
         }
     };
+    let err = match batch_config {
+        BatchRequestConfig::Disabled => {
+            Some(ErrorObject::borrowed(BATCHES_NOT_SUPPORTED_CODE, BATCHES_NOT_SUPPORTED_MSG))
+        }
+        BatchRequestConfig::Limit(limit) if entries.len() > limit as usize => {
+            Some(reject_too_big_batch_request(limit as usize))
+        }
+        _ => None,
+    };
+    if let Some(err) = err {
+        return Some((MethodResponse::error(Id::Null, err).into_json(), on_sent))
+    }
 
     // Invalid entries are answered in place, calls are filled in after the batch completes.
     let mut responses = Vec::with_capacity(entries.len());
     let mut reqs = Vec::with_capacity(entries.len());
+    let mut notifications = Vec::new();
     for entry in &entries {
-        match parse_message(entry) {
+        match parse_message(entry, extensions) {
             Message::Call(req) => {
                 reqs.push(req);
                 responses.push(None);
             }
-            Message::Notification => {}
+            Message::Notification(n) => notifications.push(n),
             Message::Invalid(id, code) => responses.push(Some(MethodResponse::error(id, code))),
         }
     }
     drop(entries);
-    let mut results =
-        if reqs.is_empty() { Vec::new() } else { service.batch(reqs).await }.into_iter();
+    let notify = join_all(notifications.into_iter().map(|n| service.notification(n)));
+    let calls = async {
+        if reqs.is_empty() {
+            Vec::new()
+        } else {
+            service.batch(reqs).await
+        }
+    };
+    let mut results = join(calls, notify).await.0.into_iter();
     let responses =
         responses.into_iter().filter_map(|response| response.or_else(|| results.next()));
     batch_json(responses, max_response_size, &mut on_sent).map(|json| (json, on_sent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Notification;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountNotifications<S>(S, Arc<AtomicUsize>);
+
+    impl<S: RpcServiceT> RpcServiceT for CountNotifications<S> {
+        fn call(&self, req: crate::Request) -> impl Future<Output = MethodResponse> + Send {
+            self.0.call(req)
+        }
+
+        async fn notification(&self, n: Notification) {
+            assert_eq!(n.extensions().get::<ConnectionId>(), Some(&ConnectionId(7)));
+            self.1.fetch_add(1, Ordering::Relaxed);
+            self.0.notification(n).await
+        }
+    }
+
+    async fn handle(service: &impl RpcServiceT, msg: &str, config: BatchRequestConfig) -> String {
+        let mut extensions = Extensions::new();
+        extensions.insert(ConnectionId(7));
+        let msg = Bytes::copy_from_slice(msg.as_bytes());
+        handle_message(service, msg, usize::MAX, config, &extensions).await.map_or_default(|r| r.0)
+    }
+
+    #[tokio::test]
+    async fn batch_config_and_notifications() {
+        let mut methods = RpcModule::new();
+        methods.register_method("a", |_, _| 1).unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let service = CountNotifications(RpcService::new(methods, usize::MAX, None), count.clone());
+
+        let batch = r#"[{"jsonrpc":"2.0","id":1,"method":"a"},{"jsonrpc":"2.0","method":"a"}]"#;
+        assert_eq!(
+            handle(&service, batch, BatchRequestConfig::Unlimited).await,
+            r#"[{"jsonrpc":"2.0","id":1,"result":1}]"#
+        );
+        assert_eq!(
+            handle(&service, batch, BatchRequestConfig::Limit(1)).await,
+            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32010,"message":"The batch request was too large","data":"Exceeded max limit of 1"}}"#
+        );
+        assert_eq!(
+            handle(&service, batch, BatchRequestConfig::Disabled).await,
+            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"Batched requests are not supported by this server"}}"#
+        );
+        assert_eq!(
+            handle(&service, r#"{"jsonrpc":"2.0","method":"a"}"#, BatchRequestConfig::Disabled)
+                .await,
+            ""
+        );
+        assert_eq!(count.load(Ordering::Relaxed), 2);
+    }
 }

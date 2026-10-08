@@ -20,7 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod config;
-pub use config::ServerConfig;
+pub use config::{BatchRequestConfig, PingConfig, ServerConfig};
 
 mod connection;
 pub use connection::serve_connection;
@@ -32,7 +32,7 @@ mod handle;
 pub use handle::{stop_channel, AlreadyStoppedError, ServerHandle, StopHandle};
 
 mod id;
-pub use id::{Id, SubscriptionId};
+pub use id::{ConnectionId, Id, SubscriptionId};
 
 mod middleware;
 pub use middleware::{RpcService, RpcServiceBuilder, RpcServiceT};
@@ -44,7 +44,7 @@ mod params;
 pub use params::{Params, ParamsSequence};
 
 mod request;
-pub use request::{ByteStr, Request};
+pub use request::{ByteStr, Notification, Request};
 
 mod response;
 pub use response::MethodResponse;
@@ -65,6 +65,7 @@ pub mod server;
 #[cfg(feature = "macros")]
 pub use reth_json_rpc_macros::rpc;
 
+pub use http::Extensions;
 pub use serde::{de::DeserializeOwned, Serialize};
 pub use serde_json::value::RawValue;
 

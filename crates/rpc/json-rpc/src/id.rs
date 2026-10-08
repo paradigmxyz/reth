@@ -1,6 +1,9 @@
 use crate::ByteStr;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
+use std::{
+    fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 /// JSON-RPC request id.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -21,6 +24,19 @@ impl Id {
             Self::Number(n) => Some(*n),
             _ => None,
         }
+    }
+
+    /// Returns the string id, if any.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if the id is null.
+    pub const fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
     }
 
     /// Appends the JSON encoding of the id to `buf`.
@@ -113,5 +129,25 @@ impl fmt::Display for SubscriptionId {
             Self::Num(n) => n.fmt(f),
             Self::Str(s) => s.fmt(f),
         }
+    }
+}
+
+/// Identifies a connection, unique within the process.
+///
+/// Servers attach it to the [`Extensions`](http::Extensions) of every request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ConnectionId(pub u64);
+
+impl ConnectionId {
+    /// Returns a new id.
+    pub fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }

@@ -17,16 +17,23 @@ use syn::{
 /// - `client`: generate `{Trait}Client`, implemented for every `ClientT`, or every
 ///   `SubscriptionClientT` if the trait has subscriptions.
 /// - `namespace = "ns"`: prefix method names with `ns_`.
+/// - `namespace_separator = "."`: separate the namespace with `.` instead of `_`.
 /// - `server_bounds(..)` / `client_bounds(..)`: replace the inferred bounds on generic parameters.
 ///
 /// Every trait method needs one of:
 /// - `#[method(name = "..", aliases = [".."])]`: async or sync method. Aliases have no namespace.
+///   - `blocking`: run the sync method on the blocking thread pool.
 /// - `#[subscription(name = "sub" => "notification", unsubscribe = "unsub", item = T)]`: the server
 ///   method also takes a `PendingSubscriptionSink` after `&self`. The notification name defaults to
 ///   the subscription name, and `unsubscribe` defaults to the name with its `subscribe` prefix
 ///   replaced by `unsubscribe`.
+///   - `unsubscribe_aliases = [".."]`: aliases of the unsubscribe method, with no namespace.
 ///
-/// Parameters are positional. A trailing `Option` parameter may be omitted.
+/// Both take `with_extensions`, which passes the request's `&Extensions` to the server method
+/// after `&self` and the subscription sink.
+///
+/// Parameters are positional, or named by their name or its `lowerCamelCase` form. A trailing
+/// `Option` parameter may be omitted. `#[argument(rename = "..")]` sets the parameter name.
 #[proc_macro_attribute]
 pub fn rpc(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut args = RpcArgs::default();
@@ -44,6 +51,7 @@ struct RpcArgs {
     server: bool,
     client: bool,
     namespace: Option<String>,
+    namespace_separator: Option<String>,
     server_bounds: Option<Vec<WherePredicate>>,
     client_bounds: Option<Vec<WherePredicate>>,
 }
@@ -56,6 +64,8 @@ impl RpcArgs {
             self.client = true;
         } else if meta.path.is_ident("namespace") {
             self.namespace = Some(meta.value()?.parse::<LitStr>()?.value());
+        } else if meta.path.is_ident("namespace_separator") {
+            self.namespace_separator = Some(meta.value()?.parse::<LitStr>()?.value());
         } else if meta.path.is_ident("server_bounds") {
             self.server_bounds = Some(parse_bounds(&meta)?);
         } else if meta.path.is_ident("client_bounds") {
@@ -77,13 +87,27 @@ struct Method {
     func: TraitItemFn,
     name: String,
     aliases: Vec<String>,
-    args: Vec<(Ident, Type)>,
+    args: Vec<Arg>,
+    with_extensions: bool,
     kind: Kind,
 }
 
+struct Arg {
+    ident: Ident,
+    ty: Type,
+    rename: Option<String>,
+}
+
 enum Kind {
-    Method,
-    Subscription { notification: String, unsubscribe: String, item: Box<Type> },
+    Method {
+        blocking: bool,
+    },
+    Subscription {
+        notification: String,
+        unsubscribe: String,
+        unsubscribe_aliases: Vec<String>,
+        item: Box<Type>,
+    },
 }
 
 impl Rpc {
@@ -91,8 +115,9 @@ impl Rpc {
         if !args.server && !args.client {
             return Err(syn::Error::new_spanned(&item.ident, "expected `server` or `client`"))
         }
+        let separator = args.namespace_separator.as_deref().unwrap_or("_");
         let ns = |name: &str| match &args.namespace {
-            Some(ns) => format!("{ns}_{name}"),
+            Some(ns) => format!("{ns}{separator}{name}"),
             None => name.to_owned(),
         };
 
@@ -105,17 +130,28 @@ impl Rpc {
             if func.sig.receiver().is_none() {
                 return Err(syn::Error::new_spanned(&func.sig, "expected a `&self` receiver"))
             }
-            let (name, aliases, kind) = parse_method_attr(func)?;
+            let MethodAttr { name, aliases, with_extensions, kind } = parse_method_attr(func)?;
             let (name, kind) = match kind {
-                Kind::Method => (ns(&name), Kind::Method),
-                Kind::Subscription { notification, unsubscribe, item } => {
-                    let unsubscribe = ns(&unsubscribe);
-                    if !names.insert(unsubscribe.clone()) {
-                        return Err(duplicate(&func.sig.ident, &unsubscribe))
+                Kind::Method { blocking } => {
+                    if blocking && func.sig.asyncness.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            &func.sig,
+                            "blocking methods must not be async",
+                        ))
                     }
+                    (ns(&name), Kind::Method { blocking })
+                }
+                Kind::Subscription { notification, unsubscribe, unsubscribe_aliases, item } => {
+                    let unsubscribe = ns(&unsubscribe);
+                    for name in std::iter::once(&unsubscribe).chain(&unsubscribe_aliases) {
+                        if !names.insert(name.clone()) {
+                            return Err(duplicate(&func.sig.ident, name))
+                        }
+                    }
+                    let notification = ns(&notification);
                     (
                         ns(&name),
-                        Kind::Subscription { notification: ns(&notification), unsubscribe, item },
+                        Kind::Subscription { notification, unsubscribe, unsubscribe_aliases, item },
                     )
                 }
             };
@@ -127,18 +163,19 @@ impl Rpc {
             let args = func
                 .sig
                 .inputs
-                .iter()
+                .iter_mut()
                 .skip(1)
                 .map(|arg| {
                     if let FnArg::Typed(arg) = arg &&
                         let Pat::Ident(pat) = &*arg.pat
                     {
-                        return Ok((pat.ident.clone(), (*arg.ty).clone()))
+                        let rename = parse_argument_attr(&mut arg.attrs)?;
+                        return Ok(Arg { ident: pat.ident.clone(), ty: (*arg.ty).clone(), rename })
                     }
                     Err(syn::Error::new_spanned(arg, "expected an identifier"))
                 })
                 .collect::<syn::Result<_>>()?;
-            methods.push(Method { func: func.clone(), name, aliases, args, kind });
+            methods.push(Method { func: func.clone(), name, aliases, args, with_extensions, kind });
         }
 
         Ok(Self { args, item, methods })
@@ -159,6 +196,9 @@ impl Rpc {
 
         let fns = self.methods.iter().map(|m| {
             let mut func = m.func.clone();
+            if m.with_extensions {
+                func.sig.inputs.insert(1, parse_quote!(ext: &::reth_json_rpc::Extensions));
+            }
             if matches!(m.kind, Kind::Subscription { .. }) {
                 func.sig.inputs.insert(
                     1,
@@ -186,30 +226,42 @@ impl Rpc {
             let call = quote!(<Self as #name #ty_generics>::#rust_name);
             let is_async = m.func.sig.asyncness.is_some();
             let wait = is_async.then(|| quote!(.await));
-            let args = m.args.iter().map(|(ident, _)| ident);
+            let args = m.args.iter().map(|arg| &arg.ident);
             let params = if m.args.is_empty() { quote!(_) } else { quote!(__params) };
+            let ext = if m.with_extensions { quote!(__ext) } else { quote!(_) };
+            let ext_arg = m.with_extensions.then(|| quote!(, &__ext));
+            let mut unsubscribe_aliases = None;
             let register = match &m.kind {
-                Kind::Method => {
+                Kind::Method { blocking } => {
                     let on_err = quote! {
                         return ::reth_json_rpc::__private::MethodResult::Err(__err)
                     };
                     let parse = parse_args(&m.args, &on_err);
-                    let mut body = quote!(#call(&__ctx #(, #args)*) #wait);
+                    let mut body = quote!(#call(&__ctx #ext_arg #(, #args)*) #wait);
                     if !m.args.is_empty() {
                         body = quote!(#parse ::reth_json_rpc::__private::MethodResult::Ok(#body));
                     }
                     if is_async {
                         quote! {
-                            rpc.register_async_method(#rpc_name, move |#params| {
+                            rpc.register_async_method(#rpc_name, move |#params, #ext| {
                                 let __ctx = __ctx.clone();
                                 async move { #body }
                             })
                         }
+                    } else if *blocking {
+                        quote! {
+                            rpc.register_blocking_method(#rpc_name, move |#params, #ext| {
+                                #body
+                            })
+                        }
                     } else {
-                        quote!(rpc.register_method(#rpc_name, move |#params| { #body }))
+                        quote!(rpc.register_method(#rpc_name, move |#params, #ext| { #body }))
                     }
                 }
-                Kind::Subscription { notification, unsubscribe, .. } => {
+                Kind::Subscription {
+                    notification, unsubscribe, unsubscribe_aliases: a, ..
+                } => {
+                    unsubscribe_aliases = Some((unsubscribe, a));
                     let on_err = quote! {{
                         __pending.reject(__err);
                         return ::core::result::Result::Ok(())
@@ -218,11 +270,11 @@ impl Rpc {
                     quote! {
                         rpc.register_subscription(
                             #rpc_name, #notification, #unsubscribe,
-                            move |#params, __pending| {
+                            move |#params, __pending, #ext| {
                                 let __ctx = __ctx.clone();
                                 async move {
                                     #parse
-                                    #call(&__ctx, __pending #(, #args)*) #wait
+                                    #call(&__ctx, __pending #ext_arg #(, #args)*) #wait
                                 }
                             },
                         )
@@ -230,6 +282,9 @@ impl Rpc {
                 }
             };
             let aliases = &m.aliases;
+            let unsubscribe_aliases = unsubscribe_aliases.map(|(unsubscribe, aliases)| {
+                quote!(#(let _ = rpc.register_alias(#aliases, #unsubscribe);)*)
+            });
             // Names are checked for duplicates above, so registration cannot fail.
             quote! {
                 {
@@ -237,6 +292,7 @@ impl Rpc {
                     let _ = #register;
                 }
                 #(let _ = rpc.register_alias(#aliases, #rpc_name);)*
+                #unsubscribe_aliases
             }
         });
 
@@ -291,7 +347,7 @@ impl Rpc {
             let mut sig = m.func.sig.clone();
             sig.asyncness = None;
             let (output, call) = match &m.kind {
-                Kind::Method => match result_ok_type(&sig.output) {
+                Kind::Method { .. } => match result_ok_type(&sig.output) {
                     Ok(ty) => (
                         quote!(#ty),
                         quote! {
@@ -317,7 +373,7 @@ impl Rpc {
                 > + ::core::marker::Send
             };
             let attrs = &m.func.attrs;
-            let args = m.args.iter().map(|(ident, _)| ident);
+            let args = m.args.iter().map(|arg| &arg.ident);
             quote! {
                 #(#attrs)*
                 #[allow(non_snake_case, clippy::used_underscore_binding)]
@@ -365,11 +421,13 @@ impl Rpc {
         let mut inputs = HashSet::new();
         let mut outputs = HashSet::new();
         for m in &self.methods {
-            for (_, ty) in &m.args {
-                collect_idents(ty.to_token_stream(), &mut inputs);
+            for arg in &m.args {
+                collect_idents(arg.ty.to_token_stream(), &mut inputs);
             }
             match &m.kind {
-                Kind::Method => collect_idents(m.func.sig.output.to_token_stream(), &mut outputs),
+                Kind::Method { .. } => {
+                    collect_idents(m.func.sig.output.to_token_stream(), &mut outputs)
+                }
                 Kind::Subscription { item, .. } => {
                     collect_idents(item.to_token_stream(), &mut outputs)
                 }
@@ -391,8 +449,15 @@ impl Rpc {
     }
 }
 
+struct MethodAttr {
+    name: String,
+    aliases: Vec<String>,
+    with_extensions: bool,
+    kind: Kind,
+}
+
 /// Removes the `#[method]` or `#[subscription]` attribute from `func` and parses it.
-fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<(String, Vec<String>, Kind)> {
+fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<MethodAttr> {
     let index = func
         .attrs
         .iter()
@@ -407,7 +472,10 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<(String, Vec<String>
     let mut notification = None;
     let mut aliases = Vec::new();
     let mut unsubscribe = None;
+    let mut unsubscribe_aliases = Vec::new();
     let mut item = None;
+    let mut blocking = false;
+    let mut with_extensions = false;
     attr.parse_nested_meta(|meta| {
         if meta.path.is_ident("name") {
             let input = meta.value()?;
@@ -417,14 +485,13 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<(String, Vec<String>
                 notification = Some(input.parse::<LitStr>()?.value());
             }
         } else if meta.path.is_ident("aliases") {
-            let input = meta.value()?;
-            let content;
-            bracketed!(content in input);
-            aliases = content
-                .parse_terminated(<LitStr as Parse>::parse, Token![,])?
-                .iter()
-                .map(LitStr::value)
-                .collect();
+            aliases = parse_names(&meta)?;
+        } else if meta.path.is_ident("with_extensions") {
+            with_extensions = true;
+        } else if !is_subscription && meta.path.is_ident("blocking") {
+            blocking = true;
+        } else if is_subscription && meta.path.is_ident("unsubscribe_aliases") {
+            unsubscribe_aliases = parse_names(&meta)?;
         } else if is_subscription && meta.path.is_ident("unsubscribe") {
             unsubscribe = Some(meta.value()?.parse::<LitStr>()?.value());
         } else if is_subscription && meta.path.is_ident("item") {
@@ -437,14 +504,42 @@ fn parse_method_attr(func: &mut TraitItemFn) -> syn::Result<(String, Vec<String>
 
     let name = name.ok_or_else(|| syn::Error::new_spanned(&attr, "missing `name`"))?;
     if !is_subscription {
-        return Ok((name, aliases, Kind::Method))
+        return Ok(MethodAttr { name, aliases, with_extensions, kind: Kind::Method { blocking } })
     }
     let item = item.ok_or_else(|| syn::Error::new_spanned(&attr, "missing `item`"))?;
     let unsubscribe = unsubscribe
         .or_else(|| name.strip_prefix("subscribe").map(|rest| format!("unsubscribe{rest}")))
         .ok_or_else(|| syn::Error::new_spanned(&attr, "missing `unsubscribe`"))?;
     let notification = notification.unwrap_or_else(|| name.clone());
-    Ok((name, aliases, Kind::Subscription { notification, unsubscribe, item }))
+    let kind = Kind::Subscription { notification, unsubscribe, unsubscribe_aliases, item };
+    Ok(MethodAttr { name, aliases, with_extensions, kind })
+}
+
+/// Removes the `#[argument]` attributes from a parameter and returns its `rename`, if any.
+fn parse_argument_attr(attrs: &mut Vec<Attribute>) -> syn::Result<Option<String>> {
+    let mut rename = None;
+    for attr in attrs.extract_if(.., |attr| attr.path().is_ident("argument")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("rename") {
+                rename = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
+            } else {
+                Err(meta.error("unknown argument"))
+            }
+        })?;
+    }
+    Ok(rename)
+}
+
+fn parse_names(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<String>> {
+    let input = meta.value()?;
+    let content;
+    bracketed!(content in input);
+    Ok(content
+        .parse_terminated(<LitStr as Parse>::parse, Token![,])?
+        .iter()
+        .map(LitStr::value)
+        .collect())
 }
 
 fn parse_bounds(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<WherePredicate>> {
@@ -455,11 +550,11 @@ fn parse_bounds(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<WherePredicate>> 
 
 /// Generates code that parses `__params` into one variable per argument, running `on_err` with
 /// `__err` on failure.
-fn parse_args(args: &[(Ident, Type)], on_err: &TokenStream2) -> TokenStream2 {
+fn parse_args(args: &[Arg], on_err: &TokenStream2) -> TokenStream2 {
     if args.is_empty() {
         return TokenStream2::new()
     }
-    let lets = args.iter().map(|(ident, ty)| {
+    let lets = args.iter().map(|Arg { ident, ty, .. }| {
         let next = if is_option(ty) { quote!(optional_next) } else { quote!(next) };
         quote! {
             let #ident: #ty = match __seq.#next() {
@@ -468,8 +563,11 @@ fn parse_args(args: &[(Ident, Type)], on_err: &TokenStream2) -> TokenStream2 {
             };
         }
     });
-    let names = args.iter().map(|(ident, _)| {
-        let name = ident.unraw().to_string();
+    let names = args.iter().map(|arg| {
+        if let Some(rename) = &arg.rename {
+            return quote!(&[#rename])
+        }
+        let name = arg.ident.unraw().to_string();
         let camel = lower_camel_case(&name);
         if camel == name {
             quote!(&[#name])

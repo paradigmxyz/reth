@@ -1,5 +1,6 @@
 use crate::{Id, Params};
 use bytes::Bytes;
+use http::Extensions;
 use serde::{de::IgnoredAny, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 use std::{
@@ -148,12 +149,15 @@ pub struct Request {
     pub method: ByteStr,
     /// Method parameters.
     pub params: Params,
+    /// Data attached by the transport and middleware, such as the
+    /// [`ConnectionId`](crate::ConnectionId).
+    pub extensions: Extensions,
 }
 
 impl Request {
     /// Creates a new request.
     pub fn new(method: impl Into<ByteStr>, params: Params, id: Id) -> Self {
-        Self { id, method: method.into(), params }
+        Self { id, method: method.into(), params, extensions: Extensions::new() }
     }
 
     /// Returns the method name.
@@ -170,6 +174,54 @@ impl Request {
     pub const fn params(&self) -> &Params {
         &self.params
     }
+
+    /// Returns the extensions.
+    pub const fn extensions(&self) -> &Extensions {
+        &self.extensions
+    }
+
+    /// Returns the extensions mutably.
+    pub const fn extensions_mut(&mut self) -> &mut Extensions {
+        &mut self.extensions
+    }
+}
+
+/// A JSON-RPC notification, which is a call without an id that gets no response.
+#[derive(Clone, Debug)]
+pub struct Notification {
+    /// Method name.
+    pub method: ByteStr,
+    /// Method parameters.
+    pub params: Params,
+    /// Data attached by the transport and middleware.
+    pub extensions: Extensions,
+}
+
+impl Notification {
+    /// Creates a new notification.
+    pub fn new(method: impl Into<ByteStr>, params: Params) -> Self {
+        Self { method: method.into(), params, extensions: Extensions::new() }
+    }
+
+    /// Returns the method name.
+    pub fn method_name(&self) -> &str {
+        &self.method
+    }
+
+    /// Returns the parameters.
+    pub const fn params(&self) -> &Params {
+        &self.params
+    }
+
+    /// Returns the extensions.
+    pub const fn extensions(&self) -> &Extensions {
+        &self.extensions
+    }
+
+    /// Returns the extensions mutably.
+    pub const fn extensions_mut(&mut self) -> &mut Extensions {
+        &mut self.extensions
+    }
 }
 
 /// A parsed JSON-RPC message.
@@ -178,7 +230,7 @@ pub(crate) enum Message {
     /// A method call.
     Call(Request),
     /// A notification, which gets no response.
-    Notification,
+    Notification(Notification),
     /// An invalid request, answered with this error and id.
     Invalid(Id, crate::ErrorCode),
 }
@@ -222,23 +274,23 @@ pub(crate) fn split_batch(buf: &Bytes) -> Option<Result<Vec<Bytes>, crate::Error
 }
 
 /// Parses a single JSON-RPC message, borrowing strings from `buf`.
-pub(crate) fn parse_message(buf: &Bytes) -> Message {
+pub(crate) fn parse_message(buf: &Bytes, extensions: &Extensions) -> Message {
     match serde_json::from_slice::<RawRequest<'_>>(buf) {
         Ok(req) => {
             if req.jsonrpc != "2.0" {
                 let id = req.id.and_then(|id| parse_id(buf, id)).unwrap_or(Id::Null);
                 return Message::Invalid(id, crate::ErrorCode::InvalidRequest)
             }
-            let Some(id) = req.id else { return Message::Notification };
+            let method = ByteStr::from_cow(buf, req.method);
+            let params = Params::new(req.params.map(|p| ByteStr::slice_ref(buf, p.get())));
+            let extensions = extensions.clone();
+            let Some(id) = req.id else {
+                return Message::Notification(Notification { method, params, extensions })
+            };
             let Some(id) = parse_id(buf, id) else {
                 return Message::Invalid(Id::Null, crate::ErrorCode::InvalidRequest)
             };
-            let params = req.params.map(|p| ByteStr::slice_ref(buf, p.get()));
-            Message::Call(Request {
-                id,
-                method: ByteStr::from_cow(buf, req.method),
-                params: Params::new(params),
-            })
+            Message::Call(Request { id, method, params, extensions })
         }
         Err(_) => match serde_json::from_slice::<RawId<'_>>(buf) {
             Ok(raw) => Message::Invalid(
@@ -275,7 +327,7 @@ mod tests {
     use crate::ErrorCode;
 
     fn parse(s: &'static str) -> Message {
-        parse_message(&Bytes::from_static(s.as_bytes()))
+        parse_message(&Bytes::from_static(s.as_bytes()), &Extensions::new())
     }
 
     #[test]
@@ -304,7 +356,7 @@ mod tests {
 
     #[test]
     fn parse_invalid() {
-        assert!(matches!(parse(r#"{"jsonrpc":"2.0","method":"m"}"#), Message::Notification));
+        assert!(matches!(parse(r#"{"jsonrpc":"2.0","method":"m"}"#), Message::Notification(_)));
         assert!(matches!(
             parse(r#"{"jsonrpc":"2.0","id":5,"method":1}"#),
             Message::Invalid(Id::Number(5), ErrorCode::InvalidRequest)

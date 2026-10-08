@@ -1,6 +1,5 @@
 use crate::{
-    error::exceeded_limit, ErrorObject, Id, MethodResponse, SubscriptionId,
-    TOO_MANY_SUBSCRIPTIONS_CODE, TOO_MANY_SUBSCRIPTIONS_MSG,
+    reject_too_many_subscriptions, ConnectionId, ErrorObject, Id, MethodResponse, SubscriptionId,
 };
 use rand::{distr::Alphanumeric, Rng};
 use rustc_hash::FxHashMap;
@@ -96,6 +95,7 @@ impl IdProvider for RandomStringIdProvider {
 /// Subscription state of a connection.
 #[derive(Debug)]
 pub(crate) struct Connection {
+    id: ConnectionId,
     tx: mpsc::Sender<String>,
     /// Active subscriptions by id, with their unsubscribe method.
     ///
@@ -108,11 +108,13 @@ pub(crate) struct Connection {
 
 impl Connection {
     pub(crate) fn new(
+        id: ConnectionId,
         tx: mpsc::Sender<String>,
         max_subscriptions: u32,
         id_provider: Arc<dyn IdProvider>,
     ) -> Self {
         Self {
+            id,
             tx,
             subscriptions: Default::default(),
             permits: Arc::new(Semaphore::new(max_subscriptions as usize)),
@@ -128,13 +130,11 @@ impl Connection {
         method: &'static str,
         unsubscribe: &'static str,
     ) -> Result<(PendingSubscriptionSink, oneshot::Receiver<MethodResponse>), ErrorObject> {
-        let permit = self.permits.clone().try_acquire_owned().map_err(|_| {
-            exceeded_limit(
-                TOO_MANY_SUBSCRIPTIONS_CODE,
-                TOO_MANY_SUBSCRIPTIONS_MSG,
-                self.max_subscriptions as usize,
-            )
-        })?;
+        let permit = self
+            .permits
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| reject_too_many_subscriptions(self.max_subscriptions as usize))?;
         let (respond, rx) = oneshot::channel();
         let sink = PendingSubscriptionSink {
             id,
@@ -210,6 +210,11 @@ impl PendingSubscriptionSink {
     pub const fn subscription_id(&self) -> &SubscriptionId {
         &self.sub_id
     }
+
+    /// Returns the id of the connection.
+    pub fn connection_id(&self) -> ConnectionId {
+        self.conn.id
+    }
 }
 
 /// An accepted subscription.
@@ -261,6 +266,11 @@ impl SubscriptionSink {
     /// Returns the subscription id.
     pub const fn subscription_id(&self) -> &SubscriptionId {
         &self.sub_id
+    }
+
+    /// Returns the id of the connection.
+    pub fn connection_id(&self) -> ConnectionId {
+        self.conn.id
     }
 }
 

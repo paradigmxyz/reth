@@ -14,6 +14,10 @@ pub const INVALID_PARAMS_CODE: i32 = -32602;
 pub const INTERNAL_ERROR_CODE: i32 = -32603;
 /// Call execution failed error code.
 pub const CALL_EXECUTION_FAILED_CODE: i32 = -32000;
+/// Unknown error code.
+pub const UNKNOWN_ERROR_CODE: i32 = -32001;
+/// Batches not supported error code.
+pub const BATCHES_NOT_SUPPORTED_CODE: i32 = -32005;
 /// Too many subscriptions error code.
 pub const TOO_MANY_SUBSCRIPTIONS_CODE: i32 = -32006;
 /// Oversized request error code.
@@ -22,6 +26,8 @@ pub const OVERSIZED_REQUEST_CODE: i32 = -32007;
 pub const OVERSIZED_RESPONSE_CODE: i32 = -32008;
 /// Server is busy error code.
 pub const SERVER_IS_BUSY_CODE: i32 = -32009;
+/// Batch request too big error code.
+pub const TOO_BIG_BATCH_REQUEST_CODE: i32 = -32010;
 /// Batch response too big error code.
 pub const TOO_BIG_BATCH_RESPONSE_CODE: i32 = -32011;
 
@@ -37,6 +43,8 @@ pub const INVALID_PARAMS_MSG: &str = "Invalid params";
 pub const INTERNAL_ERROR_MSG: &str = "Internal error";
 /// Generic server error message.
 pub const SERVER_ERROR_MSG: &str = "Server error";
+/// Batches not supported error message.
+pub const BATCHES_NOT_SUPPORTED_MSG: &str = "Batched requests are not supported by this server";
 /// Too many subscriptions error message.
 pub const TOO_MANY_SUBSCRIPTIONS_MSG: &str = "Too many subscriptions on the connection";
 /// Oversized request error message.
@@ -45,6 +53,8 @@ pub const OVERSIZED_REQUEST_MSG: &str = "Request is too big";
 pub const OVERSIZED_RESPONSE_MSG: &str = "Response is too big";
 /// Server is busy error message.
 pub const SERVER_IS_BUSY_MSG: &str = "Server is busy, try again later";
+/// Batch request too big error message.
+pub const TOO_BIG_BATCH_REQUEST_MSG: &str = "The batch request was too large";
 /// Batch response too big error message.
 pub const TOO_BIG_BATCH_RESPONSE_MSG: &str = "The batch response was too large";
 
@@ -127,7 +137,8 @@ impl From<core::convert::Infallible> for ErrorObject {
 }
 
 /// Standard JSON-RPC error codes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{}: {}", self.code(), self.message())]
 pub enum ErrorCode {
     /// Invalid JSON was received by the server.
     ParseError,
@@ -177,6 +188,18 @@ impl ErrorCode {
     }
 }
 
+impl Serialize for ErrorCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_i32(self.code())
+    }
+}
+
+impl<'de> Deserialize<'de> for ErrorCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        i32::deserialize(deserializer).map(Self::from)
+    }
+}
+
 impl From<i32> for ErrorCode {
     fn from(code: i32) -> Self {
         match code {
@@ -197,7 +220,32 @@ pub fn invalid_params(reason: impl fmt::Display) -> ErrorObject {
     ErrorObject::owned(INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, Some(reason.to_string()))
 }
 
-pub(crate) fn exceeded_limit(code: i32, message: &'static str, limit: usize) -> ErrorObject {
+/// Returns the error for exceeding the subscription limit of a connection.
+pub fn reject_too_many_subscriptions(limit: usize) -> ErrorObject {
+    exceeded_limit(TOO_MANY_SUBSCRIPTIONS_CODE, TOO_MANY_SUBSCRIPTIONS_MSG, limit)
+}
+
+/// Returns the error for exceeding the request size limit.
+pub fn reject_too_big_request(limit: usize) -> ErrorObject {
+    exceeded_limit(OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG, limit)
+}
+
+/// Returns the error for exceeding the response size limit.
+pub fn reject_too_big_response(limit: usize) -> ErrorObject {
+    exceeded_limit(OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG, limit)
+}
+
+/// Returns the error for exceeding the batch length limit.
+pub fn reject_too_big_batch_request(limit: usize) -> ErrorObject {
+    exceeded_limit(TOO_BIG_BATCH_REQUEST_CODE, TOO_BIG_BATCH_REQUEST_MSG, limit)
+}
+
+/// Returns the error for exceeding the batch response size limit.
+pub fn reject_too_big_batch_response(limit: usize) -> ErrorObject {
+    exceeded_limit(TOO_BIG_BATCH_RESPONSE_CODE, TOO_BIG_BATCH_RESPONSE_MSG, limit)
+}
+
+fn exceeded_limit(code: i32, message: &'static str, limit: usize) -> ErrorObject {
     ErrorObject::owned(code, message, Some(format!("Exceeded max limit of {limit}")))
 }
 

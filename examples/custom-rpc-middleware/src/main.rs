@@ -25,7 +25,7 @@ use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{EthereumAddOns, EthereumNode},
 };
-use reth_json_rpc::{ErrorObject, MethodResponse, Request, RpcServiceT};
+use reth_json_rpc::{ErrorObject, MethodResponse, Notification, Request, RpcServiceT};
 use tower::Layer;
 
 fn main() {
@@ -90,5 +90,9 @@ where
 
     fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
         self.service.batch(reqs)
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        self.service.notification(n)
     }
 }

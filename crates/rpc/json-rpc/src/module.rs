@@ -1,9 +1,10 @@
 use crate::{
-    connection::handle_message, ErrorObject, Id, IntoSubscriptionResult, MethodResponse, Params,
-    PendingSubscriptionSink, RpcService,
+    connection::handle_message, BatchRequestConfig, ErrorCode, ErrorObject, Id,
+    IntoSubscriptionResult, MethodResponse, Params, PendingSubscriptionSink, RpcService,
 };
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
+use http::Extensions;
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::{collections::hash_map::Entry, fmt, future::Future, sync::Arc};
@@ -21,6 +22,8 @@ impl RpcModule {
     }
 
     /// Registers a synchronous method.
+    ///
+    /// The method runs on the connection task, so it must not block.
     pub fn register_method<R, F>(
         &mut self,
         name: &'static str,
@@ -28,12 +31,12 @@ impl RpcModule {
     ) -> Result<(), RegisterMethodError>
     where
         R: IntoResponse,
-        F: Fn(Params) -> R + Send + Sync + 'static,
+        F: Fn(Params, &Extensions) -> R + Send + Sync + 'static,
     {
         self.insert(
             name,
-            Callback::Sync(Arc::new(move |id, params, max_size| {
-                callback(params).into_response(id, max_size)
+            Callback::Sync(Arc::new(move |id, params, extensions, max_size| {
+                callback(params, extensions).into_response(id, max_size)
             })),
         )
     }
@@ -46,14 +49,41 @@ impl RpcModule {
     ) -> Result<(), RegisterMethodError>
     where
         R: IntoResponse,
-        F: Fn(Params) -> Fut + Send + Sync + 'static,
+        F: Fn(Params, Extensions) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = R> + Send + 'static,
     {
         self.insert(
             name,
-            Callback::Async(Arc::new(move |id, params, max_size| {
-                let fut = callback(params);
+            Callback::Async(Arc::new(move |id, params, extensions, max_size| {
+                let fut = callback(params, extensions);
                 Box::pin(async move { fut.await.into_response(id, max_size) })
+            })),
+        )
+    }
+
+    /// Registers a method that runs on the blocking thread pool.
+    pub fn register_blocking_method<R, F>(
+        &mut self,
+        name: &'static str,
+        callback: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        R: IntoResponse,
+        F: Fn(Params, Extensions) -> R + Send + Sync + 'static,
+    {
+        let callback = Arc::new(callback);
+        self.insert(
+            name,
+            Callback::Async(Arc::new(move |id, params, extensions, max_size| {
+                let callback = callback.clone();
+                let err_id = id.clone();
+                Box::pin(async move {
+                    tokio::task::spawn_blocking(move || {
+                        callback(params, extensions).into_response(id, max_size)
+                    })
+                    .await
+                    .unwrap_or_else(|_| MethodResponse::error(err_id, ErrorCode::InternalError))
+                })
             })),
         )
     }
@@ -71,11 +101,11 @@ impl RpcModule {
     ) -> Result<(), RegisterMethodError>
     where
         R: IntoSubscriptionResult,
-        F: Fn(Params, PendingSubscriptionSink) -> Fut + Send + Sync + 'static,
+        F: Fn(Params, PendingSubscriptionSink, Extensions) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = R> + Send + 'static,
     {
-        self.register_subscription_raw(subscribe, notification, unsubscribe, move |params, pending| {
-            let fut = callback(params, pending);
+        self.register_subscription_raw(subscribe, notification, unsubscribe, move |params, pending, extensions| {
+            let fut = callback(params, pending, extensions);
             tokio::spawn(async move {
                 if let Err(err) = fut.await.into_subscription_result() {
                     tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
@@ -96,7 +126,7 @@ impl RpcModule {
     ) -> Result<(), RegisterMethodError>
     where
         R: IntoSubscriptionResult,
-        F: Fn(Params, PendingSubscriptionSink) -> R + Send + Sync + 'static,
+        F: Fn(Params, PendingSubscriptionSink, Extensions) -> R + Send + Sync + 'static,
     {
         if subscribe == unsubscribe {
             return Err(RegisterMethodError::SubscriptionNameConflict(subscribe.into()))
@@ -110,8 +140,8 @@ impl RpcModule {
             Callback::Subscription {
                 notification,
                 unsubscribe,
-                callback: Arc::new(move |params, pending| {
-                    if let Err(err) = callback(params, pending).into_subscription_result() {
+                callback: Arc::new(move |params, pending, extensions| {
+                    if let Err(err) = callback(params, pending, extensions).into_subscription_result() {
                         tracing::debug!(target: "rpc::jsonrpc", method = subscribe, err = err.as_str(), "subscription failed");
                     }
                 }),
@@ -172,7 +202,8 @@ impl RpcModule {
     /// Returns `None` if the request only contained notifications.
     pub async fn raw_json_request(&self, request: &str) -> Option<String> {
         let service = RpcService::new(self.clone(), usize::MAX, None);
-        handle_message(&service, Bytes::copy_from_slice(request.as_bytes()), usize::MAX)
+        let msg = Bytes::copy_from_slice(request.as_bytes());
+        handle_message(&service, msg, usize::MAX, BatchRequestConfig::Unlimited, &Extensions::new())
             .await
             .map(|(json, _)| json)
     }
@@ -202,9 +233,10 @@ impl fmt::Debug for RpcModule {
     }
 }
 
-type SyncCallback = dyn Fn(Id, Params, usize) -> MethodResponse + Send + Sync;
-type AsyncCallback = dyn Fn(Id, Params, usize) -> BoxFuture<'static, MethodResponse> + Send + Sync;
-type SubscriptionCallback = dyn Fn(Params, PendingSubscriptionSink) + Send + Sync;
+type SyncCallback = dyn Fn(Id, Params, &Extensions, usize) -> MethodResponse + Send + Sync;
+type AsyncCallback =
+    dyn Fn(Id, Params, Extensions, usize) -> BoxFuture<'static, MethodResponse> + Send + Sync;
+type SubscriptionCallback = dyn Fn(Params, PendingSubscriptionSink, Extensions) + Send + Sync;
 
 #[derive(Clone)]
 pub(crate) enum Callback {
@@ -262,7 +294,52 @@ macro_rules! impl_into_response {
     )*};
 }
 
-impl_into_response!(&str, String, bool);
+impl_into_response!(
+    (),
+    &str,
+    String,
+    bool,
+    char,
+    u8,
+    u16,
+    u32,
+    u64,
+    u128,
+    usize,
+    i8,
+    i16,
+    i32,
+    i64,
+    i128,
+    isize,
+    f32,
+    f64,
+    serde_json::Value
+);
+
+impl<T: Serialize> IntoResponse for Option<T> {
+    fn into_response(self, id: Id, max_size: usize) -> MethodResponse {
+        MethodResponse::response(id, &self, max_size)
+    }
+}
+
+impl<T: Serialize> IntoResponse for Vec<T> {
+    fn into_response(self, id: Id, max_size: usize) -> MethodResponse {
+        MethodResponse::response(id, &self, max_size)
+    }
+}
+
+impl<T: Serialize, const N: usize> IntoResponse for [T; N] {
+    fn into_response(self, id: Id, max_size: usize) -> MethodResponse {
+        MethodResponse::response(id, &self[..], max_size)
+    }
+}
+
+impl IntoResponse for ErrorObject {
+    fn into_response(self, id: Id, _max_size: usize) -> MethodResponse {
+        MethodResponse::error(id, self)
+    }
+}
 
 /// The output of a method generated by the `rpc` macro, or the error from parsing its parameters.
 #[doc(hidden)]
@@ -290,16 +367,16 @@ mod tests {
     #[test]
     fn register_and_merge() {
         let mut a = RpcModule::new();
-        a.register_method("a", |_| "a").unwrap();
+        a.register_method("a", |_, _| "a").unwrap();
         assert_eq!(
-            a.register_method("a", |_| "a").unwrap_err(),
+            a.register_method("a", |_, _| "a").unwrap_err(),
             RegisterMethodError::AlreadyRegistered("a".into())
         );
         a.register_alias("b", "a").unwrap();
 
         let mut c = RpcModule::new();
-        c.register_method("c", |_| "c").unwrap();
-        c.register_method("b", |_| "b").unwrap();
+        c.register_method("c", |_, _| "c").unwrap();
+        c.register_method("b", |_, _| "b").unwrap();
 
         let mut methods = a;
         assert!(methods.merge(c.clone()).is_err());
@@ -319,17 +396,19 @@ mod tests {
     #[test]
     fn subscription_names() {
         let mut m = RpcModule::new();
-        m.register_subscription("sub", "notif", "unsub", |_, _| async { Ok(()) }).unwrap();
-        assert!(m.register_subscription("x", "notif", "unsub", |_, _| async { Ok(()) }).is_err());
-        assert!(m.register_subscription("y", "y", "y", |_, _| async { Ok(()) }).is_err());
+        m.register_subscription("sub", "notif", "unsub", |_, _, _| async { Ok(()) }).unwrap();
+        assert!(m
+            .register_subscription("x", "notif", "unsub", |_, _, _| async { Ok(()) })
+            .is_err());
+        assert!(m.register_subscription("y", "y", "y", |_, _, _| async { Ok(()) }).is_err());
         assert!(m.contains("unsub"));
     }
 
     #[tokio::test]
     async fn raw_json_request() {
         let mut m = RpcModule::new();
-        m.register_method("sync", |params| params.one::<u64>().map(|n| n + 5)).unwrap();
-        m.register_async_method("async", |_| async { Ok::<_, ErrorObject>(5) }).unwrap();
+        m.register_method("sync", |params, _| params.one::<u64>().map(|n| n + 5)).unwrap();
+        m.register_async_method("async", |_, _| async { Ok::<_, ErrorObject>(5) }).unwrap();
         assert_eq!(
             m.raw_json_request(r#"{"jsonrpc":"2.0","id":1,"method":"sync","params":[1]}"#)
                 .await

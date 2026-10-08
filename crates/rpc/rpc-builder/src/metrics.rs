@@ -1,4 +1,4 @@
-use reth_json_rpc::{MethodResponse, Request, RpcModule, RpcServiceT};
+use reth_json_rpc::{MethodResponse, Notification, Request, RpcModule, RpcServiceT};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -133,6 +133,10 @@ where
             started_at: Instant::now(),
             metrics: self.metrics.clone(),
         }
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        self.inner.notification(n)
     }
 }
 

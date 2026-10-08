@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 bytes.workspace = true
 futures-util = { workspace = true, features = ["sink", "std"] }
+http.workspace = true
 rand.workspace = true
 rustc-hash = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive", "std"] }
@@ -27,7 +28,6 @@ tracing.workspace = true
 reth-json-rpc-macros = { workspace = true, optional = true }
 
 # server
-http = { workspace = true, optional = true }
 http-body = { workspace = true, optional = true }
 http-body-util = { workspace = true, optional = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"], optional = true }
@@ -45,7 +45,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 default = []
 macros = ["dep:reth-json-rpc-macros"]
 server = [
-    "dep:http",
     "dep:http-body",
     "dep:http-body-util",
     "dep:hyper",

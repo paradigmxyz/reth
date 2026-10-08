@@ -1,6 +1,6 @@
 //! RPC middleware for rate limiting certain methods.
 
-use reth_json_rpc::{MethodResponse, Request, RpcServiceT};
+use reth_json_rpc::{MethodResponse, Notification, Request, RpcServiceT};
 use std::{
     future::Future,
     pin::Pin,
@@ -78,6 +78,10 @@ where
             // is no need to get a semaphore permit
             RateLimitingRequestFuture { fut: self.inner.call(req), guard: None, permit: None }
         }
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        self.inner.notification(n)
     }
 }
 

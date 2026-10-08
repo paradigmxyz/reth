@@ -396,7 +396,8 @@ impl State {
 mod tests {
     use super::*;
     use crate::{
-        connection::serve_connection, stop_channel, RpcModule, RpcServiceBuilder, ServerConfig,
+        connection::serve_connection, stop_channel, Extensions, RpcModule, RpcServiceBuilder,
+        ServerConfig,
     };
     use bytes::Bytes;
     use futures_util::StreamExt;
@@ -415,6 +416,7 @@ mod tests {
                 &RpcServiceBuilder::new(),
                 &ServerConfig::default(),
                 stop,
+                Extensions::new(),
             )
             .await;
             drop(handle);
@@ -426,10 +428,10 @@ mod tests {
     async fn request_batch_subscribe() {
         let mut module = RpcModule::new();
         module
-            .register_method("add", |params| params.parse::<(u64, u64)>().map(|(a, b)| a + b))
+            .register_method("add", |params, _| params.parse::<(u64, u64)>().map(|(a, b)| a + b))
             .unwrap();
         module
-            .register_subscription("sub", "notif", "unsub", |params, pending| async move {
+            .register_subscription("sub", "notif", "unsub", |params, pending, _| async move {
                 let n = params.one::<u64>()?;
                 let sink = pending.accept().await?;
                 for i in 0..n {

@@ -1,6 +1,6 @@
 use crate::{
-    module::Callback, subscription::Connection, ErrorCode, Id, MethodResponse, Request, RpcModule,
-    SubscriptionId,
+    module::Callback, subscription::Connection, ErrorCode, Id, MethodResponse, Notification,
+    Request, RpcModule, SubscriptionId,
 };
 use futures_util::future::BoxFuture;
 use std::{
@@ -32,6 +32,14 @@ pub trait RpcServiceT: Send + Sync {
     fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
         futures_util::future::join_all(reqs.into_iter().map(|req| self.call(req)))
     }
+
+    /// Processes a notification, which gets no response.
+    ///
+    /// Does nothing by default. Methods are not called for notifications.
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        drop(n);
+        std::future::ready(())
+    }
 }
 
 impl<A: RpcServiceT, B: RpcServiceT> RpcServiceT for Either<A, B> {
@@ -48,6 +56,13 @@ impl<A: RpcServiceT, B: RpcServiceT> RpcServiceT for Either<A, B> {
             Self::Right(svc) => svc.batch(reqs).await,
         }
     }
+
+    async fn notification(&self, n: Notification) {
+        match self {
+            Self::Left(svc) => svc.notification(n).await,
+            Self::Right(svc) => svc.notification(n).await,
+        }
+    }
 }
 
 impl<T: RpcServiceT + ?Sized> RpcServiceT for Arc<T> {
@@ -57,6 +72,10 @@ impl<T: RpcServiceT + ?Sized> RpcServiceT for Arc<T> {
 
     fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
         (**self).batch(reqs)
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        (**self).notification(n)
     }
 }
 
@@ -82,7 +101,7 @@ impl RpcService {
 
 impl RpcServiceT for RpcService {
     fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
-        let Request { id, method, params } = req;
+        let Request { id, method, params, extensions } = req;
         let max_size = self.max_response_size;
         let Some(callback) = self.methods.method(&method) else {
             return ResponseFuture::ready(MethodResponse::error(id, ErrorCode::MethodNotFound))
@@ -91,13 +110,17 @@ impl RpcServiceT for RpcService {
             |id| ResponseFuture::ready(MethodResponse::error(id, ErrorCode::InternalError));
         match callback {
             Callback::Sync(callback) => {
-                match catch_unwind(AssertUnwindSafe(|| callback(id.clone(), params, max_size))) {
+                match catch_unwind(AssertUnwindSafe(|| {
+                    callback(id.clone(), params, &extensions, max_size)
+                })) {
                     Ok(response) => ResponseFuture::ready(response),
                     Err(_) => internal_error(id),
                 }
             }
             Callback::Async(callback) => {
-                match catch_unwind(AssertUnwindSafe(|| callback(id.clone(), params, max_size))) {
+                match catch_unwind(AssertUnwindSafe(|| {
+                    callback(id.clone(), params, extensions, max_size)
+                })) {
                     Ok(fut) => ResponseFuture(Inner::Future { fut, id }),
                     Err(_) => internal_error(id),
                 }
@@ -106,7 +129,9 @@ impl RpcServiceT for RpcService {
                 let Some(conn) = &self.conn else { return internal_error(id) };
                 match conn.subscribe(id.clone(), notification, unsubscribe) {
                     Ok((pending, rx)) => {
-                        match catch_unwind(AssertUnwindSafe(|| callback(params, pending))) {
+                        match catch_unwind(AssertUnwindSafe(|| {
+                            callback(params, pending, extensions)
+                        })) {
                             Ok(()) => ResponseFuture(Inner::Subscription { rx, id }),
                             Err(_) => internal_error(id),
                         }

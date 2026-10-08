@@ -1,12 +1,15 @@
 //! HTTP and `WebSocket` server.
 
 use crate::{
-    connection::handle_message, error::exceeded_limit, serve_connection, stop_channel, Id,
-    MethodResponse, RpcModule, RpcService, RpcServiceBuilder, RpcServiceT, ServerConfig,
-    ServerHandle, StopHandle, OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG,
+    connection::handle_message, reject_too_big_request, serve_connection, stop_channel,
+    ConnectionId, Id, MethodResponse, PingConfig, RpcModule, RpcService, RpcServiceBuilder,
+    RpcServiceT, ServerConfig, ServerHandle, StopHandle,
 };
 use bytes::Bytes;
-use futures_util::{future::BoxFuture, SinkExt, StreamExt};
+use futures_util::{
+    future::{BoxFuture, Either},
+    sink, SinkExt, StreamExt,
+};
 use http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use http_body::Body;
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -21,13 +24,14 @@ use std::{
     io,
     net::SocketAddr,
     pin::pin,
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
     task::{Context, Poll},
+    time::Instant,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpListener, ToSocketAddrs},
-    sync::{OwnedSemaphorePermit, Semaphore},
+    sync::{Mutex, OwnedSemaphorePermit, Semaphore},
 };
 use tokio_tungstenite::{
     tungstenite::{
@@ -93,12 +97,22 @@ impl<HL, RL> ServerBuilder<HL, RL> {
     /// Binds the server to the given address.
     pub async fn build(self, addr: impl ToSocketAddrs) -> io::Result<Server<HL, RL>> {
         let listener = TcpListener::bind(addr).await?;
-        Ok(Server {
+        Ok(self.build_from_listener(listener))
+    }
+
+    /// Builds the server from an already bound standard library listener.
+    pub fn build_from_tcp(self, listener: std::net::TcpListener) -> io::Result<Server<HL, RL>> {
+        listener.set_nonblocking(true)?;
+        Ok(self.build_from_listener(TcpListener::from_std(listener)?))
+    }
+
+    fn build_from_listener(self, listener: TcpListener) -> Server<HL, RL> {
+        Server {
             listener,
             config: self.config,
             http_middleware: self.http_middleware,
             rpc_middleware: self.rpc_middleware,
-        })
+        }
     }
 }
 
@@ -141,6 +155,8 @@ where
         let Self { listener, config, http_middleware, rpc_middleware } = self;
         let connections = Arc::new(Semaphore::new(config.max_connections as usize));
         let max_response_size = config.max_response_body_size as usize;
+        let keep_alive = config.keep_alive;
+        let tcp_no_delay = config.tcp_no_delay;
         let shared = Arc::new(Shared { methods, rpc_middleware, config });
         let mut stopped = pin!(stop.clone().shutdown());
         loop {
@@ -154,11 +170,16 @@ where
                 },
                 () = &mut stopped => break,
             };
+            let _ = socket.set_nodelay(tcp_no_delay);
+            let stopped = stop.clone().shutdown();
             let Ok(permit) = connections.clone().try_acquire_owned() else {
                 tracing::debug!(target: "rpc::jsonrpc", "too many connections");
+                let service = tower::service_fn(|_| {
+                    ready(Ok::<_, BoxError>(status_response(StatusCode::TOO_MANY_REQUESTS)))
+                });
+                tokio::spawn(serve_http(socket, service, stopped, false));
                 continue
             };
-            let _ = socket.set_nodelay(true);
             let rpc = shared.rpc_middleware.service(RpcService::new(
                 shared.methods.clone(),
                 max_response_size,
@@ -168,14 +189,10 @@ where
                 shared: shared.clone(),
                 rpc: Arc::new(rpc),
                 stop: stop.clone(),
+                conn_id: ConnectionId::next(),
                 _permit: Arc::new(permit),
             });
-            let stopped = stop.clone().shutdown();
-            tokio::spawn(async move {
-                if let Err(err) = serve_with_graceful_shutdown(socket, service, stopped).await {
-                    tracing::debug!(target: "rpc::jsonrpc", %err, "connection failed");
-                }
-            });
+            tokio::spawn(serve_http(socket, service, stopped, keep_alive));
         }
     }
 }
@@ -192,6 +209,7 @@ pub struct TowerService<RL: Layer<RpcService>> {
     shared: Arc<Shared<RL>>,
     rpc: Arc<RL::Service>,
     stop: StopHandle,
+    conn_id: ConnectionId,
     _permit: Arc<OwnedSemaphorePermit>,
 }
 
@@ -201,6 +219,7 @@ impl<RL: Layer<RpcService>> Clone for TowerService<RL> {
             shared: self.shared.clone(),
             rpc: self.rpc.clone(),
             stop: self.stop.clone(),
+            conn_id: self.conn_id,
             _permit: self._permit.clone(),
         }
     }
@@ -225,7 +244,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: HttpRequest) -> Self::Future {
+    fn call(&mut self, mut req: HttpRequest) -> Self::Future {
+        req.extensions_mut().insert(self.conn_id);
         let this = self.clone();
         Box::pin(async move { Ok(this.handle(req).await) })
     }
@@ -251,12 +271,12 @@ where
             return status_response(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         }
 
+        let extensions = req.extensions().clone();
         let max_request_size = config.max_request_body_size as usize;
         let body = match Limited::new(req.into_body(), max_request_size).collect().await {
             Ok(body) => body.to_bytes(),
             Err(err) if err.is::<LengthLimitError>() => {
-                let err =
-                    exceeded_limit(OVERSIZED_REQUEST_CODE, OVERSIZED_REQUEST_MSG, max_request_size);
+                let err = reject_too_big_request(max_request_size);
                 return json_response(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     MethodResponse::error(Id::Null, err).into_json(),
@@ -265,7 +285,9 @@ where
             Err(_) => return status_response(StatusCode::BAD_REQUEST),
         };
         let max_response_size = config.max_response_body_size as usize;
-        match handle_message(&*self.rpc, body, max_response_size).await {
+        match handle_message(&*self.rpc, body, max_response_size, config.batch_config, &extensions)
+            .await
+        {
             Some((json, _)) => json_response(StatusCode::OK, json),
             None => status_response(StatusCode::OK),
         }
@@ -278,6 +300,7 @@ where
         };
         let accept = derive_accept_key(key.as_bytes());
         let on_upgrade = hyper::upgrade::on(&mut req);
+        let extensions = req.extensions().clone();
         tokio::spawn(async move {
             let upgraded = match on_upgrade.await {
                 Ok(upgraded) => upgraded,
@@ -298,8 +321,15 @@ where
             )
             .await;
             let (sink, stream) = ws.split();
+            let last_active = config.ping_config.map(|_| Arc::new(StdMutex::new(Instant::now())));
+            let active = last_active.clone();
             let reader = stream
-                .scan((), |(), msg| {
+                .scan((), move |(), msg| {
+                    if let Some(active) = &active &&
+                        let Ok(mut active) = active.lock()
+                    {
+                        *active = Instant::now();
+                    }
                     ready(match msg {
                         Ok(Message::Text(text)) => Some(Some(Bytes::from(text))),
                         Ok(Message::Binary(bytes)) => Some(Some(bytes)),
@@ -308,7 +338,23 @@ where
                     })
                 })
                 .filter_map(ready);
-            let writer = sink.with(|msg: String| ready(Ok::<_, WsError>(Message::text(msg))));
+            let text = |msg: String| Message::text(msg);
+            let (reader, writer, ping) = match (config.ping_config, last_active) {
+                (Some(ping_config), Some(last_active)) => {
+                    let sink = Arc::new(Mutex::new(sink));
+                    let ping = tokio::spawn(ping(sink.clone(), ping_config, last_active));
+                    let abort = ping.abort_handle();
+                    let writer = sink::unfold(sink, move |sink, msg| async move {
+                        let res = sink.lock().await.send(text(msg)).await;
+                        res.map(|()| sink)
+                    });
+                    (Either::Left(reader.take_until(ping)), Either::Left(writer), Some(abort))
+                }
+                _ => {
+                    let writer = sink.with(move |msg| ready(Ok::<_, WsError>(text(msg))));
+                    (Either::Right(reader), Either::Right(writer), None)
+                }
+            };
             serve_connection(
                 pin!(reader),
                 pin!(writer),
@@ -316,8 +362,12 @@ where
                 rpc_middleware,
                 config,
                 self.stop.clone(),
+                extensions,
             )
             .await;
+            if let Some(ping) = ping {
+                ping.abort();
+            }
         });
 
         let mut response = status_response(StatusCode::SWITCHING_PROTOCOLS);
@@ -346,10 +396,42 @@ where
     B: Body<Data = Bytes> + Send + 'static,
     B::Error: Into<BoxError>,
 {
+    serve_with_keep_alive(io, service, stopped, true).await
+}
+
+async fn serve_http<I, S, B>(io: I, service: S, stopped: impl Future<Output = ()>, keep_alive: bool)
+where
+    I: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    S: Service<HttpRequest, Response = http::Response<B>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<BoxError>,
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
+    if let Err(err) = serve_with_keep_alive(io, service, stopped, keep_alive).await {
+        tracing::debug!(target: "rpc::jsonrpc", %err, "connection failed");
+    }
+}
+
+async fn serve_with_keep_alive<I, S, B>(
+    io: I,
+    service: S,
+    stopped: impl Future<Output = ()>,
+    keep_alive: bool,
+) -> Result<(), BoxError>
+where
+    I: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    S: Service<HttpRequest, Response = http::Response<B>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<BoxError>,
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
+{
     let service = TowerToHyperService::new(
         service.map_request(|req: http::Request<Incoming>| req.map(HttpBody::new)),
     );
-    let builder = auto::Builder::new(TokioExecutor::new());
+    let mut builder = auto::Builder::new(TokioExecutor::new());
+    builder.http1().keep_alive(keep_alive);
     let mut conn = pin!(builder.serve_connection_with_upgrades(TokioIo::new(io), service));
     let mut stopped = pin!(stopped);
     tokio::select! {
@@ -357,6 +439,34 @@ where
         () = &mut stopped => {
             conn.as_mut().graceful_shutdown();
             conn.await
+        }
+    }
+}
+
+/// Pings the `WebSocket` peer until it stops answering or a ping fails to send.
+async fn ping<S>(sink: Arc<Mutex<S>>, config: PingConfig, last_active: Arc<StdMutex<Instant>>)
+where
+    S: futures_util::Sink<Message> + Unpin,
+{
+    let mut interval = tokio::time::interval(config.ping_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await;
+    let mut failures = 0;
+    loop {
+        interval.tick().await;
+        let idle =
+            last_active.lock().map_or_else(|_| Default::default(), |active| active.elapsed());
+        if idle > config.inactive_limit {
+            failures += 1;
+            if failures >= config.max_failures {
+                tracing::debug!(target: "rpc::jsonrpc", "websocket peer stopped answering pings");
+                return
+            }
+        } else {
+            failures = 0;
+        }
+        if sink.lock().await.send(Message::Ping(Bytes::new())).await.is_err() {
+            return
         }
     }
 }
@@ -403,14 +513,19 @@ mod tests {
     use super::*;
     use crate::{
         client::{ClientT, Error, HttpClientBuilder, SubscriptionClientT, WsClientBuilder},
-        rpc_params,
+        rpc_params, OVERSIZED_REQUEST_CODE,
+    };
+    use std::time::Duration;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
     };
 
     async fn start(config: ServerConfig) -> (SocketAddr, ServerHandle) {
         let mut module = RpcModule::new();
-        module.register_method("echo", |params| params.one::<String>()).unwrap();
+        module.register_method("echo", |params, _| params.one::<String>()).unwrap();
         module
-            .register_subscription("sub", "notif", "unsub", |_, pending| async move {
+            .register_subscription("sub", "notif", "unsub", |_, pending, _| async move {
                 let sink = pending.accept().await?;
                 sink.send(&1).await?;
                 sink.closed().await;
@@ -441,7 +556,7 @@ mod tests {
         sub.unsubscribe().await.unwrap();
 
         handle.stop().unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), handle.stopped()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle.stopped()).await.unwrap();
     }
 
     #[tokio::test]
@@ -450,5 +565,70 @@ mod tests {
         assert!(WsClientBuilder::default().build(format!("ws://{addr}")).await.is_err());
         let http = HttpClientBuilder::default().build(format!("http://{addr}")).unwrap();
         assert_eq!(http.request::<String, _>("echo", rpc_params!["a"]).await.unwrap(), "a");
+    }
+
+    /// Sends a raw HTTP request on `stream` and returns the response head.
+    async fn raw_http(stream: &mut TcpStream) -> String {
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"echo","params":["a"]}"#;
+        let req = format!(
+            "POST / HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut buf = vec![0; 1024];
+        let n = stream.read(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf[..n]).lines().next().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn too_many_connections() {
+        let (addr, _handle) = start(ServerConfig::default().max_connections(1)).await;
+        let mut first = TcpStream::connect(addr).await.unwrap();
+        assert_eq!(raw_http(&mut first).await, "HTTP/1.1 200 OK");
+        let mut second = TcpStream::connect(addr).await.unwrap();
+        assert_eq!(raw_http(&mut second).await, "HTTP/1.1 429 Too Many Requests");
+        assert_eq!(raw_http(&mut first).await, "HTTP/1.1 200 OK");
+    }
+
+    #[tokio::test]
+    async fn ws_ping() {
+        let ping = PingConfig::new()
+            .ping_interval(Duration::from_millis(20))
+            .inactive_limit(Duration::from_millis(50));
+        let (addr, _handle) = start(ServerConfig::default().enable_ws_ping(ping)).await;
+        let url = format!("ws://{addr}");
+
+        // A peer that reads answers pings and stays connected.
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let mut pings = 0;
+        while pings < 10 {
+            match ws.next().await.unwrap().unwrap() {
+                Message::Ping(_) => pings += 1,
+                msg => panic!("unexpected message: {msg:?}"),
+            }
+        }
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"echo","params":["a"]}"#;
+        ws.send(Message::text(req)).await.unwrap();
+        loop {
+            match ws.next().await.unwrap().unwrap() {
+                Message::Ping(_) => {}
+                msg => {
+                    assert_eq!(msg.to_text().unwrap(), r#"{"jsonrpc":"2.0","id":1,"result":"a"}"#);
+                    break
+                }
+            }
+        }
+
+        // A peer that does not read sends no pongs and gets disconnected.
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(msg)) = ws.next().await {
+                if msg.is_close() {
+                    break
+                }
+            }
+        });
+        closed.await.unwrap();
     }
 }

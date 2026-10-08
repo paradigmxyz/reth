@@ -1,7 +1,4 @@
-use crate::{
-    error::exceeded_limit, ErrorCode, ErrorObject, Id, OVERSIZED_RESPONSE_CODE,
-    OVERSIZED_RESPONSE_MSG, TOO_BIG_BATCH_RESPONSE_CODE, TOO_BIG_BATCH_RESPONSE_MSG,
-};
+use crate::{reject_too_big_batch_response, reject_too_big_response, ErrorCode, ErrorObject, Id};
 use serde::Serialize;
 use std::io;
 use tokio::sync::oneshot;
@@ -35,10 +32,7 @@ impl MethodResponse {
         {
             // SAFETY: `serde_json` only writes valid UTF-8.
             Ok(()) => Self::new(unsafe { String::from_utf8_unchecked(w.buf) }, None),
-            Err(err) if err.is_io() => Self::error(
-                id,
-                exceeded_limit(OVERSIZED_RESPONSE_CODE, OVERSIZED_RESPONSE_MSG, max_size),
-            ),
+            Err(err) if err.is_io() => Self::error(id, reject_too_big_response(max_size)),
             Err(err) => {
                 tracing::error!(target: "rpc::jsonrpc", %err, "failed to serialize response");
                 Self::error(id, ErrorCode::InternalError)
@@ -128,8 +122,7 @@ pub(crate) fn batch_json(
     for response in responses {
         if json.len() + response.json.len() + 1 > max_size {
             on_sent.clear();
-            let err =
-                exceeded_limit(TOO_BIG_BATCH_RESPONSE_CODE, TOO_BIG_BATCH_RESPONSE_MSG, max_size);
+            let err = reject_too_big_batch_response(max_size);
             return Some(MethodResponse::error(Id::Null, err).into_json())
         }
         if json.len() > 1 {
@@ -172,6 +165,7 @@ impl io::Write for BoundedWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OVERSIZED_RESPONSE_CODE;
 
     #[test]
     fn response() {

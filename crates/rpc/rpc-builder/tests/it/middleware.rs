@@ -1,7 +1,7 @@
 use crate::utils::{test_address, test_rpc_builder};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_json_rpc::{MethodResponse, Request, RpcServiceT};
+use reth_json_rpc::{MethodResponse, Notification, Request, RpcServiceT};
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -52,6 +52,10 @@ where
 
     fn batch(&self, reqs: Vec<Request>) -> impl Future<Output = Vec<MethodResponse>> + Send {
         self.service.batch(reqs)
+    }
+
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
+        self.service.notification(n)
     }
 }
 

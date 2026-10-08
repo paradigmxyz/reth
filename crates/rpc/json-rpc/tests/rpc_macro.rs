@@ -6,8 +6,9 @@ use bytes::Bytes;
 use futures::{channel::mpsc, StreamExt};
 use reth_json_rpc::{
     client::{BoxError, Client, ClientBuilder, ClientT, Error, SubscriptionClientT},
-    rpc, serve_connection, stop_channel, PendingSubscriptionSink, RpcModule, RpcResult,
-    RpcServiceBuilder, ServerConfig, SubscriptionResult, INVALID_PARAMS_CODE,
+    rpc, rpc_params, serve_connection, stop_channel, ConnectionId, Extensions,
+    PendingSubscriptionSink, RpcModule, RpcResult, RpcServiceBuilder, ServerConfig,
+    SubscriptionResult, INVALID_PARAMS_CODE,
 };
 use std::time::Duration;
 use tokio::time::timeout;
@@ -65,6 +66,46 @@ impl TestServer<String> for TestImpl {
     }
 }
 
+#[rpc(server, namespace = "extra", namespace_separator = ".")]
+trait Extra {
+    #[method(name = "sub", blocking)]
+    fn sub(&self, a: u64, #[argument(rename = "rhs")] b: u64) -> RpcResult<u64>;
+
+    #[method(name = "connectionId", with_extensions)]
+    fn connection_id(&self) -> RpcResult<u64>;
+
+    #[subscription(
+        name = "subscribe",
+        unsubscribe_aliases = ["extra_unsub"],
+        item = u64,
+        with_extensions
+    )]
+    async fn subscribe(&self) -> SubscriptionResult;
+}
+
+struct ExtraImpl;
+
+impl ExtraServer for ExtraImpl {
+    fn sub(&self, a: u64, b: u64) -> RpcResult<u64> {
+        Ok(a - b)
+    }
+
+    fn connection_id(&self, ext: &Extensions) -> RpcResult<u64> {
+        Ok(ext.get::<ConnectionId>().unwrap().0)
+    }
+
+    async fn subscribe(
+        &self,
+        pending: PendingSubscriptionSink,
+        ext: &Extensions,
+    ) -> SubscriptionResult {
+        let sink = pending.accept().await?;
+        sink.send(&ext.get::<ConnectionId>().unwrap().0).await?;
+        sink.closed().await;
+        Ok(())
+    }
+}
+
 /// Serves a connection over in-memory channels.
 fn serve(
     module: RpcModule,
@@ -75,7 +116,9 @@ fn serve(
     let (stop, handle) = stop_channel();
     tokio::spawn(async move {
         let reader = server_rx.map(Bytes::from);
-        serve_connection(reader, server_tx, module, &RpcServiceBuilder::new(), &config, stop).await;
+        let middleware = RpcServiceBuilder::new();
+        serve_connection(reader, server_tx, module, &middleware, &config, stop, Extensions::new())
+            .await;
         drop(handle);
     });
     (client_tx, client_rx)
@@ -116,9 +159,9 @@ async fn server_and_client() {
     assert_eq!(client.echo("hi".to_owned()).await.unwrap(), "hi");
     assert_eq!(TestClient::<String>::count(&client).await.unwrap(), 3);
 
-    let res = client.request::<u64, _>("test_plus", reth_json_rpc::rpc_params![2]).await;
+    let res = client.request::<u64, _>("test_plus", rpc_params![2]).await;
     assert_eq!(res.unwrap(), 2);
-    let res = client.request::<u64, _>("test_add", reth_json_rpc::rpc_params!["x"]).await;
+    let res = client.request::<u64, _>("test_add", rpc_params!["x"]).await;
     assert!(matches!(res, Err(Error::Call(err)) if err.code() == INVALID_PARAMS_CODE));
 
     let sub = TestClient::<String>::subscribe(&client, 3).await.unwrap();
@@ -127,7 +170,7 @@ async fn server_and_client() {
     assert_eq!(sub.next().await.unwrap().unwrap(), 7);
     sub.unsubscribe().await.unwrap();
 
-    let params = reth_json_rpc::rpc_params!["x"];
+    let params = rpc_params!["x"];
     let res = SubscriptionClientT::subscribe::<u64, _>(
         &client,
         "test_subscribe",
@@ -190,4 +233,35 @@ async fn pipelined_subscriptions() {
         }
     }
     assert!(responses.iter().any(|res| res.is_array() && res[0]["id"] == 2));
+}
+
+#[tokio::test]
+async fn method_attributes() {
+    let module = ExtraImpl.into_rpc();
+    let mut names = module.method_names().collect::<Vec<_>>();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        ["extra.connectionId", "extra.sub", "extra.subscribe", "extra.unsubscribe", "extra_unsub"]
+    );
+    let request = r#"{"jsonrpc":"2.0","id":1,"method":"extra.sub","params":{"a":5,"rhs":2}}"#;
+    assert_eq!(
+        module.raw_json_request(request).await.unwrap(),
+        r#"{"jsonrpc":"2.0","id":1,"result":3}"#
+    );
+
+    let client = connect(module);
+    assert_eq!(client.request::<u64, _>("extra.sub", rpc_params![5, 2]).await.unwrap(), 3);
+    let id = client.request::<u64, _>("extra.connectionId", rpc_params![]).await.unwrap();
+    let params = rpc_params![];
+    let mut sub =
+        SubscriptionClientT::subscribe::<u64, _>(&client, "extra.subscribe", params, "extra_unsub")
+            .await
+            .unwrap();
+    assert_eq!(sub.next().await.unwrap().unwrap(), id);
+    sub.unsubscribe().await.unwrap();
+
+    let other = connect(ExtraImpl.into_rpc());
+    let other_id = other.request::<u64, _>("extra.connectionId", rpc_params![]).await.unwrap();
+    assert_ne!(id, other_id);
 }
