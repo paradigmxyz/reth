@@ -292,6 +292,19 @@ pub trait DebugApi<TxReq: RpcObject> {
         end_number: u64,
     ) -> RpcResult<()>;
 
+    /// Returns the raw RLP-encoded trie node with the given hash, found by walking the trie
+    /// along `path` (one nibble per byte). `hashed_address` selects the storage trie for that
+    /// hashed address, or the account trie if `None`. Returns `None` if the path doesn't lead to
+    /// a node with the requested hash.
+    #[method(name = "getTrieNodeByHash")]
+    async fn debug_get_trie_node_by_hash(
+        &self,
+        hashed_address: Option<B256>,
+        path: Bytes,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>>;
+
     /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
     /// stateroot after each transaction.
     #[method(name = "intermediateRoots")]
