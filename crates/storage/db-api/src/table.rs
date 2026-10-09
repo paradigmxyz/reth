@@ -80,6 +80,12 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// The table's name.
     const NAME: &'static str;
 
+    /// In-memory identifier for a built-in table, shared by all views of that table.
+    ///
+    /// Resolved at compile time from [`Self::NAME`]. Custom tables return `None`.
+    /// This is independent of database handles and must not be persisted across builds.
+    const TABLE_ID: Option<usize> = crate::tables::Tables::id_by_name(Self::NAME);
+
     /// Whether the table is also a `DUPSORT` table.
     const DUPSORT: bool;
 

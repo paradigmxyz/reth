@@ -1,6 +1,6 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::{cursor::Cursor, utils::*};
+use super::{cursor::Cursor, utils::*, TableHandles};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
@@ -13,7 +13,6 @@ use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, W
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
-use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
     marker::PhantomData,
@@ -34,7 +33,7 @@ pub struct Tx<K: TransactionKind> {
     inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
-    dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
+    dbis: Arc<TableHandles>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -49,7 +48,7 @@ impl<K: TransactionKind> Tx<K> {
     #[track_caller]
     pub(crate) fn new(
         inner: Transaction<K>,
-        dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
+        dbis: Arc<TableHandles>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -76,7 +75,7 @@ impl<K: TransactionKind> Tx<K> {
     /// Gets a table database handle by name if it exists, otherwise, check the
     /// database, opening the DB if it exists.
     pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
-        if let Some(dbi) = self.dbis.get(name) {
+        if let Some(dbi) = self.dbis.by_name.get(name) {
             Ok(*dbi)
         } else {
             self.inner
@@ -89,6 +88,9 @@ impl<K: TransactionKind> Tx<K> {
     /// Gets a table database handle by name if it exists, otherwise, check the
     /// database, opening the DB if it exists.
     pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = T::TABLE_ID.and_then(|id| self.dbis.by_id[id]) {
+            return Ok(dbi);
+        }
         self.get_dbi_raw(T::NAME)
     }
 
@@ -101,7 +103,7 @@ impl<K: TransactionKind> Tx<K> {
 
         Ok(Cursor::new_with_metrics(
             inner,
-            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics::<T>()),
         ))
     }
 
@@ -166,7 +168,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
+                .record_operation::<T, _>(operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }

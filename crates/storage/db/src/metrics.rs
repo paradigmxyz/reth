@@ -1,5 +1,6 @@
 use crate::Tables;
 use metrics::Histogram;
+use reth_db_api::table::Table;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives_traits::FastInstant as Instant;
 use rustc_hash::FxHashMap;
@@ -16,7 +17,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
     /// Caches per-table operation metric handles for all database operation metrics.
-    operations: FxHashMap<&'static str, TableOperationMetrics>,
+    operations: [TableOperationMetrics; Tables::COUNT],
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -40,24 +41,18 @@ impl DatabaseEnvMetrics {
         }
     }
 
-    /// Generate a map of pre-bound operation handles for each table.
-    fn generate_operation_handles() -> FxHashMap<&'static str, TableOperationMetrics> {
-        let mut operations = FxHashMap::with_capacity_and_hasher(Tables::COUNT, Default::default());
-
-        for table in Tables::ALL {
-            let table_name = table.name();
-            let metrics = array::from_fn(|index| {
+    /// Generate pre-bound operation handles for each table ID.
+    fn generate_operation_handles() -> [TableOperationMetrics; Tables::COUNT] {
+        array::from_fn(|id| {
+            let table_name = Tables::ALL[id].name();
+            Arc::new(array::from_fn(|index| {
                 let operation = Operation::from_index(index);
                 OperationMetrics::new_with_labels(&[
                     (Labels::Table.as_str(), table_name),
                     (Labels::Operation.as_str(), operation.as_str()),
                 ])
-            });
-
-            operations.insert(table_name, Arc::new(metrics));
-        }
-
-        operations
+            }))
+        })
     }
 
     /// Generate a map of all possible transaction modes to metric handles.
@@ -99,24 +94,23 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record a metric for database operation executed in `f`.
-    /// Panics if a metric recorder is not found for the given table and operation.
-    pub(crate) fn record_operation<R>(
+    /// Tables without a built-in ID execute without recording operation metrics.
+    pub(crate) fn record_operation<T: Table, R>(
         &self,
-        table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        if let Some(metrics) = self.operations.get(table) {
-            metrics[operation.index()].record(value_size, f)
+        if let Some(id) = T::TABLE_ID {
+            self.operations[id][operation.index()].record(value_size, f)
         } else {
             f()
         }
     }
 
     /// Returns pre-bound operation metric handles for a single table.
-    pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        self.operations.get(table).expect("table operation metric handles not found").clone()
+    pub(crate) fn table_operation_metrics<T: Table>(&self) -> TableOperationMetrics {
+        self.operations[T::TABLE_ID.expect("table operation metric handles not found")].clone()
     }
 
     /// Record metrics for opening a database transaction.
@@ -402,5 +396,29 @@ impl OperationMetrics {
         } else {
             f()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_db_api::tables::{Headers, RawTable};
+
+    #[test]
+    fn table_views_share_metric_handles() {
+        let metrics = DatabaseEnvMetrics::new();
+        assert!(Arc::ptr_eq(
+            &metrics.table_operation_metrics::<Headers>(),
+            &metrics.table_operation_metrics::<RawTable<Headers>>(),
+        ));
+        #[derive(Debug)]
+        struct CustomTable;
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+            type Key = u64;
+            type Value = u64;
+        }
+        assert_eq!(metrics.record_operation::<CustomTable, _>(Operation::Get, None, || 42), 42);
     }
 }
