@@ -1327,7 +1327,16 @@ where
                     )
                 });
             if !reused {
-                executor.execute_transaction(tx)?;
+                if let Some(results) = prewarm_results {
+                    executor.execute_transaction_with_result_closure(tx, |result| {
+                        results.report_execution(
+                            index,
+                            &alloy_evm::block::TxResult::result(result).state,
+                        );
+                    })?;
+                } else {
+                    executor.execute_transaction(tx)?;
+                }
             }
             self.metrics.record_transaction_execution(tx_start.elapsed());
 

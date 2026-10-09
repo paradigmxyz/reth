@@ -24,7 +24,7 @@ use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::transaction::{Recovered, TxHashRef};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
@@ -35,7 +35,7 @@ use reth_evm::{
     RecoveredTx, SpecFor, TxEnvFor,
 };
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, TxTy};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
@@ -47,10 +47,14 @@ use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::context::Block;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -166,6 +170,7 @@ where
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
+            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(128);
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
@@ -191,6 +196,7 @@ where
 
                     tx_count += 1;
                     let parent_span = Span::current();
+                    let refresh_tx = &refresh_tx;
                     s.spawn(move |_| {
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -199,8 +205,19 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        Self::transact_worker(
+                            ctx,
+                            index,
+                            tx,
+                            state_root_hint_stream,
+                            Some(refresh_tx),
+                        );
                     });
+                }
+
+                if ctx.prewarm_results.is_some() {
+                    // Start after the first pass has handed out its jobs, using spare capacity.
+                    s.spawn(move |_| Self::refresh_worker(ctx, refresh_rx));
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
@@ -230,6 +247,7 @@ where
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
+        refresh_tx: Option<&crossbeam_channel::Sender<(usize, Recovered<TxTy<N>>)>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -313,6 +331,10 @@ where
             if let Some(reads) = reads &&
                 let Some(results) = &ctx.prewarm_results
             {
+                if let Some(refresh_tx) = refresh_tx {
+                    let _ = refresh_tx
+                        .try_send((index, Recovered::new_unchecked(tx.tx().clone(), *tx.signer())));
+                }
                 results.publish(
                     index,
                     ctx.executed_tx_index.load(Ordering::Relaxed),
@@ -321,6 +343,58 @@ where
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
+        });
+    }
+
+    /// Retries storage-conflicting ready results off the canonical thread. Predictions affect
+    /// only a private database; ordinary handoff checks every refreshed dependency again.
+    fn refresh_worker(
+        ctx: &PrewarmContext<N, P, Evm>,
+        sources: crossbeam_channel::Receiver<(usize, Recovered<TxTy<N>>)>,
+    ) {
+        let Some(results) = &ctx.prewarm_results else {
+            return;
+        };
+        WorkerPool::with_worker_mut(|worker| {
+            let (primary, _) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| (ctx.evm_for_ctx(true), None));
+            let Some(evm) = primary.as_mut() else {
+                return;
+            };
+            let mut transactions = BTreeMap::new();
+            while !ctx.should_stop() {
+                let next = ctx.executed_tx_index.load(Ordering::Relaxed);
+                transactions.retain(|index, _| *index >= next);
+                for (index, tx) in sources.try_iter() {
+                    if PrewarmResults::<HaltReasonFor<Evm>>::within_window(index, next) {
+                        transactions.insert(index, tx);
+                    }
+                }
+                if let Some((index, seed)) = results.take_refresh(next) &&
+                    let Some(tx) = transactions.get(&index)
+                {
+                    results.metrics.refresh_attempts.increment(1);
+                    evm.db_mut().set_recording(true);
+                    evm.db_mut().seed_storage(seed);
+                    evm.inspector_mut().reset(true);
+                    if let Ok(result) =
+                        evm.transact(TxEnvFor::<Evm>::from_recovered_tx(tx.tx(), tx.signer()))
+                    {
+                        let reads = evm.db_mut().take_reads();
+                        let mut candidate =
+                            PrewarmResult::new(*tx.tx().tx_hash(), tx.signer(), reads, result);
+                        candidate.refreshed = true;
+                        results.publish(
+                            index,
+                            ctx.executed_tx_index.load(Ordering::Relaxed),
+                            candidate,
+                        );
+                    }
+                } else {
+                    // Yield the core while initial results or canonical write reports arrive.
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+            }
         });
     }
 
@@ -1070,7 +1144,7 @@ mod tests {
                 )),
             };
             runtime.prewarming_pool().in_place_scope(|scope| {
-                scope.spawn(|_| PrewarmCacheTask::transact_worker(&ctx, index, tx, None));
+                scope.spawn(|_| PrewarmCacheTask::transact_worker(&ctx, index, tx, None, None));
             });
             assert!(
                 ctx.saved_cache

@@ -7,7 +7,10 @@
 //! remain exact dependencies. Caller funding checks conservatively require its parent balance.
 
 use alloy_consensus::{transaction::TxHashRef, Transaction, TxReceipt};
-use alloy_evm::{block::BlockExecutor, Evm};
+use alloy_evm::{
+    block::{BlockExecutor, TxResult},
+    Evm,
+};
 use alloy_primitives::{
     map::{AddressMap, AddressSet, HashMap},
     Address, B256, U256,
@@ -42,6 +45,7 @@ use std::{
 
 const MAX_READS: usize = 8_192;
 const MAX_READY_RESULTS: usize = 128;
+const MAX_REFRESHES: usize = 128;
 
 /// A parent-state database that records every account and storage dependency.
 #[derive(Debug)]
@@ -52,6 +56,7 @@ pub(super) struct RecordingDatabase<DB> {
     after_execution: Arc<AtomicBool>,
     actions: Rc<RefCell<StorageJournal>>,
     enabled: bool,
+    storage_seed: HashMap<(Address, U256), U256>,
 }
 
 impl<DB> RecordingDatabase<DB> {
@@ -61,6 +66,7 @@ impl<DB> RecordingDatabase<DB> {
             beneficiary,
             enabled,
             reads: ReadSet::default(),
+            storage_seed: HashMap::default(),
             after_execution: Arc::new(AtomicBool::new(false)),
             actions: Rc::new(RefCell::new(StorageJournal::default())),
         }
@@ -77,6 +83,7 @@ impl<DB> RecordingDatabase<DB> {
 
     pub(super) fn reset(&mut self) {
         self.reads = ReadSet::default();
+        self.storage_seed.clear();
         self.after_execution.store(false, Ordering::Relaxed);
         *self.actions.borrow_mut() = StorageJournal::default();
     }
@@ -93,6 +100,11 @@ impl<DB> RecordingDatabase<DB> {
         reads.balance_reads = actions.balance_reads;
         reads.overflowed |= actions.overflowed;
         reads
+    }
+
+    /// Seeds a private retry database; shared parent-state caches are never changed.
+    pub(super) fn seed_storage(&mut self, seed: HashMap<(Address, U256), U256>) {
+        self.storage_seed = seed;
     }
 
     fn can_record(&mut self) -> bool {
@@ -130,7 +142,10 @@ impl<DB: Database> Database for RecordingDatabase<DB> {
     }
 
     fn storage(&mut self, address: Address, slot: U256) -> Result<U256, Self::Error> {
-        let value = self.inner.storage(address, slot)?;
+        let value = match self.storage_seed.get(&(address, slot)) {
+            Some(value) => *value,
+            None => self.inner.storage(address, slot)?,
+        };
         if self.can_record() {
             self.reads.storage.entry((address, slot)).or_insert(value);
         }
@@ -334,6 +349,7 @@ pub(crate) struct PrewarmResult<H> {
     result: ExecutionResult<H>,
     effects: StateEffects,
     caller: Address,
+    pub(super) refreshed: bool,
 }
 
 /// Validated account effects and original storage metadata, with ordered persistent writes.
@@ -376,6 +392,7 @@ impl<H> PrewarmResult<H> {
             result: result.result,
             effects: StateEffects { accounts: result.state, writes },
             caller,
+            refreshed: false,
         }
     }
 
@@ -456,14 +473,21 @@ impl<H> PrewarmResult<H> {
 pub(crate) struct PrewarmResults<H> {
     ready: Mutex<ReadyResults<H>>,
     pub(crate) metrics: HandoffMetrics,
+    executed_tx: crossbeam_channel::Sender<(usize, Vec<StorageWrite>)>,
+    executed_rx: crossbeam_channel::Receiver<(usize, Vec<StorageWrite>)>,
 }
 
 impl<H> Default for PrewarmResults<H> {
     fn default() -> Self {
+        let (executed_tx, executed_rx) = crossbeam_channel::bounded(MAX_READY_RESULTS);
         Self {
+            executed_tx,
+            executed_rx,
             ready: Mutex::new(ReadyResults {
                 next: 0,
                 slots: std::iter::repeat_with(|| None).take(MAX_READY_RESULTS).collect(),
+                refresh: RefreshIndex::default(),
+                refresh_versions: vec![0; MAX_READY_RESULTS],
             }),
             metrics: HandoffMetrics::default(),
         }
@@ -481,6 +505,10 @@ impl<H> PrewarmResults<H> {
         }
         let mut ready = self.ready.lock();
         if Self::within_window(index, next.max(ready.next)) {
+            if result.refreshed {
+                self.metrics.refreshed.increment(1);
+            }
+            ready.refresh.replace(index, &result.effects.writes);
             ready.slots[index % MAX_READY_RESULTS] = Some((index, result));
         }
     }
@@ -498,12 +526,130 @@ impl<H> PrewarmResults<H> {
             None
         }
     }
+
+    /// Collects actual writes without waiting for the refresh worker. Missing reports only reduce
+    /// prediction quality: every retry still passes canonical dependency validation.
+    pub(crate) fn report_execution(&self, index: usize, state: &EvmState) {
+        let mut writes = Vec::new();
+        for (address, account) in state {
+            if !account.is_touched() {
+                continue;
+            }
+            for (slot, value) in &account.storage {
+                if value.is_changed() {
+                    if writes.len() == MAX_READS {
+                        return;
+                    }
+                    writes.push(StorageWrite {
+                        address: *address,
+                        slot: *slot,
+                        value: value.present_value,
+                    });
+                }
+            }
+        }
+        if self.executed_tx.try_send((index, writes)).is_err() {
+            self.metrics.refresh_reports_dropped.increment(1);
+        }
+    }
+
+    /// Finds the nearest ready result whose storage inputs conflict with earlier writes. Each
+    /// result gets at most one attempt per prediction generation, within a block-wide budget.
+    pub(super) fn take_refresh(
+        &self,
+        next: usize,
+    ) -> Option<(usize, HashMap<(Address, U256), U256>)> {
+        let mut ready = self.ready.lock();
+        for (index, writes) in self.executed_rx.try_iter() {
+            ready.refresh.replace(index, &writes);
+        }
+        if ready.refresh.disabled || ready.refresh.attempts >= MAX_REFRESHES {
+            return None;
+        }
+        let next = next.max(ready.next);
+        for index in next.saturating_add(1)..next.saturating_add(MAX_READY_RESULTS) {
+            let offset = index % MAX_READY_RESULTS;
+            if ready.refresh_versions[offset] == ready.refresh.version {
+                continue;
+            }
+            let Some((stored_index, result)) = &ready.slots[offset] else {
+                continue;
+            };
+            if *stored_index != index {
+                continue;
+            }
+            let mut changed = false;
+            let mut seed = HashMap::default();
+            for (key, original) in &result.reads.storage {
+                if let Some(value) = ready.refresh.value_before(key, index) {
+                    changed |= value != *original;
+                    seed.insert(*key, value);
+                }
+            }
+            ready.refresh_versions[offset] = ready.refresh.version;
+            if changed {
+                ready.refresh.attempts += 1;
+                self.metrics.storage_conflicts.increment(1);
+                return Some((index, seed));
+            }
+        }
+        None
+    }
+}
+
+/// Bounded predictions used only to seed speculative retries, never canonical execution.
+#[derive(Debug, Default)]
+struct RefreshIndex {
+    writes: HashMap<(Address, U256), BTreeMap<usize, U256>>,
+    by_transaction: BTreeMap<usize, Vec<(Address, U256)>>,
+    entries: usize,
+    version: u64,
+    attempts: usize,
+    disabled: bool,
+}
+
+impl RefreshIndex {
+    fn replace(&mut self, index: usize, writes: &[StorageWrite]) {
+        if self.disabled {
+            return;
+        }
+        if let Some(keys) = self.by_transaction.remove(&index) {
+            for key in keys {
+                if let Some(writers) = self.writes.get_mut(&key) {
+                    self.entries -= usize::from(writers.remove(&index).is_some());
+                    if writers.is_empty() {
+                        self.writes.remove(&key);
+                    }
+                }
+            }
+        }
+        for write in writes {
+            let writers = self.writes.entry((write.address, write.slot)).or_default();
+            if writers.insert(index, write.value).is_none() {
+                self.entries += 1;
+                self.by_transaction.entry(index).or_default().push((write.address, write.slot));
+            }
+            if self.entries > MAX_READS || writers.len() > 64 {
+                self.writes.clear();
+                self.by_transaction.clear();
+                self.disabled = true;
+                return;
+            }
+        }
+        self.version = self.version.wrapping_add(1);
+    }
+
+    fn value_before(&self, key: &(Address, U256), index: usize) -> Option<U256> {
+        self.writes.get(key)?.range(..index).next_back().map(|(_, value)| *value)
+    }
 }
 
 #[derive(Debug)]
 struct ReadyResults<H> {
     next: usize,
     slots: Vec<Option<(usize, PrewarmResult<H>)>>,
+    refresh: RefreshIndex,
+    refresh_versions: Vec<u64>,
 }
 
 /// Counters for validated handoffs and ordinary-execution fallbacks.
@@ -516,6 +662,16 @@ pub(crate) struct HandoffMetrics {
     pub(crate) rejected: Counter,
     /// Transactions whose speculative result was not ready.
     pub(crate) missing: Counter,
+    /// Ready results found to have conflicting predicted storage inputs.
+    pub(crate) storage_conflicts: Counter,
+    /// Speculative executions retried with updated storage inputs.
+    pub(crate) refresh_attempts: Counter,
+    /// Refreshed results published before canonical execution reached them.
+    pub(crate) refreshed: Counter,
+    /// Refreshed results accepted by canonical dependency validation.
+    pub(crate) refresh_reused: Counter,
+    /// Actual-write reports dropped because the refresh queue was full.
+    pub(crate) refresh_reports_dropped: Counter,
 }
 
 /// Attempts a non-waiting handoff through the canonical executor's normal commit path.
@@ -539,6 +695,7 @@ where
         results.metrics.missing.increment(1);
         return false
     };
+    let refreshed = candidate.refreshed;
     let gas_used = executor.receipts().last().map_or(0, TxReceipt::cumulative_gas_used);
     let evm = executor.evm_mut();
     let available = evm.block().gas_limit().saturating_sub(gas_used);
@@ -547,7 +704,11 @@ where
         let Some(result) = candidate.validate(*transaction.tx_hash(), evm.db_mut()) &&
         let Some(result) = config.prewarm_transaction_result(transaction, result)
     {
+        results.report_execution(index, &result.result().state);
         executor.commit_transaction(result);
+        if refreshed {
+            results.metrics.refresh_reused.increment(1);
+        }
         results.metrics.reused.increment(1);
         true
     } else {
@@ -1182,5 +1343,137 @@ mod tests {
             }
             assert!(!config.prewarm_handoff_enabled(&invalid));
         }
+    }
+    fn speculate_seeded(
+        db: InMemoryDB,
+        transaction: TxEnv,
+        seed: HashMap<(Address, U256), U256>,
+    ) -> PrewarmResult<HaltReason> {
+        let caller = transaction.caller;
+        let mut recording = RecordingDatabase::new(db, BENEFICIARY, true);
+        recording.seed_storage(seed);
+        let inspector = recording.inspector();
+        let mut evm =
+            EthEvmConfig::mainnet().evm_with_env_and_inspector(recording, env(), inspector);
+        evm.enable_inspector();
+        let result = evm.transact(transaction).unwrap();
+        let reads = evm.db_mut().take_reads();
+        let mut candidate = PrewarmResult::new(B256::ZERO, caller, reads, result);
+        candidate.refreshed = true;
+        candidate
+    }
+
+    #[test]
+    fn refresh_counter_chain_matches_serial_receipts_and_bundle() {
+        let mut parent = database();
+        // Increment slot zero; each later transaction depends on the previous increment.
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let mut third = tx(2);
+        third.caller = BENEFICIARY;
+        let transactions = [tx(1), tx(2), third];
+        let (serial_receipts, serial_state, _) =
+            execute_block_transactions(parent.clone(), &transactions, false, 30_000_000);
+        let config = EthEvmConfig::mainnet();
+        let block = EthBlock {
+            header: Header { gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody::default(),
+        }
+        .seal_slow();
+        let mut state = State::builder().with_database(parent.clone()).with_bundle_update().build();
+        let evm = config.evm_with_env(&mut state, env());
+        let mut executor =
+            config.create_executor_with_state(evm, config.context_for_block(&block).unwrap());
+        let results = PrewarmResults::default();
+        for (index, transaction) in transactions.iter().enumerate() {
+            results.publish(index, 0, speculate(parent.clone(), transaction.clone()));
+        }
+        while let Some((index, seed)) = results.take_refresh(0) {
+            results.publish(
+                index,
+                0,
+                speculate_seeded(parent.clone(), transactions[index].clone(), seed),
+            );
+        }
+        for (index, transaction) in transactions.iter().enumerate() {
+            let signed = recovered(transaction);
+            assert!(try_reuse_transaction(&results, index, signed.tx(), &config, &mut executor));
+        }
+        let receipts = executor.receipts().to_vec();
+        drop(executor);
+        state.merge_transitions(BundleRetention::Reverts);
+        assert_eq!(receipts, serial_receipts);
+        assert_eq!(state.take_bundle(), serial_state);
+    }
+
+    #[test]
+    fn refreshed_prediction_must_match_actual_storage() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let seed = HashMap::from_iter([((CONTRACT, U256::ZERO), U256::from(7))]);
+        let candidate = speculate_seeded(parent.clone(), tx(2), seed);
+        assert!(candidate.validate(B256::ZERO, &mut parent).is_none());
+    }
+
+    #[test]
+    fn executed_writes_replace_speculative_prediction() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let results = PrewarmResults::default();
+        results.publish(0, 0, speculate(parent.clone(), tx(1)));
+        results.publish(2, 0, speculate(parent.clone(), tx(2)));
+        let mut actual = execute(&mut parent, tx(1)).state;
+        actual.get_mut(&CONTRACT).unwrap().storage.get_mut(&U256::ZERO).unwrap().present_value =
+            U256::from(9);
+        results.report_execution(0, &actual);
+        let (index, seed) = results.take_refresh(0).unwrap();
+        assert_eq!(index, 2);
+        assert_eq!(seed[&(CONTRACT, U256::ZERO)], U256::from(9));
+        // An empty actual delta retracts the speculative write entirely.
+        results.report_execution(0, &EvmState::default());
+        assert!(results.take_refresh(0).is_none());
+        assert!(results.ready.lock().refresh.value_before(&(CONTRACT, U256::ZERO), 2).is_none());
+    }
+
+    #[test]
+    fn refresh_budget_and_prediction_memory_are_bounded() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let results = PrewarmResults::default();
+        results.publish(2, 0, speculate(parent.clone(), tx(2)));
+        for value in 1..=MAX_REFRESHES {
+            let writes =
+                [StorageWrite { address: CONTRACT, slot: U256::ZERO, value: U256::from(value) }];
+            results.ready.lock().refresh.replace(0, &writes);
+            assert!(results.take_refresh(0).is_some());
+        }
+        results
+            .ready
+            .lock()
+            .refresh
+            .replace(0, &[StorageWrite { address: CONTRACT, slot: U256::ZERO, value: U256::MAX }]);
+        assert!(results.take_refresh(0).is_none());
+        let mut predictions = RefreshIndex::default();
+        for index in 0..=64 {
+            predictions.replace(
+                index,
+                &[StorageWrite { address: CONTRACT, slot: U256::ZERO, value: U256::from(index) }],
+            );
+        }
+        assert!(predictions.disabled);
+        assert!(predictions.writes.is_empty());
+    }
+
+    #[test]
+    fn refresh_never_waits_on_or_republishes_consumed_results() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let results = PrewarmResults::default();
+        results.publish(0, 0, speculate(parent.clone(), tx(1)));
+        results.publish(2, 0, speculate(parent.clone(), tx(2)));
+        assert!(results.take_refresh(1).is_some());
+        assert!(results.take(2).is_some());
+        results.publish(2, 0, speculate(parent.clone(), tx(2)));
+        assert!(results.take(2).is_none());
+        assert!(results.take_refresh(0).is_none());
     }
 }
