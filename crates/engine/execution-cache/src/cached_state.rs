@@ -1116,7 +1116,7 @@ impl ExecutionCache {
     /// the touched and modified state. The insertion order is critical:
     ///
     /// 1. Bytecodes: Insert contract code first
-    /// 2. Storage slots: Update storage values for each account
+    /// 2. Storage slots: Update changed storage values for each account
     /// 3. Accounts: Update account info (nonce, balance, code hash)
     ///
     /// ## Why This Order Matters
@@ -1190,9 +1190,13 @@ impl ExecutionCache {
                 return Err(())
             };
 
-            // Now we iterate over all storage and make updates to the cached storage values
+            // Unchanged slots (including writes restored to their original value) need no cache
+            // update. Existing entries still hold the parent value; misses can read the database.
+            // Keep all slots when storage is newly created or reset.
             for (key, slot) in &account.storage {
-                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                if account.status.is_storage_known() || slot.is_changed() {
+                    self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+                }
             }
 
             // Insert will update if present, so we just use the new account info as the new value
@@ -1309,11 +1313,14 @@ impl SavedCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, U256};
+    use alloy_primitives::{
+        map::{HashMap, U256Map},
+        U256,
+    };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
     use reth_storage_api::StateProvider;
-    use revm::state::AccountInfo;
+    use revm::{database::states::StorageSlot, state::AccountInfo};
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
@@ -1588,5 +1595,84 @@ mod tests {
             capacity, 16384,
             "code cache should have 16384 entries with default 4 GB budget"
         );
+    }
+
+    #[test]
+    fn test_insert_state_compacts_unchanged_storage() {
+        let caches = ExecutionCache::new(1000);
+        let address = Address::repeat_byte(1);
+        let unchanged_key = U256::from(1);
+        let changed_key = U256::from(2);
+        let cleared_key = U256::from(3);
+        let uncached_key = U256::from(4);
+        caches.insert_storage(address, unchanged_key.into(), Some(U256::from(7)));
+        caches.insert_storage(address, changed_key.into(), Some(U256::from(8)));
+        caches.insert_storage(address, cleared_key.into(), Some(U256::from(9)));
+
+        let info = AccountInfo::default();
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                address,
+                BundleAccount::new(
+                    Some(info.clone()),
+                    Some(info),
+                    U256Map::from_iter([
+                        (unchanged_key, StorageSlot::new(U256::from(7))),
+                        (changed_key, StorageSlot::new_changed(U256::from(8), U256::from(10))),
+                        (cleared_key, StorageSlot::new_changed(U256::from(9), U256::ZERO)),
+                        (uncached_key, StorageSlot::new(U256::from(11))),
+                    ]),
+                    AccountStatus::Changed,
+                ),
+            )]),
+            ..Default::default()
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert_eq!(
+            caches.0.storage_cache.get(&(address, unchanged_key.into())),
+            Some(U256::from(7))
+        );
+        assert_eq!(
+            caches.0.storage_cache.get(&(address, changed_key.into())),
+            Some(U256::from(10))
+        );
+        assert_eq!(caches.0.storage_cache.get(&(address, cleared_key.into())), Some(U256::ZERO));
+        assert_eq!(caches.0.storage_cache.get(&(address, uncached_key.into())), None);
+
+        let provider = MockEthProvider::default();
+        provider.extend_accounts(vec![(
+            address,
+            ExtendedAccount::new(0, U256::ZERO)
+                .extend_storage(vec![(uncached_key.into(), U256::from(11))]),
+        )]);
+        let state_provider =
+            CachedStateProvider::new(provider.into_evm_state_provider(), caches, None);
+        assert_eq!(
+            state_provider.storage(address, uncached_key.into()).unwrap(),
+            Some(U256::from(11))
+        );
+    }
+
+    #[test]
+    fn test_insert_state_keeps_zero_slots_for_new_storage() {
+        let caches = ExecutionCache::new(1000);
+        let address = Address::repeat_byte(2);
+        let key = U256::from(1);
+        let bundle = BundleState {
+            state: HashMap::from_iter([(
+                address,
+                BundleAccount::new(
+                    None,
+                    Some(AccountInfo::default()),
+                    U256Map::from_iter([(key, StorageSlot::new(U256::ZERO))]),
+                    AccountStatus::InMemoryChange,
+                ),
+            )]),
+            ..Default::default()
+        };
+
+        assert!(caches.insert_state(&bundle).is_ok());
+        assert_eq!(caches.0.storage_cache.get(&(address, key.into())), Some(U256::ZERO));
     }
 }
