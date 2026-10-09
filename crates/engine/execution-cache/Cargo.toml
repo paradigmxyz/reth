@@ -16,10 +16,9 @@ reth-execution-types.workspace = true
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
-moka = { workspace = true, features = ["sync"] }
 parking_lot.workspace = true
 reth-errors.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["std"] }
 reth-metrics = { workspace = true, features = ["common"] }
 reth-primitives-traits = { workspace = true, features = ["std", "dashmap"] }
 reth-revm.workspace = true
@@ -28,7 +27,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
-metrics-util = { workspace = true, features = ["debugging"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 revm.workspace = true
