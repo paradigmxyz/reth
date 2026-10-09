@@ -1,4 +1,7 @@
+//! Interactive database table listing with fallible pagination.
+
 use crossterm::{
+    cursor::Show,
     event::{self, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -105,7 +108,7 @@ impl<'a, T: Table> Iterator for EntriesKeyIter<'a, T> {
 
 pub(crate) struct DbListTUI<F, T: Table>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     /// Fetcher for the next page of items.
     ///
@@ -130,7 +133,7 @@ where
 
 impl<F, T: Table> DbListTUI<F, T>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     /// Create a new database list TUI
     pub(crate) fn new(
@@ -154,83 +157,99 @@ where
 
     /// Move to the next list selection
     fn next(&mut self) {
+        let Some(last) = self.entries.len().checked_sub(1) else {
+            self.list_state.select(None);
+            return;
+        };
         self.list_state.select(Some(
-            self.list_state
-                .selected()
-                .map(|i| if i >= self.entries.len() - 1 { 0 } else { i + 1 })
-                .unwrap_or(0),
+            self.list_state.selected().map(|i| if i >= last { 0 } else { i + 1 }).unwrap_or(0),
         ));
     }
 
     /// Move to the previous list selection
     fn previous(&mut self) {
+        let Some(last) = self.entries.len().checked_sub(1) else {
+            self.list_state.select(None);
+            return;
+        };
         self.list_state.select(Some(
-            self.list_state
-                .selected()
-                .map(|i| if i == 0 { self.entries.len() - 1 } else { i - 1 })
-                .unwrap_or(0),
+            self.list_state.selected().map(|i| if i == 0 { last } else { i - 1 }).unwrap_or(0),
         ));
     }
 
     fn reset(&mut self) {
-        self.list_state.select(Some(0));
+        self.list_state.select((self.entries.len() > 0).then_some(0));
     }
 
     /// Fetch the next page of items
-    fn next_page(&mut self) {
-        if self.skip + self.count < self.total_entries {
-            self.skip += self.count;
-            self.fetch_page();
+    fn next_page(&mut self) -> eyre::Result<()> {
+        if let Some(skip) =
+            self.skip.checked_add(self.count).filter(|skip| *skip < self.total_entries)
+        {
+            self.skip = skip;
+            self.fetch_page()?;
         }
+        Ok(())
     }
 
     /// Fetch the previous page of items
-    fn previous_page(&mut self) {
+    fn previous_page(&mut self) -> eyre::Result<()> {
         if self.skip > 0 {
             self.skip = self.skip.saturating_sub(self.count);
-            self.fetch_page();
+            self.fetch_page()?;
         }
+        Ok(())
     }
 
     /// Go to a specific page.
-    fn go_to_page(&mut self, page: usize) {
-        self.skip = (self.count * page).min(self.total_entries - self.count);
-        self.fetch_page();
+    fn go_to_page(&mut self, page: usize) -> eyre::Result<()> {
+        // Clamp before multiplying so even the largest user-supplied page cannot overflow.
+        self.skip = page.min(self.last_page()) * self.count;
+        self.fetch_page()
+    }
+
+    /// Returns the last zero-based page index, or zero for an empty table.
+    fn last_page(&self) -> usize {
+        self.total_entries.saturating_sub(1) / self.count
     }
 
     /// Fetch the current page
-    fn fetch_page(&mut self) {
-        self.entries.set((self.fetch)(self.skip, self.count));
+    fn fetch_page(&mut self) -> eyre::Result<()> {
+        self.entries.set((self.fetch)(self.skip, self.count)?);
         self.reset();
+        Ok(())
     }
 
     /// Show the [`DbListTUI`] in the terminal.
+    ///
+    /// # Errors
+    /// Returns page fetch, terminal setup, rendering, or input errors.
     pub(crate) fn run(mut self) -> eyre::Result<()> {
-        // Setup backend
+        // Reject a bad initial page without changing the terminal state.
+        self.fetch_page()?;
         enable_raw_mode()?;
+        let _restore = RestoreTerminal;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
-        // Load initial page
-        self.fetch_page();
-
-        // Run event loop
         let tick_rate = Duration::from_millis(250);
-        let res = event_loop(&mut terminal, &mut self, tick_rate);
+        event_loop(&mut terminal, &mut self, tick_rate)
+    }
+}
 
-        // Restore terminal
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
+// Restore terminal state on setup failures as well as errors after entering the event loop.
+struct RestoreTerminal;
 
-        // Handle errors
-        if let Err(err) = res {
-            error!("{err}");
+impl Drop for RestoreTerminal {
+    fn drop(&mut self) {
+        if let Err(err) = disable_raw_mode() {
+            error!(%err, "failed to disable terminal raw mode");
         }
-
-        Ok(())
+        if let Err(err) = execute!(io::stdout(), LeaveAlternateScreen, Show) {
+            error!(%err, "failed to restore terminal screen");
+        }
     }
 }
 
@@ -239,16 +258,16 @@ fn event_loop<B: Backend, F, T: Table>(
     terminal: &mut Terminal<B>,
     app: &mut DbListTUI<F, T>,
     tick_rate: Duration,
-) -> io::Result<()>
+) -> eyre::Result<()>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
     io::Error: From<B::Error>,
 {
     let mut last_tick = Instant::now();
     let mut running = true;
     while running {
         // Render
-        terminal.draw(|f| ui(f, app))?;
+        terminal.draw(|f| ui(f, app)).map_err(io::Error::from)?;
 
         // Calculate timeout
         let timeout =
@@ -268,9 +287,9 @@ where
 }
 
 /// Handle incoming events
-fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
+fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> eyre::Result<bool>
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     if app.mode == ViewMode::GoToPage {
         if let Event::Key(key) = event {
@@ -278,7 +297,7 @@ where
                 KeyCode::Enter => {
                     let input = std::mem::take(&mut app.input);
                     if let Ok(page) = input.parse() {
-                        app.go_to_page(page);
+                        app.go_to_page(page)?;
                     }
                     app.mode = ViewMode::Normal;
                 }
@@ -301,8 +320,8 @@ where
             KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
             KeyCode::Down => app.next(),
             KeyCode::Up => app.previous(),
-            KeyCode::Right => app.next_page(),
-            KeyCode::Left => app.previous_page(),
+            KeyCode::Right => app.next_page()?,
+            KeyCode::Left => app.previous_page()?,
             KeyCode::Char('G') => {
                 app.mode = ViewMode::GoToPage;
             }
@@ -330,7 +349,7 @@ where
 /// Render the UI
 fn ui<F, T: Table>(f: &mut Frame<'_>, app: &mut DbListTUI<F, T>)
 where
-    F: FnMut(usize, usize) -> Vec<TableRow<T>>,
+    F: FnMut(usize, usize) -> eyre::Result<Vec<TableRow<T>>>,
 {
     let outer_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -344,7 +363,7 @@ where
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(outer_chunks[0]);
 
-        let key_length = format!("{}", (app.skip + app.count).saturating_sub(1)).len();
+        let key_length = format!("{}", app.skip.saturating_add(app.count).saturating_sub(1)).len();
 
         let formatted_keys = app
             .entries
@@ -359,7 +378,7 @@ where
             .block(Block::default().borders(Borders::ALL).title(format!(
                 "Keys (Showing entries {}-{} out of {} entries)",
                 app.skip,
-                (app.skip + app.entries.len()).saturating_sub(1),
+                app.skip.saturating_add(app.entries.len()).saturating_sub(1),
                 app.total_entries
             )))
             .style(Style::default().fg(Color::White))
@@ -396,11 +415,9 @@ where
         ViewMode::Normal => Paragraph::new(
             CMDS.iter().map(|(k, v)| format!("[{k}] {v}")).collect::<Vec<_>>().join(" | "),
         ),
-        ViewMode::GoToPage => Paragraph::new(format!(
-            "Go to page (max {}): {}",
-            app.total_entries / app.count,
-            app.input
-        )),
+        ViewMode::GoToPage => {
+            Paragraph::new(format!("Go to page (max {}): {}", app.last_page(), app.input))
+        }
     }
     .block(Block::default().borders(Borders::ALL))
     .alignment(match app.mode {
@@ -409,4 +426,139 @@ where
     })
     .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
     f.render_widget(footer, outer_chunks[1]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_db_api::tables;
+
+    #[test]
+    fn empty_pages_have_no_selection() {
+        for total_entries in [0, 42] {
+            let mut app = DbListTUI::<_, tables::Headers>::new(
+                |_, _| Ok(Vec::new()),
+                0,
+                20,
+                total_entries,
+                false,
+            );
+            app.fetch_page().unwrap();
+            assert_eq!(app.list_state.selected(), None);
+            for key in [KeyCode::Down, KeyCode::Up, KeyCode::Right, KeyCode::Left] {
+                handle_event(&mut app, Event::Key(key.into())).unwrap();
+                assert_eq!(app.list_state.selected(), None);
+            }
+        }
+    }
+
+    #[test]
+    fn page_jumps_clamp_to_the_last_page() {
+        for (total, page, expected_skip) in [
+            (0, 0, 0),
+            (0, usize::MAX, 0),
+            (3, 0, 0),
+            (3, usize::MAX, 0),
+            (40, usize::MAX, 20),
+            (43, 2, 40),
+            (43, usize::MAX, 40),
+            (usize::MAX, usize::MAX, (usize::MAX - 1) / 20 * 20),
+        ] {
+            let mut app = DbListTUI::<_, tables::Headers>::new(
+                |skip, len| {
+                    Ok((0..total.saturating_sub(skip).min(len))
+                        .map(|i| ((skip + i) as u64, Default::default()))
+                        .collect())
+                },
+                0,
+                20,
+                total,
+                false,
+            );
+            app.mode = ViewMode::GoToPage;
+            app.input = page.to_string();
+            handle_event(&mut app, Event::Key(KeyCode::Enter.into())).unwrap();
+            assert_eq!(app.skip, expected_skip);
+            assert_eq!(app.entries.len(), total.saturating_sub(expected_skip).min(20));
+            assert_eq!(app.list_state.selected(), (total > 0).then_some(0));
+        }
+    }
+
+    #[test]
+    fn next_page_near_maximum_offset_does_not_wrap() {
+        let mut reads = 0;
+        let mut app = DbListTUI::<_, tables::Headers>::new(
+            |_, _| {
+                reads += 1;
+                Ok(vec![(0, Default::default())])
+            },
+            usize::MAX - 1,
+            20,
+            usize::MAX,
+            false,
+        );
+        app.fetch_page().unwrap();
+        handle_event(&mut app, Event::Key(KeyCode::Right.into())).unwrap();
+        assert_eq!(app.skip, usize::MAX - 1);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui(frame, &mut app)).unwrap();
+        assert_eq!(reads, 1);
+    }
+
+    #[test]
+    fn selection_wraps_within_nonempty_pages() {
+        let mut app = DbListTUI::<_, tables::Headers>::new(
+            |_, _| Ok(vec![(0, Default::default()), (1, Default::default())]),
+            0,
+            20,
+            2,
+            false,
+        );
+        app.fetch_page().unwrap();
+        for (key, selected) in [(KeyCode::Up, 1), (KeyCode::Down, 0), (KeyCode::Down, 1)] {
+            handle_event(&mut app, Event::Key(key.into())).unwrap();
+            assert_eq!(app.list_state.selected(), Some(selected));
+        }
+    }
+
+    #[test]
+    fn initial_page_error_is_returned_before_terminal_setup() {
+        let app = DbListTUI::<_, tables::Headers>::new(
+            |_, _| eyre::bail!("invalid table value"),
+            0,
+            1,
+            2,
+            false,
+        );
+
+        assert_eq!(app.run().unwrap_err().to_string(), "invalid table value");
+    }
+
+    #[test]
+    fn pagination_events_propagate_fetch_errors() {
+        for key in [KeyCode::Right, KeyCode::Left, KeyCode::Enter] {
+            let mut reads = 0;
+            let mut app = DbListTUI::<_, tables::Headers>::new(
+                |_, _| {
+                    reads += 1;
+                    if reads > 1 {
+                        eyre::bail!("invalid table value")
+                    }
+                    Ok(vec![(1, Default::default())])
+                },
+                1,
+                1,
+                3,
+                false,
+            );
+            app.fetch_page().unwrap();
+            if key == KeyCode::Enter {
+                app.mode = ViewMode::GoToPage;
+                app.input = "2".to_string();
+            }
+
+            let error = handle_event(&mut app, Event::Key(key.into())).unwrap_err();
+            assert_eq!(error.to_string(), "invalid table value");
+        }
+    }
 }
