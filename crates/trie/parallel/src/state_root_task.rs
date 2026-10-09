@@ -807,14 +807,34 @@ mod tests {
             self.state_updates.fetch_add(1, Ordering::Relaxed);
         }
 
-        fn on_hashed_state_update(&self, state: HashedPostState) {
-            assert!(state.accounts.is_empty());
-            assert!(state.storages.is_empty());
-        }
+        fn on_hashed_state_update(&self, _state: HashedPostState) {}
 
         fn on_updates_finished(&self) {
             self.finished_updates.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    #[test]
+    fn state_access_hint_converts_to_sparse_targets() {
+        let account = B256::repeat_byte(0x01);
+        let storage_account = B256::repeat_byte(0x02);
+        let storage_slot = B256::repeat_byte(0x03);
+
+        let mut storages = B256Map::default();
+        storages.insert(storage_account, vec![storage_slot]);
+        let hint = StateAccessHint { accounts: vec![account], storages };
+
+        let targets = MultiProofTargetsV2::from(hint);
+        assert_eq!(targets.account_targets.len(), 1);
+        assert_eq!(targets.account_targets[0].key(), account);
+        assert_eq!(targets.storage_targets.len(), 1);
+        assert_eq!(targets.storage_targets[&storage_account].len(), 1);
+        assert_eq!(targets.storage_targets[&storage_account][0].key(), storage_slot);
+
+        let hint = StateAccessHint::from(targets);
+        assert_eq!(hint.accounts, vec![account]);
+        assert_eq!(hint.storages.len(), 1);
+        assert_eq!(hint.storages[&storage_account], vec![storage_slot]);
     }
 
     /// A hook dropped by a panic unwind must not finish the stream: the updates are

@@ -112,6 +112,19 @@ mod tests {
     }
 
     #[test]
+    fn start_sends_job() {
+        let (control, receiver) = control();
+        let parent_hash = B256::repeat_byte(0x01);
+        control.start(parent_hash, 1);
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(Command::Start { parent_hash: received_parent, job: 1 })
+                if received_parent == parent_hash
+        ));
+    }
+
+    #[test]
     fn pause_guard_does_not_retain_control() {
         let (control, _receiver) = control();
         let weak_control = Arc::downgrade(&control);

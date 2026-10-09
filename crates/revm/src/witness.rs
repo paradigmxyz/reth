@@ -163,9 +163,22 @@ mod tests {
     use reth_storage_errors::provider::ProviderResult;
     use reth_trie::HashedStorage;
     use revm::{
-        database::{states::CacheAccount, EmptyDB},
+        database::{states::CacheAccount, AccountStatus, BundleAccount, EmptyDB},
         state::AccountInfo,
     };
+
+    #[derive(Debug)]
+    struct ExpandedStateProvider(HashedPostState);
+
+    impl HashedPostStateProvider for ExpandedStateProvider {
+        fn hashed_post_state(
+            &self,
+            bundle_state: &revm::database::BundleState,
+        ) -> ProviderResult<HashedPostState> {
+            assert!(bundle_state.state.values().any(BundleAccount::was_destroyed));
+            Ok(self.0.clone())
+        }
+    }
 
     #[derive(Debug)]
     struct StaticStateProvider(HashedPostState);
@@ -177,6 +190,37 @@ mod tests {
         ) -> ProviderResult<HashedPostState> {
             Ok(self.0.clone())
         }
+    }
+
+    #[test]
+    fn destroyed_account_storage_is_zero_expanded() {
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let hashed_slot = B256::with_last_byte(2);
+
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        state.cache.accounts.insert(address, CacheAccount::new_destroyed());
+        state.bundle_state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(AccountInfo::default()),
+                None,
+                Default::default(),
+                AccountStatus::Destroyed,
+            ),
+        );
+
+        let provider = ExpandedStateProvider(
+            HashedPostState::default().with_accounts([(hashed_address, None)]).with_storages([(
+                hashed_address,
+                HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
+            )]),
+        );
+
+        let (hashed_state, _) =
+            ExecutionWitnessRecord::new(&state).hashed_post_state(&provider).unwrap();
+        let storage = hashed_state.storages.get(&hashed_address).unwrap();
+        assert_eq!(storage.storage.get(&hashed_slot), Some(&U256::ZERO));
     }
 
     #[test]

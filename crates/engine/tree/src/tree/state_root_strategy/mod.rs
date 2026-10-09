@@ -1632,6 +1632,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sparse_trie_prune_target_advances_reused_anchor_when_parent_becomes_durable() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+        let old_anchor = blocks[1].recovered_block().hash();
+        let parent = blocks[2].recovered_block().num_hash();
+
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
+            Some((TrieNodeEpoch::new(4), parent.hash))
+        );
+    }
+
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
