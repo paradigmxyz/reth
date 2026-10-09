@@ -479,7 +479,7 @@ pub(crate) struct PrewarmResults<H> {
 
 impl<H> Default for PrewarmResults<H> {
     fn default() -> Self {
-        let (executed_tx, executed_rx) = crossbeam_channel::bounded(MAX_READY_RESULTS);
+        let (executed_tx, executed_rx) = crossbeam_channel::bounded(MAX_READY_RESULTS * 2);
         Self {
             executed_tx,
             executed_rx,
@@ -555,7 +555,11 @@ impl<H> PrewarmResults<H> {
 
     /// Finds the nearest ready result whose storage inputs conflict with earlier writes. Each
     /// result gets at most one attempt per prediction generation, within a block-wide budget.
-    pub(super) fn take_refresh(&self, next: usize) -> Option<(usize, StorageSeed)> {
+    pub(super) fn take_refresh(
+        &self,
+        next: usize,
+        has_source: impl Fn(usize) -> bool,
+    ) -> Option<(usize, StorageSeed)> {
         let mut ready = self.ready.lock();
         for (index, writes) in self.executed_rx.try_iter() {
             ready.refresh.replace(index, &writes);
@@ -566,7 +570,7 @@ impl<H> PrewarmResults<H> {
         let next = next.max(ready.next);
         for index in next.saturating_add(1)..next.saturating_add(MAX_READY_RESULTS) {
             let offset = index % MAX_READY_RESULTS;
-            if ready.refresh_versions[offset] == ready.refresh.version {
+            if !has_source(index) || ready.refresh_versions[offset] == ready.refresh.version {
                 continue;
             }
             let Some((stored_index, result)) = &ready.slots[offset] else {
@@ -1387,7 +1391,7 @@ mod tests {
         for (index, transaction) in transactions.iter().enumerate() {
             results.publish(index, 0, speculate(parent.clone(), transaction.clone()));
         }
-        while let Some((index, seed)) = results.take_refresh(0) {
+        while let Some((index, seed)) = results.take_refresh(0, |_| true) {
             results.publish(
                 index,
                 0,
@@ -1425,12 +1429,12 @@ mod tests {
         actual.get_mut(&CONTRACT).unwrap().storage.get_mut(&U256::ZERO).unwrap().present_value =
             U256::from(9);
         results.report_execution(0, &actual);
-        let (index, seed) = results.take_refresh(0).unwrap();
+        let (index, seed) = results.take_refresh(0, |_| true).unwrap();
         assert_eq!(index, 2);
         assert_eq!(seed[&(CONTRACT, U256::ZERO)], U256::from(9));
         // An empty actual delta retracts the speculative write entirely.
         results.report_execution(0, &EvmState::default());
-        assert!(results.take_refresh(0).is_none());
+        assert!(results.take_refresh(0, |_| true).is_none());
         assert!(results.ready.lock().refresh.value_before(&(CONTRACT, U256::ZERO), 2).is_none());
     }
 
@@ -1444,14 +1448,14 @@ mod tests {
             let writes =
                 [StorageWrite { address: CONTRACT, slot: U256::ZERO, value: U256::from(value) }];
             results.ready.lock().refresh.replace(0, &writes);
-            assert!(results.take_refresh(0).is_some());
+            assert!(results.take_refresh(0, |_| true).is_some());
         }
         results
             .ready
             .lock()
             .refresh
             .replace(0, &[StorageWrite { address: CONTRACT, slot: U256::ZERO, value: U256::MAX }]);
-        assert!(results.take_refresh(0).is_none());
+        assert!(results.take_refresh(0, |_| true).is_none());
         let mut predictions = RefreshIndex::default();
         for index in 0..=64 {
             predictions.replace(
@@ -1470,10 +1474,23 @@ mod tests {
         let results = PrewarmResults::default();
         results.publish(0, 0, speculate(parent.clone(), tx(1)));
         results.publish(2, 0, speculate(parent.clone(), tx(2)));
-        assert!(results.take_refresh(1).is_some());
+        assert!(results.take_refresh(1, |_| true).is_some());
         assert!(results.take(2).is_some());
         results.publish(2, 0, speculate(parent.clone(), tx(2)));
         assert!(results.take(2).is_none());
-        assert!(results.take_refresh(0).is_none());
+        assert!(results.take_refresh(0, |_| true).is_none());
+    }
+
+    #[test]
+    fn missing_refresh_source_does_not_spend_budget_or_generation() {
+        let mut parent = database();
+        contract(&mut parent, &[0x60, 0, 0x54, 0x60, 1, 0x01, 0x60, 0, 0x55, 0]);
+        let results = PrewarmResults::default();
+        results.publish(0, 0, speculate(parent.clone(), tx(1)));
+        results.publish(2, 0, speculate(parent, tx(2)));
+        assert!(results.take_refresh(0, |_| false).is_none());
+        assert_eq!(results.ready.lock().refresh.attempts, 0);
+        assert_eq!(results.take_refresh(0, |index| index == 2).unwrap().0, 2);
+        assert_eq!(results.ready.lock().refresh.attempts, 1);
     }
 }

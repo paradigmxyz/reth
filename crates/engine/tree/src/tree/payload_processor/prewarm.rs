@@ -170,7 +170,7 @@ where
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
-            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(128);
+            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(256);
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
@@ -370,7 +370,8 @@ where
                         transactions.insert(index, tx);
                     }
                 }
-                if let Some((index, seed)) = results.take_refresh(next) &&
+                if let Some((index, seed)) =
+                    results.take_refresh(next, |index| transactions.contains_key(&index)) &&
                     let Some(tx) = transactions.get(&index)
                 {
                     results.metrics.refresh_attempts.increment(1);
