@@ -1806,9 +1806,10 @@ mod tests {
         let mut session = builder.connect_incoming(incoming).await;
 
         session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, _rx) = dispatch_snap_request(&mut session, 0);
+        let (id, rx) = dispatch_snap_request(&mut session, 0);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!session.check_timed_out_requests(Instant::now()));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
 
         // A response arriving after the timeout clears the entry without a bad-message report.
         let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(

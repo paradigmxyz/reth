@@ -1208,6 +1208,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepts_ping_burst_at_token_bucket_capacity() {
+        let mut stream = stream_with_incoming_pings(usize::from(PING_TOKEN_BUCKET_CAPACITY));
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.outgoing_messages.len(), usize::from(PING_TOKEN_BUCKET_CAPACITY));
+    }
+
+    #[tokio::test]
     async fn rejects_ping_burst_over_token_bucket_capacity() {
         let mut stream = stream_with_incoming_pings(usize::from(PING_TOKEN_BUCKET_CAPACITY) + 1);
         let waker = noop_waker_ref();
