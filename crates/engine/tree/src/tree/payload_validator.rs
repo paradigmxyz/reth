@@ -105,7 +105,8 @@ use crate::tree::{
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
-    PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
+    PayloadExecutionStrategy, PayloadHandle, SequentialExecution, StateProviderDatabase,
+    TreeConfig, WaitForCaches,
 };
 use alloy_consensus::transaction::{Either, TxHashRef};
 use alloy_eip7928::{
@@ -136,8 +137,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::BlockExecutor, execute::ExecutableTxFor, BlockExecutorForEvm, ConfigureEvm, EvmEnvFor,
+    ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedRevmBal;
@@ -266,7 +267,7 @@ impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
 /// used as a standalone component, but rather as a building block for concrete implementations.
 #[derive(derive_more::Debug)]
-pub struct BasicEngineValidator<P, Evm, V>
+pub struct BasicEngineValidator<P, Evm, V, X = SequentialExecution>
 where
     Evm: ConfigureEvm,
 {
@@ -303,6 +304,9 @@ where
     /// None if txpool prewarming is disabled.
     #[debug(skip)]
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
+    /// Custom transaction prewarming and execution.
+    #[debug(skip)]
+    execution_strategy: X,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
 }
@@ -372,6 +376,64 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            execution_strategy: SequentialExecution,
+        }
+    }
+}
+
+impl<N, P, Evm, V, X> BasicEngineValidator<P, Evm, V, X>
+where
+    N: NodePrimitives,
+    X: PayloadExecutionStrategy<Evm>,
+    P: DatabaseProviderFactory<
+            Provider: BlockReader
+                          + BlockHashReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + StorageChangeSetReader
+                          + StorageSettingsCache
+                          + HistoryReader
+                          + 'static,
+        > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + StateProviderFactory
+        + StateReader
+        + Clone
+        + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + StateProvider
+                          + Send,
+        > + Clone
+        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+{
+    /// Installs a transaction execution strategy without changing trie processing or caches.
+    pub fn with_execution_strategy<Strategy: PayloadExecutionStrategy<Evm>>(
+        self,
+        execution_strategy: Strategy,
+    ) -> BasicEngineValidator<P, Evm, V, Strategy> {
+        BasicEngineValidator {
+            provider: self.provider,
+            consensus: self.consensus,
+            evm_config: self.evm_config,
+            config: self.config,
+            payload_processor: self.payload_processor,
+            precompile_cache_map: self.precompile_cache_map,
+            precompile_cache_metrics: self.precompile_cache_metrics,
+            invalid_block_hook: self.invalid_block_hook,
+            metrics: self.metrics,
+            validator: self.validator,
+            runtime: self.runtime,
+            overlay_manager: self.overlay_manager,
+            state_root_strategy: self.state_root_strategy,
+            txpool_prewarm: self.txpool_prewarm,
+            bal_hash_buf: self.bal_hash_buf,
+            execution_strategy,
         }
     }
 
@@ -609,7 +671,12 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let execution_strategy = self.execution_strategy.for_block(env.transaction_count);
+        // Custom strategies use the ordered executor unless they permit native BAL execution.
+        // The ordered path still rebuilds and validates any supplied BAL.
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref())) &&
+            execution_strategy.allow_parallel_bal_execution() &&
+            !execution_strategy.requires_prewarming();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -647,6 +714,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            execution_strategy.clone(),
         ));
 
         // Create optional cache stats for detailed block logging
@@ -735,6 +803,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    &execution_strategy,
                 ),
                 Err(err) => Err(err.into()),
             }
@@ -1022,6 +1091,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
+        execution_strategy: &X,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1090,6 +1160,7 @@ where
             &receipt_tx,
             &executed_tx_index,
             has_bal,
+            execution_strategy,
         )?;
         drop(receipt_tx);
 
@@ -1242,20 +1313,21 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
+    #[expect(clippy::too_many_arguments)]
+    fn execute_transactions<'a, Tx, InnerTx, Err, DB>(
         &self,
-        mut executor: E,
+        mut executor: BlockExecutorForEvm<'a, Evm, DB>,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
-    ) -> Result<(E, Vec<Address>), BlockExecutionError>
+        execution_strategy: &X,
+    ) -> Result<(BlockExecutorForEvm<'a, Evm, DB>, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
+        Tx: ExecutableTxFor<Evm> + alloy_evm::RecoveredTx<InnerTx>,
         InnerTx: TxHashRef,
-        DB: revm::Database + 'a,
+        DB: reth_evm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
@@ -1304,7 +1376,7 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            execution_strategy.execute_transaction(senders.len() - 1, &mut executor, tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
@@ -1409,6 +1481,7 @@ where
             parallel_bal_execution
         )
     )]
+    #[expect(clippy::too_many_arguments)]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
@@ -1417,10 +1490,11 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        execution_strategy: X,
     ) -> Result<
         PayloadHandle<
-            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
-            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, X, T>,
+            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, X, T>,
             N::Receipt,
         >,
         InsertBlockErrorKind,
@@ -1433,6 +1507,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            execution_strategy,
         );
 
         self.metrics.block_validation.spawn_payload_processor.record(start.elapsed().as_secs_f64());
@@ -1806,8 +1881,9 @@ pub trait EngineValidator<
     ) -> PayloadBuilderResources;
 }
 
-impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
+impl<N, Types, P, Evm, V, X> EngineValidator<Types> for BasicEngineValidator<P, Evm, V, X>
 where
+    X: PayloadExecutionStrategy<Evm>,
     P: DatabaseProviderFactory<
             Provider: BlockReader
                           + BlockHashReader
@@ -1964,7 +2040,7 @@ where
     }
 }
 
-impl<P, Evm, V> WaitForCaches for BasicEngineValidator<P, Evm, V>
+impl<P, Evm, V, X> WaitForCaches for BasicEngineValidator<P, Evm, V, X>
 where
     Evm: ConfigureEvm,
 {
@@ -2127,4 +2203,95 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
+    use alloy_evm::{eth::EthBlockExecutionCtx, EvmEnv};
+    use alloy_primitives::Signature;
+    use reth_chainspec::MAINNET;
+    use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use revm::database::EmptyDB;
+
+    #[derive(Clone)]
+    struct RejectTransaction(Arc<AtomicUsize>);
+
+    impl PayloadExecutionStrategy<EthEvmConfig> for RejectTransaction {
+        fn execute_transaction<
+            'a,
+            DB: reth_evm::Database + 'a,
+            Tx: ExecutableTxFor<EthEvmConfig>,
+        >(
+            &self,
+            index: usize,
+            _executor: &mut BlockExecutorForEvm<'a, EthEvmConfig, DB>,
+            _tx: Tx,
+        ) -> Result<(), BlockExecutionError> {
+            self.0.store(index + 1, Ordering::Relaxed);
+            Err(BlockValidationError::msg("strategy rejected transaction").into())
+        }
+    }
+
+    #[test]
+    fn strategy_error_stops_execution_before_receipts_or_retry() {
+        let runtime = reth_tasks::Runtime::test();
+        let config = EthEvmConfig::new(MAINNET.clone());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let strategy = RejectTransaction(calls.clone());
+        let validator = BasicEngineValidator::new(
+            MockEthProvider::default(),
+            Arc::new(EthBeaconConsensus::new(MAINNET.clone())),
+            config.clone(),
+            (),
+            TreeConfig::default(),
+            Box::new(reth_engine_primitives::NoopInvalidBlockHook::default()),
+            OverlayManager::new(runtime.state_trie_overlay_worker_pool()),
+            runtime,
+        )
+        .with_execution_strategy(strategy.clone());
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        let evm = config.evm_with_env(&mut state, EvmEnv::default());
+        let executor = config.create_executor(
+            evm,
+            EthBlockExecutionCtx {
+                parent_hash: B256::ZERO,
+                parent_beacon_block_root: None,
+                ommers: &[],
+                withdrawals: None,
+                extra_data: Default::default(),
+                tx_count_hint: Some(2),
+                slot_number: None,
+            },
+        );
+        let tx = Recovered::new_unchecked(
+            TransactionSigned::Legacy(Signed::new_unhashed(
+                TxLegacy::default(),
+                Signature::test_signature(),
+            )),
+            Address::ZERO,
+        );
+        let (receipt_tx, receipt_rx) = crossbeam_channel::unbounded();
+        let executed = AtomicUsize::new(0);
+        let error = validator
+            .execute_transactions(
+                executor,
+                2,
+                [Ok::<_, std::io::Error>(&tx), Ok(&tx)].into_iter(),
+                &receipt_tx,
+                &executed,
+                false,
+                &strategy,
+            )
+            .err()
+            .unwrap();
+        assert_eq!(error.to_string(), "strategy rejected transaction");
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(executed.load(Ordering::Relaxed), 0);
+        assert!(receipt_rx.try_recv().is_err());
+    }
 }

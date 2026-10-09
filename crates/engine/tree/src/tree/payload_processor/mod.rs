@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
-    ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
+    ExecutionEnv, PayloadExecutionCache, PayloadExecutionStrategy, SavedCache, TreeConfig,
 };
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
@@ -166,7 +166,12 @@ where
     /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
     /// an externally-owned state-root task.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    pub fn spawn_with_state_root_streams<P, I: ExecutableTxIterator<Evm>>(
+    #[expect(clippy::too_many_arguments)]
+    pub fn spawn_with_state_root_streams<
+        P,
+        I: ExecutableTxIterator<Evm>,
+        X: PayloadExecutionStrategy<Evm>,
+    >(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: I,
@@ -174,6 +179,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        execution_strategy: X,
     ) -> IteratorPayloadHandle<Evm, I>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -186,8 +192,9 @@ where
             + HistoryReader
             + 'static,
     {
-        let prewarm_transactions =
-            self.prewarms_transactions(env.transaction_count, parallel_bal_execution);
+        let prewarm_transactions = !parallel_bal_execution &&
+            (execution_strategy.requires_prewarming() ||
+                self.prewarms_transactions(env.transaction_count, parallel_bal_execution));
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
             transactions,
             env.transaction_count,
@@ -201,6 +208,7 @@ where
             hint_stream,
             hashed_update_stream,
             parallel_bal_execution,
+            execution_strategy,
         );
         PayloadHandle { prewarm_handle, transactions: execution_rx, _span: Span::current() }
     }
@@ -402,7 +410,8 @@ where
     /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
     /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
-    fn spawn_caching_with<P>(
+    #[expect(clippy::too_many_arguments)]
+    fn spawn_caching_with<P, X: PayloadExecutionStrategy<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
         transactions: Option<
@@ -412,6 +421,7 @@ where
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
+        execution_strategy: X,
     ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
     where
         P: DatabaseProviderFactory + Clone + 'static,
@@ -441,6 +451,7 @@ where
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
+            execution_strategy,
             env,
             evm_config: self.evm_config.clone(),
             saved_cache: saved_cache.clone(),
