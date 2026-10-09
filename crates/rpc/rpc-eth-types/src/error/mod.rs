@@ -424,6 +424,9 @@ impl From<EthTxEnvError> for EthApiError {
                     RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
                 )
             }
+            EthTxEnvError::CallFees(CallFeesError::BlobFeeBeforeCancun) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::MaxFeePerBlobGasNotSupported)
+            }
             EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
                 Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
             }
