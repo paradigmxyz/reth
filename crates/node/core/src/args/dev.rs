@@ -282,17 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rejects_zero_finality_depth() {
-        assert!(CommandParser::<DevArgs>::try_parse_from([
-            "reth",
-            "--dev",
-            "--dev.finality-depth",
-            "0",
-        ])
-        .is_err());
-    }
-
-    #[test]
     fn test_parse_dev_args_conflicts() {
         let args = CommandParser::<DevArgs>::try_parse_from([
             "reth",

@@ -26,9 +26,9 @@ use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
-    context::Block,
+    context::{Block, Cfg as _},
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind, U256},
+    primitives::{hardfork::SpecId, Address, Bytes, TxKind, U256},
     Database,
 };
 
@@ -326,7 +326,11 @@ pub fn execute_transactions<S, T>(
     EthApiError,
 >
 where
-    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    S: BlockBuilder<
+        Executor: BlockExecutor<
+            Evm: Evm<DB: Database<Error: Into<EthApiError>>, Spec: Into<SpecId>>,
+        >,
+    >,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
@@ -337,7 +341,7 @@ where
     let mut block_state_gas_used: u64 = 0;
     let block_gas_limit = builder.evm().block().gas_limit();
     let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
-    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
+    let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
             block_gas_limit
@@ -592,7 +596,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
@@ -648,7 +652,7 @@ mod tests {
 
     #[test]
     fn precompile_self_move_errors_for_existing_precompile() {
-        let address = address!("0000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
         let mut state_overrides = StateOverride::default();
         state_overrides.insert(
             address,
@@ -663,7 +667,7 @@ mod tests {
 
     #[test]
     fn moved_precompile_is_callable() {
-        let source = address!("0000000000000000000000000000000000000001");
+        let source = Address::with_last_byte(1);
         let dest = address!("0000000000000000000000000000000000123456");
         let mut state_overrides = StateOverride::default();
         state_overrides.insert(
@@ -793,7 +797,7 @@ mod tests {
         let blocks = vec![
             SimBlock {
                 block_overrides: Some(BlockOverrides {
-                    number: Some(U256::from(1)),
+                    number: Some(U256::ONE),
                     time: Some(u64::MAX),
                     ..Default::default()
                 }),

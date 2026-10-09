@@ -158,23 +158,18 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{b256, B256};
+    use alloy_primitives::B256;
     use reth_network_api::noop::NoopNetwork;
 
     #[test]
     fn test_required_block_filter_creation() {
         let network = NoopNetwork::default();
         let block_num_hashes = vec![
-            BlockNumHash::new(
-                0,
-                b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
-            ),
-            BlockNumHash::new(
-                23115201,
-                b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
-            ),
+            BlockNumHash::new(0, B256::repeat_byte(0x11)),
+            BlockNumHash::new(23115201, B256::repeat_byte(0x22)),
         ];
 
         let filter = RequiredBlockFilter::new(network, block_num_hashes.clone());

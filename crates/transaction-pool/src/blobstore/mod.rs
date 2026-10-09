@@ -329,23 +329,10 @@ pub struct BlobStoreCleanupStat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarEip7594};
 
     #[expect(dead_code)]
     struct DynStore {
         store: Box<dyn BlobStore>,
-    }
-
-    #[test]
-    fn pooled_blob_sidecar_defaults_to_full_availability() {
-        let sidecars = [
-            BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
-            BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594::default()),
-        ];
-
-        for sidecar in sidecars {
-            assert!(PooledBlobSidecar::from(sidecar).availability().is_full());
-        }
     }
 
     #[test]

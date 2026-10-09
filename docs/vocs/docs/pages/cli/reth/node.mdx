@@ -138,6 +138,9 @@ Networking:
 
           [default: 200]
 
+      --snap.v2
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it, and uses the staged pipeline while the chain head predates block access lists
+
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
@@ -689,7 +692,7 @@ TxPool:
           [default: 7]
 
       --txpool.minimum-priority-fee <MINIMUM_PRIORITY_FEE>
-          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected
+          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected. For legacy and EIP-2930 transactions the gas price is used as the priority fee
 
       --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
@@ -1110,6 +1113,9 @@ Engine:
 
           [default: 1]
 
+      --cpu-cores <COUNT>
+          Override the available CPU count for node thread pools and parallel execution decisions. Does not change CPU affinity. Explicit thread counts take precedence
+
       --engine.disable-precompile-cache
           Disable precompile cache
 
@@ -1125,10 +1131,10 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers in the Tokio blocking pool. If not specified, defaults to 2x available parallelism
+          Configure the number of storage proof workers spawned for each block. If not specified or zero, the count is derived from the block: 2x available parallelism, halved for blocks with few transactions and doubled for blocks at or above 100M gas
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
-          Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
+          Configure the number of account proof workers spawned for each block. If not specified or zero, the count is derived from the block the same way as for storage workers
 
       --engine.prewarming-threads <PREWARMING_THREADS>
           Configure the number of prewarming threads. If not specified, defaults to available parallelism

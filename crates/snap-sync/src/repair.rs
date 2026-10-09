@@ -230,7 +230,7 @@ mod tests {
         slots.iter().fold(AccountChanges::new(ACCOUNT), |changes, slot| {
             changes.with_storage_change(SlotChanges::new(
                 U256::from(*slot),
-                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(1))],
+                vec![StorageChange::new(BlockAccessIndex::new(1), U256::ONE)],
             ))
         })
     }
@@ -266,7 +266,7 @@ mod tests {
         repairs.resolve_changes(hashed(), &slots(&[1]));
 
         let remaining: Vec<_> = repairs.slots(hashed()).collect();
-        assert_eq!(remaining, [keccak256(B256::from(U256::from(2)))]);
+        assert_eq!(remaining, [keccak256(B256::with_last_byte(2))]);
     }
 
     #[test]

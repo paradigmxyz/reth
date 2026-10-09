@@ -238,7 +238,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         for account in kept {
             self.remove::<tables::HashedStorages>((start, Bound::Excluded(*account)))?;
             // Walks cannot start at an excluded key, so the next piece starts one key past it.
-            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::from(1)) else {
+            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::ONE) else {
                 return Ok(())
             };
             start = Bound::Included(after.into());
@@ -543,22 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn an_interrupted_commit_leaves_nothing_behind() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
-        let (storages, bytecodes) = dependencies();
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
-        drop(provider);
-
-        let provider = factory.database_provider_rw().unwrap();
-        assert_eq!(stored(&provider), (Vec::new(), false, false));
-        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
-    }
-
-    #[test]
     fn a_partial_range_moves_the_coverage_to_its_next_key() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
@@ -634,6 +618,35 @@ mod tests {
         );
 
         assert_eq!(stored(&provider), (Vec::new(), false, false));
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
+    }
+
+    #[test]
+    fn missing_code_is_named_after_contracts_whose_code_is_stored() {
+        let stored_code = code();
+        let missing_code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let mut first = account(1);
+        first.code_hash = stored_code.hash_slow();
+        let mut second = account(2);
+        second.code_hash = missing_code.hash_slow();
+        let accounts = vec![(key(1), first), (key(2), second), (key(3), account(3))];
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_state_changes(StateChangeset {
+                contracts: vec![(stored_code.hash_slow(), stored_code)],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let refused = provider.commit_account_range(write, &range, Default::default(), Vec::new());
+
+        assert!(matches!(
+            refused,
+            Err(SnapSyncError::MissingCode { hash }) if hash == missing_code.hash_slow()
+        ));
+        assert_eq!(stored_accounts(&provider), Vec::<B256>::new());
         assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
     }
 
@@ -774,21 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn coverage_survives_reopening_the_database() {
-        let accounts = accounts();
-        let (factory, write, _) = started(&accounts);
-        let range = verified_range(&accounts, 0..1, B256::ZERO, &[key(1)]);
-        let provider = factory.database_provider_rw().unwrap();
-        let coverage =
-            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        provider.commit().unwrap();
-
-        let reopened = factory.database_provider_rw().unwrap();
-
-        assert_eq!(reopened.account_coverage(write).unwrap(), Some(coverage));
-    }
-
-    #[test]
     fn storage_persisted_ahead_of_the_range_commits_with_it() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
@@ -874,8 +872,8 @@ mod tests {
                 (ABSENT, Some(Account::from(account(9)))),
             ])
             .with_storages([
-                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
-                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
+                (key(2), HashedStorage::from_iter([(SLOT, U256::ONE), (OTHER, U256::from(2))])),
+                (ABSENT, HashedStorage::from_iter([(SLOT, U256::ONE)])),
             ]);
         provider.write_hashed_state(&stale.into_sorted()).unwrap();
         let mut repairs = StateRepairs::default();

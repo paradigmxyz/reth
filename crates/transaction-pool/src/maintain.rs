@@ -858,8 +858,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{hex, U256};
+    use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip2718::Decodable2718};
+    use alloy_primitives::{address, hex, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_fs_util as fs;
@@ -888,10 +888,11 @@ mod tests {
         let provider = MockEthProvider::default().with_genesis_block();
         let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();
-        let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
+        let sender = address!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326");
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider, EthEvmConfig::mainnet())
+            .set_block_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
             .build(blob_store.clone());
 
         let txpool = Pool::new(

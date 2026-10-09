@@ -381,7 +381,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessRights, EnvironmentArgs};
+    use super::*;
     use alloy_primitives::Address;
     use clap::Parser;
     use reth_db_api::{

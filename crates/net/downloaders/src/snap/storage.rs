@@ -26,7 +26,7 @@ use std::{
 use tracing::debug;
 
 // Keeps storage requests inclusive through the full trie keyspace.
-const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+const MAX_HASH: B256 = B256::repeat_byte(0xff);
 
 /// Downloads storage ranges authenticated by a verified account range.
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
         // Servers disagree on whether a finite limit applies only to the first account or every
         // account, so the final proof cannot be assigned reliably for this request shape.
-        if request.account_hashes.len() > 1 && origin == B256::ZERO && limit != MAX_HASH {
+        if request.account_hashes.len() > 1 && origin.is_zero() && limit != MAX_HASH {
             return Err(InvalidStorageRangeRequest::LimitedMultipleAccounts {
                 accounts: request.account_hashes.len(),
             })

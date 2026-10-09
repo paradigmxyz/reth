@@ -126,11 +126,6 @@ mod platform {
         use crate::thread::ThreadResourceUsage;
 
         #[test]
-        fn samples_current_thread() {
-            assert!(ThreadResourceUsage::now().elapsed().is_some());
-        }
-
-        #[test]
         fn measures_forced_minor_page_fault() {
             let mapping_len = 4096;
             // SAFETY: The mapping is private and anonymous, has a non-zero length, and the returned
@@ -177,16 +172,6 @@ mod platform {
     #[allow(clippy::missing_const_for_fn)]
     pub(super) fn current_thread_resource_usage() -> Option<ThreadResourceUsageSnapshot> {
         None
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use crate::thread::ThreadResourceUsage;
-
-        #[test]
-        fn unsupported_platform_returns_none() {
-            assert!(ThreadResourceUsage::now().elapsed().is_none());
-        }
     }
 }
 

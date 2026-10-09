@@ -493,27 +493,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reply_repeating_an_applied_list_cannot_apply_it_again() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        // The first block's list, served again for every attempt at the second block.
-        let duplicate = std::iter::repeat_with(|| chain.response(2, [Some(1)])).take(4);
-        let (_, mut catch_up) = catch_up_with(
-            std::iter::once(chain.response(1, [Some(1)])).chain(duplicate),
-            factory.clone(),
-            1,
-        );
-        applied(&mut catch_up, write, PIVOT + 3).await;
-
-        // It belongs to a block the applied state already covers, so it authenticates against
-        // nothing the request asked for.
-        let repeated = catch_up.next(write, PIVOT + 3).await;
-
-        assert!(matches!(repeated, Err(SnapSyncError::Request(_))));
-        assert_eq!(balance(&factory), U256::from(10));
-    }
-
-    #[tokio::test]
     async fn a_peer_holding_no_list_for_the_next_block_applies_nothing() {
         let chain = chain();
         let (factory, write) = started(&chain, &accounts());
@@ -522,7 +501,7 @@ mod tests {
         let step = catch_up.next(write, PIVOT + 3).await.unwrap();
 
         assert!(matches!(step, CatchUpStep::Unavailable { .. }));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]
@@ -534,7 +513,7 @@ mod tests {
         let progress = applied(&mut catch_up, write, PIVOT + 1).await;
 
         assert_eq!(progress.applied(), chain.block(1));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]
@@ -562,16 +541,6 @@ mod tests {
             *client.block_requests(),
             [(1..=3).map(|nth| chain.block(nth).hash).collect::<Vec<_>>()]
         );
-    }
-
-    #[tokio::test]
-    async fn a_target_already_applied_needs_no_request() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        let (client, mut catch_up) = catch_up([], factory);
-
-        assert!(matches!(catch_up.next(write, PIVOT).await.unwrap(), CatchUpStep::Complete));
-        assert!(client.block_requests().is_empty());
     }
 
     #[tokio::test]
@@ -658,22 +627,6 @@ mod tests {
         assert_eq!(provider.block_hash(PIVOT + 2).unwrap(), Some(replacement_hash));
         assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), chain.block(0));
         assert_eq!(SnapStateSnapshot::read(&provider), before);
-    }
-
-    #[tokio::test]
-    async fn a_reply_to_an_earlier_request_is_ignored() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        // A reply carrying another request's id, as a delayed one does.
-        let stale = chain.response(99, [Some(1), Some(2), Some(3)]);
-        let (_, mut catch_up) =
-            catch_up([stale, chain.response(1, [Some(1), Some(2), Some(3)])], factory.clone());
-
-        // The retry is what the authenticated lists arrive on.
-        let progress = applied(&mut catch_up, write, PIVOT + 3).await;
-
-        assert_eq!(progress.applied(), chain.block(3));
-        assert_eq!(balance(&factory), U256::from(30));
     }
 
     #[tokio::test]

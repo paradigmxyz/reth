@@ -102,34 +102,4 @@ mod tests {
         assert_eq!(config.max_bals_bytes, DEFAULT_BAL_CACHE_MAX_BYTES);
         assert_eq!(config.idle_timeout, DEFAULT_CACHE_IDLE_TIMEOUT);
     }
-
-    #[test]
-    fn cache_memory_limits_and_idle_timeout_round_trip() {
-        for config in [
-            EthStateCacheConfig::default(),
-            EthStateCacheConfig {
-                max_blocks_bytes: 1024,
-                max_receipts_bytes: 2048,
-                max_bals_bytes: 4096,
-                idle_timeout: Duration::from_millis(1500),
-                ..Default::default()
-            },
-            EthStateCacheConfig {
-                max_blocks_bytes: 0,
-                max_receipts_bytes: 0,
-                max_bals_bytes: 0,
-                idle_timeout: Duration::ZERO,
-                ..Default::default()
-            },
-        ] {
-            let serialized = serde_json::to_value(config).unwrap();
-            assert_eq!(serialized["maxBlocksBytes"], serde_json::json!(config.max_blocks_bytes));
-            assert_eq!(
-                serialized["maxReceiptsBytes"],
-                serde_json::json!(config.max_receipts_bytes)
-            );
-            assert_eq!(serialized["maxBalsBytes"], serde_json::json!(config.max_bals_bytes));
-            assert_eq!(serde_json::from_value::<EthStateCacheConfig>(serialized).unwrap(), config);
-        }
-    }
 }

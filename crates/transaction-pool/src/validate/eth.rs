@@ -21,8 +21,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
+    eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -101,6 +100,8 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: EnvKzgSettings,
@@ -576,16 +577,15 @@ where
             }
         }
 
-        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
-        // into the pool.
-        if transaction.is_dynamic_fee() &&
-            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        // Drop transactions with a priority fee lower than the configured minimum for acceptance
+        // into the pool. This applies to all transaction types: legacy and EIP-2930 transactions
+        // use their gas price as the priority fee.
+        if let Some(minimum_priority_fee) = self.minimum_priority_fee &&
+            transaction.priority_fee_or_price() < minimum_priority_fee
         {
             self.validation_metrics.rejected_priority_fee_below_minimum.increment(1);
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
-                minimum_priority_fee: self
-                    .minimum_priority_fee
-                    .expect("minimum priority fee is expected inside if statement"),
+                minimum_priority_fee,
             })
         }
 
@@ -1071,6 +1071,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
     ///
@@ -1127,7 +1129,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
         let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
 
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
+            block_gas_limit: tip.gas_limit().into(),
             client,
             chain_id: chain_spec.chain().id(),
             evm_config,
@@ -1306,6 +1308,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
+    ///
+    /// This applies to all transaction types. For legacy and EIP-2930 transactions the gas price
+    /// is used as the priority fee.
     pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: Option<u128>) -> Self {
         self.minimum_priority_fee = minimum_priority_fee;
         self
@@ -1595,10 +1600,12 @@ mod tests {
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
+        eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1607,6 +1614,20 @@ mod tests {
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()
+    }
+
+    /// Mainnet with a 30M genesis gas limit instead of 5,000, since the validator takes its block
+    /// gas limit from the latest header.
+    fn mock_provider() -> MockEthProvider {
+        mock_provider_with_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
+    }
+
+    fn mock_provider_with_gas_limit(gas_limit: u64) -> MockEthProvider {
+        let mut genesis = MAINNET.genesis.clone();
+        genesis.gas_limit = gas_limit;
+        MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().genesis(genesis).build())
+            .with_genesis_block()
     }
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1781,7 +1802,7 @@ mod tests {
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1806,7 +1827,7 @@ mod tests {
     #[test]
     fn accepts_sender_with_empty_bytecode() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
@@ -1821,7 +1842,7 @@ mod tests {
 
     #[test]
     fn validates_nonce_bound() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |nonce| {
@@ -1849,7 +1870,7 @@ mod tests {
 
     #[test]
     fn validates_configured_chain_id() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |chain_id| {
@@ -1915,7 +1936,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_fee_cap_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1952,7 +1973,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_zero_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1970,7 +1991,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_normal_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1988,7 +2009,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_max_tx_gas_limit_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2020,7 +2041,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_disabled() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2038,7 +2059,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_within_limit() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2056,7 +2077,7 @@ mod tests {
     // Helper function to set up common test infrastructure for priority fee tests
     fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2217,6 +2238,103 @@ mod tests {
         assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
     }
 
+    /// Returns a legacy and an EIP-2930 transaction with the given gas price, and a provider
+    /// holding a funded sender account for both.
+    fn setup_gas_price_txs(gas_price: u128) -> ([EthPooledTransaction; 2], MockEthProvider) {
+        let sender = Address::repeat_byte(1);
+        let to = Address::repeat_byte(2);
+
+        let legacy = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+        let eip2930 = alloy_consensus::TxEip2930 {
+            chain_id: 1,
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+
+        let txs = [legacy.into(), eip2930.into()].map(|tx: alloy_consensus::TypedTransaction| {
+            let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+                tx.into(),
+                alloy_primitives::Signature::test_signature(),
+            );
+            EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(signed, sender),
+                200,
+            )
+        });
+
+        let provider = mock_provider();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        (txs, provider)
+    }
+
+    #[tokio::test]
+    async fn invalid_on_gas_price_lower_than_configured_minimum() {
+        let gas_price = 1_000_000_000;
+        let minimum_priority_fee = gas_price + 1;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // Legacy and EIP-2930 transactions use their gas price as the priority fee.
+        for transaction in txs {
+            assert!(!transaction.is_dynamic_fee());
+
+            for origin in
+                [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+            {
+                let outcome = validator.validate_one(origin, transaction.clone());
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Invalid(
+                        _,
+                        InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                            minimum_priority_fee: min_fee
+                        }
+                    ) if min_fee == minimum_priority_fee
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_at_or_above_minimum() {
+        let gas_price = 1_000_000_000;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+
+        for minimum_priority_fee in [gas_price, gas_price / 2] {
+            let validator = create_validator_with_minimum_fee(
+                provider.clone(),
+                Some(minimum_priority_fee),
+                None,
+            );
+
+            for transaction in txs.clone() {
+                let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+                assert!(outcome.is_valid());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_with_minimum_priority_fee_disabled() {
+        let (txs, provider) = setup_gas_price_txs(1);
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        for transaction in txs {
+            let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+            assert!(outcome.is_valid());
+        }
+    }
+
     #[test]
     fn reject_oversized_tx() {
         let mut transaction = get_transaction();
@@ -2271,7 +2389,7 @@ mod tests {
     #[tokio::test]
     async fn valid_with_disabled_balance_check() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
 
         // Set account with 0 balance
         provider.add_account(
@@ -2290,7 +2408,7 @@ mod tests {
             assert!(matches!(
                 err,
                 InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
-                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+                if funds_err.got.is_zero() && funds_err.expected == expected_cost
             ));
         } else {
             panic!("Expected Invalid outcome with InsufficientFunds error");
@@ -2303,5 +2421,36 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    #[test]
+    fn block_gas_limit_from_latest_header() {
+        let gas_limit = 60_000_000;
+        let validator = EthTransactionValidatorBuilder::new(
+            mock_provider_with_gas_limit(gas_limit),
+            test_evm_config(),
+        )
+        .build(InMemoryBlobStore::default());
+        let transaction = |gas_limit| {
+            EthPooledTransaction::try_from_consensus(
+                TransactionBuilder::default()
+                    .chain_id(validator.chain_id())
+                    .gas_limit(gas_limit)
+                    .to(Address::ZERO)
+                    .into_eip1559()
+                    .try_into_recovered()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(validator.block_gas_limit(), gas_limit);
+        assert!(validator
+            .validate_stateless(TransactionOrigin::External, &transaction(gas_limit))
+            .is_ok());
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
+            Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
+        ));
     }
 }
