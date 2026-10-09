@@ -16,6 +16,7 @@ use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tower_http::compression::Compression;
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -179,6 +180,8 @@ impl MetricServer {
                     Ok::<_, Infallible>(response)
                 }
             });
+
+            let service = Compression::new(service).gzip(true).no_br().no_deflate().no_zstd();
 
             let mut shutdown = signal.clone().ignore_guard();
             tokio::task::spawn(async move {
@@ -489,10 +492,13 @@ async fn handle_tokio_dump() -> Response<Full<Bytes>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::read::GzDecoder;
+    use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY};
     use reqwest::Client;
     use reth_tasks::Runtime;
     use socket2::{Domain, Socket, Type};
     use std::{
+        io::Read,
         net::{SocketAddr, TcpListener},
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -550,8 +556,11 @@ mod tests {
 
         // Send request to the metrics endpoint
         let url = format!("http://{listen_addr}");
-        let response = Client::new().get(&url).send().await.unwrap();
+        let client =
+            Client::builder().no_gzip().no_brotli().no_deflate().no_zstd().build().unwrap();
+        let response = client.get(&url).send().await.unwrap();
         assert!(response.status().is_success());
+        assert_eq!(response.headers().get(CONTENT_ENCODING), None);
 
         // Check the response body
         let body = response.text().await.unwrap();
@@ -562,6 +571,39 @@ mod tests {
         assert!(body.contains("storage_v2=\"true\""), "expected storage v2 label");
         assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
         assert!(body.contains("prune_config="), "expected prune config label");
+
+        let storage_metric =
+            body.lines().find(|line| line.starts_with("reth_storage_settings{")).unwrap();
+        for (accept_encoding, gzip) in [
+            ("gzip", true),
+            ("br, gzip;q=0.5", true),
+            ("gzip;q=0", false),
+            ("identity", false),
+            ("br", false),
+        ] {
+            let response =
+                client.get(&url).header(ACCEPT_ENCODING, accept_encoding).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+            assert_eq!(response.headers()[VARY], "accept-encoding");
+            assert_eq!(
+                response.headers().get(CONTENT_ENCODING),
+                gzip.then_some(&HeaderValue::from_static("gzip")),
+                "Accept-Encoding: {accept_encoding}"
+            );
+            let bytes = response.bytes().await.unwrap();
+            let decoded = if gzip {
+                let mut decoded = String::new();
+                GzDecoder::new(bytes.as_ref()).read_to_string(&mut decoded).unwrap();
+                decoded
+            } else {
+                String::from_utf8(bytes.to_vec()).unwrap()
+            };
+            assert_eq!(
+                decoded.lines().find(|line| line.starts_with("reth_storage_settings{")),
+                Some(storage_metric)
+            );
+        }
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);

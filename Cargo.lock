@@ -9769,6 +9769,7 @@ version = "2.7.0"
 dependencies = [
  "bytes",
  "eyre",
+ "flate2",
  "http",
  "http-body-util",
  "jemalloc_pprof",
@@ -9790,6 +9791,7 @@ dependencies = [
  "tikv-jemalloc-ctl",
  "tokio",
  "tower",
+ "tower-http",
  "tracing",
 ]
 
