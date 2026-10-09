@@ -18,9 +18,6 @@ pub use evm2::evm::{
 pub use reth_trie_common::HashedPostState;
 pub use revm::state::EvmState;
 
-/// Per-transaction state changes streamed to execution state hooks.
-pub type StateUpdate = evm2::evm::PendingState;
-
 /// Receives per-transaction state changes streamed from block execution.
 pub trait OnStateHook: Send + 'static {
     /// Observes one committed state update.

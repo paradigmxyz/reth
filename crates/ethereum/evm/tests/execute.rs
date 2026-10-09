@@ -739,7 +739,9 @@ fn test_balance_increment_not_duplicated() {
 
     let _output = executor
         .execute_with_state_hook(block, move |state: StateUpdate| {
-            if let Some(info) = state.account_info(&withdrawal_recipient) {
+            if let Some(info) =
+                state.account(&withdrawal_recipient).and_then(|account| account.current.as_ref())
+            {
                 let _ = tx_clone.send(info.balance);
             }
         })

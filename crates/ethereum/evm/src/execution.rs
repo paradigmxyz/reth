@@ -200,10 +200,7 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
-    if stream_state {
-        send_state_update(pending_state.clone(), on_state_update);
-    }
+    accumulate_pending_state(block_state, stream_state, on_state_update, &pending_state);
     // Reattach the finalized transaction so evm2 retains its account capacity and recycles
     // storage maps for the next transaction instead of dropping the detached allocations.
     evm.state_mut().set_pending_state(pending_state);
@@ -218,10 +215,24 @@ pub(crate) fn commit_pending_state<T: EvmTypes>(
     on_state_update: &mut impl FnMut(StateUpdate),
     pending_state: &evm2::evm::PendingState,
 ) {
-    let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
+    accumulate_pending_state(block_state, stream_state, on_state_update, pending_state);
     evm.overlay_db_mut().commit_pending(pending_state);
+}
+
+/// Folds a transaction's state into the block state, recording the hook update when streaming.
+fn accumulate_pending_state(
+    block_state: &mut BlockState,
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(StateUpdate),
+    pending_state: &evm2::evm::PendingState,
+) {
     if stream_state {
-        send_state_update(pending_state.clone(), on_state_update);
+        let mut update = StateUpdate::default();
+        let Ok(()) =
+            pending_state.visit(&mut block_state.transaction_sink_with_update(&mut update));
+        send_state_update(update, on_state_update);
+    } else {
+        let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
     }
 }
 
@@ -439,7 +450,7 @@ fn commit_state_changes<T: EvmTypes>(
     on_state_update: &mut impl FnMut(StateUpdate),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    let mut update = StateUpdate::default();
+    let mut pending_state = evm2::evm::PendingState::default();
     for (address, original, current) in changes {
         let change = AccountChangeRef {
             address: *address,
@@ -449,12 +460,9 @@ fn commit_state_changes<T: EvmTypes>(
             selfdestructed: false,
         };
         let Ok(()) = evm.overlay_db_mut().account(change);
-        update.insert_account(*address, original.clone(), current.clone());
+        pending_state.insert_account(*address, original.clone(), current.clone());
     }
-    let Ok(()) = update.visit(&mut block_state.transaction_sink());
-    if stream_state {
-        send_state_update(update, on_state_update);
-    }
+    accumulate_pending_state(block_state, stream_state, on_state_update, &pending_state);
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -680,6 +688,10 @@ mod tests {
                 assert_eq!(bundle.storage(&contract, U256::ZERO), Some(U256::from(2)));
                 assert_eq!(updates.len(), if stream_state { 2 } else { 0 });
                 if stream_state {
+                    // Account order within an update follows map iteration and is unspecified.
+                    for update in &mut updates {
+                        update.accounts.sort_unstable_by_key(|account| account.address);
+                    }
                     assert_eq!(expected_updates.get_or_insert_with(|| updates.clone()), &updates);
                 }
                 let output = (bundle, evm.state_mut().take_bal_builder());
