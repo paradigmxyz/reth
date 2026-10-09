@@ -1,5 +1,6 @@
-use jsonrpsee::server::{
-    middleware::rpc::RpcService, HttpRequest, HttpResponse, TowerServiceNoHttp,
+use reth_json_rpc::{
+    server::{HttpRequest, HttpResponse, TowerService},
+    RpcService, RpcServiceT,
 };
 use tower::{
     layer::util::{Identity, Stack},
@@ -8,44 +9,28 @@ use tower::{
 
 /// A Helper alias trait for the RPC middleware supported by the server.
 pub trait RethRpcMiddleware:
-    Layer<
-        RpcService,
-        Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-            MethodResponse = jsonrpsee::MethodResponse,
-            BatchResponse = jsonrpsee::MethodResponse,
-            NotificationResponse = jsonrpsee::MethodResponse,
-        > + Send
-                     + Sync
-                     + Clone
-                     + 'static,
-    > + Clone
+    Layer<RpcService, Service: RpcServiceT + Send + Sync + Clone + 'static>
+    + Clone
     + Send
+    + Sync
     + 'static
 {
 }
 
 impl<T> RethRpcMiddleware for T where
-    T: Layer<
-            RpcService,
-            Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-                MethodResponse = jsonrpsee::MethodResponse,
-                BatchResponse = jsonrpsee::MethodResponse,
-                NotificationResponse = jsonrpsee::MethodResponse,
-            > + Send
-                         + Sync
-                         + Clone
-                         + 'static,
-        > + Clone
+    T: Layer<RpcService, Service: RpcServiceT + Send + Sync + Clone + 'static>
+        + Clone
         + Send
+        + Sync
         + 'static
 {
 }
 
 /// Inner HTTP transport service type for auth-server middleware.
-pub type AuthHttpService<RM> = TowerServiceNoHttp<Stack<RM, Identity>>;
+pub type AuthHttpService<RM> = TowerService<Stack<RM, Identity>>;
 
 /// Helper alias trait for auth-server HTTP transport middleware layers.
-pub trait RethAuthHttpMiddleware<RM>:
+pub trait RethAuthHttpMiddleware<RM: Layer<RpcService>>:
     tower::Layer<
         AuthHttpService<RM>,
         Service: tower::Service<
@@ -54,14 +39,15 @@ pub trait RethAuthHttpMiddleware<RM>:
             Error = tower::BoxError,
             Future: Send,
         > + Send
-                     + Clone,
+                     + Clone
+                     + 'static,
     > + Clone
     + Send
     + 'static
 {
 }
 
-impl<T, RM> RethAuthHttpMiddleware<RM> for T where
+impl<T, RM: Layer<RpcService>> RethAuthHttpMiddleware<RM> for T where
     T: tower::Layer<
             AuthHttpService<RM>,
             Service: tower::Service<
@@ -70,7 +56,8 @@ impl<T, RM> RethAuthHttpMiddleware<RM> for T where
                 Error = tower::BoxError,
                 Future: Send,
             > + Send
-                         + Clone,
+                         + Clone
+                         + 'static,
         > + Clone
         + Send
         + 'static

@@ -9,7 +9,7 @@ license.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "rpc", "cli"] }
 
 clap = { workspace = true, features = ["derive"] }
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
+reth-json-rpc.workspace = true
 tracing.workspace = true
 tower.workspace = true
 

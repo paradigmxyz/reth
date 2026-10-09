@@ -1,11 +1,10 @@
-use jsonrpsee::server::ServerConfigBuilder;
+use reth_json_rpc::ServerConfig;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};
-use tower::layer::util::Identity;
 use tracing::{debug, warn};
 
 use crate::{
@@ -49,10 +48,10 @@ pub trait RethRpcServerConfig {
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig;
 
     /// Returns the default server config for http/ws
-    fn http_ws_server_builder(&self) -> ServerConfigBuilder;
+    fn http_ws_server_builder(&self) -> ServerConfig;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
+    fn ipc_server_builder(&self) -> IpcServerBuilder;
 
     /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
@@ -176,15 +175,15 @@ impl RethRpcServerConfig for RpcServerArgs {
         config
     }
 
-    fn http_ws_server_builder(&self) -> ServerConfigBuilder {
-        ServerConfigBuilder::new()
+    fn http_ws_server_builder(&self) -> ServerConfig {
+        ServerConfig::default()
             .max_connections(self.rpc_max_connections.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
+    fn ipc_server_builder(&self) -> IpcServerBuilder {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())

@@ -9,16 +9,11 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt,
 };
 use alloy_rpc_types_trace::filter::TraceFilter;
-use jsonrpsee::{
-    core::{
-        client::{ClientT, SubscriptionClientT},
-        params::ArrayParams,
-    },
-    http_client::HttpClient,
-    rpc_params,
-    types::error::ErrorCode,
-};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_json_rpc::{
+    client::{ArrayParams, ClientT, HttpClient, SubscriptionClientT},
+    rpc_params, ErrorCode,
+};
 use reth_network_peers::NodeRecord;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -30,9 +25,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
+fn is_unimplemented(err: reth_json_rpc::client::Error) -> bool {
     match err {
-        jsonrpsee::core::client::Error::Call(error_obj) => {
+        reth_json_rpc::client::Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
@@ -40,9 +35,9 @@ fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     }
 }
 
-fn is_invalid_params(err: &jsonrpsee::core::client::Error) -> bool {
+const fn is_invalid_params(err: &reth_json_rpc::client::Error) -> bool {
     match err {
-        jsonrpsee::core::client::Error::Call(error_obj) => {
+        reth_json_rpc::client::Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InvalidParams.code()
         }
         _ => false,
@@ -1806,9 +1801,9 @@ async fn test_debug_db_get() {
         ("0xc0000000000000000000000000000000000000000000000000000000000000000", "Invalid hex key"),
     ];
 
-    let match_error_msg = |err: jsonrpsee::core::client::Error, expected: String| -> bool {
+    let match_error_msg = |err: reth_json_rpc::client::Error, expected: String| -> bool {
         match err {
-            jsonrpsee::core::client::Error::Call(error_obj) => {
+            reth_json_rpc::client::Error::Call(error_obj) => {
                 error_obj.code() == ErrorCode::InvalidParams.code() &&
                     error_obj.message() == expected
             }

@@ -5,9 +5,9 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_evm::env::BlockEnvironment;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
-use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
+use reth_json_rpc::RpcResult;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
@@ -286,7 +286,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
     Eth: EthTransactions + LoadPendingBlock + Call + 'static,

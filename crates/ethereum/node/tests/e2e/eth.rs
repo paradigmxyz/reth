@@ -11,11 +11,11 @@ use alloy_rpc_types_engine::{
     },
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
-use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
 };
+use reth_json_rpc::client::ClientT;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
     node_config::NodeConfig,
@@ -652,7 +652,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
     let middleware =
-        tower::util::MapRequestLayer::new(move |request: jsonrpsee::server::HttpRequest| {
+        tower::util::MapRequestLayer::new(move |request: reth_json_rpc::server::HttpRequest| {
             if request.uri().path().starts_with("/engine/") {
                 observed.fetch_add(1, Ordering::Relaxed);
             }

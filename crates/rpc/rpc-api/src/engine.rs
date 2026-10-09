@@ -19,29 +19,29 @@ use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+use reth_json_rpc::{rpc, RpcModule, RpcResult};
 use serde_json::Value;
 
 /// Helper trait for the engine api server.
 ///
-/// This type-erases the concrete [`jsonrpsee`] server implementation and only returns the
+/// This type-erases the concrete RPC server implementation and only returns the
 /// [`RpcModule`] that contains all the endpoints of the server.
 pub trait IntoEngineApiRpcModule {
     /// Consumes the type and returns all the methods and subscriptions defined in the trait and
     /// returns them as a single [`RpcModule`]
-    fn into_rpc_module(self) -> RpcModule<()>;
+    fn into_rpc_module(self) -> RpcModule;
 }
 
-// NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
-// generic here. It would be nice if the rpc macro would understand which types need to have serde.
-// By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
-// the trait bounds, which is not what we want, because `Types` is not used directly in any of the
-// trait methods. Instead, we have to add the bounds manually. This would be disastrous if we had
-// more than one associated type used in the trait methods.
+// NOTE: We can't use associated types in the `EngineApi` trait because of the rpc macro, so we use
+// a generic here. It would be nice if the rpc macro would understand which types need to have
+// serde. By default, if the trait has a generic, the rpc macro will add e.g. `Engine:
+// DeserializeOwned` to the trait bounds, which is not what we want, because `Types` is not used
+// directly in any of the trait methods. Instead, we have to add the bounds manually. This would be
+// disastrous if we had more than one associated type used in the trait methods.
 
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine", server_bounds(Engine::PayloadAttributes: reth_json_rpc::DeserializeOwned)))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: reth_json_rpc::Serialize + Clone), server_bounds(Engine::PayloadAttributes: reth_json_rpc::DeserializeOwned)))]
 pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field

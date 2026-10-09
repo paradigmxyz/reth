@@ -6,9 +6,9 @@ use crate::EthApiError;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
-use jsonrpsee_types::ErrorObject;
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
+use reth_json_rpc::ErrorObject;
 use reth_primitives_traits::{
     BlockBody, NodePrimitives, RecoveredBlock, SealedHeaderFor, SignedTransaction,
 };
@@ -159,7 +159,7 @@ where
                 };
                 let log = converter
                     .convert_log(log, receipt, header)
-                    .map_err(|err| EthApiError::other(Into::<ErrorObject<'static>>::into(err)))?;
+                    .map_err(|err| EthApiError::other(Into::<ErrorObject>::into(err)))?;
                 all_logs.push(log);
             }
             log_index += 1;

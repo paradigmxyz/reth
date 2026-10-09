@@ -6,12 +6,12 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadInputV2, ExecutionPayloadV1, ForkchoiceState, PayloadId,
 };
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
-use jsonrpsee::{
-    core::client::{ClientT, SubscriptionClientT},
-    server::{HttpRequest, HttpResponse},
-};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_json_rpc::{
+    client::{ClientT, SubscriptionClientT},
+    server::{HttpRequest, HttpResponse},
+};
 use reth_primitives_traits::block::Block as _;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_builder::auth::AuthServerConfig;

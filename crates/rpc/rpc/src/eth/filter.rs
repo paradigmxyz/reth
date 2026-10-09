@@ -14,8 +14,8 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
-use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_json_rpc::{IdProvider, RpcResult};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadReceipt},
@@ -350,7 +350,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
     for EthFilter<Eth>
 where
@@ -643,8 +642,8 @@ where
         let subscription_id = self.id_provider.next_id();
 
         let id = match subscription_id {
-            jsonrpsee_types::SubscriptionId::Num(n) => FilterId::Num(n),
-            jsonrpsee_types::SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
+            reth_json_rpc::SubscriptionId::Num(n) => FilterId::Num(n),
+            reth_json_rpc::SubscriptionId::Str(s) => FilterId::Str(s),
         };
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
@@ -1048,16 +1047,15 @@ pub enum EthFilterError {
     InternalError,
 }
 
-impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
+impl From<EthFilterError> for reth_json_rpc::ErrorObject {
     fn from(err: EthFilterError) -> Self {
         match err {
             // geth and Nethermind answer -32000 for unknown filter ids
-            EthFilterError::FilterNotFound(_) => rpc_error_with_code(
-                jsonrpsee::types::error::CALL_EXECUTION_FAILED_CODE,
-                "filter not found",
-            ),
+            EthFilterError::FilterNotFound(_) => {
+                rpc_error_with_code(reth_json_rpc::CALL_EXECUTION_FAILED_CODE, "filter not found")
+            }
             err @ EthFilterError::InternalError => {
-                rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
+                rpc_error_with_code(reth_json_rpc::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
             err @ EthFilterError::ReceiptsUnavailable(_) => {
@@ -1067,7 +1065,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::QueryExceedsMaxBlocks(_) |
             EthFilterError::QueryExceedsMaxResults { .. } |
             EthFilterError::BlockRangeExceedsHead { .. }) => {
-                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+                rpc_error_with_code(reth_json_rpc::INVALID_PARAMS_CODE, err.to_string())
             }
         }
     }
@@ -1458,8 +1456,7 @@ mod tests {
 
     #[test]
     fn receipts_unavailable_error_matches_geth() {
-        let err: jsonrpsee::types::error::ErrorObject<'static> =
-            EthFilterError::ReceiptsUnavailable(100).into();
+        let err: reth_json_rpc::ErrorObject = EthFilterError::ReceiptsUnavailable(100).into();
         assert_eq!(err.code(), 4444);
         assert_eq!(err.message(), "pruned history unavailable");
     }

@@ -1,6 +1,6 @@
 use crate::{AuthValidator, JwtError, JwtSecret};
 use http::{header, HeaderMap, Response, StatusCode};
-use jsonrpsee_http_client::{HttpBody, HttpResponse};
+use reth_json_rpc::server::{HttpBody, HttpResponse};
 use tracing::error;
 
 /// Implements JWT validation logics and integrates

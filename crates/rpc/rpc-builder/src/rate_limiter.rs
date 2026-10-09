@@ -1,6 +1,6 @@
-//! [`jsonrpsee`] helper layer for rate limiting certain methods.
+//! RPC middleware for rate limiting certain methods.
 
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request};
+use reth_json_rpc::{MethodResponse, Notification, Request, RpcServiceT};
 use std::{
     future::Future,
     pin::Pin,
@@ -65,11 +65,7 @@ impl<S> RpcServiceT for RpcRequestRateLimitingService<S>
 where
     S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type MethodResponse = S::MethodResponse;
-    type NotificationResponse = S::NotificationResponse;
-    type BatchResponse = S::BatchResponse;
-
-    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+    fn call(&self, req: Request) -> impl Future<Output = MethodResponse> + Send {
         let method_name = req.method_name();
         if method_name.starts_with("trace_") || method_name.starts_with("debug_") {
             RateLimitingRequestFuture {
@@ -84,17 +80,7 @@ where
         }
     }
 
-    fn batch<'a>(
-        &self,
-        requests: jsonrpsee::core::middleware::Batch<'a>,
-    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
-        self.inner.batch(requests)
-    }
-
-    fn notification<'a>(
-        &self,
-        n: jsonrpsee::core::middleware::Notification<'a>,
-    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+    fn notification(&self, n: Notification) -> impl Future<Output = ()> + Send {
         self.inner.notification(n)
     }
 }
@@ -128,5 +114,40 @@ impl<F: Future> Future for RateLimitingRequestFuture<F> {
             *this.permit = None;
         }
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_json_rpc::{Id, Params};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Records the highest number of calls running at once.
+    #[derive(Clone, Default)]
+    struct Concurrency {
+        running: Arc<AtomicUsize>,
+        max: Arc<AtomicUsize>,
+    }
+
+    impl RpcServiceT for Concurrency {
+        async fn call(&self, req: Request) -> MethodResponse {
+            let running = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max.fetch_max(running, Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            self.running.fetch_sub(1, Ordering::SeqCst);
+            MethodResponse::response(req.id, &(), usize::MAX)
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limits_batch_entries() {
+        let inner = Concurrency::default();
+        let service = RpcRequestRateLimiter::new(1).layer(inner.clone());
+        let reqs = (0..3)
+            .map(|id| Request::new("trace_block", Params::new(None), Id::Number(id)))
+            .collect();
+        assert_eq!(service.batch(reqs).await.len(), 3);
+        assert_eq!(inner.max.load(Ordering::SeqCst), 1);
     }
 }

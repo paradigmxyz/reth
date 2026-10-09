@@ -15,16 +15,12 @@
 #![warn(unused_crate_dependencies)]
 
 use clap::Parser;
-use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult},
-    proc_macros::rpc,
-    PendingSubscriptionSink, SubscriptionMessage,
-};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::EthereumNode,
     pool::TransactionPool,
 };
+use reth_json_rpc::{rpc, PendingSubscriptionSink, RpcResult, SubscriptionResult};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -85,10 +81,7 @@ pub trait TxpoolExtApi {
 
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(
-        &self,
-        #[argument(rename = "delay")] delay: Option<u64>,
-    ) -> SubscriptionResult;
+    fn subscribe_transaction_count(&self, delay: Option<u64>) -> SubscriptionResult;
 }
 
 /// The type that implements the `txpoolExt` rpc namespace trait
@@ -134,10 +127,7 @@ where
                     _ = sleep(Duration::from_secs(delay)) => {}
                 }
 
-                let msg = SubscriptionMessage::from(
-                    serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
-                );
-                if sink.send(msg).await.is_err() {
+                if sink.send(&pool.pool_size().total).await.is_err() {
                     break;
                 }
             }
@@ -150,10 +140,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonrpsee::{
-        http_client::HttpClientBuilder, server::ServerBuilder, ws_client::WsClientBuilder,
-    };
     use reth_ethereum::pool::noop::NoopTransactionPool;
+    use reth_json_rpc::{
+        client::{HttpClientBuilder, WsClientBuilder},
+        server::ServerBuilder,
+    };
 
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
@@ -193,12 +184,7 @@ mod tests {
                         _ = sink.closed() => break,
                         _ = sleep(Duration::from_millis(delay)) => {}
                     }
-                    let message = SubscriptionMessage::from(
-                        serde_json::value::to_raw_value(&pool.pool_size().total)
-                            .expect("serialize usize"),
-                    );
-
-                    if sink.send(message).await.is_err() {
+                    if sink.send(&pool.pool_size().total).await.is_err() {
                         break;
                     }
                 }

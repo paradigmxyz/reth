@@ -3,9 +3,7 @@ use std::{future::Future, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use reth_chain_state::{
     CanonStateNotification, CanonStateSubscriptions, ForkChoiceSubscriptions,
     PersistedBlockSubscriptions,
@@ -13,6 +11,7 @@ use reth_chain_state::{
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_json_rpc::{PendingSubscriptionSink, RpcResult, SubscriptionSink};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -199,7 +198,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt
@@ -266,7 +264,7 @@ where
     async fn reth_subscribe_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().canonical_state_stream();
         self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
@@ -278,7 +276,7 @@ where
     async fn reth_subscribe_persisted_block(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let stream = self.provider().persisted_block_stream();
         self.inner.task_spawner.spawn_task(pipe_from_stream(sink, stream));
@@ -290,7 +288,7 @@ where
     async fn reth_subscribe_finalized_chain_notifications(
         &self,
         pending: PendingSubscriptionSink,
-    ) -> jsonrpsee::core::SubscriptionResult {
+    ) -> reth_json_rpc::SubscriptionResult {
         let sink = pending.accept().await?;
         let canon_stream = self.provider().canonical_state_stream();
         let finalized_stream = self.provider().finalized_block_stream();
@@ -319,14 +317,7 @@ where
                 let Some(item) = maybe_item else {
                     break
                 };
-                let msg = match SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &item) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize subscription message");
-                        break
-                    }
-                };
-                if sink.send(msg).await.is_err() {
+                if sink.send(&item).await.is_err() {
                     break;
                 }
             }
@@ -403,18 +394,7 @@ async fn finalized_chain_notifications<N>(
 
                 committed.sort_by_key(|n| *n.committed().range().start());
 
-                let msg = match SubscriptionMessage::new(
-                    sink.method_name(),
-                    sink.subscription_id(),
-                    &committed,
-                ) {
-                    Ok(msg) => msg,
-                    Err(err) => {
-                        tracing::error!(target: "rpc::reth", %err, "Failed to serialize finalized chain notification");
-                        break
-                    }
-                };
-                if sink.send(msg).await.is_err() {
+                if sink.send(&committed).await.is_err() {
                     break;
                 }
             }

@@ -1,4 +1,4 @@
-use jsonrpsee_http_client::{HttpBody, HttpRequest, HttpResponse};
+use reth_json_rpc::server::{HttpBody, HttpRequest, HttpResponse};
 use std::{
     future::Future,
     pin::Pin,
@@ -8,7 +8,7 @@ use tower::{Layer, Service};
 use tower_http::compression::{Compression, CompressionLayer as TowerCompressionLayer};
 
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
-/// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
+/// with the RPC server's HTTP types. It automatically compresses responses based on the client's
 /// `Accept-Encoding` header.
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
@@ -104,7 +104,7 @@ mod tests {
     use super::*;
     use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
     use http_body_util::BodyExt;
-    use jsonrpsee_http_client::{HttpRequest, HttpResponse};
+    use reth_json_rpc::server::{HttpRequest, HttpResponse};
     use std::{convert::Infallible, future::ready};
 
     const TEST_DATA: &str = "compress test data ";

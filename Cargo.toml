@@ -82,6 +82,8 @@ members = [
     "crates/prune/types",
     "crates/revm/",
     "crates/rpc/ipc/",
+    "crates/rpc/json-rpc/",
+    "crates/rpc/json-rpc-macros/",
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
@@ -373,6 +375,8 @@ reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
 reth-ipc = { path = "crates/rpc/ipc" }
+reth-json-rpc = { path = "crates/rpc/json-rpc" }
+reth-json-rpc-macros = { path = "crates/rpc/json-rpc-macros" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
 reth-metrics = { path = "crates/metrics" }
@@ -566,14 +570,10 @@ discv5 = { git = "https://github.com/sigp/discv5", rev = "7663c00" }
 if-addrs = "0.14"
 
 # rpc
-jsonrpsee = "0.26.0"
-jsonrpsee-core = "0.26.0"
-jsonrpsee-server = "0.26.0"
-jsonrpsee-http-client = "0.26.0"
-jsonrpsee-types = "0.26.0"
 
 # http
 http = "1.0"
+http-body = "1.0"
 http-body-util = "0.1.2"
 proptest-arbitrary-interop = "0.1.0"
 

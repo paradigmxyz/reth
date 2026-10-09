@@ -4,10 +4,10 @@ use alloy_rpc_types_engine::{
     INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG, TOO_DEEP_REORG_ERROR,
     TOO_DEEP_REORG_ERROR_MSG,
 };
-use jsonrpsee_types::error::{
+use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
+use reth_json_rpc::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
-use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{EngineObjectValidationError, VersionSpecificValidationError};
 use thiserror::Error;
@@ -86,12 +86,12 @@ pub enum EngineApiError {
     UnexpectedRequestsHash,
     /// Any other rpc error
     #[error("{0}")]
-    Other(jsonrpsee_types::ErrorObject<'static>),
+    Other(reth_json_rpc::ErrorObject),
 }
 
 impl EngineApiError {
     /// Crates a new [`EngineApiError::Other`] variant.
-    pub const fn other(err: jsonrpsee_types::ErrorObject<'static>) -> Self {
+    pub const fn other(err: reth_json_rpc::ErrorObject) -> Self {
         Self::Other(err)
     }
 }
@@ -110,7 +110,7 @@ impl ErrorData {
     }
 }
 
-impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<EngineApiError> for reth_json_rpc::ErrorObject {
     fn from(error: EngineApiError) -> Self {
         match error {
             // Per the Shanghai Engine API spec, FCU V2 must return -38003 when the wrong
@@ -133,7 +133,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
-                jsonrpsee_types::error::ErrorObject::owned(
+                Self::owned(
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                     INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                     Some(ErrorData::new(error)),
@@ -144,70 +144,50 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
-            ) => jsonrpsee_types::error::ErrorObject::owned(
-                INVALID_PARAMS_CODE,
-                INVALID_PARAMS_MSG,
+            ) => Self::owned(INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, Some(ErrorData::new(error))),
+            EngineApiError::UnknownPayload => {
+                Self::owned(UNKNOWN_PAYLOAD_CODE, error.to_string(), None::<()>)
+            }
+            EngineApiError::PayloadRequestTooLarge { .. } |
+            EngineApiError::BlobRequestTooLarge { .. } => Self::owned(
+                REQUEST_TOO_LARGE_CODE,
+                REQUEST_TOO_LARGE_MESSAGE,
                 Some(ErrorData::new(error)),
             ),
-            EngineApiError::UnknownPayload => jsonrpsee_types::error::ErrorObject::owned(
-                UNKNOWN_PAYLOAD_CODE,
-                error.to_string(),
-                None::<()>,
-            ),
-            EngineApiError::PayloadRequestTooLarge { .. } |
-            EngineApiError::BlobRequestTooLarge { .. } => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    REQUEST_TOO_LARGE_CODE,
-                    REQUEST_TOO_LARGE_MESSAGE,
-                    Some(ErrorData::new(error)),
-                )
-            }
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3 |
                     VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun,
                 ),
-            ) => jsonrpsee_types::error::ErrorObject::owned(
+            ) => Self::owned(
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR,
                 INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::UnsupportedFork,
-            ) => jsonrpsee_types::error::ErrorObject::owned(
-                UNSUPPORTED_FORK_CODE,
-                error.to_string(),
-                None::<()>,
-            ),
+            ) => Self::owned(UNSUPPORTED_FORK_CODE, error.to_string(), None::<()>),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
                 BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => match err {
-                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
-                            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
-                            None::<()>,
-                        )
-                    }
+                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => Self::owned(
+                        INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                        INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                        None::<()>,
+                    ),
                     ForkchoiceUpdateError::InvalidState |
-                    ForkchoiceUpdateError::UnknownFinalBlock => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            INVALID_FORK_CHOICE_STATE_ERROR,
-                            INVALID_FORK_CHOICE_STATE_ERROR_MSG,
-                            None::<()>,
-                        )
-                    }
+                    ForkchoiceUpdateError::UnknownFinalBlock => Self::owned(
+                        INVALID_FORK_CHOICE_STATE_ERROR,
+                        INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+                        None::<()>,
+                    ),
                     ForkchoiceUpdateError::TooDeepReorg => {
-                        jsonrpsee_types::error::ErrorObject::owned(
-                            TOO_DEEP_REORG_ERROR,
-                            TOO_DEEP_REORG_ERROR_MSG,
-                            None::<()>,
-                        )
+                        Self::owned(TOO_DEEP_REORG_ERROR, TOO_DEEP_REORG_ERROR_MSG, None::<()>)
                     }
                     // Map future alloy forkchoice errors as internal until handled.
                     #[allow(unreachable_patterns, clippy::needless_return)]
                     _ => {
-                        return jsonrpsee_types::error::ErrorObject::owned(
+                        return Self::owned(
                             INTERNAL_ERROR_CODE,
                             SERVER_ERROR_MSG,
                             Some(ErrorData::new(error)),
@@ -216,22 +196,16 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 },
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
-                    jsonrpsee_types::error::ErrorObject::owned(
-                        INTERNAL_ERROR_CODE,
-                        SERVER_ERROR_MSG,
-                        Some(ErrorData::new(error)),
-                    )
+                    Self::owned(INTERNAL_ERROR_CODE, SERVER_ERROR_MSG, Some(ErrorData::new(error)))
                 }
             },
             // Any other server error
             EngineApiError::TerminalBlockHash { .. } |
             EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |
-            EngineApiError::GetPayloadError(_) => jsonrpsee_types::error::ErrorObject::owned(
-                INTERNAL_ERROR_CODE,
-                SERVER_ERROR_MSG,
-                Some(ErrorData::new(error)),
-            ),
+            EngineApiError::GetPayloadError(_) => {
+                Self::owned(INTERNAL_ERROR_CODE, SERVER_ERROR_MSG, Some(ErrorData::new(error)))
+            }
             EngineApiError::Other(err) => err,
         }
     }
@@ -245,7 +219,7 @@ mod tests {
     fn ensure_engine_rpc_error(
         code: i32,
         message: &str,
-        err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
+        err: impl Into<reth_json_rpc::ErrorObject>,
     ) {
         let err = err.into();
         assert_eq!(err.code(), code);

@@ -2,7 +2,7 @@
 
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, PendingTransactionFilterKind};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_json_rpc::{rpc, RpcResult};
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
