@@ -349,6 +349,9 @@ impl PeersManager {
                 let max_inbound =
                     self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
                 if self.connection_info.num_pending_in < max_inbound {
+                    // Rate limit these admissions as well, otherwise a single host could keep
+                    // the pending slots occupied once the inbound slots are taken.
+                    self.throttle_incoming_ip(addr);
                     self.connection_info.inc_pending_in();
                     return Ok(())
                 }
@@ -2916,6 +2919,33 @@ mod tests {
         .await;
 
         assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::IpBanned
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incoming_rate_limit_at_capacity() {
+        // Pending sessions admitted while the inbound slots are full, so that trusted peers can
+        // still connect, must be rate limited per IP like any other.
+        let config = PeersConfig {
+            incoming_ip_throttle_duration: Duration::from_millis(100),
+            ..PeersConfig::test().with_max_inbound(1)
+        };
+        let mut peers = PeersManager::new(config);
+        peers.add_trusted_peer_id(PeerId::random());
+
+        // fill the only inbound slot
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8008);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        peers.on_incoming_session_established(PeerId::random(), addr);
+        assert!(!peers.connection_info.has_in_capacity());
+
+        // a pending session is still admitted, but its ip is throttled
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 3)), 8009);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+        peers.on_incoming_pending_session_gracefully_closed();
         assert_eq!(
             peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
             InboundConnectionError::IpBanned
