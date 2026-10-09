@@ -1182,6 +1182,7 @@ impl Discv4Service {
         let mut is_new_insert = false;
         let mut needs_bond = false;
         let mut is_proven = false;
+        let has_bond = self.has_bond(remote_id, remote_addr.ip());
 
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => {
@@ -1250,6 +1251,12 @@ impl Discv4Service {
             enr_sq: self.enr_seq(),
         });
         self.send_packet(pong, remote_addr);
+
+        // our endpoint proof of a known node lapsed, but its pings keep the entry from expiring,
+        // so re-ping it to keep answering its `FindNode` and `EnrRequest` packets.
+        if !is_new_insert && !needs_bond && !has_bond {
+            self.try_ping(record, PingReason::EstablishBond);
+        }
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -2883,6 +2890,39 @@ mod tests {
             }
             _ => unreachable!(),
         };
+    }
+
+    #[tokio::test]
+    async fn test_ping_from_proven_node_with_expired_bond_rebonds() {
+        reth_tracing::init_test_tracing();
+        let mut rng = rand_08::thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let addr: SocketAddr = (Ipv4Addr::new(10, 0, 0, 1), DEFAULT_DISCOVERY_PORT).into();
+        let record = NodeRecord::new(addr, id);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Outgoing,
+                state: ConnectionState::Connected,
+            },
+        );
+        // the node is proven, but the pong that bonded it is older than `bond_expiration`.
+        assert!(!service.has_bond(id, addr.ip()));
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, addr, id, B256::random());
+
+        // without a fresh pong we keep ignoring this node's FindNode/EnrRequest, so ping it back.
+        assert!(service.pending_pings.contains_key(&id));
     }
 
     #[tokio::test]
