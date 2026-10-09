@@ -14,10 +14,11 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
+use reth_eth_wire_types::message::EthMessageID;
 use reth_metrics::metrics::counter;
 use reth_primitives_traits::GotExpected;
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     io,
     pin::Pin,
@@ -288,6 +289,9 @@ pub struct P2PStream<S> {
     /// Explicit frame limits registered by installed subprotocol handlers.
     inbound_protocol_limits: Vec<InboundProtocolLimit>,
 
+    /// Request IDs whose responses may still arrive from the peer.
+    pending_responses: PendingResponseIds,
+
     /// Outgoing messages buffered for sending to the underlying stream.
     outgoing_messages: VecDeque<Bytes>,
 
@@ -321,6 +325,7 @@ impl<S> P2PStream<S> {
             ping_token_bucket: PingTokenBucket::new(Instant::now()),
             shared_capabilities,
             inbound_protocol_limits: Vec::new(),
+            pending_responses: PendingResponseIds::default(),
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
@@ -402,6 +407,236 @@ impl<S> P2PStream<S> {
         self.outgoing_messages.push_back(Bytes::from_static(SNAPPY_PING_MESSAGE));
         self.needs_control_flush = true;
     }
+}
+
+/// Maximum number of newer requests retained while matching response IDs.
+const MAX_PENDING_RESPONSE_IDS: usize = 1024;
+
+/// Tracks bounded per-connection request IDs for response messages that require matching.
+#[derive(Debug, Default)]
+struct PendingResponseIds {
+    ids: HashMap<(u8, u64), u64>,
+    requests: VecDeque<(u64, (u8, u64))>,
+    next_request: u64,
+}
+
+impl PendingResponseIds {
+    fn record(&mut self, key: (u8, u64)) {
+        self.next_request = self.next_request.saturating_add(1);
+        let request_number = self.next_request;
+        self.ids.insert(key, request_number);
+        self.requests.push_back((request_number, key));
+
+        while let Some((number, _)) = self.requests.front() &&
+            request_number.saturating_sub(*number) > MAX_PENDING_RESPONSE_IDS as u64
+        {
+            let (number, key) = self.requests.pop_front().expect("front was present");
+            if self.ids.get(&key) == Some(&number) {
+                self.ids.remove(&key);
+            }
+        }
+    }
+
+    fn consume(&mut self, key: (u8, u64)) -> bool {
+        self.ids.remove(&key).is_some()
+    }
+}
+
+/// Returns the paired response's wire message ID for an outgoing request.
+fn response_wire_id_for_relative_message(
+    capabilities: &SharedCapabilities,
+    relative_message_id: u8,
+) -> Option<u8> {
+    let capability = capabilities.find_by_relative_offset(relative_message_id)?;
+    let relative_offset = capability.relative_message_id_offset();
+    let message_id = relative_message_id.checked_sub(relative_offset)?;
+    let response_id = match capability {
+        crate::capability::SharedCapability::Eth { version, .. } => match message_id {
+            id if id == EthMessageID::GetBlockHeaders.to_u8() => EthMessageID::BlockHeaders.to_u8(),
+            id if id == EthMessageID::GetBlockBodies.to_u8() => EthMessageID::BlockBodies.to_u8(),
+            id if id == EthMessageID::GetPooledTransactions.to_u8() => {
+                EthMessageID::PooledTransactions.to_u8()
+            }
+            id if id == EthMessageID::GetNodeData.to_u8() &&
+                *version < crate::EthVersion::Eth67 =>
+            {
+                EthMessageID::NodeData.to_u8()
+            }
+            id if id == EthMessageID::GetReceipts.to_u8() => EthMessageID::Receipts.to_u8(),
+            id if *version >= crate::EthVersion::Eth71 &&
+                id == EthMessageID::GetBlockAccessLists.to_u8() =>
+            {
+                EthMessageID::BlockAccessLists.to_u8()
+            }
+            id if *version >= crate::EthVersion::Eth72 && id == EthMessageID::GetCells.to_u8() => {
+                EthMessageID::Cells.to_u8()
+            }
+            _ => return None,
+        },
+        crate::capability::SharedCapability::UnknownCapability { cap, .. }
+            if cap.name == "snap" && cap.version == 2 =>
+        {
+            match message_id {
+                0 => 1,
+                2 => 3,
+                4 => 5,
+                8 => 9,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+
+    capability.message_id_offset().checked_add(response_id)
+}
+
+/// Returns whether a wire message ID is a response whose request ID should be matched.
+fn response_id_for_wire_message(
+    capabilities: &SharedCapabilities,
+    wire_message_id: u8,
+) -> Option<u8> {
+    let capability = capabilities.find_by_offset(wire_message_id)?;
+    let capability_offset = capability.message_id_offset();
+    let message_id = wire_message_id.checked_sub(capability_offset)?;
+    match capability {
+        crate::capability::SharedCapability::Eth { version, .. } => match message_id {
+            id if id == EthMessageID::BlockHeaders.to_u8() => {
+                capability_offset.checked_add(EthMessageID::BlockHeaders.to_u8())
+            }
+            id if id == EthMessageID::BlockBodies.to_u8() => {
+                capability_offset.checked_add(EthMessageID::BlockBodies.to_u8())
+            }
+            id if id == EthMessageID::PooledTransactions.to_u8() => {
+                capability_offset.checked_add(EthMessageID::PooledTransactions.to_u8())
+            }
+            id if id == EthMessageID::NodeData.to_u8() && *version < crate::EthVersion::Eth67 => {
+                capability_offset.checked_add(EthMessageID::NodeData.to_u8())
+            }
+            id if id == EthMessageID::Receipts.to_u8() => {
+                capability_offset.checked_add(EthMessageID::Receipts.to_u8())
+            }
+            id if *version >= crate::EthVersion::Eth71 &&
+                id == EthMessageID::BlockAccessLists.to_u8() =>
+            {
+                capability_offset.checked_add(EthMessageID::BlockAccessLists.to_u8())
+            }
+            id if *version >= crate::EthVersion::Eth72 && id == EthMessageID::Cells.to_u8() => {
+                capability_offset.checked_add(EthMessageID::Cells.to_u8())
+            }
+            _ => None,
+        },
+        crate::capability::SharedCapability::UnknownCapability { cap, .. }
+            if cap.name == "snap" && cap.version == 2 =>
+        {
+            match message_id {
+                1 | 3 | 5 | 9 => capability_offset.checked_add(message_id),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Reads a request ID from the initial RLP list header and integer only.
+fn request_id_from_rlp_prefix(mut input: &[u8]) -> Option<u64> {
+    let header = *input.first()?;
+    if header < 0xc0 {
+        return None
+    }
+    if header <= 0xf7 {
+        input = &input[1..];
+    } else {
+        let length_bytes = usize::from(header - 0xf7);
+        input = input.get(1 + length_bytes..)?;
+    }
+    u64::decode(&mut input).ok()
+}
+
+/// Decompresses at most 18 bytes from a raw Snappy block, enough for an RLP list header and u64.
+fn decompress_request_id_prefix(input: &[u8]) -> Option<u64> {
+    const PREFIX_LEN: usize = 18;
+
+    let mut header_len = 0;
+    let mut decoded_len = 0usize;
+    loop {
+        let byte = *input.get(header_len)?;
+        if header_len == 5 {
+            return None
+        }
+        decoded_len |= usize::from(byte & 0x7f).checked_shl((header_len * 7) as u32)?;
+        header_len += 1;
+        if byte & 0x80 == 0 {
+            break
+        }
+    }
+
+    let target_len = decoded_len.min(PREFIX_LEN);
+    let mut output = [0u8; PREFIX_LEN];
+    let mut src = header_len;
+    let mut dst = 0;
+
+    while dst < target_len {
+        let tag = *input.get(src)?;
+        src += 1;
+        match tag & 0x03 {
+            0 => {
+                let mut length = usize::from(tag >> 2);
+                if length >= 60 {
+                    let length_bytes = length - 59;
+                    if length_bytes > 4 {
+                        return None
+                    }
+                    length = 0;
+                    for shift in 0..length_bytes {
+                        length |= usize::from(*input.get(src + shift)?) << (shift * 8);
+                    }
+                    src += length_bytes;
+                    length = length.checked_add(1)?;
+                } else {
+                    length += 1;
+                }
+                if dst.checked_add(length)? > decoded_len || src.checked_add(length)? > input.len()
+                {
+                    return None
+                }
+                let count = length.min(target_len - dst);
+                output[dst..dst + count].copy_from_slice(&input[src..src + count]);
+                dst += count;
+                src += length;
+            }
+            kind => {
+                let (length, offset, tag_bytes) = match kind {
+                    1 => {
+                        let offset = (usize::from(tag & 0xe0) << 3) | usize::from(*input.get(src)?);
+                        (4 + usize::from((tag >> 2) & 0x07), offset, 1)
+                    }
+                    2 => {
+                        let offset = usize::from(*input.get(src)?) |
+                            (usize::from(*input.get(src + 1)?) << 8);
+                        (1 + usize::from(tag >> 2), offset, 2)
+                    }
+                    _ => {
+                        let offset = usize::from(*input.get(src)?) |
+                            (usize::from(*input.get(src + 1)?) << 8) |
+                            (usize::from(*input.get(src + 2)?) << 16) |
+                            (usize::from(*input.get(src + 3)?) << 24);
+                        (1 + usize::from(tag >> 2), offset, 4)
+                    }
+                };
+                src += tag_bytes;
+                if offset == 0 || offset > dst || dst.checked_add(length)? > decoded_len {
+                    return None
+                }
+                let count = length.min(target_len - dst);
+                for _ in 0..count {
+                    output[dst] = output[dst - offset];
+                    dst += 1;
+                }
+            }
+        }
+    }
+
+    request_id_from_rlp_prefix(&output[..target_len])
 }
 
 /// Per-connection bucket that restores one incoming ping token per second.
@@ -640,6 +875,15 @@ where
                 })))
             }
 
+            if response_id_for_wire_message(&this.shared_capabilities, id).is_some() &&
+                let Some(request_id) = decompress_request_id_prefix(&bytes[1..]) &&
+                !this.pending_responses.consume((id, request_id))
+            {
+                // Responses to requests this connection did not send do not need full
+                // decompression or protocol decoding.
+                continue
+            }
+
             // create a buffer to hold the decompressed message, adding a byte to the length for
             // the message ID byte, which is the first byte in this buffer
             let mut decompress_buf = BytesMut::zeroed(frame_len);
@@ -790,6 +1034,16 @@ where
 
         let this = self.project();
 
+        let pending_response = if item.len() > 1 &&
+            let Some(response_id) =
+                response_wire_id_for_relative_message(this.shared_capabilities, item[0]) &&
+            let Some(request_id) = request_id_from_rlp_prefix(&item[1..])
+        {
+            Some((response_id, request_id))
+        } else {
+            None
+        };
+
         // all messages sent in this stream are subprotocol messages, so we need to switch the
         // message id based on the offset
         let compressed = compress_frame(
@@ -806,6 +1060,9 @@ where
             );
             err
         })?;
+        if let Some(key) = pending_response {
+            this.pending_responses.record(key);
+        }
         this.outgoing_messages.push_back(compressed);
 
         Ok(())
@@ -1016,6 +1273,7 @@ mod tests {
         EthVersion, ProtocolVersion,
     };
     use futures::task::noop_waker_ref;
+    use reth_eth_wire_types::message::RequestPair;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 
@@ -1119,6 +1377,140 @@ mod tests {
         let message =
             compress_frame(&mut encoder, &mut scratch, message_id as u8, payload).unwrap();
         BytesMut::from(message.as_ref())
+    }
+
+    fn compressed_protocol_message(wire_id: u8, payload: &[u8]) -> BytesMut {
+        let mut encoder = snap::raw::Encoder::new();
+        let mut scratch = Vec::new();
+        BytesMut::from(
+            compress_frame(&mut encoder, &mut scratch, wire_id, payload).unwrap().as_ref(),
+        )
+    }
+
+    #[test]
+    fn pending_response_ids_expire_after_the_bound() {
+        let mut pending = PendingResponseIds::default();
+        pending.record((20, 0));
+        for request_id in 1..=MAX_PENDING_RESPONSE_IDS as u64 {
+            pending.record((20, request_id));
+        }
+        assert!(pending.ids.contains_key(&(20, 0)));
+
+        pending.record((20, MAX_PENDING_RESPONSE_IDS as u64 + 1));
+        assert!(!pending.consume((20, 0)));
+        assert!(pending.consume((20, MAX_PENDING_RESPONSE_IDS as u64 + 1)));
+    }
+
+    #[test]
+    fn request_response_ids_follow_negotiated_capabilities() {
+        let eth68 =
+            SharedCapabilities::try_new(vec![EthVersion::Eth68.into()], vec![Capability::eth_68()])
+                .unwrap();
+        let eth71 =
+            SharedCapabilities::try_new(vec![EthVersion::Eth71.into()], vec![Capability::eth_71()])
+                .unwrap();
+        let snap2 =
+            SharedCapabilities::try_new(vec![Protocol::snap_2()], vec![Capability::snap_2()])
+                .unwrap();
+
+        assert_eq!(response_wire_id_for_relative_message(&eth68, 0x12), None);
+        assert_eq!(response_wire_id_for_relative_message(&eth71, 0x12), Some(0x23));
+        assert_eq!(response_id_for_wire_message(&eth68, 0x13), None);
+        assert_eq!(response_id_for_wire_message(&eth68, 0x1a), Some(0x1a));
+        assert_eq!(response_wire_id_for_relative_message(&snap2, 8), Some(25));
+        assert_eq!(response_id_for_wire_message(&snap2, 25), Some(25));
+    }
+
+    #[test]
+    fn decompress_request_id_prefix_matches_full_snappy_data() {
+        for request_id in [0, 1, 127, 128, u32::MAX as u64, u64::MAX] {
+            for body in [vec![0x5a; 4096], (0..4096).map(|i| i as u8).collect()] {
+                let message = RequestPair { request_id, message: body };
+                let encoded = alloy_rlp::encode(message);
+                let mut encoder = snap::raw::Encoder::new();
+                let compressed = encoder.compress_vec(&encoded).unwrap();
+                let mut decoder = snap::raw::Decoder::new();
+                let full = decoder.decompress_vec(&compressed).unwrap();
+                assert_eq!(request_id_from_rlp_prefix(&full), Some(request_id));
+                assert_eq!(decompress_request_id_prefix(&compressed), Some(request_id));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn only_decodes_responses_with_an_awaited_request_id_once() {
+        let mut transport = FlushCountingTransport::default();
+        let response_id = EthMessageID::BlockHeaders.to_u8();
+        let wire_response_id = MAX_RESERVED_MESSAGE_ID + 1 + response_id;
+        let response = RequestPair { request_id: 42, message: vec![0x5a_u8; 4096] };
+        let response_payload = alloy_rlp::encode(response);
+        let frame = compressed_protocol_message(wire_response_id, &response_payload);
+        transport.incoming.extend([Ok(frame.clone()), Ok(frame)]);
+        let mut stream = P2PStream::new(transport, eth_shared_capabilities());
+
+        let request = RequestPair { request_id: 42, message: Vec::<u8>::new() };
+        let mut request_message = vec![EthMessageID::GetBlockHeaders.to_u8()];
+        request_message.extend_from_slice(&alloy_rlp::encode(request));
+        Pin::new(&mut stream).start_send(Bytes::from(request_message)).unwrap();
+
+        let decoded = stream.next().await.unwrap().unwrap();
+        assert_eq!(decoded[0], response_id);
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+    }
+
+    #[tokio::test]
+    async fn drops_unrequested_response_before_full_decompression() {
+        let wire_response_id = MAX_RESERVED_MESSAGE_ID + 1 + EthMessageID::BlockHeaders.to_u8();
+        let response = RequestPair { request_id: 42, message: vec![0x5a_u8; 1024 * 1024] };
+        let payload = alloy_rlp::encode(response);
+        let mut frame = compressed_protocol_message(wire_response_id, &payload);
+        // Truncate after the request-id prefix but before the compressed body ends. Full decoding
+        // would fail, while the prefix check has enough data to drop the unsolicited response.
+        let truncated_len = (2..frame.len())
+            .find(|&len| {
+                decompress_request_id_prefix(&frame[1..len]) == Some(42) &&
+                    snap::raw::Decoder::new().decompress_vec(&frame[1..len]).is_err()
+            })
+            .expect("compressed frame contains a valid prefix before its end");
+        frame.truncate(truncated_len);
+        let mut transport = FlushCountingTransport::default();
+        transport.incoming.push_back(Ok(frame));
+        let mut stream = P2PStream::new(transport, eth_shared_capabilities());
+
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+    }
+
+    #[tokio::test]
+    async fn tracks_snap_response_ids_for_the_negotiated_snap_capability() {
+        let snap = Capability::snap_2();
+        let caps = SharedCapabilities::try_new(vec![Protocol::snap_2()], vec![snap]).unwrap();
+        let request = reth_eth_wire_types::snap::GetAccountRangeMessage {
+            request_id: 7,
+            root_hash: Default::default(),
+            starting_hash: Default::default(),
+            limit_hash: Default::default(),
+            response_bytes: 0,
+        };
+        let mut request_message = vec![0];
+        request_message.extend_from_slice(&alloy_rlp::encode(request));
+        let response = reth_eth_wire_types::snap::AccountRangeMessage {
+            request_id: 7,
+            accounts: Vec::new(),
+            proof: Vec::new(),
+        };
+        let payload = alloy_rlp::encode(response);
+        let mut transport = FlushCountingTransport::default();
+        // snap follows eth in normal capability ordering, but is the only capability here.
+        transport.incoming.push_back(Ok(compressed_protocol_message(17, &payload)));
+        let mut stream = P2PStream::new(transport, caps);
+        Pin::new(&mut stream).start_send(Bytes::from(request_message)).unwrap();
+
+        let decoded = stream.next().await.unwrap().unwrap();
+        assert_eq!(decoded[0], 1);
     }
 
     #[tokio::test]
