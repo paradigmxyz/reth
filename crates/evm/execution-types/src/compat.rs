@@ -61,13 +61,6 @@ impl BlockState {
         BlockStateSink { block: self, storage: AddressMap::default(), update }
     }
 
-    fn with_code(&self, mut info: Option<AccountInfo>) -> Option<AccountInfo> {
-        if let Some(info) = &mut info {
-            info.code = self.contracts.get(&info.code_hash).cloned();
-        }
-        info
-    }
-
     fn commit_account(
         &mut self,
         address: Address,
@@ -253,16 +246,14 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         let current = current.map(revm_account);
         let slots = written_slots(changes.storage);
         let Some(update) = self.update.as_deref_mut() else {
-            let current = self.block.with_code(current);
             self.block.commit_account(address, original, current, created, wiped, slots);
             return Ok(());
         };
         let storage: Vec<_> = slots.collect();
-        let code_current = self.block.with_code(current.clone());
         self.block.commit_account(
             address,
             original.clone(),
-            code_current,
+            current.clone(),
             created,
             wiped,
             storage.iter().copied(),
@@ -273,11 +264,10 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
 
     fn account(&mut self, change: evm2::evm::AccountChangeRef<'_>) -> Result<(), Self::Error> {
         let (wiped, slots) = self.storage.remove(&change.address).unwrap_or_default();
-        let current = self.block.with_code(change.current.map(revm_account));
         self.block.commit_account(
             change.address,
             change.original.map(revm_account),
-            current,
+            change.current.map(revm_account),
             change.created,
             wiped,
             slots.into_iter(),
