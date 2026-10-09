@@ -196,6 +196,15 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
 
+    /// Whether payload conversion validates that the header transaction root matches its body.
+    ///
+    /// Validators may opt in when they derive the header's transaction root from the payload's
+    /// transactions and verify the advertised block hash. The engine can then skip rebuilding the
+    /// transaction trie during pre-execution validation for payloads from that validator.
+    fn payload_transactions_root_is_validated(&self) -> bool {
+        false
+    }
+
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
     ///

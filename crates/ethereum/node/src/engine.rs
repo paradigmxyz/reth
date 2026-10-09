@@ -49,6 +49,10 @@ where
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
     }
+
+    fn payload_transactions_root_is_validated(&self) -> bool {
+        true
+    }
 }
 
 impl<ChainSpec, Types> EngineApiValidator<Types> for EthereumEngineValidator<ChainSpec>
@@ -81,5 +85,36 @@ where
                 attributes,
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{hex, Bytes};
+    use alloy_rpc_types_engine::ExecutionPayload;
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_ethereum_engine_primitives::EthPayloadTypes;
+
+    #[test]
+    fn validates_transaction_root_during_payload_conversion() {
+        let validator = EthereumEngineValidator::new(Arc::new(ChainSpecBuilder::mainnet().build()));
+        assert!(PayloadValidator::<EthPayloadTypes>::payload_transactions_root_is_validated(
+            &validator,
+        ));
+
+        let block = Block::default();
+        let mut payload = ExecutionData::from_block_unchecked(block.header.hash_slow(), &block);
+        let ExecutionPayload::V1(payload_v1) = &mut payload.payload else {
+            panic!("default block should produce a V1 payload");
+        };
+        // Adding a transaction without updating the advertised block hash makes the payload's
+        // transactions inconsistent with the header derived from them.
+        payload_v1.transactions.push(Bytes::from(hex::decode(
+            "02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090",
+        ).unwrap()));
+
+        assert!(PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&validator, payload)
+            .is_err());
     }
 }
