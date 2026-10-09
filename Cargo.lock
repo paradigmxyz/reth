@@ -9194,6 +9194,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-filter-maps"
+version = "2.7.0"
+dependencies = [
+ "alloy-primitives",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "reth-fs-util"
 version = "2.7.0"
 dependencies = [
