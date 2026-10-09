@@ -3705,7 +3705,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3744,7 +3744,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3766,7 +3766,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3781,7 +3781,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "eyre",
  "ruint",
@@ -3790,12 +3790,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3808,7 +3808,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3831,7 +3831,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3841,7 +3841,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3854,7 +3854,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3881,7 +3881,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=86958088a0b610734c0129c187cf5d4f5dc04bc8#86958088a0b610734c0129c187cf5d4f5dc04bc8"
+source = "git+https://github.com/alloy-rs/evm2?rev=ba380e5eef4ae69ed36d3947203354183661a2dc#ba380e5eef4ae69ed36d3947203354183661a2dc"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -218,8 +218,7 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         if let Some((hash, code)) = changes.code {
             self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
         }
-        // Loaded-but-unchanged accounts commit only when their storage changed.
-        if !changes.changed && !changes.storage.is_changed() {
+        if !changes.is_changed() {
             return Ok(());
         }
         let address = changes.address;
@@ -524,7 +523,6 @@ mod tests {
                 address,
                 original: Some(&native),
                 current: Some(&updated),
-                changed: true,
                 created: false,
                 selfdestructed: false,
                 code: None,
@@ -567,7 +565,6 @@ mod tests {
                     address,
                     original: Some(&info),
                     current: Some(&info),
-                    changed: false,
                     created: false,
                     selfdestructed: false,
                     code: None,
@@ -578,7 +575,6 @@ mod tests {
                     address,
                     original: (step != 3 && step != 6).then_some(&info),
                     current: (step == 3 || step == 4).then_some(&info),
-                    changed: true,
                     created: step == 3,
                     selfdestructed: step != 3,
                     code: (step == 3).then(|| (code.hash_slow(), &code)),
@@ -591,7 +587,6 @@ mod tests {
                 address: Address::with_last_byte(2),
                 original: Some(&info),
                 current: Some(&info),
-                changed: false,
                 created: false,
                 selfdestructed: false,
                 code: None,
