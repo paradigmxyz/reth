@@ -269,16 +269,23 @@ where
 /// This function processes `movePrecompileToAddress` entries from the state overrides and
 /// moves precompiles from their original addresses to new addresses. The original address
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
+///
+/// Moves are applied in ascending order of source address, matching geth. If several
+/// precompiles are moved to the same destination, the one with the highest source address ends
+/// up there, and if several moves are invalid, the error names the lowest source address.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     precompiles: &mut PrecompilesMap,
 ) -> Result<(), EthSimulateError> {
-    let moves: Vec<_> = state_overrides
+    let mut moves: Vec<_> = state_overrides
         .iter()
         .filter_map(|(source, account_override)| {
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+    // `StateOverride` iterates in a randomly seeded order, so sort the moves to make both the
+    // result and the reported error deterministic.
+    moves.sort_unstable_by_key(|(source, _)| *source);
 
     for (source, dest) in &moves {
         if source == dest {
@@ -595,7 +602,7 @@ mod tests {
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_evm::precompiles::PrecompilesMap;
+    use alloy_evm::precompiles::{Precompile, PrecompilesMap};
     use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
@@ -603,7 +610,7 @@ mod tests {
         BlockOverrides, TransactionRequest,
     };
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+    use revm::precompile::{PrecompileId, Precompiles};
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {
@@ -680,6 +687,84 @@ mod tests {
 
         assert!(precompiles.get(&source).is_none());
         assert!(precompiles.get(&dest).is_some());
+    }
+
+    /// Number of times each ordering test rebuilds the overrides. Every `StateOverride` map gets
+    /// a new random hasher seed, so an order-dependent result shows up within a few runs.
+    const ORDERING_RUNS: usize = 64;
+
+    /// Builds move overrides, inserting them in reverse order on odd runs.
+    fn move_overrides(moves: &[(Address, Address)], run: usize) -> StateOverride {
+        let mut state_overrides = StateOverride::default();
+        let mut insert = |&(source, dest): &(Address, Address)| {
+            state_overrides.insert(
+                source,
+                AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+            );
+        };
+        if run.is_multiple_of(2) {
+            moves.iter().for_each(&mut insert);
+        } else {
+            moves.iter().rev().for_each(&mut insert);
+        }
+        state_overrides
+    }
+
+    #[test]
+    fn precompiles_moved_to_same_destination_resolve_deterministically() {
+        let sha256 = Address::with_last_byte(2);
+        let identity = Address::with_last_byte(4);
+        let dest = address!("0000000000000000000000000000000000001111");
+
+        for run in 0..ORDERING_RUNS {
+            let state_overrides = move_overrides(&[(sha256, dest), (identity, dest)], run);
+            let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+            apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+            // Moves apply in ascending source order, so identity (0x04) is installed last.
+            let installed = precompiles.get(&dest).expect("precompile installed at destination");
+            assert_eq!(installed.precompile_id(), &PrecompileId::Identity, "run {run}");
+            assert!(precompiles.get(&sha256).is_none());
+            assert!(precompiles.get(&identity).is_none());
+        }
+    }
+
+    #[test]
+    fn invalid_precompile_moves_report_lowest_source() {
+        let first = address!("0000000000000000000000000000000000002222");
+        let second = address!("0000000000000000000000000000000000003333");
+        let dest = address!("0000000000000000000000000000000000004444");
+
+        for run in 0..ORDERING_RUNS {
+            let state_overrides = move_overrides(&[(first, dest), (second, dest)], run);
+            let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+            let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+            assert!(
+                matches!(err, EthSimulateError::NotAPrecompile(addr) if addr == first),
+                "run {run}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn precompile_self_moves_report_lowest_source() {
+        let sha256 = Address::with_last_byte(2);
+        let identity = Address::with_last_byte(4);
+
+        for run in 0..ORDERING_RUNS {
+            let state_overrides = move_overrides(&[(sha256, sha256), (identity, identity)], run);
+            let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+            let err = apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap_err();
+
+            assert!(
+                matches!(err, EthSimulateError::MovePrecompileToSelf(addr) if addr == sha256),
+                "run {run}: {err:?}"
+            );
+        }
     }
 
     #[test]
