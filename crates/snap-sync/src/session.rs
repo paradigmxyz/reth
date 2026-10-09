@@ -2,7 +2,6 @@
 
 use crate::{SnapAttemptStore, SnapGeneration, SnapPivotPolicy, SnapSyncError, SnapWrite};
 use reth_storage_api::{BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter};
-use tokio_util::sync::CancellationToken;
 
 /// One snap synchronization attempt, from the pivot it targets to the work it owns.
 ///
@@ -14,18 +13,12 @@ pub struct SnapSyncSession {
     policy: SnapPivotPolicy,
     // How far the attempt has got.
     state: SnapSyncSessionState,
-    // Cancelled once, watched by whatever took the target.
-    cancellation: CancellationToken,
 }
 
 impl SnapSyncSession {
     /// Creates a session waiting for its first eligible target.
-    pub fn new(policy: SnapPivotPolicy) -> Self {
-        Self {
-            policy,
-            state: SnapSyncSessionState::Waiting,
-            cancellation: CancellationToken::new(),
-        }
+    pub const fn new(policy: SnapPivotPolicy) -> Self {
+        Self { policy, state: SnapSyncSessionState::Waiting }
     }
 
     /// What the session is doing.
@@ -36,11 +29,6 @@ impl SnapSyncSession {
     /// Pivot this session is anchored to, if it has one.
     pub const fn target(&self) -> Option<&SnapGeneration> {
         self.state.target()
-    }
-
-    /// Returns whether this session has been cancelled.
-    pub fn is_cancelled(&self) -> bool {
-        self.cancellation.is_cancelled()
     }
 
     /// Selects a target under `head`, or waits while no block is eligible.
@@ -63,27 +51,28 @@ impl SnapSyncSession {
         Ok(&self.state)
     }
 
-    /// Hands the selected target, and the token to watch, to the work downloading against it.
+    /// Hands the selected target to the work downloading against it.
     ///
     /// Taking the target is what starts it, so only the first caller gets one: a target already
-    /// being downloaded has an owner, and a waiting or cancelled session has nothing to hand out.
-    pub fn start(&mut self) -> Option<(SnapGeneration, CancellationToken)> {
+    /// being downloaded has an owner, and a waiting session has nothing to hand out.
+    pub const fn start(&mut self) -> Option<SnapGeneration> {
         let SnapSyncSessionState::Selected(generation) = self.state else { return None };
         self.state = SnapSyncSessionState::Downloading(generation);
-        Some((generation, self.cancellation.clone()))
+        Some(generation)
     }
 
     /// Takes over the target of an attempt a previous run recorded, as [`Self::start`] does for a
     /// selected one.
     ///
-    /// Only a session that has not handed out a target can take one over.
-    pub fn resume(&mut self, generation: SnapGeneration) -> Option<CancellationToken> {
+    /// Only a session that has not handed out a target can take one over, so this returns whether
+    /// it did.
+    pub const fn resume(&mut self, generation: SnapGeneration) -> bool {
         if !matches!(self.state, SnapSyncSessionState::Waiting | SnapSyncSessionState::Selected(_))
         {
-            return None
+            return false
         }
         self.state = SnapSyncSessionState::Downloading(generation);
-        Some(self.cancellation.clone())
+        true
     }
 
     /// Re-anchors the downloaded target once it lags too far behind `head`, returning the new
@@ -119,14 +108,6 @@ impl SnapSyncSession {
         self.state = SnapSyncSessionState::Downloading(next);
         Ok(Some(write))
     }
-
-    /// Signals outstanding work to stop and ends the session.
-    ///
-    /// Terminal: a later attempt needs a new session.
-    pub fn cancel(&mut self) {
-        self.cancellation.cancel();
-        self.state = SnapSyncSessionState::Cancelled;
-    }
 }
 
 /// What a [`SnapSyncSession`] is doing.
@@ -138,8 +119,6 @@ pub enum SnapSyncSessionState {
     Selected(SnapGeneration),
     /// Work is outstanding against the target.
     Downloading(SnapGeneration),
-    /// The session was cancelled and its outstanding work signalled to stop.
-    Cancelled,
 }
 
 impl SnapSyncSessionState {
@@ -147,7 +126,7 @@ impl SnapSyncSessionState {
     pub const fn target(&self) -> Option<&SnapGeneration> {
         match self {
             Self::Selected(generation) | Self::Downloading(generation) => Some(generation),
-            Self::Waiting | Self::Cancelled => None,
+            Self::Waiting => None,
         }
     }
 }
@@ -175,7 +154,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         let mut session = SnapSyncSession::new(policy().with_advance_after(1));
         session.select(&provider, 2, None).unwrap();
-        let (generation, _) = session.start().unwrap();
+        let generation = session.start().unwrap();
         let write = provider.start_snap_attempt(generation).unwrap();
         provider.commit().unwrap();
         (factory, session, write)
@@ -211,7 +190,7 @@ mod tests {
         let provider = provider_with(chain(Some(0)));
         let mut session = session();
         session.select(&provider, 2, None).unwrap();
-        let (started, _) = session.start().unwrap();
+        let started = session.start().unwrap();
 
         session.select(&provider, 3, None).unwrap();
 
@@ -226,8 +205,8 @@ mod tests {
         let recorded = SnapGeneration::new(attempt.pivot(), attempt.state_root());
         let mut session = SnapSyncSession::new(policy().with_advance_after(1));
 
-        assert!(session.resume(recorded).is_some());
-        assert!(session.resume(recorded).is_none());
+        assert!(session.resume(recorded));
+        assert!(!session.resume(recorded));
         assert!(session.start().is_none());
         assert_eq!(session.state(), &SnapSyncSessionState::Downloading(recorded));
         // A resumed target advances like a started one.

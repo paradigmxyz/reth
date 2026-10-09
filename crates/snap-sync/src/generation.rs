@@ -1,4 +1,4 @@
-//! Identifies one attempt at downloading state, and how far it has progressed.
+//! Identifies one attempt at downloading state.
 
 use crate::SnapSyncError;
 use alloy_eips::BlockNumHash;
@@ -16,14 +16,12 @@ pub struct SnapGeneration {
     target: BlockNumHash,
     // Root downloaded ranges authenticate against.
     state_root: B256,
-    // Stage reached so far.
-    phase: SnapPhase,
 }
 
 impl SnapGeneration {
     /// Creates a generation anchored to the given pivot, before any range is downloaded.
     pub const fn new(target: BlockNumHash, state_root: B256) -> Self {
-        Self { target, state_root, phase: SnapPhase::Accounts }
+        Self { target, state_root }
     }
 
     /// Pivot block this generation is anchored to.
@@ -34,11 +32,6 @@ impl SnapGeneration {
     /// State root that downloaded ranges authenticate against.
     pub const fn state_root(&self) -> B256 {
         self.state_root
-    }
-
-    /// Stage this generation has reached.
-    pub const fn phase(&self) -> SnapPhase {
-        self.phase
     }
 
     /// Returns how far the canonical head has moved past this generation's anchor.
@@ -54,15 +47,4 @@ impl SnapGeneration {
         let header = provider.sealed_header(self.target.number)?;
         Ok(header.is_some_and(|header| header.hash() == self.target.hash))
     }
-}
-
-/// The stage a [`SnapGeneration`] has reached.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SnapPhase {
-    /// Account, storage and bytecode ranges are being downloaded.
-    Accounts,
-    /// Authenticated block access lists are being applied.
-    BlockAccessLists,
-    /// The final state trie is being rebuilt and checked.
-    Trie,
 }
