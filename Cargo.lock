@@ -5211,15 +5211,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inventory"
-version = "0.3.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6928282826c822ad91bf1c9a1cb90a30ba1c26770749929b4656cd6be829cd7c"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "ipconfig"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8448,7 +8439,6 @@ name = "reth-dst"
 version = "2.7.0"
 dependencies = [
  "bedrock-assertions",
- "inventory",
  "serde",
  "serde_json",
 ]

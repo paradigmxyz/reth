@@ -13,6 +13,5 @@ workspace = true
 
 [dependencies]
 bedrock-assertions = { git = "https://github.com/tempoxyz/bedrock", rev = "401097a2b7fa8481d2846a970448ccc830e7387d" }
-inventory = "0.3"
 serde.workspace = true
 serde_json.workspace = true
