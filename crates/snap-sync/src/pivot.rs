@@ -236,16 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn generation_outside_the_bal_window_is_not_finishable() {
-        let headers = chain(Some(0));
-        let anchor = headers[1].clone();
-        let provider = provider_with(headers);
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root);
+    fn generation_outside_the_bal_window_is_not_catchable() {
         let policy = policy();
 
-        assert!(generation.is_canonical(&provider).unwrap());
-        assert!(policy.is_finishable(generation, 9));
-        assert!(!policy.is_finishable(generation, 10));
+        assert!(policy.is_catchable_from(1, 9));
+        assert!(!policy.is_catchable_from(1, 10));
     }
 }
