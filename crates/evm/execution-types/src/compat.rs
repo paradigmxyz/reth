@@ -226,24 +226,23 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         let wiped = changes.storage.wiped;
         let original = changes.original.map(revm_account);
         let current = changes.current.map(revm_account);
-        let slots = changes
-            .storage
-            .changed_slots()
-            .map(|(&key, value)| (key, StorageSlot::new_changed(value.original, value.current)));
-        let Some(update) = self.update.as_deref_mut() else {
-            self.block.commit_account(address, original, current, created, wiped, slots);
-            return Ok(());
+        let slots = || {
+            changes
+                .storage
+                .changed_slots()
+                .map(|(&key, value)| (key, StorageSlot::new_changed(value.original, value.current)))
         };
-        let storage: Vec<_> = slots.collect();
-        self.block.commit_account(
-            address,
-            original.clone(),
-            current.clone(),
-            created,
-            wiped,
-            storage.iter().copied(),
-        );
-        update.accounts.push(AccountUpdate { address, original, current, created, wiped, storage });
+        if let Some(update) = self.update.as_deref_mut() {
+            update.accounts.push(AccountUpdate {
+                address,
+                original: original.clone(),
+                current: current.clone(),
+                created,
+                wiped,
+                storage: slots().collect(),
+            });
+        }
+        self.block.commit_account(address, original, current, created, wiped, slots());
         Ok(())
     }
 }
