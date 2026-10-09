@@ -845,6 +845,19 @@ pub struct PrewarmMetrics {
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
 
+/// Releases strategy consumers when a dispatched worker finishes or unwinds.
+struct PrewarmCompletion<'a, Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> {
+    strategy: &'a X,
+    index: usize,
+    _evm: std::marker::PhantomData<Evm>,
+}
+
+impl<Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> Drop for PrewarmCompletion<'_, Evm, X> {
+    fn drop(&mut self) {
+        self.strategy.on_prewarm_finished(self.index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,7 +898,8 @@ mod tests {
                     logs: Vec::new(),
                     output: revm::context::result::Output::Call(Default::default()),
                 },
-                state: [(alloy_primitives::Address::repeat_byte(7), account)].into_iter().collect(),
+                state: std::iter::once((alloy_primitives::Address::repeat_byte(7), account))
+                    .collect(),
             })
         }
 
@@ -1364,18 +1378,5 @@ mod tests {
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
         assert_eq!(account.bytecode_hash, Some(B256::repeat_byte(0xaa)));
-    }
-}
-
-/// Releases strategy consumers when a dispatched worker finishes or unwinds.
-struct PrewarmCompletion<'a, Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> {
-    strategy: &'a X,
-    index: usize,
-    _evm: std::marker::PhantomData<Evm>,
-}
-
-impl<Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> Drop for PrewarmCompletion<'_, Evm, X> {
-    fn drop(&mut self) {
-        self.strategy.on_prewarm_finished(self.index);
     }
 }
