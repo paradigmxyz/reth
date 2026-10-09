@@ -247,7 +247,7 @@ where
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
-        refresh_tx: Option<&crossbeam_channel::Sender<(usize, Recovered<TxTy<N>>)>>,
+        refresh_tx: Option<&crossbeam_channel::Sender<RefreshTransaction<N>>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
@@ -350,7 +350,7 @@ where
     /// only a private database; ordinary handoff checks every refreshed dependency again.
     fn refresh_worker(
         ctx: &PrewarmContext<N, P, Evm>,
-        sources: crossbeam_channel::Receiver<(usize, Recovered<TxTy<N>>)>,
+        sources: crossbeam_channel::Receiver<RefreshTransaction<N>>,
     ) {
         let Some(results) = &ctx.prewarm_results else {
             return;
@@ -715,6 +715,9 @@ type WorkerEvm<Evm> = Option<
 
 /// Primary EVM plus a lazily initialized permissive cache-only fallback.
 type PrewarmEvmState<Evm> = (WorkerEvm<Evm>, WorkerEvm<Evm>);
+
+/// A recovered source transaction retained within the refresh window.
+type RefreshTransaction<N> = (usize, Recovered<TxTy<N>>);
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where

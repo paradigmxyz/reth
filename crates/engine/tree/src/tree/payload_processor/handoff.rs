@@ -56,7 +56,7 @@ pub(super) struct RecordingDatabase<DB> {
     after_execution: Arc<AtomicBool>,
     actions: Rc<RefCell<StorageJournal>>,
     enabled: bool,
-    storage_seed: HashMap<(Address, U256), U256>,
+    storage_seed: StorageSeed,
 }
 
 impl<DB> RecordingDatabase<DB> {
@@ -103,7 +103,7 @@ impl<DB> RecordingDatabase<DB> {
     }
 
     /// Seeds a private retry database; shared parent-state caches are never changed.
-    pub(super) fn seed_storage(&mut self, seed: HashMap<(Address, U256), U256>) {
+    pub(super) fn seed_storage(&mut self, seed: StorageSeed) {
         self.storage_seed = seed;
     }
 
@@ -313,7 +313,7 @@ impl<Ctx> Inspector<Ctx> for HandoffInspector {
 #[derive(Debug, Default)]
 pub(super) struct ReadSet {
     accounts: AddressMap<AccountRead>,
-    storage: HashMap<(Address, U256), U256>,
+    storage: StorageSeed,
     block_hashes: BTreeMap<u64, B256>,
     overflowed: bool,
     writes: Vec<StorageWrite>,
@@ -555,10 +555,7 @@ impl<H> PrewarmResults<H> {
 
     /// Finds the nearest ready result whose storage inputs conflict with earlier writes. Each
     /// result gets at most one attempt per prediction generation, within a block-wide budget.
-    pub(super) fn take_refresh(
-        &self,
-        next: usize,
-    ) -> Option<(usize, HashMap<(Address, U256), U256>)> {
+    pub(super) fn take_refresh(&self, next: usize) -> Option<(usize, StorageSeed)> {
         let mut ready = self.ready.lock();
         for (index, writes) in self.executed_rx.try_iter() {
             ready.refresh.replace(index, &writes);
@@ -596,6 +593,9 @@ impl<H> PrewarmResults<H> {
         None
     }
 }
+
+/// Private storage inputs supplied to one speculative retry.
+type StorageSeed = HashMap<(Address, U256), U256>;
 
 /// Bounded predictions used only to seed speculative retries, never canonical execution.
 #[derive(Debug, Default)]
@@ -1347,7 +1347,7 @@ mod tests {
     fn speculate_seeded(
         db: InMemoryDB,
         transaction: TxEnv,
-        seed: HashMap<(Address, U256), U256>,
+        seed: StorageSeed,
     ) -> PrewarmResult<HaltReason> {
         let caller = transaction.caller;
         let mut recording = RecordingDatabase::new(db, BENEFICIARY, true);
