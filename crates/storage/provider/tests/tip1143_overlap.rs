@@ -401,3 +401,81 @@ fn ordinary_account_metadata_does_not_fetch_code_and_kind_preserves_legacy_recor
         assert!(reth_execution_types::revm_account(&loaded).extension.code_metadata().is_none());
     }
 }
+
+#[test]
+fn cold_reopen_executes_generated_and_split_rjump() {
+    for suffix in [&[0x60, 0xab, 0x50, 0][..], &[0xe0, 0x80, 0x80, 0][..]] {
+        let directory = tempfile::tempdir().unwrap();
+        let factory = open_factory(directory.path(), true);
+        let settings = StorageSettings::v1();
+        factory.set_storage_settings_cache(settings);
+        let writer = factory.provider_rw().unwrap();
+        writer.write_storage_settings(settings).unwrap();
+        let address = Address::repeat_byte(0x65);
+        let mut raw = vec![0; 24540];
+        // Jump to the JUMPDEST preceding the boundary instruction.
+        raw[..4].copy_from_slice(&[0x61, 0x5f, 0xdb, 0x56]);
+        raw[24539] = 0x5b;
+        raw.extend_from_slice(suffix);
+        let code = ValidatedCode::new(raw.into()).unwrap();
+        writer
+            .write_chunked_code(
+                address,
+                reth_primitives_traits::Account::from(reth_execution_types::revm_account(
+                    &ExecutionAccountInfo {
+                        nonce: 1,
+                        code_hash: code.code_hash(),
+                        code_metadata: evm2::bytecode::code_metadata(code.original_bytes())
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                )),
+                &code,
+            )
+            .unwrap();
+        writer.commit().unwrap();
+        drop(factory);
+        let hooks = DatabaseTestHooks::default();
+        let factory = open_factory_observed(directory.path(), false, hooks.clone());
+        factory.set_storage_settings_cache(settings);
+        let state = factory.latest().unwrap();
+        let mut execution = Evm::<'_, BaseEvmTypes>::new_with_execution_config(
+            ExecutionConfig::for_spec_and_version(
+                SpecId::PRAGUE,
+                Version::new(SpecId::PRAGUE).with_tip1143(true),
+            ),
+            SpecId::PRAGUE,
+            BlockEnvExt::default(),
+            TxRegistry::new(),
+            Db::new(StateProviderDatabase::new(state.into_evm_state_provider())),
+            Precompiles::base(SpecId::PRAGUE),
+        );
+        hooks.clear_reads();
+        let budget = 100_000;
+        let mut gas = GasTracker::new(budget);
+        let frame = prepare_initial_frame(
+            &mut execution,
+            Address::repeat_byte(0x55),
+            0,
+            TxKind::Call(address),
+            &Bytes::new(),
+            U256::ZERO,
+            &mut gas,
+        )
+        .unwrap();
+        let result =
+            execute_initial_frame(&mut execution, &TxEnvExt::default(), frame, &mut gas, budget, 0)
+                .unwrap();
+        assert_eq!(result.stop, InstrStop::Stop);
+        let ordinary_gas = if suffix[0] == 0x60 { 19 } else { 14 };
+        assert_eq!(gas.spent(), 2 * 28680 + ordinary_gas);
+        let reads = hooks.reads();
+        let payloads =
+            reads.iter().filter(|read| read.table == "BytecodeChunks").collect::<Vec<_>>();
+        assert_eq!(payloads.len(), 2);
+        let hashes = code.descriptor().unwrap().chunk_hashes();
+        assert_eq!(payloads[0].key, hashes[0].as_slice());
+        assert_eq!(payloads[1].key, hashes[1].as_slice());
+        assert!(!reads.iter().any(|read| read.table == "Bytecodes"));
+    }
+}

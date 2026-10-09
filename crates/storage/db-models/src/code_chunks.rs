@@ -236,7 +236,7 @@ pub struct ChunkPreparation {
     pub jump_data_len: u8,
     /// Up to 32 original bytes after this slice, for every possible legal entry path.
     pub lookahead: Bytes,
-    /// Next slice for a fused stack-neutral transfer, or final STOP.
+    /// Next slice for a stack-neutral RJUMP transfer, or final STOP.
     pub next_chunk: Option<u32>,
 }
 
@@ -257,6 +257,7 @@ fn prepare_chunks(code: &[u8]) -> Vec<ChunkPreparation> {
     while pc < code.len() {
         let width = match code[pc] {
             0x60..=0x7f => (code[pc] - 0x5f) as usize,
+            0xe0 => 2,
             0xe6..=0xe8 => 1,
             _ => 0,
         };
@@ -366,6 +367,22 @@ mod tests {
 
     #[cfg(feature = "reth-codec")]
     use reth_codecs::{Compress, Decompress};
+
+    #[test]
+    fn rjump_immediates_crossing_boundary_match_execution_preparation() {
+        for distance in [1, 2] {
+            let mut raw = vec![0; CODE_CHUNK_SIZE - distance];
+            raw.extend([0xe0, 0x80, 0x80, 0]);
+            let code = ValidatedCode::new(raw.clone().into()).unwrap();
+            let descriptor = code.descriptor().unwrap();
+            let prepared = prepare_chunks(&raw);
+            assert_eq!(descriptor.preparation(1), Some(&prepared[1]));
+            assert_eq!(prepared[1].leading_data_len, (3 - distance) as u8);
+            assert_eq!(prepared[1].jump_data_len, 0);
+            assert_eq!(prepared[0].next_chunk, Some(1));
+            assert_eq!(prepared[0].lookahead.as_ref(), &raw[CODE_CHUNK_SIZE..]);
+        }
+    }
 
     #[test]
     fn every_push_overlap_retains_raw_values_and_bounded_context() {

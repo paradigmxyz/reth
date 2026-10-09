@@ -12,13 +12,15 @@ Explicit typed account metadata opts new outcomes into chunk publication.
 `MAX_CODE_CHUNKS = 40`, and `MAX_CODE_SIZE = 981640`.
 
 `ValidatedCode::new(Bytes)` keeps original logical bytes and hashes unchanged. It slices
-at 24,541 bytes and scans PUSH and the immediate-bearing EIP-8024 instructions.
+at 24,541 bytes and scans PUSH, RJUMP (two immediate bytes), and the immediate-bearing EIP-8024 instructions.
 It derives bounded leading-data lengths, up to 32 original lookahead bytes,
 and the next-chunk index or final STOP. Boundary STOPs are not required. The EVM2
 adapter creates execution buffers with valid leading replacement JUMPDESTs and
-private transitions. Each legal entry offset derives its own stack-neutral transition
+`RJUMP -3` transitions (opcode `0xe0`, operand `5a 58`). Each legal entry offset derives its own stack-neutral transition
 so jumps into EIP-8024 operands retain the established jump-map behavior. This intentionally permits jumps into replaced leading immediate
 positions; it does not claim complete equivalence to unmodified-code execution.
+RJUMP costs 2 gas and encodes a signed relative byte offset with two base-219
+DUPN/SWAPN-safe digits; the interpreter handles it as an ordinary opcode.
 `ValidatedCode::from_chunks` authenticates raw sizes and hashes before deriving this
 context. Unchanged historical single records remain valid through 24,576 bytes.
 
