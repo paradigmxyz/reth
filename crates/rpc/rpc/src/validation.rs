@@ -948,8 +948,8 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_deterministic() {
         let mut addresses = AddressSet::default();
-        addresses.insert(Address::from([1u8; 20]));
-        addresses.insert(Address::from([2u8; 20]));
+        addresses.insert(Address::repeat_byte(1u8));
+        addresses.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses);
         let hash2 = hash_disallow_list(&addresses);
@@ -960,10 +960,10 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_different_content() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -974,12 +974,12 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_order_independent() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
-        addresses1.insert(Address::from([2u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
+        addresses1.insert(Address::repeat_byte(2u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
-        addresses2.insert(Address::from([1u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8)); // Different insertion order
+        addresses2.insert(Address::repeat_byte(1u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);

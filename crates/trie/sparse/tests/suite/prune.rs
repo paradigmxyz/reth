@@ -13,7 +13,7 @@ pub(super) fn test_prune_retains_recent_leaves<T: SparseTrie>(new_trie: fn() -> 
     key_e.0[0] = 0x50;
 
     let storage: BTreeMap<B256, U256> = BTreeMap::from([
-        (key_a, U256::from(1)),
+        (key_a, U256::ONE),
         (key_b, U256::from(2)),
         (key_c, U256::from(3)),
         (key_d, U256::from(4)),
@@ -63,7 +63,7 @@ pub(super) fn test_prune_retains_structurally_modified_branch<T: SparseTrie>(new
     let old_keys = [key(0x00, 0x00), key(0x00, 0x10), key(0x00, 0x20)];
     let sibling = key(0x01, 0x00);
     let mut storage = BTreeMap::from([
-        (old_keys[0], U256::from(1)),
+        (old_keys[0], U256::ONE),
         (old_keys[1], U256::from(2)),
         (old_keys[2], U256::from(3)),
         (sibling, U256::from(4)),
@@ -232,7 +232,7 @@ pub(super) fn test_prune_mixed_embedded_and_hashed_nodes<T: SparseTrie>(new_trie
     for i in 4..8u8 {
         let mut key = B256::ZERO;
         key.0[0] = i;
-        storage.insert(key, U256::from(1));
+        storage.insert(key, U256::ONE);
     }
 
     let mut trie = (new_trie)();
@@ -291,8 +291,7 @@ pub(super) fn test_prune_then_update_no_panic<T: SparseTrie>(new_trie: fn() -> T
 /// leaf or empty root), `prune` should immediately return 0 without walking.
 pub(super) fn test_prune_only_descends_into_branch_root<T: SparseTrie>(new_trie: fn() -> T) {
     // Single-leaf trie: root is a leaf node, not a branch.
-    let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(B256::with_last_byte(0x10), U256::from(1))]);
+    let storage: BTreeMap<B256, U256> = BTreeMap::from([(B256::with_last_byte(0x10), U256::ONE)]);
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
@@ -327,7 +326,7 @@ pub(super) fn test_prune_handles_small_subtrie_root_nodes<T: SparseTrie>(new_tri
     // Small subtrie: single small leaf
     let mut small_key = B256::ZERO;
     small_key.0[0] = 0x20;
-    storage.insert(small_key, U256::from(1));
+    storage.insert(small_key, U256::ONE);
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);

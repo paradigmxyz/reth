@@ -2,7 +2,7 @@
 
 use crate::{
     eth_payload_attributes,
-    setup_builder::{launch_test_node, test_node_config, LaunchArgs},
+    setup_builder::{launch_test_node, open_test_database, test_node_config, LaunchArgs},
     wallet::Wallet,
     NodeHelperType,
 };
@@ -107,14 +107,21 @@ pub async fn setup_engine_with_chain_import(
         // Now launch the node with the pre-populated datadir.
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
-        let node = launch_test_node::<EthereumNode>(LaunchArgs {
-            node_config,
-            runtime: runtime.clone(),
-            tree_config: tree_config.clone(),
-            datadir,
-            attributes_generator: attributes_generator.clone(),
-            dev_payload_attributes: None,
-        })
+        let database = open_test_database(&datadir)?;
+        let node = launch_test_node::<EthereumNode>(
+            LaunchArgs {
+                idx,
+                node_factory: Arc::new(|_| EthereumNode::default()),
+                node_builder_modifiers: Vec::new(),
+                node_config,
+                runtime: Some(runtime.clone()),
+                tree_config: tree_config.clone(),
+                datadir,
+                attributes_generator: attributes_generator.clone(),
+                dev_payload_attributes: None,
+            },
+            database,
+        )
         .instrument(span)
         .await?;
 

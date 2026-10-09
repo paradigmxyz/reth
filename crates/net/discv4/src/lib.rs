@@ -927,7 +927,7 @@ impl Discv4Service {
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
             debug!(target: "discv4", %err, "dropped outgoing packet");
         });
-        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
+        self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx, to.ip()));
     }
 
     /// Sends a new `FindNode` packet to the node with `target` as the lookup target but checks
@@ -1301,11 +1301,11 @@ impl Discv4Service {
             self.try_ping(record, PingReason::InitialInsert);
         } else if needs_bond {
             self.try_ping(record, PingReason::EstablishBond);
-        } else if is_proven {
+        } else {
             // if node has been proven, this means we've received a pong and verified its endpoint
             // proof. We've also sent a pong above to verify our endpoint proof, so we can now
             // send our find_nodes request if PingReason::Lookup
-            if let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
+            if is_proven && let Some((_, ctx)) = self.pending_lookup.remove(&record.id) {
                 if self.pending_find_nodes.contains_key(&record.id) {
                     // there's already another pending request, unmark it so the next round can
                     // try to send it
@@ -1316,7 +1316,7 @@ impl Discv4Service {
                     self.find_node(&record, ctx);
                 }
             }
-        } else {
+
             // Request ENR if included in the ping
             match (ping.enr_sq, old_enr) {
                 (Some(new), Some(old)) if new > old => {
@@ -1473,35 +1473,34 @@ impl Discv4Service {
     /// Handler for incoming `EnrResponse` message
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
-        if let Some(resp) = self.pending_enr_requests.remove(&id) {
-            // ensure the ENR's public key matches the expected node id
-            let enr_id = pk2id(&msg.enr.public_key());
-            if id != enr_id {
-                return
-            }
+        let Entry::Occupied(request) = self.pending_enr_requests.entry(id) else { return };
 
-            if resp.echo_hash == msg.request_hash {
-                let key = kad_key(id);
-                let fork_id = msg.eth_fork_id();
-                let (record, old_fork_id) = match self.kbuckets.entry(&key) {
-                    kbucket::Entry::Present(mut entry, _) => {
-                        let id = entry.value_mut().update_with_fork_id(fork_id);
-                        (entry.value().record, id)
-                    }
-                    kbucket::Entry::Pending(mut entry, _) => {
-                        let id = entry.value_mut().update_with_fork_id(fork_id);
-                        (entry.value().record, id)
-                    }
-                    _ => return,
-                };
-                match (fork_id, old_fork_id) {
-                    (Some(new), Some(old)) if new != old => {
-                        self.notify(DiscoveryUpdate::EnrForkId(record, new))
-                    }
-                    (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
-                    _ => {}
-                }
+        // A delayed response to an earlier request must not consume its replacement.
+        // Also ensure the ENR's public key matches the expected node id.
+        if request.get().echo_hash != msg.request_hash || id != pk2id(&msg.enr.public_key()) {
+            return
+        }
+        request.remove();
+
+        let key = kad_key(id);
+        let fork_id = msg.eth_fork_id();
+        let (record, old_fork_id) = match self.kbuckets.entry(&key) {
+            kbucket::Entry::Present(mut entry, _) => {
+                let id = entry.value_mut().update_with_fork_id(fork_id);
+                (entry.value().record, id)
             }
+            kbucket::Entry::Pending(mut entry, _) => {
+                let id = entry.value_mut().update_with_fork_id(fork_id);
+                (entry.value().record, id)
+            }
+            _ => return,
+        };
+        match (fork_id, old_fork_id) {
+            (Some(new), Some(old)) if new != old => {
+                self.notify(DiscoveryUpdate::EnrForkId(record, new))
+            }
+            (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
+            _ => {}
         }
     }
 
@@ -1540,6 +1539,13 @@ impl Discv4Service {
             Entry::Occupied(mut entry) => {
                 {
                     let request = entry.get_mut();
+                    // `Neighbours` packets carry no request binding, so a validly signed packet
+                    // from the queried node could be replayed from another address. Ignore it and
+                    // keep the request armed for the genuine reply.
+                    if !request.is_from_destination(remote_addr.ip()) {
+                        trace!(target: "discv4", from=?remote_addr, expected=?request.destination, "Ignoring Neighbours from unexpected IP");
+                        return
+                    }
                     // Mark the request as answered
                     request.answered = true;
                     let total = request.response_count + msg.nodes.len();
@@ -1687,9 +1693,23 @@ impl Discv4Service {
     }
 
     fn evict_expired_requests(&mut self, now: Instant) {
-        self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.enr_expiration
+        let mut failed_enr_requests = Vec::new();
+        self.pending_enr_requests.retain(|node_id, enr_request| {
+            if now.duration_since(enr_request.sent_at) < self.config.enr_expiration {
+                return true
+            }
+            failed_enr_requests.push(*node_id);
+            false
         });
+
+        // forget the announced enr seq, so the next ping or pong requests the ENR again.
+        for node_id in failed_enr_requests {
+            match self.kbuckets.entry(&kad_key(node_id)) {
+                kbucket::Entry::Present(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                kbucket::Entry::Pending(mut entry, _) => entry.value_mut().last_enr_seq = None,
+                _ => {}
+            }
+        }
 
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
@@ -2167,11 +2187,12 @@ impl IngressHandler {
 
         // A packet starts with the hash of everything that follows it, and `Message::decode`
         // rejects any packet whose contents do not hash to it. A repeat of a packet we already
-        // accepted can therefore be recognised from those 32 bytes alone, without decoding.
+        // accepted from the same IP can therefore be recognised from those 32 bytes alone,
+        // without decoding.
         // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from costing
         // a signature verification.
         if data.len() >= MIN_PACKET_SIZE &&
-            self.cache.contains_packet(B256::from_slice(&data[..32]))
+            self.cache.contains_packet(B256::from_slice(&data[..32]), src.ip())
         {
             trace!(target: "discv4", ?src, "Received duplicate packet.");
             return
@@ -2186,7 +2207,7 @@ impl IngressHandler {
 
                 // Only packets that decoded are remembered, so a peer cannot suppress a packet we
                 // have not seen yet by guessing its hash.
-                self.cache.insert_packet(packet.hash);
+                self.cache.insert_packet(packet.hash, src.ip());
 
                 IngressEvent::Packet(src, packet)
             }
@@ -2211,8 +2232,10 @@ struct ReceiveCache {
     /// This is used to count the number of messages received from a given IP address within an
     /// interval.
     ip_messages: HashMap<IpAddr, usize>,
-    // keeps track of unique packet hashes
-    unique_packets: schnellru::LruMap<B256, ()>,
+    /// Valid packet hashes paired with their canonical source IP.
+    ///
+    /// A replay from another IP must not suppress the genuine packet from the expected source.
+    unique_packets: schnellru::LruMap<(B256, IpAddr), ()>,
 }
 
 impl ReceiveCache {
@@ -2237,16 +2260,16 @@ impl ReceiveCache {
         *ctn
     }
 
-    /// Returns true if we previously received the packet.
+    /// Returns true if we previously received the packet from this IP.
     ///
     /// A hit refreshes the entry so that a packet being replayed repeatedly stays cached.
-    fn contains_packet(&mut self, hash: B256) -> bool {
-        self.unique_packets.get(&hash).is_some()
+    fn contains_packet(&mut self, hash: B256, ip: IpAddr) -> bool {
+        self.unique_packets.get(&(hash, ip.to_canonical())).is_some()
     }
 
     /// Remembers a packet we accepted.
-    fn insert_packet(&mut self, hash: B256) {
-        self.unique_packets.insert(hash, ());
+    fn insert_packet(&mut self, hash: B256, ip: IpAddr) {
+        self.unique_packets.insert((hash, ip.to_canonical()), ());
     }
 }
 
@@ -2494,13 +2517,29 @@ struct FindNodeRequest {
     answered: bool,
     /// Response buffer
     lookup_context: LookupContext,
+    /// IP address the request was sent to, in canonical form.
+    destination: IpAddr,
 }
 
 // === impl FindNodeRequest ===
 
 impl FindNodeRequest {
-    fn new(resp: LookupContext) -> Self {
-        Self { sent_at: Instant::now(), response_count: 0, answered: false, lookup_context: resp }
+    fn new(resp: LookupContext, destination: IpAddr) -> Self {
+        Self {
+            sent_at: Instant::now(),
+            response_count: 0,
+            answered: false,
+            lookup_context: resp,
+            destination: destination.to_canonical(),
+        }
+    }
+
+    /// Returns `true` if `ip` is the address this request was sent to.
+    ///
+    /// Only the IP is compared, not the port, and IPv4-mapped IPv6 addresses are treated as their
+    /// IPv4 counterparts because a dual-stack socket reports IPv4 peers as mapped addresses.
+    fn is_from_destination(&self, ip: IpAddr) -> bool {
+        self.destination == ip.to_canonical()
     }
 }
 
@@ -2686,15 +2725,17 @@ mod tests {
             enr_sq: None,
         });
         let (packet, hash) = msg.encode(&remote_key);
-        let src = "10.0.0.1:30303".parse().unwrap();
+        let src = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
 
         handler.handle_packet(&packet, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::Packet(_, _))));
 
-        // the replay is dropped on the hash prefix alone
-        handler.handle_packet(&packet, src).await;
-        assert!(rx.try_recv().is_err());
-        assert!(handler.cache.contains_packet(hash));
+        // Replays from the same IP are dropped regardless of address representation or port.
+        for duplicate_src in [src, SocketAddr::from(([10, 0, 0, 1], 40404))] {
+            handler.handle_packet(&packet, duplicate_src).await;
+            assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+        }
+        assert!(handler.cache.contains_packet(hash, src.ip()));
     }
 
     #[tokio::test]
@@ -2721,7 +2762,7 @@ mod tests {
         forged[last] ^= 0xff;
         handler.handle_packet(&forged, src).await;
         assert!(matches!(rx.try_recv(), Ok(IngressEvent::BadPacket(..))));
-        assert!(!handler.cache.contains_packet(hash));
+        assert!(!handler.cache.contains_packet(hash, src.ip()));
 
         // so the genuine packet still gets through
         handler.handle_packet(&packet, src).await;
@@ -2879,6 +2920,42 @@ mod tests {
         let mut encoded = Vec::with_capacity(expected.len());
         original.encode(&mut encoded);
         assert_eq!(&expected[..], encoded.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_request_enr_of_proven_node() {
+        reth_tracing::init_test_tracing();
+        let mut rng = rand_08::thread_rng();
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let addr: SocketAddr = (Ipv4Addr::new(10, 0, 0, 1), DEFAULT_DISCOVERY_PORT).into();
+        let mut entry = NodeEntry::new_proven(NodeRecord::new(addr, id));
+        entry.last_enr_seq = Some(1);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            entry,
+            NodeStatus {
+                direction: ConnectionDirection::Outgoing,
+                state: ConnectionState::Connected,
+            },
+        );
+        let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
+            from: rng_endpoint(rng),
+            to: rng_endpoint(rng),
+            expire: service.ping_expiration(),
+            enr_sq: Some(2),
+        };
+
+        // the node announces a newer record.
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
+
+        // the request goes unanswered, so the next ping has to ask again.
+        service.evict_expired_requests(Instant::now() + service.config.enr_expiration * 2);
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        service.on_ping(ping(&service, &mut rng), addr, id, B256::random());
+        assert!(service.pending_enr_requests.contains_key(&id));
     }
 
     #[test]
@@ -3678,5 +3755,202 @@ mod tests {
 
         // flag should be false when lookups are disabled
         assert!(!service.pending_lookup_reset);
+    }
+
+    #[tokio::test]
+    async fn test_enr_response_preserves_pending_request() {
+        let fork_id = ForkId { hash: ForkHash([1, 2, 3, 4]), next: 0 };
+        let mut config = Discv4Config::default();
+        config.add_eip868_pair("eth", EnrForkIdEntry::from(fork_id));
+        let (_remote, mut remote) = create_discv4_with_config(config).await;
+        let (_discv4, mut service) = create_discv4().await;
+        let record = remote.local_node_record;
+        let id = record.id;
+        let addr = record.udp_addr();
+        insert_proven_node(&mut service, record);
+        service.update_on_reping(record, remote.enr_seq());
+        let old_enr = remote.local_eip_868_enr.clone();
+
+        // Model a request sent in the previous second without waiting for the wall clock.
+        let (_, old_hash) =
+            Message::EnrRequest(EnrRequest { expire: service.enr_request_expiration() - 1 })
+                .encode(&service.secret_key);
+        service.pending_enr_requests.get_mut(&id).unwrap().echo_hash = old_hash;
+
+        // A newer sequence replaces the pending request before its response arrives.
+        remote.local_eip_868_enr.set_tcp4(30304, &remote.secret_key).unwrap();
+        service.on_ping(
+            Ping {
+                from: record.into(),
+                to: service.local_node_record.into(),
+                expire: service.ping_expiration(),
+                enr_sq: remote.enr_seq(),
+            },
+            addr,
+            id,
+            B256::random(),
+        );
+        let request_hash = service.pending_enr_requests[&id].echo_hash;
+        assert_ne!(request_hash, old_hash);
+
+        service.on_enr_response(EnrResponse { request_hash: old_hash, enr: old_enr }, addr, id);
+        assert_eq!(service.pending_enr_requests[&id].echo_hash, request_hash);
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(None));
+
+        // A response with the right hash but a different node identity is also ignored.
+        service.on_enr_response(
+            EnrResponse { request_hash, enr: service.local_eip_868_enr.clone() },
+            addr,
+            id,
+        );
+        assert_eq!(service.pending_enr_requests[&id].echo_hash, request_hash);
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(None));
+
+        let mut updates = service.update_stream().into_inner();
+        service.on_enr_response(
+            EnrResponse { request_hash, enr: remote.local_eip_868_enr.clone() },
+            addr,
+            id,
+        );
+        assert!(!service.pending_enr_requests.contains_key(&id));
+        assert_eq!(service.on_entry(id, |entry| entry.fork_id), Some(Some(fork_id)));
+        assert_matches::assert_matches!(
+            updates.try_recv().unwrap(),
+            DiscoveryUpdate::EnrForkId(found_record, found_fork_id) => {
+                assert_eq!(found_record, record);
+                assert_eq!(found_fork_id, fork_id);
+            }
+        );
+    }
+
+    /// Sets up a service with a pending `FindNode` request to a proven node at `node_addr`.
+    async fn pending_find_node_service(node_addr: SocketAddr) -> (Discv4Service, NodeRecord) {
+        let (_discv4, mut service) = create_discv4().await;
+
+        let id = PeerId::random();
+        let record = NodeRecord::new(node_addr, id);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(id),
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+        (service, record)
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_from_unexpected_ip_ignored() {
+        reth_tracing::init_test_tracing();
+
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+
+        let expire = service.find_node_expiration() + 1000;
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Neighbours { nodes: vec![discovered], expire };
+
+        // A validly signed packet from the queried node's id but from another IP is ignored, even
+        // if only the port or the address family differs.
+        for spoofed in [
+            SocketAddr::from(([10, 0, 0, 2], 30303)),
+            SocketAddr::from(([10, 0, 0, 2], 1)),
+            SocketAddr::from((Ipv4Addr::new(10, 0, 0, 2).to_ipv6_mapped(), 30303)),
+            SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 30303)),
+        ] {
+            service.on_neighbours(msg.clone(), spoofed, record.id);
+
+            let request = &service.pending_find_nodes[&record.id];
+            assert!(!request.answered);
+            assert_eq!(request.response_count, 0);
+            assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+            assert!(service.pending_pings.is_empty());
+        }
+
+        // The genuine reply from the queried IP is still accepted, regardless of the port.
+        service.on_neighbours(msg, SocketAddr::from(([10, 0, 0, 1], 40404)), record.id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_ipv4_mapped_ip_accepted() {
+        reth_tracing::init_test_tracing();
+
+        // A dual-stack socket reports IPv4 peers as IPv4-mapped IPv6 addresses.
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+
+        let expire = service.find_node_expiration() + 1000;
+        let msg = Neighbours { nodes: Vec::new(), expire };
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 30303));
+        service.on_neighbours(msg, mapped, record.id);
+
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_wrong_ip_replay_does_not_poison_cache() {
+        let (_discv4, mut service) = create_discv4().await;
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let record = NodeRecord::from_secret_key(node_addr, &remote_key);
+        insert_proven_node(&mut service, record);
+        service.lookup(PeerId::random());
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes[&record.id].lookup_context.clone();
+        let lookup_nodes = ctx.inner.closest_nodes.borrow().len();
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        let msg = Message::Neighbours(Neighbours {
+            nodes: vec![discovered],
+            expire: service.find_node_expiration(),
+        });
+        let (packet, _) = msg.encode(&remote_key);
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut handler = IngressHandler::new(tx, *service.local_peer_id());
+
+        // A valid replay from another IP must not consume the request or suppress its reply.
+        handler.handle_packet(&packet, SocketAddr::from(([10, 0, 0, 2], 30303))).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().unwrap()
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(!request.answered);
+        assert_eq!(request.response_count, 0);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes);
+        assert!(service.pending_pings.is_empty());
+
+        // The identical signed packet from the queried IP must still reach the service.
+        handler.handle_packet(&packet, node_addr).await;
+        let IngressEvent::Packet(src, Packet { msg: Message::Neighbours(msg), node_id, .. }) =
+            rx.try_recv().expect("genuine reply was suppressed by the wrong-IP replay")
+        else {
+            panic!("expected a decoded Neighbours packet");
+        };
+        service.on_neighbours(msg, src, node_id);
+        let request = &service.pending_find_nodes[&record.id];
+        assert!(request.answered);
+        assert_eq!(request.response_count, 1);
+        assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+
+        // A port change or mapped address must not bypass deduplication for the same IP.
+        let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
+        handler.handle_packet(&packet, mapped).await;
+        assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
 }

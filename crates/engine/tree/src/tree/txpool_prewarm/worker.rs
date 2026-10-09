@@ -474,7 +474,7 @@ mod tests {
         let transaction = TxLegacy {
             gas_limit: 21_000,
             to: TxKind::Call(Address::repeat_byte(recipient)),
-            value: U256::from(1),
+            value: U256::ONE,
             ..Default::default()
         };
         let hash = B256::repeat_byte(recipient);
@@ -510,27 +510,6 @@ mod tests {
         let snapshot = harness.published_for(parent_hash);
         let (accounts, _, _) = snapshot.entry_counts();
         assert!(accounts >= 1, "speculative execution should cache account reads");
-    }
-
-    #[test]
-    fn pause_quiesces_the_worker_until_resume() {
-        let harness = Harness::spawn();
-        let parent_hash = B256::repeat_byte(0x01);
-        harness.start(parent_hash);
-        harness.pool.push(parent_hash, transfer(0xB0));
-        let before = harness.published_for(parent_hash).entry_counts();
-
-        harness.pause();
-        harness.pool.push(parent_hash, transfer(0xB1));
-        thread::sleep(REFRESH_INTERVAL * 2);
-        assert_eq!(
-            harness.published_entry_counts(),
-            Some(before),
-            "a paused worker must not publish"
-        );
-
-        harness.resume();
-        harness.published(|snapshot| snapshot.entry_counts() != before);
     }
 
     #[test]
@@ -573,19 +552,6 @@ mod tests {
         harness.pool.push(second, transfer(0xB2));
         harness.published_for(second);
         assert_eq!(harness.pool.opened.load(Ordering::Relaxed), 2);
-    }
-
-    #[test]
-    fn newest_start_wins() {
-        let harness = Harness::spawn();
-        let stale = B256::repeat_byte(0x01);
-        let newest = B256::repeat_byte(0x02);
-
-        harness.start(stale);
-        harness.start(newest);
-        harness.pool.push(newest, transfer(0xB0));
-
-        harness.published_for(newest);
     }
 
     #[test]

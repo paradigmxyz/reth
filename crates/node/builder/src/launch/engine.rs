@@ -5,6 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
+    sync::{BackfillClientFor, BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -46,14 +47,20 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// The engine node launcher.
+///
+/// `B` builds the engine's backfill, the staged pipeline unless set with
+/// [`Self::with_backfill`].
 #[derive(Debug)]
-pub struct EngineNodeLauncher {
+pub struct EngineNodeLauncher<B = PipelineBackfill> {
     /// The task executor for the node.
     pub ctx: LaunchContext,
 
     /// Temporary configuration for engine tree.
     /// After engine is stabilized, this should be configured through node builder.
     pub engine_tree_config: TreeConfig,
+
+    // Builds the backfill the engine runs while far behind the chain.
+    backfill: B,
 }
 
 impl EngineNodeLauncher {
@@ -63,9 +70,15 @@ impl EngineNodeLauncher {
         data_dir: ChainPath<DataDirPath>,
         engine_tree_config: TreeConfig,
     ) -> Self {
-        Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
+        Self {
+            ctx: LaunchContext::new(task_executor, data_dir),
+            engine_tree_config,
+            backfill: PipelineBackfill,
+        }
     }
+}
 
+impl<B> EngineNodeLauncher<B> {
     async fn launch_node<N, DB, T, CB, AO>(
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
@@ -81,8 +94,9 @@ impl EngineNodeLauncher {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>,
     {
-        let Self { ctx, engine_tree_config } = self;
+        let Self { ctx, engine_tree_config, mut backfill } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             rocksdb_provider,
@@ -109,11 +123,13 @@ impl EngineNodeLauncher {
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            // Create the provider factory with the shared overlay manager
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(
+            // Create the provider factory with the shared overlay manager, letting the backfill
+            // finish writes an earlier run left half-committed before the consistency check
+            .with_provider_factory_and_recovery::<_, <CB::Components as NodeComponents<T>>::Evm>(
                 overlay_manager.clone(),
                 rocksdb_provider,
                 disabled_stages,
+                |factory| backfill.recover(factory),
             )
             .await?
             .inspect(|_| {
@@ -245,6 +261,8 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
+        let (backfill_client, backfill_factory) =
+            (network_client.clone(), ctx.provider_factory().clone());
         let mut orchestrator = EngineOrchestratorBuilder {
             engine_kind,
             consensus,
@@ -263,7 +281,14 @@ impl EngineNodeLauncher {
             evm_config: ctx.components().evm_config().clone(),
             runtime: ctx.task_executor().clone(),
         }
-        .build();
+        .build_with_backfill(|pipeline, runtime| {
+            backfill.build(BackfillContext::new(
+                pipeline,
+                backfill_client,
+                backfill_factory,
+                runtime,
+            ))
+        })?;
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -443,9 +468,15 @@ impl EngineNodeLauncher {
 
         Ok(handle)
     }
+
+    /// Returns this launcher with the engine's backfill built by `backfill`.
+    pub fn with_backfill<B2>(self, backfill: B2) -> EngineNodeLauncher<B2> {
+        let Self { ctx, engine_tree_config, .. } = self;
+        EngineNodeLauncher { ctx, engine_tree_config, backfill }
+    }
 }
 
-impl<N, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<N, DB, T, CB, AO, B> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher<B>
 where
     T: FullNodeTypes<
         Types = N,
@@ -457,6 +488,8 @@ where
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + 'static,
+    B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>
         + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;

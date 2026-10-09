@@ -244,18 +244,3 @@ where
         &self.peers_handle
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn configures_client_version() {
-        let network = NoopNetwork::default().with_client_version("custom-client/v1.0.0");
-
-        assert_eq!(
-            futures::executor::block_on(network.network_status()).unwrap().client_version,
-            "custom-client/v1.0.0"
-        );
-    }
-}

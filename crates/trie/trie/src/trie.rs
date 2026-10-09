@@ -73,6 +73,9 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Configures the state root walker to visit all children of changed branch paths.
+    ///
+    /// When updates are retained, also removes stored descendants hidden by a changed branch's
+    /// tree mask. Regenerated branch updates take precedence over these deletions.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -586,6 +589,9 @@ impl<T, H> StorageRoot<T, H> {
     }
 
     /// Configures the storage root walker to visit all children of changed branch paths.
+    ///
+    /// When updates are retained, also removes stored descendants hidden by a changed branch's
+    /// tree mask. Regenerated branch updates take precedence over these deletions.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self

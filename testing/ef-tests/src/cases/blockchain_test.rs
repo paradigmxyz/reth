@@ -4,6 +4,7 @@ use crate::{
     models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
 };
+use alloy_eip7928::bal::Bal;
 use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::ChainSpec;
@@ -11,7 +12,10 @@ use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
@@ -235,6 +239,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
+    let mut bal_buf = Vec::new();
 
     for (block_index, block) in blocks.iter().enumerate() {
         // Note: same as the comment on `decode_blocks` as to why we cannot use block.number
@@ -254,14 +259,26 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Execute the block
         let state_provider = provider.latest();
         let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
-        let executor = executor_provider.batch_executor(state_db);
+        let mut executor = executor_provider.batch_executor(state_db);
 
-        let output = executor
-            .execute(&(*block).clone())
+        let result = executor
+            .execute_one(&(*block).clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
+        // Check the block access list size cap and compute its hash for post-Amsterdam blocks so
+        // the consensus check below validates it.
+        let block_access_list_hash = executor
+            .take_bal()
+            .map(|bal| {
+                let bal = Bal::from(bal);
+                bal.validate_gas_limit(block.gas_limit)
+                    .map(|()| bal.compute_hash_with_buf(&mut bal_buf))
+            })
+            .transpose()
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        let output = BlockExecutionOutput { state: executor.into_state().take_bundle(), result };
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output, None, None)
+        validate_block_post_execution(block, &chain_spec, &output, None, block_access_list_hash)
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Compute and check the post state root

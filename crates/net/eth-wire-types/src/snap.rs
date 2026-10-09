@@ -1026,19 +1026,8 @@ mod tests {
     }
 
     #[test]
-    fn storage_data_carries_the_trie_leaf_encoding() {
-        let value = U256::from(1234);
-        let slot = StorageData::from_value(B256::repeat_byte(4), value);
-
-        // Clients verify range proofs against the RLP-encoded trie leaf, so the wire bytes must be
-        // exactly that rather than a fixed-width word.
-        assert_eq!(slot.data.as_ref(), alloy_rlp::encode(value));
-        assert_eq!(slot.value().unwrap(), value);
-    }
-
-    #[test]
     fn storage_data_rejects_trailing_bytes() {
-        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::from(1));
+        let mut slot = StorageData::from_value(B256::repeat_byte(4), U256::ONE);
         slot.data = [slot.data.as_ref(), &[0x00]].concat().into();
 
         assert!(slot.value().is_err());

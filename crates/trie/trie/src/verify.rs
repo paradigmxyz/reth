@@ -404,7 +404,7 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                     let prev_account = *prev_account;
 
                     // Calculate the max possible account address (all bits set).
-                    let max_account = B256::from([0xFFu8; 32]);
+                    let max_account = B256::repeat_byte(0xFFu8);
 
                     self.verify_empty_storages(prev_account, max_account, false, true)?;
                 }
@@ -469,12 +469,13 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Veri
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         hashed_cursor::mock::MockHashedCursorFactory,
         trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory},
     };
-    use alloy_primitives::{address, keccak256, map::B256Map, U256};
+    use alloy_primitives::{keccak256, map::B256Map, Address, U256};
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
@@ -492,7 +493,7 @@ mod tests {
         let mut final_hashes = hashes;
         let mut counter = 100u8;
         while final_hashes.len() < expected_hashes {
-            final_hashes.push(B256::from([counter; 32]));
+            final_hashes.push(B256::repeat_byte(counter));
             counter += 1;
         }
         final_hashes.truncate(expected_hashes);
@@ -538,7 +539,7 @@ mod tests {
         let mut storage_tries = B256Map::default();
 
         // Create test accounts
-        let addr1 = keccak256(address!("0000000000000000000000000000000000000001"));
+        let addr1 = keccak256(Address::with_last_byte(1));
         accounts.insert(
             addr1,
             Account {
@@ -551,8 +552,8 @@ mod tests {
 
         // Add storage for the account
         let mut storage1 = BTreeMap::new();
-        storage1.insert(keccak256(B256::from(U256::from(1))), U256::from(100));
-        storage1.insert(keccak256(B256::from(U256::from(2))), U256::from(200));
+        storage1.insert(keccak256(B256::with_last_byte(1)), U256::from(100));
+        storage1.insert(keccak256(B256::with_last_byte(2)), U256::from(200));
         storage_tries.insert(addr1, storage1);
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
@@ -623,7 +624,7 @@ mod tests {
             // Add some storage for each account
             let mut storage = BTreeMap::new();
             for j in 0..i {
-                storage.insert(keccak256(B256::from(U256::from(j))), U256::from(j as u64 * 10));
+                storage.insert(keccak256(B256::with_last_byte(j)), U256::from(j as u64 * 10));
             }
             if !storage.is_empty() {
                 storage_tries.insert(addr, storage);
@@ -683,8 +684,8 @@ mod tests {
     #[test]
     fn test_single_verifier_next_exact_match() {
         // Test when the expected node matches exactly
-        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node2 = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
+        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
+        let node2 = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::repeat_byte(2u8)]);
 
         let trie_nodes = BTreeMap::from([
             (Nibbles::from_nibbles([0x1]), node1.clone()),
@@ -705,8 +706,8 @@ mod tests {
     #[test]
     fn test_single_verifier_next_wrong_value() {
         // Test when the path matches but value is different
-        let node_in_trie = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node_expected = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
+        let node_in_trie = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
+        let node_expected = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::repeat_byte(2u8)]);
 
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node_in_trie.clone())]);
 
@@ -729,8 +730,8 @@ mod tests {
     #[test]
     fn test_single_verifier_next_missing() {
         // Test when expected node doesn't exist in trie
-        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node_missing = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
+        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
+        let node_missing = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::repeat_byte(2u8)]);
 
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x3]), node1)]);
 
@@ -841,8 +842,8 @@ mod tests {
     #[test]
     fn test_single_verifier_storage_trie() {
         // Test SingleVerifier for storage trie (with account set)
-        let account = B256::from([42u8; 32]);
-        let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
+        let account = B256::repeat_byte(42u8);
+        let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
 
         let trie_nodes = BTreeMap::from([(Nibbles::from_nibbles([0x1]), node)]);
 
@@ -851,7 +852,7 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with missing node
-        let missing_node = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
+        let missing_node = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::repeat_byte(2u8)]);
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x0]), missing_node.clone()).unwrap();
 
         // Should produce StorageMissing, not AccountMissing
@@ -872,7 +873,7 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Any node should be marked as missing
-        let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
+        let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::repeat_byte(1u8)]);
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node.clone()).unwrap();
 
         assert_eq!(outputs.len(), 1);

@@ -454,8 +454,8 @@ pub(crate) fn parse_receipts_log_filter(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::address;
     use clap::Parser;
     use reth_chainspec::MAINNET;
 
@@ -475,10 +475,7 @@ mod tests {
         ])
         .args;
         let mut config = ReceiptsLogPruneConfig::default();
-        config.0.insert(
-            address!("0x0000000000000000000000000000000000000003"),
-            PruneMode::Before(5000000),
-        );
+        config.0.insert(Address::with_last_byte(3), PruneMode::Before(5000000));
         assert_eq!(args.receipts_log_filter, Some(config));
     }
 
@@ -531,9 +528,9 @@ mod tests {
         assert_eq!(config.0.len(), 3);
 
         // Check that the args were parsed correctly.
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
-        let addr3: Address = "0x0000000000000000000000000000000000000003".parse().unwrap();
+        let addr1 = Address::with_last_byte(1);
+        let addr2 = Address::with_last_byte(2);
+        let addr3 = Address::with_last_byte(3);
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));
@@ -550,8 +547,8 @@ mod tests {
         let config = result.unwrap();
         assert_eq!(config.0.len(), 2);
 
-        let addr1: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
-        let addr2: Address = "0x0000000000000000000000000000000000000002".parse().unwrap();
+        let addr1 = Address::with_last_byte(1);
+        let addr2 = Address::with_last_byte(2);
 
         assert_eq!(config.0.get(&addr1), Some(&PruneMode::Full));
         assert_eq!(config.0.get(&addr2), Some(&PruneMode::Distance(1000)));

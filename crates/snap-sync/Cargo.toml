@@ -19,7 +19,8 @@ reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits = { workspace = true, features = ["eip7928"] }
-reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-prune-types.workspace = true
+reth-storage-api = { workspace = true, features = ["db-api", "std"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks.workspace = true
@@ -29,6 +30,7 @@ reth-trie-common.workspace = true
 alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # revm
 revm.workspace = true
@@ -43,7 +45,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-alloy-rlp.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true

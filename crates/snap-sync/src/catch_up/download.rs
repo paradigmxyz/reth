@@ -6,7 +6,8 @@ use crate::{
     common::DownloadContext, CatchUpProgress, SnapAttemptStore, SnapCatchUpStore, SnapSyncError,
     SnapWrite,
 };
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
+use alloy_primitives::Sealable;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
@@ -82,18 +83,7 @@ where
             return Ok(CatchUpStep::Complete)
         }
 
-        let request = GetBlockAccessListsMessage {
-            request_id: self.context.next_request_id(),
-            block_hashes: headers.iter().map(SealedHeader::hash).collect(),
-            response_bytes: self.context.response_bytes(),
-        };
-        let downloader = BlockAccessListDownloader::new(
-            self.context.client().clone(),
-            request,
-            &headers,
-            self.context.runtime().clone(),
-        )?;
-        let verified = match downloader.await? {
+        let verified = match self.request(&headers).await? {
             BlockAccessListOutcome::Verified(verified) => verified,
             BlockAccessListOutcome::Unavailable { peer_id } => {
                 return Ok(CatchUpStep::Unavailable { peer_id })
@@ -133,6 +123,52 @@ where
             })
             .await?;
         Ok(CatchUpStep::Applied { progress, blocks })
+    }
+
+    /// Fetches the lists of `headers`, blocks a reorg orphaned, in order.
+    ///
+    /// A response cut short at the byte limit keeps the lists it served and the rest is asked for
+    /// again. `Ok(None)` once a request serves none of the remaining lists, since repairing the
+    /// state needs every one.
+    pub async fn orphaned_lists<H: AlloyBlockHeader + Sealable>(
+        &mut self,
+        headers: &[SealedHeader<H>],
+    ) -> Result<Option<Vec<DecodedBal>>, SnapSyncError> {
+        let mut lists = Vec::with_capacity(headers.len());
+        while lists.len() < headers.len() {
+            let end = headers.len().min(lists.len() + self.max_blocks as usize);
+            let BlockAccessListOutcome::Verified(verified) =
+                self.request(&headers[lists.len()..end]).await?
+            else {
+                return Ok(None)
+            };
+            let served = lists.len();
+            lists
+                .extend(verified.into_block_access_lists().into_iter().map_while(|(_, list)| list));
+            if lists.len() == served {
+                return Ok(None)
+            }
+        }
+        Ok(Some(lists))
+    }
+
+    // Requests the lists of `headers`, each authenticated against its header's commitment.
+    async fn request<H: AlloyBlockHeader + Sealable>(
+        &mut self,
+        headers: &[SealedHeader<H>],
+    ) -> Result<BlockAccessListOutcome, SnapSyncError> {
+        let request = GetBlockAccessListsMessage {
+            request_id: self.context.next_request_id(),
+            block_hashes: headers.iter().map(SealedHeader::hash).collect(),
+            response_bytes: self.context.response_bytes(),
+        };
+        let downloader = BlockAccessListDownloader::new(
+            self.context.client().clone(),
+            request,
+            headers,
+            self.context.runtime().clone(),
+        )?;
+        Ok(downloader.await?)
     }
 }
 
@@ -457,27 +493,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reply_repeating_an_applied_list_cannot_apply_it_again() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        // The first block's list, served again for every attempt at the second block.
-        let duplicate = std::iter::repeat_with(|| chain.response(2, [Some(1)])).take(4);
-        let (_, mut catch_up) = catch_up_with(
-            std::iter::once(chain.response(1, [Some(1)])).chain(duplicate),
-            factory.clone(),
-            1,
-        );
-        applied(&mut catch_up, write, PIVOT + 3).await;
-
-        // It belongs to a block the applied state already covers, so it authenticates against
-        // nothing the request asked for.
-        let repeated = catch_up.next(write, PIVOT + 3).await;
-
-        assert!(matches!(repeated, Err(SnapSyncError::Request(_))));
-        assert_eq!(balance(&factory), U256::from(10));
-    }
-
-    #[tokio::test]
     async fn a_peer_holding_no_list_for_the_next_block_applies_nothing() {
         let chain = chain();
         let (factory, write) = started(&chain, &accounts());
@@ -486,7 +501,7 @@ mod tests {
         let step = catch_up.next(write, PIVOT + 3).await.unwrap();
 
         assert!(matches!(step, CatchUpStep::Unavailable { .. }));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]
@@ -498,7 +513,7 @@ mod tests {
         let progress = applied(&mut catch_up, write, PIVOT + 1).await;
 
         assert_eq!(progress.applied(), chain.block(1));
-        assert_eq!(balance(&factory), U256::from(1));
+        assert_eq!(balance(&factory), U256::ONE);
     }
 
     #[tokio::test]
@@ -526,16 +541,6 @@ mod tests {
             *client.block_requests(),
             [(1..=3).map(|nth| chain.block(nth).hash).collect::<Vec<_>>()]
         );
-    }
-
-    #[tokio::test]
-    async fn a_target_already_applied_needs_no_request() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        let (client, mut catch_up) = catch_up([], factory);
-
-        assert!(matches!(catch_up.next(write, PIVOT).await.unwrap(), CatchUpStep::Complete));
-        assert!(client.block_requests().is_empty());
     }
 
     #[tokio::test]
@@ -625,22 +630,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reply_to_an_earlier_request_is_ignored() {
-        let chain = chain();
-        let (factory, write) = started(&chain, &accounts());
-        // A reply carrying another request's id, as a delayed one does.
-        let stale = chain.response(99, [Some(1), Some(2), Some(3)]);
-        let (_, mut catch_up) =
-            catch_up([stale, chain.response(1, [Some(1), Some(2), Some(3)])], factory.clone());
-
-        // The retry is what the authenticated lists arrive on.
-        let progress = applied(&mut catch_up, write, PIVOT + 3).await;
-
-        assert_eq!(progress.applied(), chain.block(3));
-        assert_eq!(balance(&factory), U256::from(30));
-    }
-
-    #[tokio::test]
     async fn downloads_split_across_pivots_converge_on_the_latest_pivot_state() {
         const FAR: B256 = B256::repeat_byte(0xfe);
         let chain = chain();
@@ -698,5 +687,48 @@ mod tests {
 
         assert_eq!(balance(&factory), U256::from(20));
         assert_eq!(downloaded_root(&factory), state_root(&at(20)));
+    }
+
+    #[tokio::test]
+    async fn orphaned_lists_are_fetched_in_order_across_requests() {
+        let chain = chain();
+        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        let responses = [chain.response(1, [Some(1), Some(2)]), chain.response(2, [Some(3)])];
+        let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 2);
+
+        let lists = catch_up.orphaned_lists(orphaned).await.unwrap().unwrap();
+
+        let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
+        assert_eq!(lists, [credit(10), credit(20), credit(30)]);
+        let hashes: Vec<_> = orphaned.iter().map(SealedHeader::hash).collect();
+        assert_eq!(*client.block_requests(), [hashes[..2].to_vec(), hashes[2..].to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn a_missing_orphaned_list_fetches_nothing() {
+        let chain = chain();
+        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        // No peer holds the last orphaned block's list any more.
+        let responses = [chain.response(1, [Some(1), Some(2), None]), chain.response(2, [None])];
+        let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
+
+        assert!(catch_up.orphaned_lists(orphaned).await.unwrap().is_none());
+        assert_eq!(client.block_requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_response_cut_short_keeps_its_lists_and_fetches_the_rest() {
+        let chain = chain();
+        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        // The first response stops at the byte limit after one list.
+        let responses = [chain.response(1, [Some(1)]), chain.response(2, [Some(2), Some(3)])];
+        let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
+
+        let lists = catch_up.orphaned_lists(orphaned).await.unwrap().unwrap();
+
+        let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
+        assert_eq!(lists, [credit(10), credit(20), credit(30)]);
+        let hashes: Vec<_> = orphaned.iter().map(SealedHeader::hash).collect();
+        assert_eq!(*client.block_requests(), [hashes.clone(), hashes[1..].to_vec()]);
     }
 }

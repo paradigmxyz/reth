@@ -1,13 +1,13 @@
 //! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/examples/bsc-p2p/src/chainspec.rs>
 
-use alloy_primitives::{BlockHash, U256};
+use alloy_primitives::{b256, U256};
 use reth_chainspec::{
     hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
-    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
+    ChainSpec, EthereumHardfork, ForkCondition, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::SealedHeader;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 hardfork!(
     /// The name of a bsc hardfork.
@@ -107,20 +107,17 @@ pub fn bsc_chain_spec() -> Arc<ChainSpec> {
         .expect("Can't deserialize BSC Mainnet genesis json");
     let hardforks = BscHardfork::bsc_mainnet();
     ChainSpec {
-        chain: Chain::from_named(NamedChain::BinanceSmartChain),
+        chain: Chain::bsc_mainnet(),
         genesis: serde_json::from_str(include_str!("genesis.json"))
             .expect("Can't deserialize BSC Mainnet genesis json"),
-        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        paris_block_and_final_difficulty: Some((0, U256::ZERO)),
         hardforks: BscHardfork::bsc_mainnet(),
         deposit_contract: None,
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::new(1, 1)),
         prune_delete_limit: 3500,
         genesis_header: SealedHeader::new(
             make_genesis_header(&genesis, &hardforks),
-            BlockHash::from_str(
-                "0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b",
-            )
-            .unwrap(),
+            b256!("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b"),
         ),
         ..Default::default()
     }
