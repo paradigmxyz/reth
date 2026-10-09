@@ -72,6 +72,7 @@ rocksdb.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+evm2 = { workspace = true, features = ["account-ext"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-chain-state = { workspace = true, features = ["test-utils"] }
@@ -80,16 +81,48 @@ reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
+reth-evm = { workspace = true, features = ["account-ext"] }
+reth-revm = { workspace = true, features = ["account-ext"] }
+reth-execution-cache.workspace = true
+reth-engine-tree.workspace = true
+reth-snap-sync.workspace = true
+reth-storage-rpc-provider = { workspace = true, features = ["account-ext"] }
+reth-db-common.workspace = true
+reth-rpc = { workspace = true, features = ["account-ext"] }
+reth-rpc-eth-api = { workspace = true, features = ["account-ext"] }
+reth-evm-ethereum.workspace = true
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-config.workspace = true
+reth-downloaders.workspace = true
+reth-eth-wire-types.workspace = true
+reth-network.workspace = true
+reth-network-api.workspace = true
+reth-network-p2p.workspace = true
+tokio-util.workspace = true
 
 tempfile.workspace = true
 assert_matches.workspace = true
+alloy-provider.workspace = true
+alloy-network.workspace = true
+alloy-transport.workspace = true
+alloy-rlp.workspace = true
 rand.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
 test-utils = [
+    "reth-evm-ethereum/test-utils",
+    "reth-transaction-pool/test-utils",
+    "reth-downloaders/test-utils",
+    "reth-network/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-evm/test-utils",
+    "reth-revm/test-utils",
+    "reth-execution-cache/test-utils",
+    "reth-engine-tree/test-utils",
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
@@ -107,6 +140,12 @@ test-utils = [
     "dep:tokio",
 ]
 account-ext = [
+    "evm2/account-ext",
+    "reth-storage-rpc-provider/account-ext",
+    "reth-rpc/account-ext",
+    "reth-rpc-eth-api/account-ext",
+    "reth-evm/account-ext",
+    "reth-revm/account-ext",
     "reth-stages-types/account-ext",
     "alloy-genesis/account-ext",
     "reth-codecs/account-ext",

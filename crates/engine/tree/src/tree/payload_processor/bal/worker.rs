@@ -162,12 +162,31 @@ impl<DB: Database> Database for WorkerDatabase<DB> {
     ) -> Result<Option<evm2::evm::AccountInfo>, Self::Error> {
         self.0.borrow_mut().get_account(address)
     }
+    fn get_code_kind_by_hash(
+        &mut self,
+        hash: &alloy_primitives::B256,
+    ) -> Result<evm2::bytecode::BytecodeKind, Self::Error> {
+        self.0.borrow_mut().get_code_kind_by_hash(hash)
+    }
+
     fn get_code_by_hash(
         &mut self,
         hash: &alloy_primitives::B256,
     ) -> Result<evm2::bytecode::Bytecode, Self::Error> {
         self.0.borrow_mut().get_code_by_hash(hash)
     }
+    fn get_code_chunk_by_hash(
+        &mut self,
+        hash: &alloy_primitives::B256,
+        index: u32,
+    ) -> Result<Option<evm2::bytecode::CodeChunk>, Self::Error> {
+        self.0.borrow_mut().get_code_chunk_by_hash(hash, index)
+    }
+
+    fn discard_code_chunk(&mut self, hash: &alloy_primitives::B256, index: u32) {
+        self.0.borrow_mut().discard_code_chunk(hash, index)
+    }
+
     fn get_storage(
         &mut self,
         address: &Address,

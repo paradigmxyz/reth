@@ -5,11 +5,7 @@
 
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{keccak256, Bytes, B256};
-use reth_db_api::{
-    tables,
-    transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
-};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
 
@@ -38,6 +34,18 @@ pub trait SnapBytecodeStore {
     ) -> Result<usize, SnapSyncError>
     where
         Self: StateWriter + DBProvider<Tx: DbTxMut>;
+    /// Authenticate and stage immutable chunk content without publishing accounts.
+    /// The caller must abort its transaction after any storage error.
+    fn stage_chunked_code(
+        &self,
+        write: SnapWrite,
+        hash: B256,
+        size: u32,
+        hashes: Vec<B256>,
+        chunks: Vec<Bytes>,
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: DBProvider<Tx: DbTxMut> + StateWriter;
 }
 
 impl<T: MetadataProvider> SnapBytecodeStore for T {
@@ -54,10 +62,10 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
         let mut missing = Vec::new();
         for hash in hashes {
             if missing.len() == limit {
-                break
+                break;
             }
             // Only presence matters, so stored code is not decoded.
-            if self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(*hash))?.is_none() {
+            if !complete_code(self.tx_ref(), hash)? {
                 missing.push(*hash);
             }
         }
@@ -79,7 +87,7 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
             .map(|(hash, code)| {
                 let got = keccak256(&code);
                 if got != hash {
-                    return Err(SnapSyncError::CodeMismatch { expected: hash, got })
+                    return Err(SnapSyncError::CodeMismatch { expected: hash, got });
                 }
                 // Code deployed before EIP-3541 can carry the delegation prefix without being
                 // one, so authenticated bytes that do not parse as a delegation are legacy code.
@@ -92,6 +100,25 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
         let written = contracts.len();
         self.write_state_changes(StateChangeset { contracts, ..Default::default() })?;
         Ok(written)
+    }
+    /// Authenticate and stage immutable chunk content without publishing accounts.
+    /// The caller must abort its transaction after any storage error.
+    fn stage_chunked_code(
+        &self,
+        write: SnapWrite,
+        hash: B256,
+        size: u32,
+        hashes: Vec<B256>,
+        chunks: Vec<Bytes>,
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: DBProvider<Tx: DbTxMut> + StateWriter,
+    {
+        self.authorize_snap_write(write)?;
+        let code = reth_storage_api::ValidatedCode::from_chunks(hash, size, hashes, chunks)
+            .map_err(reth_storage_errors::provider::ProviderError::InvalidChunkedCode)?;
+        self.write_validated_chunked_code(&code)?;
+        Ok(())
     }
 }
 
@@ -240,4 +267,36 @@ mod tests {
         ));
         assert!(!is_stored(&provider, &wanted));
     }
+}
+
+/// Recheck the actual content before a staged account becomes executable.
+pub(crate) fn complete_code<T: DbTx>(tx: &T, hash: &B256) -> Result<bool, SnapSyncError> {
+    match reth_db_api::code_chunks::bytecode_by_hash(tx, hash) {
+        Ok(code) => Ok(code.is_some()),
+        Err(reth_storage_errors::provider::ProviderError::CodeChunk(_)) => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Validate the account-owned kind before consulting code storage.
+pub(crate) fn complete_account_code<T: DbTx>(
+    tx: &T,
+    account: &reth_primitives_traits::Account,
+) -> Result<bool, SnapSyncError> {
+    let native = reth_execution_types::native_provider_account(account)
+        .map_err(reth_storage_errors::provider::ProviderError::other)?;
+    if native.inline_delegation.is_some() || native.code_hash == alloy_primitives::KECCAK256_EMPTY {
+        return Ok(true)
+    }
+    if let Some(metadata) = native.code_metadata {
+        let Some(stored) = reth_db_api::code_chunks::descriptor(tx, &native.code_hash, 0)? else {
+            return Ok(false)
+        };
+        if stored.code_size() != metadata.code_size() ||
+            stored.chunk_hashes() != metadata.chunk_hashes()
+        {
+            return Ok(false)
+        }
+    }
+    complete_code(tx, &native.code_hash)
 }

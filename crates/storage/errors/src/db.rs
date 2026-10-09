@@ -56,6 +56,30 @@ pub enum DatabaseError {
     Custom(#[from] Arc<dyn Error + Send + Sync>),
 }
 
+impl PartialEq for DatabaseError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Open(a), Self::Open(b)) |
+            (Self::CreateTable(a), Self::CreateTable(b)) |
+            (Self::Read(a), Self::Read(b)) |
+            (Self::Delete(a), Self::Delete(b)) |
+            (Self::Commit(a), Self::Commit(b)) |
+            (Self::InitTx(a), Self::InitTx(b)) |
+            (Self::InitCursor(a), Self::InitCursor(b)) |
+            (Self::Stats(a), Self::Stats(b)) => a == b,
+            (Self::Write(a), Self::Write(b)) => a == b,
+            (Self::Decode, Self::Decode) => true,
+            (Self::LogLevelUnavailable(a), Self::LogLevelUnavailable(b)) => a == b,
+            (Self::Other(a), Self::Other(b)) => a == b,
+            // Opaque errors only have identity equality; messages are not unique causes.
+            (Self::Custom(a), Self::Custom(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for DatabaseError {}
+
 /// Common error struct to propagate implementation-specific error information.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
 #[display("{message} ({code})")]

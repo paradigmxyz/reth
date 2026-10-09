@@ -9,15 +9,12 @@ use reth_storage_errors::provider::ProviderResult;
 
 /// Provides the state necessary for EVM execution.
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait EvmStateProvider {
+pub trait EvmStateProvider: crate::BytecodeReader {
     /// Returns the account, or `None` if it does not exist.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 
     /// Returns the block hash, or `None` if the block does not exist.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
-
-    /// Returns bytecode by its hash.
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
 
     /// Returns the storage value of the given account and slot.
     fn storage(
@@ -49,10 +46,6 @@ impl<P: StateProvider> EvmStateProvider for EvmStateProviderAdapter<P> {
 
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         self.0.block_hash(number)
-    }
-
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        self.0.bytecode_by_hash(code_hash)
     }
 
     fn storage(
@@ -107,5 +100,53 @@ mod tests {
         assert_eq!(provider.block_hash(1).unwrap(), None);
         assert_eq!(provider.bytecode_by_hash(&B256::ZERO).unwrap(), None);
         assert_eq!(provider.storage(Address::ZERO, B256::ZERO).unwrap(), None);
+    }
+}
+
+impl<P: StateProvider> crate::BytecodeReader for EvmStateProviderAdapter<P> {
+    fn bytecode_by_hash(&self, hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        self.0.bytecode_by_hash(hash)
+    }
+
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        self.0.legacy_code_kind(hash)
+    }
+
+    fn legacy_bytecode_by_hash(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.legacy_bytecode_by_hash(hash)
+    }
+
+    fn legacy_delegation(
+        &self,
+        hash: &B256,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::Address>> {
+        self.0.legacy_delegation(hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<crate::CodeChunkDescriptor>> {
+        self.0.code_chunk_descriptor(hash)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &B256,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.0.get_code_chunk_by_hash(hash, index)
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &B256,
+        representation: &crate::CodeRepresentation,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.0.get_required_code_chunk(hash, representation, index)
     }
 }

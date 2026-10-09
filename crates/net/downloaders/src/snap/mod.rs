@@ -53,7 +53,7 @@ impl<C: SnapClient> AccountRangeDownloader<C> {
             return Err(InvalidAccountRange {
                 origin: request.starting_hash,
                 limit: request.limit_hash,
-            })
+            });
         }
         let verifier = request.clone();
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
@@ -100,6 +100,17 @@ pub struct VerifiedAccountRange {
 }
 
 impl VerifiedAccountRange {
+    /// Authenticate an account response using the downloader's proof verification boundary.
+    pub fn verify_response(
+        request: GetAccountRangeMessage,
+        response: AccountRangeMessage,
+    ) -> Result<Self, RequestError> {
+        match request.verify(PeerId::default(), SnapResponse::AccountRange(response))? {
+            AccountRangeOutcome::Verified(range) => Ok(range),
+            AccountRangeOutcome::Unavailable { .. } => Err(RequestError::BadResponse),
+        }
+    }
+
     /// State root the accounts were authenticated against.
     pub const fn state_root(&self) -> B256 {
         self.state_root
@@ -209,13 +220,13 @@ impl<'a> VerifiedAccountBatch<'a> {
             return Err(InvalidStorageRangeRequest::StateRootMismatch {
                 requested: request.root_hash,
                 authenticated: self.state_root,
-            })
+            });
         }
         if request.account_hashes.len() != self.accounts.len() {
             return Err(InvalidStorageRangeRequest::AccountCount {
                 requested: request.account_hashes.len(),
                 supplied: self.accounts.len(),
-            })
+            });
         }
         for (index, (requested, (supplied, _))) in
             request.account_hashes.iter().zip(&self.accounts).enumerate()
@@ -225,7 +236,7 @@ impl<'a> VerifiedAccountBatch<'a> {
                     index,
                     requested: *requested,
                     supplied: *supplied,
-                })
+                });
             }
         }
         Ok(())
@@ -258,7 +269,7 @@ impl SnapVerifier for GetAccountRangeMessage {
     fn verify(self, peer_id: PeerId, response: SnapResponse) -> Result<Self::Output, RequestError> {
         let SnapResponse::AccountRange(response) = response else {
             debug!(target: "downloaders::snap", "Expected account range response");
-            return Err(RequestError::BadResponse)
+            return Err(RequestError::BadResponse);
         };
         if response.request_id != self.request_id {
             debug!(
@@ -267,7 +278,7 @@ impl SnapVerifier for GetAccountRangeMessage {
                 got = response.request_id,
                 "Account range response id mismatch"
             );
-            return Err(RequestError::BadResponse)
+            return Err(RequestError::BadResponse);
         }
         if response.accounts.is_empty() && response.proof.is_empty() {
             return if self.root_hash == EMPTY_ROOT_HASH {
@@ -280,7 +291,7 @@ impl SnapVerifier for GetAccountRangeMessage {
                 }))
             } else {
                 Ok(AccountRangeOutcome::Unavailable { peer_id })
-            }
+            };
         }
 
         verify_account_range(&self, response).map(AccountRangeOutcome::Verified)
@@ -295,7 +306,7 @@ fn verify_account_range(
     // Allow only the single out-of-range account needed as a boundary witness.
     if response.accounts.iter().filter(|data| data.hash > request.limit_hash).nth(1).is_some() {
         debug!(target: "downloaders::snap", "Account range runs past the requested limit");
-        return Err(RequestError::BadResponse)
+        return Err(RequestError::BadResponse);
     }
 
     let mut accounts =

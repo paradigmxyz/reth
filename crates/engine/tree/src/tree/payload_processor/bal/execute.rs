@@ -262,6 +262,28 @@ mod tests {
             Ok(self.contracts.get(code_hash).cloned().unwrap_or_default())
         }
 
+        fn get_code_kind_by_hash(
+            &mut self,
+            code_hash: &B256,
+        ) -> Result<evm2::bytecode::BytecodeKind, Self::Error> {
+            Ok(self
+                .contracts
+                .get(code_hash)
+                .map_or(evm2::bytecode::BytecodeKind::Legacy, Bytecode::kind))
+        }
+
+        fn get_code_chunk_by_hash(
+            &mut self,
+            code_hash: &B256,
+            index: u32,
+        ) -> Result<Option<evm2::bytecode::CodeChunk>, Self::Error> {
+            if index != 0 {
+                return Ok(None);
+            }
+            self.get_code_by_hash(code_hash)
+                .map(|code| Some(evm2::bytecode::CodeChunk::from_bytecode(&code)))
+        }
+
         fn get_storage(&mut self, address: &Address, key: &U256) -> Result<U256, Self::Error> {
             Ok(self.storage.get(&(*address, *key)).copied().unwrap_or_default())
         }

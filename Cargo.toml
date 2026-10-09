@@ -414,6 +414,7 @@ reth-static-file-types = { path = "crates/static-file/types", default-features =
 reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
 reth-storage-errors = { path = "crates/storage/errors", default-features = false }
 reth-storage-overlay = { path = "crates/storage/storage-overlay" }
+reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
@@ -429,10 +430,11 @@ reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # revm
 revm = { version = "43.0.3", default-features = false }
+revm-bytecode = { version = "43.0.0", default-features = false }
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "a204db902137a4e03412d23f5cd4ea96b767852c", default-features = false }
+evm2 = { path = "../evm2/crates/evm2", default-features = false }
+evm2-inspectors = { path = "../evm2/crates/inspectors", default-features = false }
+evm2-jit = { path = "../evm2/crates/jit", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -662,3 +664,8 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-trie = { path = "../deps/alloy-trie-0.9.8" }
+revm-state = { path = "../deps/revm-state-43.0.1" }
+reth-primitives-traits = { path = "../deps/reth-primitives-traits-0.8.2" }

@@ -761,7 +761,7 @@ where
             .unwrap_or_default();
         let code = if account.code_hash == alloy_primitives::KECCAK256_EMPTY {
             Default::default()
-        } else if let Some(code) = account.code {
+        } else if let Some(code) = &account.code {
             code.original_bytes()
         } else {
             db.get_code_by_hash(&account.code_hash)
@@ -776,7 +776,7 @@ where
             code,
             #[cfg(feature = "account-ext")]
             extension: reth_primitives_traits::AccountExtension::from_shared(
-                account.extension.into_shared(),
+                reth_execution_types::revm_account(&account).extension.into_shared(),
             ),
             ..Default::default()
         })

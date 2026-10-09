@@ -14,7 +14,6 @@ use alloy_primitives::{
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
@@ -120,10 +119,10 @@ impl AccountCoverage {
     fn advance(&self, range: &VerifiedAccountRange) -> Result<Self, SnapSyncError> {
         let origin = range.origin();
         if self.next != Some(origin) {
-            return Err(SnapSyncError::OutOfOrderRange { expected: self.next, got: origin })
+            return Err(SnapSyncError::OutOfOrderRange { expected: self.next, got: origin });
         }
         if range.next().is_some_and(|next| next <= origin) {
-            return Err(SnapSyncError::NoProgress { origin })
+            return Err(SnapSyncError::NoProgress { origin });
         }
         Ok(Self { next: range.next() })
     }
@@ -167,7 +166,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         Self: MetadataWriter,
     {
         if let Some(coverage) = self.account_coverage(write)? {
-            return Ok(coverage)
+            return Ok(coverage);
         }
         let start = AccountCoverage::START;
         StoredCoverage::new(write.attempt(), start).write(self)?;
@@ -197,7 +196,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Err(SnapSyncError::RootMismatch {
                 expected: attempt.state_root(),
                 got: range.state_root(),
-            })
+            });
         }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let advanced = coverage.advance(range)?;
@@ -210,7 +209,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Err(SnapSyncError::CatchUpBehindPivot {
                 applied: catch_up.applied().number,
                 pivot: attempt.pivot().number,
-            })
+            });
         }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
@@ -239,7 +238,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             self.remove::<tables::HashedStorages>((start, Bound::Excluded(*account)))?;
             // Walks cannot start at an excluded key, so the next piece starts one key past it.
             let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::ONE) else {
-                return Ok(())
+                return Ok(());
             };
             start = Bound::Included(after.into());
         }
@@ -284,7 +283,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Err(SnapSyncError::RootMismatch {
                 expected: attempt.state_root(),
                 got: range.state_root(),
-            })
+            });
         }
         let applied =
             self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
@@ -292,7 +291,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Err(SnapSyncError::CatchUpBehindPivot {
                 applied: applied.number,
                 pivot: attempt.pivot().number,
-            })
+            });
         }
         let hashed_address = range.origin();
         // The proof starts at the origin, so an account keyed past it means none is there.
@@ -303,9 +302,12 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             .map(|(_, account)| account);
         if let Some(hash) = account.map(|account| account.code_hash) &&
             hash != KECCAK256_EMPTY &&
-            self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
+            !crate::bytecode::store::complete_account_code(
+                self.tx_ref(),
+                &Account::from(account.unwrap().clone()),
+            )?
         {
-            return Err(SnapSyncError::MissingCode { hash })
+            return Err(SnapSyncError::MissingCode { hash });
         }
 
         let has_storage = account.is_some_and(|account| account.storage_root != EMPTY_ROOT_HASH);
@@ -364,7 +366,7 @@ impl RangeDependencies {
         progress: &StorageProgress,
         tx: &impl DbTx,
     ) -> Result<Vec<B256>, SnapSyncError> {
-        let mut available = self.supplied_code()?;
+        self.supplied_code()?;
         let mut contracts = B256Set::default();
         let mut persisted = Vec::new();
         for (hash, account) in accounts {
@@ -374,18 +376,35 @@ impl RangeDependencies {
                     persisted.push(*hash);
                 }
             }
-            // Only presence matters, so stored code is not decoded.
-            if account.code_hash != KECCAK256_EMPTY &&
-                available.insert(account.code_hash) &&
-                tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(account.code_hash))?.is_none()
+            let primitive = Account::from(account.clone());
+            let native = reth_execution_types::native_provider_account(&primitive)
+                .map_err(reth_storage_errors::provider::ProviderError::other)?;
+            if native.inline_delegation.is_some() || account.code_hash == KECCAK256_EMPTY {
+                continue
+            }
+            if let Some((_, supplied)) =
+                self.bytecodes.iter().find(|(hash, _)| *hash == account.code_hash)
             {
+                if let Some(metadata) = native.code_metadata {
+                    let validated = reth_storage_api::ValidatedCode::new(supplied.original_bytes())
+                        .map_err(
+                            reth_storage_errors::provider::ProviderError::InvalidChunkedCode,
+                        )?;
+                    if !validated.descriptor().is_some_and(|stored| {
+                        stored.code_size() == metadata.code_size() &&
+                            stored.chunk_hashes() == metadata.chunk_hashes()
+                    }) {
+                        return Err(SnapSyncError::MissingCode { hash: account.code_hash })
+                    }
+                }
+            } else if !crate::bytecode::store::complete_account_code(tx, &primitive)? {
                 return Err(SnapSyncError::MissingCode { hash: account.code_hash })
             }
         }
         if let Some(account) =
             self.state.account_storages().keys().find(|hash| !contracts.contains(*hash))
         {
-            return Err(SnapSyncError::UnexpectedStorage { account: *account })
+            return Err(SnapSyncError::UnexpectedStorage { account: *account });
         }
         Ok(persisted)
     }
@@ -396,7 +415,7 @@ impl RangeDependencies {
         for (hash, code) in &self.bytecodes {
             let got = code.hash_slow();
             if got != *hash {
-                return Err(SnapSyncError::CodeMismatch { expected: *hash, got })
+                return Err(SnapSyncError::CodeMismatch { expected: *hash, got });
             }
             hashes.insert(*hash);
         }
@@ -432,18 +451,45 @@ impl RangeDependencies {
                 account: hash,
                 expected: account.storage_root,
                 got,
-            })
+            });
         }
         Ok(persisted)
     }
 
     // Writes the accounts with their storage and code.
-    fn write(self, writer: &impl StateWriter) -> Result<(), SnapSyncError> {
+    fn write(
+        self,
+        writer: &(impl StateWriter + DBProvider<Tx: DbTxMut>),
+    ) -> Result<(), SnapSyncError> {
+        let mut chunked = B256Set::default();
+        for (_, account) in self.state.accounts() {
+            if let Some(account) = account {
+                let native = reth_execution_types::native_provider_account(account)
+                    .map_err(reth_storage_errors::provider::ProviderError::other)?;
+                if native.code_metadata.is_some() {
+                    chunked.insert(native.code_hash);
+                }
+            }
+        }
+        let mut ordinary = Vec::new();
+        let mut prepared = Vec::new();
+        for (hash, code) in self.bytecodes {
+            if chunked.contains(&hash) {
+                prepared.push(
+                    reth_storage_api::ValidatedCode::new(code.original_bytes()).map_err(
+                        reth_storage_errors::provider::ProviderError::InvalidChunkedCode,
+                    )?,
+                );
+            } else {
+                ordinary.push((hash, code));
+            }
+        }
+        // Original code and all preparation are authenticated before the first mutation.
+        for code in prepared {
+            writer.write_validated_chunked_code(&code)?;
+        }
         writer.write_hashed_state(&self.state)?;
-        writer.write_state_changes(StateChangeset {
-            contracts: self.bytecodes,
-            ..Default::default()
-        })?;
+        writer.write_state_changes(StateChangeset { contracts: ordinary, ..Default::default() })?;
         Ok(())
     }
 }

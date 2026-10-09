@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     map::{hash_map::Entry, AddressMap, AddressSet},
-    Address, U256,
+    Address, B256, U256,
 };
 use revm::{
     database::{
@@ -333,21 +333,36 @@ impl evm2::evm::StateChangeSource for BundleSource<'_> {
 
 /// Converts persistent account information into evm2's execution representation.
 pub fn native_account(info: &AccountInfo) -> evm2::evm::AccountInfo {
-    evm2::evm::AccountInfo {
+    try_native_account(info).expect("bundle account metadata was validated at provider boundary")
+}
+
+/// Validate persisted metadata before crossing into execution.
+pub fn try_native_account(
+    info: &AccountInfo,
+) -> Result<evm2::evm::AccountInfo, InvalidCodeMetadata> {
+    let mut native = evm2::evm::AccountInfo {
         #[cfg(feature = "account-ext")]
-        extension: evm2::evm::AccountExtension::from_shared(info.extension.clone().into_shared()),
+        extension: evm2::evm::AccountExtension::copy_from_slice(info.extension.as_ref()),
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
         code: info.code.as_ref().map(native_bytecode),
+        code_metadata: None,
+        inline_delegation: None,
         _non_exhaustive: (),
+    };
+    #[cfg(feature = "account-ext")]
+    if let Some(bytes) = info.extension.code_metadata() {
+        (native.code_metadata, native.inline_delegation) =
+            decode_code_metadata(info.code_hash, bytes)?;
     }
+    Ok(native)
 }
 
 /// Converts persistent bytecode while retaining its analyzed jump destinations and padding.
 pub fn native_bytecode(code: &Bytecode) -> evm2::bytecode::Bytecode {
     if code.is_empty() {
-        return evm2::bytecode::Bytecode::default()
+        return evm2::bytecode::Bytecode::default();
     }
     if let Some(jumps) = code.legacy_jump_table() {
         let jumps = evm2::bytecode::JumpTable::from_slice(jumps.as_slice(), code.len());
@@ -380,7 +395,14 @@ pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
         code: None,
         account_id: None,
         #[cfg(feature = "account-ext")]
-        extension: revm::state::AccountExtension::from_shared(info.extension.clone().into_shared()),
+        extension: {
+            let extension = revm::state::AccountExtension::copy_from_slice(info.extension.as_ref());
+            if let Some(metadata) = encode_code_metadata(info) {
+                extension.with_code_metadata(&metadata)
+            } else {
+                extension
+            }
+        },
     }
 }
 
@@ -411,7 +433,6 @@ mod tests {
         };
         let native = native_account(&original);
         assert_eq!(native.extension.as_ref(), original.extension.as_ref());
-        assert_eq!(native.extension.as_ref().as_ptr(), original.extension.as_ref().as_ptr());
         let mut updated = native.clone();
         updated.balance = U256::from(20);
         updated.extension = evm2::evm::AccountExtension::copy_from_slice(b"updated extension");
@@ -528,7 +549,8 @@ mod tests {
             let analyzed = evm2::bytecode::Bytecode::new_legacy(persistent.original_bytes());
             assert_eq!(native, analyzed);
             assert_eq!(revm_bytecode(&native), persistent);
-            assert_eq!(native.bytes(), analyzed.bytes());
+            assert_eq!(native.original_bytes(), analyzed.original_bytes());
+            assert_eq!(native.bytes(), persistent.bytes_ref());
             assert_eq!(native.legacy_jump_table(), analyzed.legacy_jump_table());
             if !persistent.is_empty() {
                 assert_eq!(native.bytes().as_ptr(), persistent.bytes_ref().as_ptr());
@@ -670,4 +692,76 @@ mod tests {
         assert_eq!(account.storage_slot(U256::from(3)), Some(U256::from(8)));
         assert!(bundle.reverts[0][0].1.wipe_storage);
     }
+}
+
+/// Invalid typed account code metadata is a node error, never legacy fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidCodeMetadata;
+
+impl core::fmt::Display for InvalidCodeMetadata {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("invalid account code metadata")
+    }
+}
+
+impl core::error::Error for InvalidCodeMetadata {}
+
+/// Encode the bounded payload of an explicitly typed account extension.
+/// The extension's external discriminator, never this byte prefix, selects typed decoding.
+pub fn encode_code_metadata(info: &evm2::evm::AccountInfo) -> Option<Vec<u8>> {
+    if let Some(metadata) = &info.code_metadata {
+        let mut bytes = Vec::with_capacity(6 + 32 * metadata.chunk_hashes().len());
+        bytes.push(1);
+        bytes.extend_from_slice(&metadata.code_size().to_be_bytes());
+        bytes.push(metadata.chunk_hashes().len() as u8);
+        for hash in metadata.chunk_hashes() {
+            bytes.extend_from_slice(hash.as_slice());
+        }
+        Some(bytes)
+    } else if let Some(target) = info.inline_delegation {
+        let mut bytes = Vec::with_capacity(21);
+        bytes.push(2);
+        bytes.extend_from_slice(target.as_slice());
+        Some(bytes)
+    } else {
+        None
+    }
+}
+
+/// Decode explicit typed metadata and authenticate any inline delegation marker.
+pub fn decode_code_metadata(
+    code_hash: B256,
+    bytes: &[u8],
+) -> Result<(Option<evm2::bytecode::CodeMetadata>, Option<Address>), InvalidCodeMetadata> {
+    match bytes.first() {
+        Some(1) if bytes.len() >= 6 => {
+            let size = u32::from_be_bytes(bytes[1..5].try_into().map_err(|_| InvalidCodeMetadata)?);
+            let count = bytes[5] as usize;
+            if bytes.len() != 6 + count * 32 {
+                return Err(InvalidCodeMetadata);
+            }
+            let hashes = bytes[6..].chunks_exact(32).map(B256::from_slice).collect();
+            let metadata =
+                evm2::bytecode::CodeMetadata::new(size, hashes).map_err(|_| InvalidCodeMetadata)?;
+            Ok((Some(metadata), None))
+        }
+        Some(2) if bytes.len() == 21 => {
+            let target = Address::from_slice(&bytes[1..]);
+            if target.is_zero() ||
+                evm2::bytecode::Bytecode::new_eip7702(target).hash_slow() != code_hash
+            {
+                return Err(InvalidCodeMetadata);
+            }
+            Ok((None, Some(target)))
+        }
+        _ => Err(InvalidCodeMetadata),
+    }
+}
+
+/// Convert a persistent provider account using the same checked boundary as bundles.
+pub fn native_provider_account(
+    info: &reth_primitives_traits::Account,
+) -> Result<evm2::evm::AccountInfo, InvalidCodeMetadata> {
+    let persistent: AccountInfo = info.clone().into();
+    try_native_account(&persistent)
 }

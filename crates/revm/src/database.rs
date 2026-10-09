@@ -214,7 +214,7 @@ mod tests {
 
         fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
             if self.fail_account_reads {
-                return Err(ProviderError::UnsupportedProvider)
+                return Err(ProviderError::UnsupportedProvider);
             }
 
             self.account_reads.fetch_add(1, Ordering::Relaxed);
@@ -223,7 +223,7 @@ mod tests {
 
         fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
             if self.fail_bytecode_reads {
-                return Err(ProviderError::UnsupportedProvider)
+                return Err(ProviderError::UnsupportedProvider);
             }
 
             self.bytecode_reads.fetch_add(1, Ordering::Relaxed);
@@ -372,5 +372,60 @@ mod tests {
             Some(reth_primitives_traits::Bytecode(bytecode))
         );
         assert_eq!(bytecode_reads.load(Ordering::Relaxed), 1);
+    }
+}
+
+impl<DB: reth_storage_api::EvmStateProvider> reth_storage_api::BytecodeReader
+    for StateProviderDatabase<DB>
+{
+    fn bytecode_by_hash(
+        &self,
+        hash: &alloy_primitives::B256,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>
+    {
+        self.0.bytecode_by_hash(hash)
+    }
+
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        self.0.legacy_code_kind(hash)
+    }
+
+    fn legacy_bytecode_by_hash(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.legacy_bytecode_by_hash(hash)
+    }
+
+    fn legacy_delegation(
+        &self,
+        hash: &B256,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::Address>> {
+        self.0.legacy_delegation(hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<reth_storage_api::CodeChunkDescriptor>>
+    {
+        self.0.code_chunk_descriptor(hash)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &alloy_primitives::B256,
+        index: u32,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.0.get_code_chunk_by_hash(hash, index)
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &alloy_primitives::B256,
+        representation: &reth_storage_api::CodeRepresentation,
+        index: u32,
+    ) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.0.get_required_code_chunk(hash, representation, index)
     }
 }

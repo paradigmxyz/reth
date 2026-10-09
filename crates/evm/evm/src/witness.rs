@@ -145,7 +145,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                         .then_some(account.code_hash),
                     #[cfg(feature = "account-ext")]
                     extension: reth_primitives_traits::AccountExtension::from_shared(
-                        account.extension.clone().into_shared(),
+                        reth_execution_types::revm_account(account).extension.into_shared(),
                     ),
                 }),
             );

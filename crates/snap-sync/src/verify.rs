@@ -13,7 +13,6 @@ use reth_db_api::{
     cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -144,7 +143,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         // The stage treats a checkpoint at genesis as already rebuilt, so it would never check
         // state anchored there.
         if self.authorize_snap_write(write)?.pivot().number == 0 {
-            return Err(SnapSyncError::GenesisPivot)
+            return Err(SnapSyncError::GenesisPivot);
         }
         self.verify_completeness(write, chunk, cancel)?;
         // Starting from block zero makes the stage clear the trie tables and rebuild them, since
@@ -160,7 +159,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         Self: BlockWriter + PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
     {
         if pivot == 0 {
-            return Err(SnapSyncError::GenesisPivot)
+            return Err(SnapSyncError::GenesisPivot);
         }
         // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
         // transaction segments no longer hold.
@@ -200,7 +199,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         let attempt = self.authorize_snap_write(write)?;
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         if let Some(next) = coverage.next() {
-            return Err(SnapSyncError::IncompleteAccounts { next })
+            return Err(SnapSyncError::IncompleteAccounts { next });
         }
         let applied =
             self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
@@ -208,11 +207,11 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
             return Err(SnapSyncError::CatchUpBehindPivot {
                 applied: applied.number,
                 pivot: attempt.pivot().number,
-            })
+            });
         }
         let repairs = self.snap_repairs(write)?;
         if !repairs.is_empty() {
-            return Err(SnapSyncError::PendingRepairs { accounts: repairs.len() })
+            return Err(SnapSyncError::PendingRepairs { accounts: repairs.len() });
         }
         ensure_code_present(self.tx_ref(), chunk, cancel)
     }
@@ -238,14 +237,14 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
                 block_number: target.number,
                 block_hash: target.hash,
             }))
-            .into())
+            .into());
         }
         // Until the stage reaches the pivot after this state's hand-off, the trie holds no state
         // for it: an earlier attempt's rebuild can end at the same block.
         let handed_off = self.is_trie_rebuild_started(write)?;
         let rebuilt = self.get_stage_checkpoint(StageId::MerkleExecute)?;
         if !handed_off || rebuilt.map(|checkpoint| checkpoint.block_number) != Some(target.number) {
-            return Err(ProviderError::StateForNumberNotFound(target.number).into())
+            return Err(ProviderError::StateForNumberNotFound(target.number).into());
         }
         self.verify_snap_attempt(write)?;
         Ok(VerifiedSnapState { attempt: attempt.id(), target, state_root: header.state_root() })
@@ -284,14 +283,14 @@ fn ensure_code_present(
     let mut cursor = tx.cursor_read::<tables::HashedAccounts>()?;
     for (scanned, entry) in cursor.walk(None)?.enumerate() {
         if (scanned as u64).is_multiple_of(chunk) && cancel.is_cancelled() {
-            return Err(SnapSyncError::Cancelled)
+            return Err(SnapSyncError::Cancelled);
         }
         let (_, account) = entry?;
-        // Only presence matters, so stored code is not decoded.
+        // Recheck all required code content before publishing executable state.
         if let Some(hash) = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY) &&
-            tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
+            !crate::bytecode::store::complete_account_code(tx, &account)?
         {
-            return Err(SnapSyncError::MissingCode { hash })
+            return Err(SnapSyncError::MissingCode { hash });
         }
     }
     Ok(())
@@ -398,7 +397,7 @@ mod tests {
             let output = stage.execute(provider, ExecInput { target: Some(target), checkpoint })?;
             provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint).unwrap();
             if output.done {
-                return Ok(())
+                return Ok(());
             }
         }
     }

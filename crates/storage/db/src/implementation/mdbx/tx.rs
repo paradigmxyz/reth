@@ -30,6 +30,9 @@ const LONG_TRANSACTION_DURATION: Duration = Duration::from_secs(60);
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
 pub struct Tx<K: TransactionKind> {
+    #[cfg(any(test, feature = "test-utils"))]
+    test_hooks: Option<crate::test_utils::DatabaseTestHooks>,
+
     /// Libmdbx-sys transaction.
     inner: Transaction<K>,
 
@@ -51,6 +54,9 @@ impl<K: TransactionKind> Tx<K> {
         inner: Transaction<K>,
         dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
+        #[cfg(any(test, feature = "test-utils"))] test_hooks: Option<
+            crate::test_utils::DatabaseTestHooks,
+        >,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
             .map(|env_metrics| {
@@ -60,7 +66,13 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self {
+            inner,
+            dbis,
+            metrics_handler,
+            #[cfg(any(test, feature = "test-utils"))]
+            test_hooks,
+        })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -102,6 +114,8 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.clone(),
         ))
     }
 
@@ -301,10 +315,18 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            #[cfg(any(test, feature = "test-utils"))]
+            if let Some(hooks) = &self.test_hooks {
+                hooks.before_read(T::NAME)?;
+            }
+            let value = tx
+                .get(self.get_dbi::<T>()?, key.as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?;
+            #[cfg(any(test, feature = "test-utils"))]
+            if let Some(hooks) = &self.test_hooks {
+                hooks.read(T::NAME, key.as_ref(), value.as_deref());
+            }
+            value.map(decode_one::<T>).transpose()
         })
     }
 
@@ -385,6 +407,10 @@ impl Tx<RW> {
         key: T::Key,
         value: T::Value,
     ) -> Result<(), DatabaseError> {
+        #[cfg(any(test, feature = "test-utils"))]
+        if let Some(hooks) = &self.test_hooks {
+            hooks.before_write()?;
+        }
         let key = key.encode();
         let value = value.compress();
         let (operation, write_operation, flags) = kind.into_operation_and_flags();

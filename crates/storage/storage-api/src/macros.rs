@@ -44,6 +44,13 @@ macro_rules! delegate_provider_impls {
             }
             BytecodeReader $(where [$($generics)*])? {
                 fn bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>;
+                fn legacy_code_kind(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<bool>>;
+                fn legacy_bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_primitives_traits::Bytecode>>;
+                fn legacy_delegation(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::Address>>;
+                fn code_chunk_descriptor(&self, code_hash: &alloy_primitives::B256) -> reth_storage_api::errors::provider::ProviderResult<Option<reth_storage_api::CodeChunkDescriptor>>;
+                fn get_code_chunk_by_hash(&self, code_hash: &alloy_primitives::B256, index: u32) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::Bytes>>;
+                fn get_required_code_chunk(&self, code_hash: &alloy_primitives::B256, representation: &reth_storage_api::CodeRepresentation, index: u32) -> reth_storage_api::errors::provider::ProviderResult<Option<alloy_primitives::Bytes>>;
+
             }
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_api::errors::provider::ProviderResult<alloy_primitives::B256>;

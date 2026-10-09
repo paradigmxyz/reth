@@ -26,3 +26,6 @@ pub use storage::StorageBeforeTx;
 /// Client Version
 pub mod client_version;
 pub use client_version::ClientVersion;
+
+pub mod code_chunks;
+pub use code_chunks::{CodeChunkDescriptor, CodeValidationError, ValidatedCode};

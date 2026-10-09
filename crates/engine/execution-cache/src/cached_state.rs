@@ -847,7 +847,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(account) = snapshot.account(address) {
                 self.record_txpool_account_hit();
-                return Ok(account)
+                return Ok(account);
             }
             self.record_txpool_account_miss();
         }
@@ -882,7 +882,7 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(value) = snapshot.storage(account, storage_key) {
                 self.record_txpool_storage_hit();
-                return Ok(nonzero_storage_value(value))
+                return Ok(nonzero_storage_value(value));
             }
             self.record_txpool_storage_miss();
         }
@@ -906,37 +906,6 @@ impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
         } else {
             self.record_storage_miss();
             self.state_provider.storage(account, storage_key)
-        }
-    }
-
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some(snapshot) = &self.txpool_snapshot {
-            if let Some(code) = snapshot.bytecode(code_hash) {
-                self.record_txpool_code_hit();
-                return Ok(code)
-            }
-            self.record_txpool_code_miss();
-        }
-
-        if self.should_fill_on_miss() {
-            match self.caches.get_or_try_insert_code_with(*code_hash, || {
-                self.state_provider.bytecode_by_hash(code_hash)
-            })? {
-                CachedStatus::NotCached(code) => {
-                    self.record_code_miss();
-                    Ok(code)
-                }
-                CachedStatus::Cached(code) => {
-                    self.record_code_hit();
-                    Ok(code)
-                }
-            }
-        } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
-            self.record_code_hit();
-            Ok(code)
-        } else {
-            self.record_code_miss();
-            self.state_provider.bytecode_by_hash(code_hash)
         }
     }
 
@@ -1152,7 +1121,7 @@ impl ExecutionCache {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the original account had code (was a contract), we must clear the entire cache
@@ -1175,7 +1144,7 @@ impl ExecutionCache {
                         );
                     });
                     self.clear();
-                    return Ok(())
+                    return Ok(());
                 }
 
                 self.0.account_cache.remove(addr);
@@ -1187,7 +1156,7 @@ impl ExecutionCache {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
@@ -1588,5 +1557,202 @@ mod tests {
             capacity, 16384,
             "code cache should have 16384 entries with default 4 GB budget"
         );
+    }
+}
+
+impl<S: reth_storage_api::BytecodeReader> reth_storage_api::BytecodeReader
+    for CachedStateProvider<S>
+{
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        if let Some(snapshot) = &self.txpool_snapshot {
+            if let Some(code) = snapshot.bytecode(code_hash) {
+                self.record_txpool_code_hit();
+                return Ok(code);
+            }
+            self.record_txpool_code_miss();
+        }
+
+        if self.should_fill_on_miss() {
+            match self.caches.get_or_try_insert_code_with(*code_hash, || {
+                self.state_provider.bytecode_by_hash(code_hash)
+            })? {
+                CachedStatus::NotCached(code) => {
+                    self.record_code_miss();
+                    Ok(code)
+                }
+                CachedStatus::Cached(code) => {
+                    self.record_code_hit();
+                    Ok(code)
+                }
+            }
+        } else if let Some(code) = self.caches.0.code_cache.get(code_hash) {
+            self.record_code_hit();
+            Ok(code)
+        } else {
+            self.record_code_miss();
+            self.state_provider.bytecode_by_hash(code_hash)
+        }
+    }
+
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            return Ok(Some(code.is_eip7702()))
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            return Ok(Some(code.is_eip7702()))
+        }
+        self.state_provider.legacy_code_kind(hash)
+    }
+
+    fn legacy_bytecode_by_hash(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            return Ok(Some(code.clone()))
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            return Ok(Some(code))
+        }
+        self.state_provider.legacy_bytecode_by_hash(hash)
+    }
+
+    fn legacy_delegation(&self, hash: &B256) -> ProviderResult<Option<alloy_primitives::Address>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            return Ok(code.eip7702_address())
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            return Ok(code.eip7702_address())
+        }
+        self.state_provider.legacy_delegation(hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_storage_api::CodeChunkDescriptor>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            return reth_storage_api::ValidatedCode::new(code.original_bytes())
+                .map(|code| code.descriptor().cloned())
+                .map_err(reth_errors::ProviderError::InvalidChunkedCode)
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            return reth_storage_api::ValidatedCode::new(code.original_bytes())
+                .map(|code| code.descriptor().cloned())
+                .map_err(reth_errors::ProviderError::InvalidChunkedCode)
+        }
+        self.state_provider.code_chunk_descriptor(hash)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &B256,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            let result =
+                reth_storage_api::resident_code_chunk(hash, code.original_bytes(), None, index);
+            if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+                metrics::counter!("execution_cache.code_chunks.hits").increment(1);
+            }
+            return result;
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            let result =
+                reth_storage_api::resident_code_chunk(hash, code.original_bytes(), None, index);
+            if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+                metrics::counter!("execution_cache.code_chunks.hits").increment(1);
+            }
+            return result;
+        }
+        let result = self.state_provider.get_code_chunk_by_hash(hash, index);
+        if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+            metrics::counter!("execution_cache.code_chunks.misses").increment(1);
+        }
+        result
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &B256,
+        representation: &reth_storage_api::CodeRepresentation,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        if let Some(snapshot) = &self.txpool_snapshot &&
+            let Some(Some(code)) = snapshot.bytecode(hash)
+        {
+            let result = reth_storage_api::resident_code_chunk(
+                hash,
+                code.original_bytes(),
+                Some(representation),
+                index,
+            );
+            if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+                metrics::counter!("execution_cache.code_chunks.hits").increment(1);
+            }
+            return result;
+        }
+        if let Some(Some(code)) = self.caches.0.code_cache.get(hash) {
+            let result = reth_storage_api::resident_code_chunk(
+                hash,
+                code.original_bytes(),
+                Some(representation),
+                index,
+            );
+            if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+                metrics::counter!("execution_cache.code_chunks.hits").increment(1);
+            }
+            return result;
+        }
+        let result = self.state_provider.get_required_code_chunk(hash, representation, index);
+        if result.as_ref().is_ok_and(|chunk| chunk.is_some()) {
+            metrics::counter!("execution_cache.code_chunks.misses").increment(1);
+        }
+        result
+    }
+}
+
+impl<S: reth_storage_api::AccountReader> reth_storage_api::AccountReader
+    for CachedStateProvider<S>
+{
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(snapshot) = &self.txpool_snapshot {
+            if let Some(account) = snapshot.account(address) {
+                self.record_txpool_account_hit();
+                return Ok(account);
+            }
+            self.record_txpool_account_miss();
+        }
+
+        if self.should_fill_on_miss() {
+            match self.caches.get_or_try_insert_account_with(*address, || {
+                self.state_provider.basic_account(address)
+            })? {
+                CachedStatus::NotCached(value) => {
+                    self.record_account_miss();
+                    Ok(value)
+                }
+                CachedStatus::Cached(value) => {
+                    self.record_account_hit();
+                    Ok(value)
+                }
+            }
+        } else if let Some(account) = self.caches.0.account_cache.get(address) {
+            self.record_account_hit();
+            Ok(account)
+        } else {
+            self.record_account_miss();
+            self.state_provider.basic_account(address)
+        }
     }
 }

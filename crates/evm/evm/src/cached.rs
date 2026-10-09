@@ -108,7 +108,7 @@ where
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
         if let Some(account) = self.cached.borrow().accounts.get(address) {
-            return Ok(account.info.clone())
+            return Ok(account.info.clone());
         }
 
         let info = self.db.get_account(address)?;
@@ -116,9 +116,19 @@ where
         Ok(info)
     }
 
+    fn get_code_kind_by_hash(
+        &mut self,
+        hash: &B256,
+    ) -> Result<evm2::bytecode::BytecodeKind, Self::Error> {
+        if let Some(code) = self.cached.borrow().contracts.get(hash) {
+            return Ok(code.kind())
+        }
+        self.db.get_code_kind_by_hash(hash)
+    }
+
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
         if let Some(code) = self.cached.borrow().contracts.get(code_hash) {
-            return Ok(code.clone())
+            return Ok(code.clone());
         }
 
         let code = self.db.get_code_by_hash(code_hash)?;
@@ -126,16 +136,28 @@ where
         Ok(code)
     }
 
+    fn get_code_chunk_by_hash(
+        &mut self,
+        hash: &B256,
+        index: u32,
+    ) -> Result<Option<evm2::bytecode::CodeChunk>, Self::Error> {
+        self.db.get_code_chunk_by_hash(hash, index)
+    }
+
+    fn discard_code_chunk(&mut self, hash: &B256, index: u32) {
+        self.db.discard_code_chunk(hash, index)
+    }
+
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
         {
             let cached = self.cached.borrow();
             if let Some(account) = cached.accounts.get(address) {
                 if let Some(value) = account.storage.get(key) {
-                    return Ok(*value)
+                    return Ok(*value);
                 }
 
                 if account.info.is_none() {
-                    return Ok(U256::ZERO)
+                    return Ok(U256::ZERO);
                 }
             }
         }
@@ -144,7 +166,7 @@ where
             let info = self.db.get_account(address)?;
             if info.is_none() {
                 self.cached.borrow_mut().accounts.insert(*address, CachedAccount::new(None));
-                return Ok(U256::ZERO)
+                return Ok(U256::ZERO);
             }
 
             self.cached.borrow_mut().accounts.insert(*address, CachedAccount::new(info));
@@ -164,7 +186,7 @@ where
     fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
         let number = number.saturating_to::<u64>();
         if let Some(hash) = self.cached.borrow().block_hashes.get(&number) {
-            return Ok(*hash)
+            return Ok(*hash);
         }
 
         let hash = self.db.get_block_hash(&U256::from(number))?;
@@ -232,9 +254,28 @@ mod tests {
             Ok(self.account.clone())
         }
 
+        fn get_code_kind_by_hash(
+            &mut self,
+            _: &B256,
+        ) -> Result<evm2::bytecode::BytecodeKind, Self::Error> {
+            Ok(evm2::bytecode::BytecodeKind::Legacy)
+        }
+
         fn get_code_by_hash(&mut self, _code_hash: &B256) -> Result<Bytecode, Self::Error> {
             self.reads.code.set(self.reads.code.get() + 1);
             Ok(self.code.clone())
+        }
+
+        fn get_code_chunk_by_hash(
+            &mut self,
+            hash: &B256,
+            index: u32,
+        ) -> Result<Option<evm2::bytecode::CodeChunk>, Self::Error> {
+            if index != 0 {
+                return Ok(None);
+            }
+            self.get_code_by_hash(hash)
+                .map(|code| Some(evm2::bytecode::CodeChunk::from_bytecode(&code)))
         }
 
         fn get_storage(&mut self, _address: &Address, _key: &Word) -> Result<Word, Self::Error> {

@@ -18,6 +18,12 @@ pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 /// Bundled errors variants thrown by various providers.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum ProviderError {
+    /// Imported bytecode failed authentication or boundary validation.
+    #[error(transparent)]
+    InvalidChunkedCode(#[from] reth_db_models::CodeValidationError),
+    /// Required bytecode content is unavailable or corrupt.
+    #[error(transparent)]
+    CodeChunk(#[from] CodeChunkError),
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -358,4 +364,56 @@ mod tests {
         assert!(err.is_other::<E>());
         assert!(err.downcast_other_ref::<E>().is_some());
     }
+}
+
+/// A node-local failure reading a required original code payload.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("code {code_hash} chunk {index}, expected length {expected_length:?}: {reason:?}")]
+pub struct CodeChunkError {
+    /// Full original code identity.
+    pub code_hash: B256,
+    /// Requested payload index.
+    pub index: u32,
+    /// Derived original length, when metadata is valid.
+    pub expected_length: Option<usize>,
+    /// Storage or authentication failure.
+    pub reason: CodeChunkErrorKind,
+    /// Optional caller-supplied execution context.
+    pub context: Option<CodeReadContext>,
+}
+
+/// Structured reasons for failing a required chunk read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CodeChunkErrorKind {
+    /// The account requires metadata that is absent from storage.
+    MissingDescriptor,
+    /// Stored metadata disagrees with the caller's committed representation.
+    DescriptorMismatch,
+    /// Metadata cannot be decoded.
+    MalformedDescriptor,
+    /// An in-range chunk record is absent.
+    MissingPayload,
+    /// A committed legacy account has no bytecode record.
+    MissingLegacyCode,
+    /// An account references unavailable code of unknown storage representation.
+    MissingCode,
+    /// A payload's length differs from its derived length.
+    InvalidLength { actual: usize },
+    /// Legacy oversized records cannot serve bounded sparse reads.
+    UnsupportedLegacySize { actual: usize },
+    /// Original payload bytes do not match the ordered commitment.
+    ChunkHashMismatch,
+    /// Reconstructed bytes do not match the full identity.
+    FullCodeHashMismatch,
+    /// The underlying database failed.
+    Database(DatabaseError),
+}
+
+/// Optional execution identity attached to a storage read failure.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CodeReadContext {
+    /// Block being executed, when known.
+    pub block_hash: Option<B256>,
+    /// Transaction being executed, when known.
+    pub transaction_hash: Option<B256>,
 }
