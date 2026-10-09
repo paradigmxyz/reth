@@ -218,13 +218,15 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         if let Some((hash, code)) = changes.code {
             self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
         }
-        let Some((original, current, created)) = committed_account(&changes) else {
+        // Loaded-but-unchanged accounts commit only when their storage changed.
+        if !changes.changed && !changes.storage.is_changed() {
             return Ok(());
-        };
+        }
         let address = changes.address;
+        let created = changes.created;
         let wiped = changes.storage.wiped;
-        let original = original.map(revm_account);
-        let current = current.map(revm_account);
+        let original = changes.original.map(revm_account);
+        let current = changes.current.map(revm_account);
         let slots = changes
             .storage
             .changed_slots()
@@ -244,23 +246,6 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         );
         update.accounts.push(AccountUpdate { address, original, current, created, wiped, storage });
         Ok(())
-    }
-}
-
-/// Returns the original info, current info, and creation flag an account commits with, or `None`
-/// when the stream reports it only as a read without storage activity.
-///
-/// Loaded-but-unchanged accounts are committed only when their storage was wiped or changed, and
-/// then as an unchanged account.
-fn committed_account<'a>(
-    changes: &evm2::evm::AccountChanges<'a>,
-) -> Option<(Option<&'a evm2::evm::AccountInfo>, Option<&'a evm2::evm::AccountInfo>, bool)> {
-    if changes.changed {
-        Some((changes.original, changes.current, changes.created))
-    } else if changes.storage.is_changed() {
-        Some((changes.current, changes.current, false))
-    } else {
-        None
     }
 }
 
