@@ -463,8 +463,9 @@ where
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
                 // 2. now execute the trace call on this state
-                let (evm_env, tx_env) =
-                    eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
+                let (evm_env, tx_env) = db.with_empty_accounts_kept(|db| {
+                    eth_api.prepare_call_env(evm_env, call, db, overrides)
+                })?;
 
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
@@ -556,8 +557,9 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
-                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        let (evm_env, tx_env) = db.with_empty_accounts_kept(|db| {
+                            eth_api.prepare_call_env(evm_env.clone(), tx, db, overrides)
+                        })?;
 
                         let res = eth_api.inspect(
                             &mut db,

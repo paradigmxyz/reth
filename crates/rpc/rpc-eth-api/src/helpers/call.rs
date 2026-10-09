@@ -194,8 +194,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         );
                     }
                     if let Some(ref state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides.clone(), &mut db)
-                            .map_err(Self::Error::from_eth_err)?;
+                        // An account that an override leaves empty stays in the state, with
+                        // its storage, as in geth; EIP-161 state clear must not remove it.
+                        db.with_empty_accounts_kept(|db| {
+                            apply_state_overrides(state_overrides.clone(), db)
+                        })
+                        .map_err(Self::Error::from_eth_err)?;
                     }
 
                     let chain_id = evm_env.cfg_env.chain_id;
@@ -410,8 +414,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
-                            .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
+                        let (current_evm_env, prepared_tx) = db
+                            .with_empty_accounts_kept(|db| {
+                                this.prepare_call_env(evm_env.clone(), tx, db, overrides)
+                            })
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
@@ -489,12 +495,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
+            let (evm_env, mut tx_env) = db.with_empty_accounts_kept(|db| {
+                this.prepare_call_env(evm_env, request, db, EvmOverrides::state(state_override))
+            })?;
 
             let mut evm = this.evm_config().evm_with_env_and_inspector(
                 &mut db,
@@ -695,8 +698,9 @@ pub trait Call:
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                let (evm_env, tx_env) =
-                    this.prepare_call_env(evm_env, request, &mut db, overrides)?;
+                let (evm_env, tx_env) = db.with_empty_accounts_kept(|db| {
+                    this.prepare_call_env(evm_env, request, db, overrides)
+                })?;
 
                 f(&mut db, evm_env, tx_env)
             })
