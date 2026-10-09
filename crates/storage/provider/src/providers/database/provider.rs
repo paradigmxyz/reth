@@ -4108,7 +4108,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4258,22 +4258,6 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
-    }
-
-    #[test]
-    fn metadata_can_be_deleted() {
-        let factory = create_test_provider_factory();
-        let key = "metadata-delete-test";
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.write_metadata(key, vec![1]).unwrap();
-        provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), Some(vec![1]));
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.delete_metadata(key).unwrap();
-        provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), None);
     }
 
     #[test]

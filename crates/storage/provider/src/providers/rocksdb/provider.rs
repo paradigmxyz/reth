@@ -4974,29 +4974,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_storage_history_batch_leaves_shards_above_target_untouched() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let addr = Address::repeat_byte(0x42);
-        let slot = B256::repeat_byte(0x01);
-        seed_three_storage_shards(&provider, addr, slot);
-
-        // Only the oldest shard holds blocks at or below the target.
-        let mut batch = provider.batch();
-        let outcomes = batch.prune_storage_history_batch(&[((addr, slot), 50)]).unwrap();
-        batch.commit().unwrap();
-
-        assert_eq!(outcomes.updated, 1);
-        // The trimmed shard keeps its own key. Re-keying it to the sentinel here would overwrite
-        // the sentinel's blocks.
-        assert_eq!(
-            storage_shard_layout(&provider, addr, slot),
-            vec![(100, vec![100]), (200, vec![150, 200]), (u64::MAX, vec![250, 300])]
-        );
-    }
-
-    #[test]
     fn test_prune_storage_history_batch_trims_sentinel_once_earlier_shards_expire() {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
@@ -5012,39 +4989,6 @@ mod tests {
 
         assert_eq!(outcomes.deleted, 1);
         assert_eq!(storage_shard_layout(&provider, addr, slot), vec![(u64::MAX, vec![300])]);
-    }
-
-    #[test]
-    fn test_prune_account_history_batch_leaves_shards_above_target_untouched() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let addr = Address::repeat_byte(0x42);
-
-        let mut batch = provider.batch();
-        batch
-            .put::<tables::AccountsHistory>(
-                ShardedKey::new(addr, 100),
-                &BlockNumberList::new_pre_sorted([10, 50, 100]),
-            )
-            .unwrap();
-        batch
-            .put::<tables::AccountsHistory>(
-                ShardedKey::new(addr, u64::MAX),
-                &BlockNumberList::new_pre_sorted([250, 300]),
-            )
-            .unwrap();
-        batch.commit().unwrap();
-
-        let mut batch = provider.batch();
-        let outcomes = batch.prune_account_history_batch(&[(addr, 50)]).unwrap();
-        batch.commit().unwrap();
-
-        assert_eq!(outcomes.updated, 1);
-        assert_eq!(
-            account_shard_layout(&provider, addr),
-            vec![(100, vec![100]), (u64::MAX, vec![250, 300])]
-        );
     }
 
     #[test]

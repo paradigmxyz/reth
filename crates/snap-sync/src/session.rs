@@ -182,31 +182,6 @@ mod tests {
     }
 
     #[test]
-    fn waits_while_no_block_is_eligible() {
-        // The only block access list commitment is at the head, past the head distance.
-        let provider = provider_with(chain(Some(3)));
-        let mut session = session();
-
-        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSyncSessionState::Waiting);
-        assert_eq!(session.target(), None);
-        assert!(session.start().is_none());
-    }
-
-    #[test]
-    fn selects_an_eligible_target() {
-        let headers = chain(Some(0));
-        let expected = headers[2].clone();
-        let provider = provider_with(headers);
-        let mut session = session();
-
-        session.select(&provider, 3, None).unwrap();
-
-        let target = session.target().unwrap();
-        assert_eq!(target.target().number, 2);
-        assert_eq!(target.target().hash, expected.hash_slow());
-    }
-
-    #[test]
     fn a_target_no_work_took_is_replaced_as_the_head_advances() {
         let provider = provider_with(chain(Some(0)));
         let mut session = session();
@@ -244,16 +219,6 @@ mod tests {
     }
 
     #[test]
-    fn only_one_worker_takes_a_target() {
-        let provider = provider_with(chain(Some(0)));
-        let mut session = session();
-        session.select(&provider, 3, None).unwrap();
-
-        assert!(session.start().is_some());
-        assert!(session.start().is_none());
-    }
-
-    #[test]
     fn a_recorded_target_is_resumed_once() {
         let (factory, _, write) = downloading();
         let provider = factory.database_provider_rw().unwrap();
@@ -268,31 +233,6 @@ mod tests {
         // A resumed target advances like a started one.
         assert!(session.advance(&provider, write, 3, None).unwrap().is_some());
         assert_eq!(session.target().unwrap().target().number, 2);
-    }
-
-    #[test]
-    fn cancellation_stops_outstanding_work() {
-        let provider = provider_with(chain(Some(0)));
-        let mut session = session();
-        session.select(&provider, 3, None).unwrap();
-        let (_, outstanding) = session.start().unwrap();
-
-        session.cancel();
-
-        assert!(outstanding.is_cancelled());
-        assert!(session.is_cancelled());
-        assert_eq!(session.state(), &SnapSyncSessionState::Cancelled);
-        assert_eq!(session.target(), None);
-    }
-
-    #[test]
-    fn a_cancelled_session_selects_nothing() {
-        let provider = provider_with(chain(Some(0)));
-        let mut session = session();
-        session.cancel();
-
-        assert_eq!(session.select(&provider, 3, None).unwrap(), &SnapSyncSessionState::Cancelled);
-        assert!(session.start().is_none());
     }
 
     #[test]

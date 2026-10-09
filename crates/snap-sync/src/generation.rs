@@ -54,13 +54,6 @@ impl SnapGeneration {
         let header = provider.sealed_header(self.target.number)?;
         Ok(header.is_some_and(|header| header.hash() == self.target.hash))
     }
-
-    /// Returns this generation moved to `phase`.
-    #[cfg(test)]
-    pub(crate) const fn with_phase(mut self, phase: SnapPhase) -> Self {
-        self.phase = phase;
-        self
-    }
 }
 
 /// The stage a [`SnapGeneration`] has reached.
