@@ -26,6 +26,7 @@ reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
+revm-bytecode.workspace = true
 
 # codecs
 modular-bitfield.workspace = true

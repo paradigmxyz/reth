@@ -173,23 +173,6 @@ impl<S: EvmStateProvider> EvmStateProvider for InstrumentedStateProvider<S> {
         res
     }
 
-    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        let start = Instant::now();
-        let res = self.state_provider.bytecode_by_hash(code_hash);
-        let elapsed = start.elapsed();
-        self.metrics.code_fetch_latency.record(elapsed);
-        self.stats.total_code_fetches.fetch_add(1, Ordering::Relaxed);
-        self.stats.total_code_fetch_latency.add_duration(elapsed);
-        self.stats.total_code_fetched_bytes.fetch_add(
-            res.as_ref()
-                .ok()
-                .and_then(|code| code.as_ref().map(|code| code.len()))
-                .unwrap_or_default(),
-            Ordering::Relaxed,
-        );
-        res
-    }
-
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
     }
@@ -245,5 +228,63 @@ impl StateProviderStats {
     /// Returns total time spent on account fetches.
     pub fn total_account_fetch_latency(&self) -> Duration {
         self.total_account_fetch_latency.duration()
+    }
+}
+
+impl<S: EvmStateProvider> reth_provider::BytecodeReader for InstrumentedStateProvider<S> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        let start = Instant::now();
+        let res = self.state_provider.bytecode_by_hash(code_hash);
+        let elapsed = start.elapsed();
+        self.metrics.code_fetch_latency.record(elapsed);
+        self.stats.total_code_fetches.fetch_add(1, Ordering::Relaxed);
+        self.stats.total_code_fetch_latency.add_duration(elapsed);
+        self.stats.total_code_fetched_bytes.fetch_add(
+            res.as_ref()
+                .ok()
+                .and_then(|code| code.as_ref().map(|code| code.len()))
+                .unwrap_or_default(),
+            Ordering::Relaxed,
+        );
+        res
+    }
+
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        self.state_provider.legacy_code_kind(hash)
+    }
+
+    fn legacy_bytecode_by_hash(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.state_provider.legacy_bytecode_by_hash(hash)
+    }
+
+    fn legacy_delegation(&self, hash: &B256) -> ProviderResult<Option<alloy_primitives::Address>> {
+        self.state_provider.legacy_delegation(hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_provider::CodeChunkDescriptor>> {
+        self.state_provider.code_chunk_descriptor(hash)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &B256,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.state_provider.get_code_chunk_by_hash(hash, index)
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &B256,
+        representation: &reth_provider::CodeRepresentation,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        self.state_provider.get_required_code_chunk(hash, representation, index)
     }
 }

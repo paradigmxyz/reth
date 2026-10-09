@@ -37,11 +37,15 @@ pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, Data
 pub use models::ClientVersion;
 pub use reth_db_api::*;
 
+#[cfg(any(test, feature = "test-utils"))]
+mod test_hooks;
+
 /// Collection of database test utilities
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
     use crate::mdbx::DatabaseArguments;
+    pub use crate::test_hooks::{DatabaseRead, DatabaseTestHooks};
     use parking_lot::RwLock;
     use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
     use reth_fs_util;

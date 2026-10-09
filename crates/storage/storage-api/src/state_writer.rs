@@ -112,6 +112,10 @@ pub trait StateWriter {
     /// Write state changes to the database.
     fn write_state_changes(&self, changes: StateChangeset) -> ProviderResult<()>;
 
+    /// Publish authenticated chunk payloads and preparation in the current transaction.
+    /// A storage failure must prevent the transaction from being committed.
+    fn write_validated_chunked_code(&self, code: &crate::ValidatedCode) -> ProviderResult<()>;
+
     /// Writes the hashed state changes to the database
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()>;
 

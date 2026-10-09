@@ -50,18 +50,18 @@ impl<N: NodeTypesWithDB> DbTool<N> {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None
+                        return None;
                     }
                     if key.len() < filter.min_key_size {
-                        return None
+                        return None;
                     }
                     if value.len() < filter.min_value_size {
-                        return None
+                        return None;
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None
+                            return None;
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -75,12 +75,12 @@ impl<N: NodeTypesWithDB> DbTool<N> {
                                 searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result()
+                                return result();
                             }
                         }
                         None => {
                             hits += 1;
-                            return result()
+                            return result();
                         }
                     }
                 }
@@ -157,7 +157,15 @@ impl<N: ProviderNodeTypes> DbTool<N> {
 
     /// Drops the provided table from the database.
     pub fn drop_table<T: Table>(&self) -> Result<()> {
-        self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
+        let tx = self.provider_factory.db_ref().tx_mut()?;
+        // Content can still be needed by historical states after the latest owner clears code.
+        if matches!(T::NAME, "BytecodeChunkDescriptors" | "BytecodeChunks") &&
+            tx.entries::<reth_db_api::tables::BytecodeChunkDescriptors>()? != 0
+        {
+            eyre::bail!("cannot drop chunk storage while chunked accounts are retained")
+        }
+        tx.clear::<T>()?;
+        tx.commit()?;
         Ok(())
     }
 }

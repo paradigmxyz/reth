@@ -752,7 +752,22 @@ where
         if let Some(code_hash) = &sender.bytecode_hash &&
             *code_hash != KECCAK_EMPTY
         {
-            let is_eip7702 = if self.fork_tracker.is_prague_activated() {
+            let native = match reth_execution_types::native_provider_account(sender) {
+                Ok(native) => native,
+                Err(error) => {
+                    return Err(TransactionValidationOutcome::Error(
+                        *transaction.hash(),
+                        Box::new(error),
+                    ))
+                }
+            };
+            let is_eip7702 = if !self.fork_tracker.is_prague_activated() {
+                false
+            } else if native.inline_delegation.is_some() {
+                true
+            } else if native.code_metadata.is_some() {
+                false
+            } else {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.is_some_and(|b| b.is_eip7702()),
                     Err(err) => {
@@ -762,8 +777,6 @@ where
                         ))
                     }
                 }
-            } else {
-                false
             };
 
             if !is_eip7702 {

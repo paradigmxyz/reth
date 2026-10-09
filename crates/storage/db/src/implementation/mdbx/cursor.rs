@@ -25,6 +25,9 @@ pub type CursorRW<T> = Cursor<RW, T>;
 /// Cursor wrapper to access KV items.
 #[derive(Debug)]
 pub struct Cursor<K: TransactionKind, T: Table> {
+    #[cfg(any(test, feature = "test-utils"))]
+    test_hooks: Option<crate::test_utils::DatabaseTestHooks>,
+
     /// Inner `libmdbx` cursor.
     pub(crate) inner: reth_libmdbx::Cursor<K>,
     /// Cache buffer that receives compressed values.
@@ -39,8 +42,18 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
     pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<TableOperationMetrics>,
+        #[cfg(any(test, feature = "test-utils"))] test_hooks: Option<
+            crate::test_utils::DatabaseTestHooks,
+        >,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self {
+            inner,
+            buf: Vec::new(),
+            metrics,
+            _dbi: PhantomData,
+            #[cfg(any(test, feature = "test-utils"))]
+            test_hooks,
+        }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -90,36 +103,69 @@ macro_rules! compress_to_buf_or_ref {
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.first())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.first(),
+        )
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.set_key(key.encode().as_ref()),
+        )
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.set_range(key.encode().as_ref()),
+        )
     }
 
     fn next(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.next(),
+        )
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.prev(),
+        )
     }
 
     fn last(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.last())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.last(),
+        )
     }
 
     fn current(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.get_current())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.get_current(),
+        )
     }
 
     fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref())).transpose()
+            decode_observed::<T>(
+                #[cfg(any(test, feature = "test-utils"))]
+                self.test_hooks.as_ref(),
+                self.inner.set_range(start_key.encode().as_ref()),
+            )
+            .transpose()
         } else {
             self.first().transpose()
         };
@@ -138,7 +184,12 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
             }
             Bound::Unbounded => self.inner.first(),
         };
-        let start = decode::<T>(start).transpose();
+        let start = decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            start,
+        )
+        .transpose();
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
     }
 
@@ -147,7 +198,11 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref()))
+            decode_observed::<T>(
+                #[cfg(any(test, feature = "test-utils"))]
+                self.test_hooks.as_ref(),
+                self.inner.set_range(start_key.encode().as_ref()),
+            )
         } else {
             self.last()
         }
@@ -160,12 +215,20 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev_dup())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.prev_dup(),
+        )
     }
 
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_dup())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.next_dup(),
+        )
     }
 
     /// Returns the last `value` of the current duplicate `key`.
@@ -179,7 +242,11 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_nodup())
+        decode_observed::<T>(
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.as_ref(),
+            self.inner.next_nodup(),
+        )
     }
 
     /// Returns the next `value` of a duplicate `key`.
@@ -464,4 +531,19 @@ mod tests {
             assert_eq!(copied_value, expected_value);
         }
     }
+}
+
+/// Record raw cursor results before decoding, without substituting database behavior.
+fn decode_observed<T: Table>(
+    #[cfg(any(test, feature = "test-utils"))] hooks: Option<&crate::test_utils::DatabaseTestHooks>,
+    result: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
+) -> PairResult<T> {
+    #[cfg(any(test, feature = "test-utils"))]
+    if let Some(hooks) = hooks {
+        hooks.before_read(T::NAME)?;
+        if let Ok(Some((key, value))) = &result {
+            hooks.read(T::NAME, key, Some(value));
+        }
+    }
+    decode::<T>(result)
 }

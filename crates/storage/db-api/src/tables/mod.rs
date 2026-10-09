@@ -399,6 +399,18 @@ tables! {
         type Value = Bytecode;
     }
 
+    /// Validated multi-chunk descriptors keyed by the original full-code hash.
+    table BytecodeChunkDescriptors {
+        type Key = B256;
+        type Value = reth_db_models::CodeChunkDescriptor;
+    }
+
+    /// Original immutable payloads keyed by their chunk commitment.
+    table BytecodeChunks {
+        type Key = B256;
+        type Value = alloy_primitives::Bytes;
+    }
+
     /// Stores the current state of an [`Account`].
     table PlainAccountState {
         type Key = Address;

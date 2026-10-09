@@ -249,7 +249,7 @@ where
     {
         let state_trie_overlay = self.state_trie_overlay_mut(trie_changesets);
         if let Some(overlay) = state_trie_overlay.get() {
-            return Ok(overlay)
+            return Ok(overlay);
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
@@ -305,7 +305,7 @@ where
     {
         let overlay = self.state_trie_overlay(trie_changesets)?;
         if overlay.skipped_for_reused_sparse_trie() {
-            return Err(ProviderError::UnsupportedProvider)
+            return Err(ProviderError::UnsupportedProvider);
         }
         let TrieInputSorted { nodes: input_nodes, state: input_state, mut prefix_sets } = input;
         let overlay_input = overlay.input();
@@ -335,7 +335,7 @@ where
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
-            return Ok((&overlay.overlay, overlay.historical_fallback.as_ref()))
+            return Ok((&overlay.overlay, overlay.historical_fallback.as_ref()));
         }
 
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(self.provider())?;
@@ -356,7 +356,7 @@ where
                     .and_then(|checkpoint| checkpoint.block_number)
                     .map(|block_number| block_number + 1);
                 if account_history_block_number.is_some_and(|lowest| block_number < lowest) {
-                    return Err(ProviderError::StateAtBlockPruned(block_number))
+                    return Err(ProviderError::StateAtBlockPruned(block_number));
                 }
 
                 let storage_history_block_number = self
@@ -365,7 +365,7 @@ where
                     .and_then(|checkpoint| checkpoint.block_number)
                     .map(|block_number| block_number + 1);
                 if storage_history_block_number.is_some_and(|lowest| block_number < lowest) {
-                    return Err(ProviderError::StateAtBlockPruned(block_number))
+                    return Err(ProviderError::StateAtBlockPruned(block_number));
                 }
 
                 Ok(HistoricalFallback {
@@ -412,7 +412,7 @@ where
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.as_ref().map(Account::from))
+            return Ok(account.as_ref().map(Account::from));
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -432,7 +432,7 @@ where
                 HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                     self.basic_account_from_db(address)
                 }
-            }
+            };
         }
         self.basic_account_from_db(address)
     }
@@ -474,7 +474,7 @@ where
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         let (overlay, _) = self.execution_overlay()?;
         if let Some(block) = overlay.block_hashes().iter().find(|block| block.number == number) {
-            return Ok(Some(block.hash))
+            return Ok(Some(block.hash));
         }
         self.provider().block_hash(number)
     }
@@ -488,7 +488,7 @@ where
         let mut block_hashes =
             overlay.block_hashes().iter().filter(|block| (start..end).contains(&block.number));
         let Some(first_block) = block_hashes.next() else {
-            return self.provider().canonical_hashes_range(start, end)
+            return self.provider().canonical_hashes_range(start, end);
         };
 
         let mut hashes = self.provider().canonical_hashes_range(start, first_block.number)?;
@@ -516,7 +516,94 @@ where
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
-        self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        reth_db_api::code_chunks::bytecode_by_hash(self.provider().tx(), code_hash)
+    }
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return Ok(Some(code.is_eip7702()))
+        }
+        reth_db_api::code_chunks::legacy_code_kind(self.provider().tx(), hash)
+    }
+
+    fn legacy_bytecode_by_hash(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return Ok(Some(reth_primitives_traits::Bytecode(code.clone())))
+        }
+        self.provider()
+            .tx()
+            .get_by_encoded_key::<reth_db_api::tables::Bytecodes>(hash)
+            .map_err(Into::into)
+    }
+
+    fn legacy_delegation(&self, hash: &B256) -> ProviderResult<Option<Address>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return Ok(code.eip7702_address());
+        }
+        reth_db_api::code_chunks::legacy_delegation(self.provider().tx(), hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_storage_api::CodeChunkDescriptor>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return reth_storage_api::ValidatedCode::new(code.original_bytes())
+                .map(|code| code.descriptor().cloned())
+                .map_err(reth_storage_errors::provider::ProviderError::InvalidChunkedCode);
+        }
+        reth_db_api::code_chunks::descriptor(self.provider().tx(), hash, 0)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &B256,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return reth_storage_api::resident_code_chunk(hash, code.original_bytes(), None, index);
+        }
+        reth_db_api::code_chunks::get_code_chunk_by_hash(self.provider().tx(), hash, index)
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &B256,
+        representation: &reth_storage_api::CodeRepresentation,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        match representation {
+            reth_storage_api::CodeRepresentation::Empty => return Ok(None),
+            reth_storage_api::CodeRepresentation::Legacy if index != 0 => return Ok(None),
+            reth_storage_api::CodeRepresentation::Chunked(descriptor)
+                if descriptor.chunk_range(index).is_none() =>
+            {
+                return Ok(None)
+            }
+            _ => {}
+        }
+        let (overlay, _) = self.execution_overlay()?;
+        if let Some(code) = overlay.code_hashes().get(hash) {
+            return reth_storage_api::resident_code_chunk(
+                hash,
+                code.original_bytes(),
+                Some(representation),
+                index,
+            );
+        }
+        reth_db_api::code_chunks::get_required_code_chunk(
+            self.provider().tx(),
+            hash,
+            representation,
+            index,
+        )
     }
 }
 
@@ -766,7 +853,7 @@ where
             .values()
             .any(|account| account.was_destroyed() && account.original_info.is_some())
         {
-            return Ok(hashed_state)
+            return Ok(hashed_state);
         }
 
         let overlay_state = self.build_overlay(TrieInputSorted::default(), true)?.state;
@@ -824,7 +911,7 @@ where
                 HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                     self.storage_from_db(address, storage_key, true)
                 }
-            }
+            };
         }
         self.storage_from_db(address, storage_key, false)
     }
@@ -855,7 +942,7 @@ where
             if let Some(entry) = cursor.seek_by_key_subkey(address, storage_key)? &&
                 entry.key == storage_key
             {
-                return Ok(Some(entry.value))
+                return Ok(Some(entry.value));
             }
             Ok(zero_if_missing.then_some(U256::ZERO))
         }

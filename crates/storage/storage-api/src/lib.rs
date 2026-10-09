@@ -115,3 +115,10 @@ pub mod macros;
 
 mod evm;
 pub use evm::*;
+
+pub use reth_db_models::code_chunks::{
+    ChunkPreparation, CodeChunkDescriptor, CodeRepresentation, CodeValidationError, ValidatedCode,
+    CODE_CHUNK_SIZE, LEGACY_CODE_CHUNK_SIZE, MAX_CODE_CHUNKS, MAX_CODE_SIZE,
+};
+
+pub use reth_storage_errors::provider::CodeReadContext;

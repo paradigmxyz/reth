@@ -971,8 +971,6 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b94e3e0a88f8db47250ac8a95fb825d020719f833eb1dc661bd3609c3bbece7d"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -3705,7 +3703,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3723,7 +3721,6 @@ dependencies = [
  "bitvec",
  "blst",
  "c-kzg",
- "cfg-if",
  "derive-where",
  "evm2-macros",
  "gmp-mpfr-sys",
@@ -3745,7 +3742,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3767,7 +3764,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3782,7 +3779,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "eyre",
  "ruint",
@@ -3791,12 +3788,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3809,7 +3806,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3832,7 +3829,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3842,7 +3839,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3855,7 +3852,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3871,7 +3868,7 @@ dependencies = [
  "eyre",
  "libc",
  "libloading 0.9.0",
- "quanta 0.12.6",
+ "quanta 0.13.0",
  "rayon",
  "tempfile",
  "tracing",
@@ -3882,7 +3879,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm2?rev=a204db902137a4e03412d23f5cd4ea96b767852c#a204db902137a4e03412d23f5cd4ea96b767852c"
+source = "git+https://github.com/alloy-rs/evm2?rev=6d09c42da976adcafa4cbddd107dca56173138bc#6d09c42da976adcafa4cbddd107dca56173138bc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8640,6 +8637,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
+ "revm-bytecode",
  "roaring",
  "serde",
  "test-fuzz",
@@ -10257,8 +10255,6 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ba9e5768d35c074e997bd8c92938c8a52f3207c5ff97258eb2eca5d7a79dd5"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10296,13 +10292,19 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
+ "alloy-network",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
+ "alloy-transport",
  "assert_matches",
+ "evm2",
  "eyre",
  "itertools 0.14.0",
  "libc",
  "metrics",
+ "metrics-util",
  "notify",
  "parking_lot",
  "rand 0.9.5",
@@ -10310,26 +10312,43 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-codecs",
+ "reth-config",
  "reth-db",
  "reth-db-api",
+ "reth-db-common",
+ "reth-downloaders",
+ "reth-engine-tree",
  "reth-errors",
+ "reth-eth-wire-types",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-execution-cache",
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
+ "reth-network",
+ "reth-network-api",
+ "reth-network-p2p",
  "reth-nippy-jar",
  "reth-node-types",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-eth-api",
+ "reth-snap-sync",
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-storage-overlay",
+ "reth-storage-rpc-provider",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
  "revm",
@@ -10338,6 +10357,7 @@ dependencies = [
  "strum 0.27.2",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -11028,6 +11048,7 @@ dependencies = [
  "alloy-rlp",
  "derive_more",
  "reth-codecs",
+ "reth-db-models",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
@@ -11570,8 +11591,6 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b2d2ec0be925c4c87ff4afae33af4b9f693d9b011f74d6b4d52267a62df0c49"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.2",

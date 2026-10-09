@@ -1,0 +1,64 @@
+[package]
+name = "revm-state"
+description = "Revm state types"
+version = "43.0.1"
+authors.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# revm
+primitives.workspace = true
+bytecode.workspace = true
+
+# alloy
+alloy-eip7928.workspace = true
+
+# misc
+bitflags.workspace = true
+nonmax = { version = "0.5.5", default-features = false }
+triomphe = { version = "0.1.16", default-features = false, optional = true }
+
+# Optional
+serde = { workspace = true, features = ["derive", "rc"], optional = true }
+
+[dev-dependencies]
+rmp-serde = "1.3"
+postcard = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
+
+[features]
+# Enables chain-specific account payloads and their BAL history.
+account-ext = ["dep:triomphe"]
+default = ["std"]
+std = [
+    "triomphe?/std",
+    "serde?/std",
+    "serde_json/std",
+    "primitives/std",
+    "bitflags/std",
+    "bytecode/std",
+    "alloy-eip7928/std",
+    "nonmax/std",
+]
+serde = [
+    "dep:serde",
+    "triomphe?/serde",
+    "primitives/serde",
+    "bitflags/serde",
+    "bytecode/serde",
+    "alloy-eip7928/serde",
+    "nonmax/serde",
+]
+map-foldhash = ["primitives/map-foldhash"]

@@ -318,7 +318,42 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        reth_db_api::code_chunks::bytecode_by_hash(self.tx(), code_hash)
+    }
+    fn legacy_code_kind(&self, hash: &B256) -> ProviderResult<Option<bool>> {
+        reth_db_api::code_chunks::legacy_code_kind(self.tx(), hash)
+    }
+
+    fn legacy_bytecode_by_hash(&self, hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        self.tx().get_by_encoded_key::<reth_db_api::tables::Bytecodes>(hash).map_err(Into::into)
+    }
+
+    fn legacy_delegation(&self, hash: &B256) -> ProviderResult<Option<Address>> {
+        reth_db_api::code_chunks::legacy_delegation(self.tx(), hash)
+    }
+
+    fn code_chunk_descriptor(
+        &self,
+        hash: &B256,
+    ) -> ProviderResult<Option<reth_storage_api::CodeChunkDescriptor>> {
+        reth_db_api::code_chunks::descriptor(self.tx(), hash, 0)
+    }
+
+    fn get_code_chunk_by_hash(
+        &self,
+        hash: &B256,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        reth_db_api::code_chunks::get_code_chunk_by_hash(self.tx(), hash, index)
+    }
+
+    fn get_required_code_chunk(
+        &self,
+        hash: &B256,
+        representation: &reth_storage_api::CodeRepresentation,
+        index: u32,
+    ) -> ProviderResult<Option<alloy_primitives::Bytes>> {
+        reth_db_api::code_chunks::get_required_code_chunk(self.tx(), hash, representation, index)
     }
 }
 

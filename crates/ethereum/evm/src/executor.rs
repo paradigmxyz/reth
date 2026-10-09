@@ -1088,6 +1088,25 @@ mod tests {
             Ok(Bytecode::default())
         }
 
+        fn get_code_kind_by_hash(
+            &mut self,
+            _code_hash: &B256,
+        ) -> Result<evm2::bytecode::BytecodeKind, Self::Error> {
+            Ok(evm2::bytecode::BytecodeKind::Legacy)
+        }
+
+        fn get_code_chunk_by_hash(
+            &mut self,
+            code_hash: &B256,
+            index: u32,
+        ) -> Result<Option<evm2::bytecode::CodeChunk>, Self::Error> {
+            if index != 0 {
+                return Ok(None);
+            }
+            self.get_code_by_hash(code_hash)
+                .map(|code| Some(evm2::bytecode::CodeChunk::from_bytecode(&code)))
+        }
+
         fn get_storage(&mut self, _address: &Address, _key: &Word) -> Result<Word, Self::Error> {
             Ok(Word::ZERO)
         }

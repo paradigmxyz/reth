@@ -150,6 +150,64 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
         self.0.commit()
     }
 
+    /// Atomically publish validated code and a caller-composed account.
+    ///
+    /// All records use the provider's MDBX transaction. Account extensions are opaque.
+    /// A storage failure poisons provider commit; callers must discard the transaction.
+    pub fn write_chunked_code(
+        &self,
+        address: Address,
+        account: Account,
+        code: &reth_storage_api::ValidatedCode,
+    ) -> ProviderResult<()> {
+        if account.bytecode_hash.unwrap_or_else(|| keccak256([])) != code.code_hash() {
+            return Err(ProviderError::InvalidChunkedCode(
+                reth_storage_api::CodeValidationError::FullCodeHash,
+            ));
+        }
+        let result = (|| -> ProviderResult<()> {
+            if let Some(descriptor) = code.descriptor() {
+                for (hash, payload) in descriptor.chunk_hashes().iter().zip(code.chunks()) {
+                    self.tx.put::<tables::BytecodeChunks>(*hash, payload.clone())?;
+                }
+                self.tx.put::<tables::BytecodeChunkDescriptors>(
+                    code.code_hash(),
+                    descriptor.clone(),
+                )?;
+            } else if !code.original_bytes().is_empty() {
+                self.tx.put::<tables::Bytecodes>(
+                    code.code_hash(),
+                    Bytecode(revm::bytecode::Bytecode::new_legacy(code.original_bytes().clone())),
+                )?;
+            }
+            if self.cached_storage_settings().use_hashed_state() {
+                self.tx.put::<tables::HashedAccounts>(keccak256(address), account)?;
+            } else {
+                self.tx.put::<tables::PlainAccountState>(address, account)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.chunk_write_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
+    }
+
+    /// Authenticate untrusted payloads before making any transaction-visible writes.
+    pub fn import_chunked_code(
+        &self,
+        address: Address,
+        account: Account,
+        size: u32,
+        hashes: Vec<B256>,
+        chunks: Vec<alloy_primitives::Bytes>,
+    ) -> ProviderResult<()> {
+        let hash = account.bytecode_hash.unwrap_or_else(|| keccak256([]));
+        let code = reth_storage_api::ValidatedCode::from_chunks(hash, size, hashes, chunks)
+            .map_err(ProviderError::InvalidChunkedCode)?;
+        self.write_chunked_code(address, account, &code)
+    }
+
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
@@ -195,6 +253,8 @@ impl SaveBlocksMode {
 pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
+    /// Refuse publication after a failed chunk write.
+    chunk_write_failed: std::sync::atomic::AtomicBool,
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
     /// Static File provider
@@ -393,6 +453,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            chunk_write_failed: std::sync::atomic::AtomicBool::new(false),
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order,
@@ -555,7 +616,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 input.prev_partial_state_trie(),
                 db_tip,
                 partial_state_trie,
-            ))))
+            ))));
         }
 
         self.save_blocks_inner(
@@ -939,16 +1000,47 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Writes bytecodes to MDBX.
+    /// Writes native outcomes, selecting chunk storage only from explicit account metadata.
     fn write_bytecodes(
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
+        chunked: &BTreeMap<B256, reth_storage_api::CodeChunkDescriptor>,
     ) -> ProviderResult<()> {
-        let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in bytecodes {
-            bytecodes_cursor.upsert(hash, &bytecode)?;
+        let result = (|| {
+            for (hash, bytecode) in bytecodes {
+                if let Some(committed) = chunked.get(&hash) {
+                    let code = reth_storage_api::ValidatedCode::new(bytecode.original_bytes())
+                        .map_err(ProviderError::InvalidChunkedCode)?;
+                    let descriptor = code.descriptor().ok_or_else(|| {
+                        ProviderError::InvalidChunkedCode(
+                            reth_storage_api::CodeValidationError::InvalidCodeSize {
+                                size: code.original_bytes().len() as u32,
+                            },
+                        )
+                    })?;
+                    if code.code_hash() != hash ||
+                        descriptor.code_size() != committed.code_size() ||
+                        descriptor.chunk_hashes() != committed.chunk_hashes()
+                    {
+                        return Err(ProviderError::InvalidChunkedCode(
+                            reth_storage_api::CodeValidationError::FullCodeHash,
+                        ));
+                    }
+                    for (chunk_hash, bytes) in descriptor.chunk_hashes().iter().zip(code.chunks()) {
+                        self.tx.put::<tables::BytecodeChunks>(*chunk_hash, bytes.clone())?;
+                    }
+                    self.tx.put::<tables::BytecodeChunkDescriptors>(hash, descriptor.clone())?;
+                } else {
+                    // Historical and disabled-fork records retain their exact code kind and shape.
+                    self.tx.put::<tables::Bytecodes>(hash, bytecode)?;
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.chunk_write_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        Ok(())
+        result
     }
 }
 
@@ -982,7 +1074,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break
+            break;
         }
 
         // Always delete the current shard from the database first
@@ -997,18 +1089,18 @@ where
         // Keep it deleted (don't return anything for reinsertion)
         if first >= block_number {
             item = cursor.prev()?;
-            continue
+            continue;
         }
         // Case 2: This is a boundary shard (spans across the unwinding point)
         // The shard contains some blocks below and some at/above the unwinding point
         else if block_number <= sharded_key.as_ref().highest_block_number {
             // Return only the block numbers that are below the unwinding point
             // These will be reinserted to preserve the historical data
-            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
+            return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>());
         }
         // Case 3: Entire shard is below the unwinding point
         // Return all block numbers for reinsertion (preserve entire shard)
-        return Ok(list.iter().collect::<Vec<_>>())
+        return Ok(list.iter().collect::<Vec<_>>());
     }
 
     // No shards found or all processed
@@ -1042,6 +1134,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            chunk_write_failed: std::sync::atomic::AtomicBool::new(false),
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
@@ -1088,7 +1181,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
         let earliest_available = self.static_file_provider.earliest_history_height();
         if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
+            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available });
         }
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
@@ -1158,7 +1251,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         F: FnMut(H, BodyTy<N>, Range<TxNumber>) -> ProviderResult<R>,
     {
         if range.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         // like the single block lookups, reject ranges that reach into expired history instead
@@ -1168,7 +1261,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Err(ProviderError::BlockExpired {
                 requested: *range.start(),
                 earliest_available,
-            })
+            });
         }
 
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
@@ -1451,7 +1544,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if !self.cached_storage_settings().storage_v2 {
             return Err(ProviderError::other(StaticFileWriterError::new(
                 "pruned anchor requires storage v2",
-            )))
+            )));
         }
         let static_files = self.static_file_provider();
         for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
@@ -1481,7 +1574,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         if proposed.block_number <= current.block_number &&
             state_trie_frontier(proposed) <= state_trie_frontier(&current)
         {
-            return Ok(())
+            return Ok(());
         }
         match self.snap_attempt()? {
             Some(attempt) if !attempt.is_verified() => {
@@ -1507,7 +1600,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// legacy layout and no execution checkpoint exists.
     pub fn snap_bootstraps(&self) -> ProviderResult<bool> {
         if let Some(attempt) = self.snap_attempt()? {
-            return Ok(!attempt.is_verified())
+            return Ok(!attempt.is_verified());
         }
         let genesis = self.chain_spec().genesis_header().number();
         Ok(self
@@ -1521,7 +1614,7 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Call this after genesis is initialized, see [`Self::snap_bootstraps`].
     pub fn ensure_sync_mode(&self, snap_enabled: bool) -> ProviderResult<()> {
         if snap_enabled {
-            return if self.snap_bootstraps()? { self.ensure_snap_sync_layout() } else { Ok(()) }
+            return if self.snap_bootstraps()? { self.ensure_snap_sync_layout() } else { Ok(()) };
         }
         match self.snap_attempt()? {
             Some(attempt) if !attempt.is_verified() => {
@@ -1826,7 +1919,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
             }
             Ordering::Equal => {}
         }
@@ -1942,7 +2035,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         if let Some(number) = self.convert_hash_or_number(id)? {
             let earliest_available = self.static_file_provider.earliest_history_height();
             if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
+                return Err(ProviderError::BlockExpired { requested: number, earliest_available });
             }
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
@@ -1952,7 +2045,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             // If they exist but are not indexed, we don't have enough
             // information to return the block anyways, so we return `None`.
             let Some(transactions) = self.transactions_by_block(number.into())? else {
-                return Ok(None)
+                return Ok(None);
             };
 
             let body = self
@@ -1962,7 +2055,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                 .pop()
                 .ok_or(ProviderError::InvalidStorageOutput)?;
 
-            return Ok(Some(Self::Block::new(header, body)))
+            return Ok(Some(Self::Block::new(header, body)));
         }
 
         Ok(None)
@@ -2145,7 +2238,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                     timestamp: header.timestamp(),
                 };
 
-                return Ok(Some((transaction, meta)))
+                return Ok(Some((transaction, meta)));
             }
         }
 
@@ -2164,7 +2257,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                 Ok(Some(Vec::new()))
             } else {
                 self.transactions_by_tx_range(tx_range).map(Some)
-            }
+            };
         }
         Ok(None)
     }
@@ -2249,11 +2342,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
                 let receipts = self.receipts_by_tx_range(tx_range)?;
 
                 if receipts.len() != body.tx_count as usize {
-                    return Ok(None)
+                    return Ok(None);
                 }
 
                 Ok(Some(receipts))
-            }
+            };
         }
         Ok(None)
     }
@@ -2579,6 +2672,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         config: StateWriteConfig,
     ) -> ProviderResult<()> {
         let execution_outcome = execution_outcome.into();
+        let chunked = outcome_code_descriptors(
+            execution_outcome.state().state.values().filter_map(|account| account.info.as_ref()),
+        )?;
 
         if self.cached_storage_settings().use_hashed_state() &&
             !config.write_receipts &&
@@ -2590,6 +2686,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // to_plain_state_and_reverts conversion that iterates all accounts and storage.
             self.write_bytecodes(
                 execution_outcome.state().contracts.iter().map(|(h, b)| (*h, Bytecode(b.clone()))),
+                &chunked,
             )?;
             return Ok(());
         }
@@ -2664,7 +2761,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     .receipts
                     .is_some_and(|mode| mode.should_prune(block_number, tip))
             {
-                continue
+                continue;
             }
 
             // If there are new addresses to retain after this block number, track them
@@ -2680,7 +2777,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     has_contract_log_filter &&
                     !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
-                    continue
+                    continue;
                 }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
@@ -2770,103 +2867,147 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     }
 
     fn write_state_changes(&self, mut changes: StateChangeset) -> ProviderResult<()> {
-        // sort all entries so they can be written to database in more performant way.
-        // and take smaller memory footprint.
-        changes.accounts.par_sort_by_key(|a| a.0);
-        changes.storage.par_sort_by_key(|a| a.address);
-        changes.contracts.par_sort_by_key(|a| a.0);
+        let result = (|| {
+            let chunked = outcome_code_descriptors(
+                changes.accounts.iter().filter_map(|(_, info)| info.as_ref()),
+            )?;
+            // sort all entries so they can be written to database in more performant way.
+            // and take smaller memory footprint.
+            changes.accounts.par_sort_by_key(|a| a.0);
+            changes.storage.par_sort_by_key(|a| a.address);
+            changes.contracts.par_sort_by_key(|a| a.0);
 
-        if !self.cached_storage_settings().use_hashed_state() {
-            // Write new account state
-            tracing::trace!(len = changes.accounts.len(), "Writing new account state");
-            let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
-            // write account to database.
-            for (address, account) in changes.accounts {
-                if let Some(account) = account {
-                    tracing::trace!(?address, "Updating plain state account");
-                    accounts_cursor.upsert(address, &account.into())?;
-                } else if accounts_cursor.seek_exact(address)?.is_some() {
-                    tracing::trace!(?address, "Deleting plain state account");
-                    accounts_cursor.delete_current()?;
+            if !self.cached_storage_settings().use_hashed_state() {
+                // Write new account state
+                tracing::trace!(len = changes.accounts.len(), "Writing new account state");
+                let mut accounts_cursor =
+                    self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
+                // write account to database.
+                for (address, account) in changes.accounts {
+                    if let Some(account) = account {
+                        tracing::trace!(?address, "Updating plain state account");
+                        accounts_cursor.upsert(address, &account.into())?;
+                    } else if accounts_cursor.seek_exact(address)?.is_some() {
+                        tracing::trace!(?address, "Deleting plain state account");
+                        accounts_cursor.delete_current()?;
+                    }
+                }
+
+                // Write new storage state and wipe storage if needed.
+                tracing::trace!(len = changes.storage.len(), "Writing new storage state");
+                let mut storages_cursor =
+                    self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+                for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
+                    // Wiping of storage.
+                    if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
+                        storages_cursor.delete_current_duplicates()?;
+                    }
+                    // cast storages to B256.
+                    let mut storage = storage
+                        .into_iter()
+                        .map(|(k, value)| StorageEntry { key: k.into(), value })
+                        .collect::<Vec<_>>();
+                    // sort storage slots by key.
+                    storage.par_sort_unstable_by_key(|a| a.key);
+
+                    for entry in storage {
+                        tracing::trace!(?address, ?entry.key, "Updating plain state storage");
+                        if let Some(db_entry) =
+                            storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                            db_entry.key == entry.key
+                        {
+                            storages_cursor.delete_current()?;
+                        }
+
+                        if !entry.value.is_zero() {
+                            storages_cursor.upsert(address, &entry)?;
+                        }
+                    }
                 }
             }
 
-            // Write new storage state and wipe storage if needed.
-            tracing::trace!(len = changes.storage.len(), "Writing new storage state");
-            let mut storages_cursor =
-                self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
-            for PlainStorageChangeset { address, wipe_storage, storage } in changes.storage {
-                // Wiping of storage.
-                if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
-                    storages_cursor.delete_current_duplicates()?;
-                }
-                // cast storages to B256.
-                let mut storage = storage
-                    .into_iter()
-                    .map(|(k, value)| StorageEntry { key: k.into(), value })
-                    .collect::<Vec<_>>();
-                // sort storage slots by key.
-                storage.par_sort_unstable_by_key(|a| a.key);
+            // Write bytecode
+            tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
+            self.write_bytecodes(
+                changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
+                &chunked,
+            )?;
 
-                for entry in storage {
-                    tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                    if let Some(db_entry) =
-                        storages_cursor.seek_by_key_subkey(address, entry.key)? &&
-                        db_entry.key == entry.key
-                    {
-                        storages_cursor.delete_current()?;
-                    }
-
-                    if !entry.value.is_zero() {
-                        storages_cursor.upsert(address, &entry)?;
-                    }
-                }
-            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.chunk_write_failed.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        result
+    }
 
-        // Write bytecode
-        tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
-        self.write_bytecodes(
-            changes.contracts.into_iter().map(|(hash, bytecode)| (hash, Bytecode(bytecode))),
-        )?;
-
-        Ok(())
+    fn write_validated_chunked_code(
+        &self,
+        code: &reth_storage_api::ValidatedCode,
+    ) -> ProviderResult<()> {
+        let descriptor = code.descriptor().ok_or_else(|| {
+            ProviderError::InvalidChunkedCode(
+                reth_storage_api::CodeValidationError::InvalidCodeSize {
+                    size: code.original_bytes().len() as u32,
+                },
+            )
+        })?;
+        let result = (|| {
+            for (hash, bytes) in descriptor.chunk_hashes().iter().zip(code.chunks()) {
+                self.tx.put::<tables::BytecodeChunks>(*hash, bytes.clone())?;
+            }
+            self.tx
+                .put::<tables::BytecodeChunkDescriptors>(code.code_hash(), descriptor.clone())?;
+            Ok(())
+        })();
+        if result.is_err() {
+            self.chunk_write_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
     }
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
-        }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+        let result = (|| {
+            // Write hashed account updates.
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_state.accounts() {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
                 }
             }
-        }
 
-        Ok(())
+            // Write hashed storage changes.
+            let sorted_storages =
+                hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+            let mut hashed_storage_cursor =
+                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+            for (hashed_address, storage) in sorted_storages {
+                for (hashed_slot, value) in storage.storage_slots_ref() {
+                    let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+
+                    if !entry.value.is_zero() {
+                        hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    }
+                }
+            }
+
+            Ok(())
+        })();
+        if result.is_err() {
+            self.chunk_write_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
     }
 
     /// Remove the last N blocks of state.
@@ -3035,7 +3176,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default())
+            return Ok(ExecutionOutcome::default());
         }
         let start_block_number = *range.start();
 
@@ -3275,7 +3416,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0)
+            return Ok(0);
         }
 
         // Track the number of inserted entries.
@@ -3829,7 +3970,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(())
+            return Ok(());
         }
 
         // Blocks are not empty, so no need to handle the case of `blocks.first()` being
@@ -4030,6 +4171,9 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         skip_all
     )]
     fn commit(self) -> ProviderResult<()> {
+        if self.chunk_write_failed.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(ProviderError::UnsupportedProvider);
+        }
         if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
             self.commit_unwind()?;
         } else {
@@ -6014,4 +6158,36 @@ mod tests {
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
     }
+}
+
+/// Only typed extensions select chunk publication; opaque bytes never opt in by prefix or size.
+fn outcome_code_descriptors<'a>(
+    accounts: impl Iterator<Item = &'a revm::state::AccountInfo>,
+) -> ProviderResult<BTreeMap<B256, reth_storage_api::CodeChunkDescriptor>> {
+    let mut descriptors = BTreeMap::new();
+    for account in accounts {
+        #[cfg(feature = "account-ext")]
+        if let Some(bytes) = account.extension.code_metadata() {
+            let (metadata, _) =
+                reth_execution_types::decode_code_metadata(account.code_hash, bytes)
+                    .map_err(ProviderError::other)?;
+            if let Some(metadata) = metadata {
+                let descriptor = reth_storage_api::CodeChunkDescriptor::new(
+                    metadata.code_size(),
+                    metadata.chunk_hashes().to_vec(),
+                )
+                .map_err(ProviderError::InvalidChunkedCode)?;
+                if let Some(previous) = descriptors.insert(account.code_hash, descriptor.clone()) &&
+                    previous != descriptor
+                {
+                    return Err(ProviderError::InvalidChunkedCode(
+                        reth_storage_api::CodeValidationError::FullCodeHash,
+                    ));
+                }
+            }
+        }
+        #[cfg(not(feature = "account-ext"))]
+        let _ = account;
+    }
+    Ok(descriptors)
 }

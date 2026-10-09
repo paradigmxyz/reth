@@ -71,6 +71,9 @@ impl DatabaseEnvKind {
 /// Arguments for database initialization.
 #[derive(Clone, Debug)]
 pub struct DatabaseArguments {
+    #[cfg(any(test, feature = "test-utils"))]
+    test_hooks: Option<crate::test_utils::DatabaseTestHooks>,
+
     /// Client version that accesses the database.
     client_version: ClientVersion,
     /// Database geometry settings.
@@ -132,6 +135,8 @@ impl DatabaseArguments {
     pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            #[cfg(any(test, feature = "test-utils"))]
+            test_hooks: None,
             geometry: Geometry {
                 size: Some(0..(8 * TERABYTE)),
                 growth_step: Some(4 * GIGABYTE as isize),
@@ -162,6 +167,13 @@ impl DatabaseArguments {
             max_read_transaction_duration: Some(MaxReadTransactionDuration::Unbounded),
             ..Self::new(ClientVersion::default())
         }
+    }
+
+    /// Attach per-environment observers and failure injection for database tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn with_test_hooks(mut self, hooks: crate::test_utils::DatabaseTestHooks) -> Self {
+        self.test_hooks = Some(hooks);
+        self
     }
 
     /// Sets the upper size limit of the db environment, the maximum database size in bytes.
@@ -242,6 +254,9 @@ impl DatabaseArguments {
 /// Wrapper for the libmdbx environment: [Environment]
 #[derive(Debug, Clone)]
 pub struct DatabaseEnv {
+    #[cfg(any(test, feature = "test-utils"))]
+    test_hooks: Option<crate::test_utils::DatabaseTestHooks>,
+
     /// Libmdbx-sys environment.
     inner: Environment,
     /// Path to the database directory.
@@ -267,6 +282,8 @@ impl Database for DatabaseEnv {
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -276,6 +293,8 @@ impl Database for DatabaseEnv {
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
+            #[cfg(any(test, feature = "test-utils"))]
+            self.test_hooks.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -524,7 +543,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 
@@ -538,6 +557,8 @@ impl DatabaseEnv {
             dbis: Arc::default(),
             metrics: None,
             _lock_file,
+            #[cfg(any(test, feature = "test-utils"))]
+            test_hooks: args.test_hooks,
         };
 
         Ok(env)
@@ -647,7 +668,7 @@ impl DatabaseEnv {
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let tx = self.tx_mut()?;

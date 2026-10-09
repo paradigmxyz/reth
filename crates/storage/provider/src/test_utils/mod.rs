@@ -192,3 +192,13 @@ pub fn insert_headers<N: ProviderNodeTypes>(
     drop(writer);
     provider.commit().expect("failed to commit");
 }
+
+/// Build a real isolated provider with raw database observations and fault injection.
+pub fn create_test_provider_factory_with_db_hooks(
+    hooks: reth_db::test_utils::DatabaseTestHooks,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    create_test_provider_factory_with_chain_spec_and_db_args(
+        MAINNET.clone(),
+        DatabaseArguments::test().with_test_hooks(hooks),
+    )
+}
