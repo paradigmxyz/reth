@@ -21,8 +21,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
+    eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -101,6 +100,8 @@ pub struct EthTransactionValidator<Client, T, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: EnvKzgSettings,
@@ -576,16 +577,15 @@ where
             }
         }
 
-        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
-        // into the pool.
-        if transaction.is_dynamic_fee() &&
-            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        // Drop transactions with a priority fee lower than the configured minimum for acceptance
+        // into the pool. This applies to all transaction types: legacy and EIP-2930 transactions
+        // use their gas price as the priority fee.
+        if let Some(minimum_priority_fee) = self.minimum_priority_fee &&
+            transaction.priority_fee_or_price() < minimum_priority_fee
         {
             self.validation_metrics.rejected_priority_fee_below_minimum.increment(1);
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
-                minimum_priority_fee: self
-                    .minimum_priority_fee
-                    .expect("minimum priority fee is expected inside if statement"),
+                minimum_priority_fee,
             })
         }
 
@@ -607,8 +607,12 @@ where
             }
         }
 
-        ensure_intrinsic_gas(transaction, &self.fork_tracker).inspect_err(|_| {
-            self.validation_metrics.rejected_intrinsic_gas_too_low.increment(1);
+        ensure_intrinsic_gas(transaction, &self.fork_tracker).inspect_err(|err| {
+            if matches!(err, InvalidPoolTransactionError::IntrinsicGasTooLow) {
+                self.validation_metrics.rejected_intrinsic_gas_too_low.increment(1);
+            } else {
+                self.validation_metrics.rejected_intrinsic_gas_too_high.increment(1);
+            }
         })?;
 
         // light blob tx pre-checks
@@ -956,17 +960,13 @@ where
         self.fork_tracker
             .max_initcode_size
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
-        // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
-        // because the cap only applies to regular gas (state gas uses a reservoir).
-        // Store 0 to disable the txpool-level check.
-        let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            0
-        } else {
-            evm_env.cfg_env.tx_gas_limit_cap()
-        };
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
         self.fork_tracker
             .tx_gas_limit_cap
             .store(tx_gas_limit_cap, std::sync::atomic::Ordering::Relaxed);
+        self.fork_tracker
+            .tx_regular_gas_cap
+            .store(tx_regular_gas_cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn max_gas_limit(&self) -> u64 {
@@ -1071,6 +1071,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     /// The current tx fee cap limit in wei locally submitted into the pool.
     tx_fee_cap: Option<u128>,
     /// Minimum priority fee to enforce for acceptance into the pool.
+    ///
+    /// For legacy and EIP-2930 transactions the gas price is used as the priority fee.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
     ///
@@ -1093,6 +1095,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     max_initcode_size: usize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     tx_gas_limit_cap: u64,
+    /// Cached EIP-8037 intrinsic regular gas cap from EVM config (0 = no cap).
+    tx_regular_gas_cap: u64,
     /// Whether EIP-7594 blob sidecars are accepted.
     /// When false, EIP-7594 (v1) sidecars are always rejected and EIP-4844 (v0) sidecars
     /// are always accepted, regardless of Osaka fork activation.
@@ -1122,9 +1126,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             .expect("latest header is not found");
         let evm_env =
             evm_config.evm_env(&tip).expect("evm_env should not fail for existing blocks");
+        let (tx_gas_limit_cap, tx_regular_gas_cap) = tx_gas_caps(&evm_env.cfg_env);
 
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
+            block_gas_limit: tip.gas_limit().into(),
             client,
             chain_id: chain_spec.chain().id(),
             evm_config,
@@ -1160,12 +1165,8 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
-            tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-                0
-            } else {
-                evm_env.cfg_env.tx_gas_limit_cap()
-            },
+            tx_gas_limit_cap,
+            tx_regular_gas_cap,
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
 
             // EIP-7594 sidecars are accepted by default (standard Ethereum behavior)
@@ -1307,6 +1308,9 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
+    ///
+    /// This applies to all transaction types. For legacy and EIP-2930 transactions the gas price
+    /// is used as the priority fee.
     pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: Option<u128>) -> Self {
         self.minimum_priority_fee = minimum_priority_fee;
         self
@@ -1390,6 +1394,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             other_tx_types,
             max_initcode_size,
             tx_gas_limit_cap,
+            tx_regular_gas_cap,
             eip7594,
         } = self;
 
@@ -1403,6 +1408,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(max_initcode_size),
             tx_gas_limit_cap: AtomicU64::new(tx_gas_limit_cap),
+            tx_regular_gas_cap: AtomicU64::new(tx_regular_gas_cap),
         };
 
         EthTransactionValidator {
@@ -1473,6 +1479,8 @@ pub struct ForkTracker {
     pub max_initcode_size: AtomicUsize,
     /// Cached transaction gas limit cap from EVM config (0 = no cap)
     pub tx_gas_limit_cap: AtomicU64,
+    /// Cached EIP-8037 intrinsic regular gas cap from EVM config (0 = no cap).
+    pub tx_regular_gas_cap: AtomicU64,
 }
 
 impl ForkTracker {
@@ -1512,7 +1520,8 @@ impl ForkTracker {
     }
 }
 
-/// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
+/// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction, and
+/// that its intrinsic regular gas fits the EIP-8037 regular gas cap.
 ///
 /// Caution: This only checks past the Merge hardfork.
 pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
@@ -1551,10 +1560,34 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     );
 
     let gas_limit = transaction.gas_limit();
+    // EIP-8037: `tx.gas` may exceed the cap, but intrinsic regular gas and the calldata floor may
+    // not, otherwise the transaction can never be included.
+    let regular_gas_cap =
+        fork_tracker.tx_regular_gas_cap.load(std::sync::atomic::Ordering::Relaxed);
     if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas() {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
+    } else if regular_gas_cap > 0 &&
+        gas.initial_regular_gas().max(gas.floor_gas()) > regular_gas_cap
+    {
+        // `GasTooHigh` is not a bad transaction, so peers that still relay these, such as nodes
+        // without this check, are not penalized.
+        Err(InvalidTransactionError::GasTooHigh.into())
     } else {
         Ok(())
+    }
+}
+
+/// Returns the pool's `(tx_gas_limit_cap, tx_regular_gas_cap)` for the given EVM config, where 0
+/// disables the respective check.
+///
+/// EIP-8037 lets `tx.gas` exceed the EIP-7825 cap because state gas is drawn from a reservoir
+/// above it, but the cap still bounds intrinsic regular gas and the calldata floor.
+fn tx_gas_caps(cfg: &impl Cfg) -> (u64, u64) {
+    let cap = cfg.tx_gas_limit_cap();
+    if cfg.is_amsterdam_eip8037_enabled() {
+        (0, cap)
+    } else {
+        (cap, 0)
     }
 }
 
@@ -1567,10 +1600,12 @@ mod tests {
     };
     use alloy_consensus::Transaction;
     use alloy_eips::{
+        eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1579,6 +1614,20 @@ mod tests {
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::mainnet()
+    }
+
+    /// Mainnet with a 30M genesis gas limit instead of 5,000, since the validator takes its block
+    /// gas limit from the latest header.
+    fn mock_provider() -> MockEthProvider {
+        mock_provider_with_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
+    }
+
+    fn mock_provider_with_gas_limit(gas_limit: u64) -> MockEthProvider {
+        let mut genesis = MAINNET.genesis.clone();
+        genesis.gas_limit = gas_limit;
+        MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().genesis(genesis).build())
+            .with_genesis_block()
     }
 
     fn get_transaction() -> EthPooledTransaction {
@@ -1606,6 +1655,10 @@ mod tests {
             value: U256::from(value),
             ..Default::default()
         };
+        pooled_eip1559_tx(tx, sender)
+    }
+
+    fn pooled_eip1559_tx(tx: alloy_consensus::TxEip1559, sender: Address) -> EthPooledTransaction {
         let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
             tx.into(),
             alloy_primitives::Signature::test_signature(),
@@ -1616,15 +1669,8 @@ mod tests {
         )
     }
 
-    /// EIP-2780 replaces the flat 21k intrinsic base with a decomposed one: 12k base, plus a cold
-    /// account access for `tx.to` and a transfer charge when `tx.value` is non-zero, with a
-    /// carve-out for self-transfers.
-    #[test]
-    fn intrinsic_gas_eip2780() {
-        let sender = Address::repeat_byte(1);
-        let recipient = Address::repeat_byte(2);
-
-        let amsterdam = || ForkTracker {
+    fn amsterdam_fork_tracker() -> ForkTracker {
+        ForkTracker {
             shanghai: true.into(),
             cancun: true.into(),
             prague: true.into(),
@@ -1634,7 +1680,19 @@ mod tests {
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
             tx_gas_limit_cap: AtomicU64::new(0),
-        };
+            tx_regular_gas_cap: AtomicU64::new(0),
+        }
+    }
+
+    /// EIP-2780 replaces the flat 21k intrinsic base with a decomposed one: 12k base, plus a cold
+    /// account access for `tx.to` and a transfer charge when `tx.value` is non-zero, with a
+    /// carve-out for self-transfers.
+    #[test]
+    fn intrinsic_gas_eip2780() {
+        let sender = Address::repeat_byte(1);
+        let recipient = Address::repeat_byte(2);
+
+        let amsterdam = amsterdam_fork_tracker;
         let pre_amsterdam = || ForkTracker { amsterdam: false.into(), ..amsterdam() };
 
         // Self-transfer: base cost only (12k), where pre-Amsterdam it pays the flat 21k.
@@ -1658,6 +1716,68 @@ mod tests {
         );
     }
 
+    /// EIP-8037: `tx.gas` may exceed the cap, but intrinsic regular gas and the calldata floor may
+    /// not.
+    #[test]
+    fn intrinsic_regular_gas_cap_eip8037() {
+        let cap = revm::primitives::eip7825::TX_GAS_LIMIT_CAP;
+        let fork_tracker =
+            ForkTracker { tx_regular_gas_cap: AtomicU64::new(cap), ..amsterdam_fork_tracker() };
+        let is_too_high = |res| {
+            matches!(
+                res,
+                Err(InvalidPoolTransactionError::Consensus(InvalidTransactionError::GasTooHigh))
+            )
+        };
+        let tx = |tx| {
+            pooled_eip1559_tx(
+                alloy_consensus::TxEip1559 {
+                    chain_id: 1,
+                    gas_limit: 2 * cap,
+                    max_fee_per_gas: 1,
+                    to: Address::repeat_byte(2).into(),
+                    ..tx
+                },
+                Address::repeat_byte(1),
+            )
+        };
+
+        // Zero-value call with `addresses` access list entries: 15,000 + 4,180 intrinsic regular
+        // gas per address.
+        let access_list_tx = |addresses: u64| {
+            tx(alloy_consensus::TxEip1559 {
+                access_list: AccessList(
+                    (0..addresses)
+                        .map(|i| AccessListItem {
+                            address: Address::left_padding_from(&i.to_be_bytes()),
+                            storage_keys: vec![],
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            })
+        };
+        // 16,776,800 intrinsic regular gas fits the cap.
+        assert!(ensure_intrinsic_gas(&access_list_tx(4_010), &fork_tracker).is_ok());
+        // 16,780,980 exceeds it.
+        assert!(is_too_high(ensure_intrinsic_gas(&access_list_tx(4_011), &fork_tracker)));
+
+        // Zero-value call with `len` non-zero calldata bytes: the calldata floor (15,000 + 64 per
+        // byte) exceeds the cap while intrinsic regular gas (15,000 + 16 per byte) stays below it.
+        let calldata_tx = |len: usize| {
+            tx(alloy_consensus::TxEip1559 { input: vec![1; len].into(), ..Default::default() })
+        };
+        // 16,777,176 floor gas fits the cap.
+        assert!(ensure_intrinsic_gas(&calldata_tx(261_909), &fork_tracker).is_ok());
+        // 16,777,240 exceeds it.
+        assert!(is_too_high(ensure_intrinsic_gas(&calldata_tx(261_910), &fork_tracker)));
+
+        // Without the regular gas cap (pre EIP-8037), only the gas limit is checked.
+        let no_cap = amsterdam_fork_tracker();
+        assert!(ensure_intrinsic_gas(&access_list_tx(4_011), &no_cap).is_ok());
+        assert!(ensure_intrinsic_gas(&calldata_tx(261_910), &no_cap).is_ok());
+    }
+
     // <https://github.com/paradigmxyz/reth/issues/5178>
     #[tokio::test]
     async fn validate_transaction() {
@@ -1672,6 +1792,7 @@ mod tests {
             max_blob_count: 0.into(),
             max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
             tx_gas_limit_cap: AtomicU64::new(0),
+            tx_regular_gas_cap: AtomicU64::new(0),
         };
 
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
@@ -1681,7 +1802,7 @@ mod tests {
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1706,7 +1827,7 @@ mod tests {
     #[test]
     fn accepts_sender_with_empty_bytecode() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
@@ -1721,7 +1842,7 @@ mod tests {
 
     #[test]
     fn validates_nonce_bound() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |nonce| {
@@ -1749,7 +1870,7 @@ mod tests {
 
     #[test]
     fn validates_configured_chain_id() {
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
             .build(InMemoryBlobStore::default());
         let transaction = |chain_id| {
@@ -1815,7 +1936,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_fee_cap_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1852,7 +1973,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_zero_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1870,7 +1991,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_normal_fee_cap() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1888,7 +2009,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_on_max_tx_gas_limit_exceeded() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1920,7 +2041,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_disabled() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1938,7 +2059,7 @@ mod tests {
     #[tokio::test]
     async fn valid_on_max_tx_gas_limit_within_limit() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -1956,7 +2077,7 @@ mod tests {
     // Helper function to set up common test infrastructure for priority fee tests
     fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
         provider.add_account(
             transaction.sender(),
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
@@ -2117,6 +2238,103 @@ mod tests {
         assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
     }
 
+    /// Returns a legacy and an EIP-2930 transaction with the given gas price, and a provider
+    /// holding a funded sender account for both.
+    fn setup_gas_price_txs(gas_price: u128) -> ([EthPooledTransaction; 2], MockEthProvider) {
+        let sender = Address::repeat_byte(1);
+        let to = Address::repeat_byte(2);
+
+        let legacy = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+        let eip2930 = alloy_consensus::TxEip2930 {
+            chain_id: 1,
+            gas_price,
+            gas_limit: 21_000,
+            to: to.into(),
+            ..Default::default()
+        };
+
+        let txs = [legacy.into(), eip2930.into()].map(|tx: alloy_consensus::TypedTransaction| {
+            let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+                tx.into(),
+                alloy_primitives::Signature::test_signature(),
+            );
+            EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(signed, sender),
+                200,
+            )
+        });
+
+        let provider = mock_provider();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        (txs, provider)
+    }
+
+    #[tokio::test]
+    async fn invalid_on_gas_price_lower_than_configured_minimum() {
+        let gas_price = 1_000_000_000;
+        let minimum_priority_fee = gas_price + 1;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // Legacy and EIP-2930 transactions use their gas price as the priority fee.
+        for transaction in txs {
+            assert!(!transaction.is_dynamic_fee());
+
+            for origin in
+                [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+            {
+                let outcome = validator.validate_one(origin, transaction.clone());
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Invalid(
+                        _,
+                        InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                            minimum_priority_fee: min_fee
+                        }
+                    ) if min_fee == minimum_priority_fee
+                ));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_at_or_above_minimum() {
+        let gas_price = 1_000_000_000;
+        let (txs, provider) = setup_gas_price_txs(gas_price);
+
+        for minimum_priority_fee in [gas_price, gas_price / 2] {
+            let validator = create_validator_with_minimum_fee(
+                provider.clone(),
+                Some(minimum_priority_fee),
+                None,
+            );
+
+            for transaction in txs.clone() {
+                let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+                assert!(outcome.is_valid());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_gas_price_with_minimum_priority_fee_disabled() {
+        let (txs, provider) = setup_gas_price_txs(1);
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        for transaction in txs {
+            let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+            assert!(outcome.is_valid());
+        }
+    }
+
     #[test]
     fn reject_oversized_tx() {
         let mut transaction = get_transaction();
@@ -2171,7 +2389,7 @@ mod tests {
     #[tokio::test]
     async fn valid_with_disabled_balance_check() {
         let transaction = get_transaction();
-        let provider = MockEthProvider::default().with_genesis_block();
+        let provider = mock_provider();
 
         // Set account with 0 balance
         provider.add_account(
@@ -2190,7 +2408,7 @@ mod tests {
             assert!(matches!(
                 err,
                 InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
-                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+                if funds_err.got.is_zero() && funds_err.expected == expected_cost
             ));
         } else {
             panic!("Expected Invalid outcome with InsufficientFunds error");
@@ -2203,5 +2421,36 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    #[test]
+    fn block_gas_limit_from_latest_header() {
+        let gas_limit = 60_000_000;
+        let validator = EthTransactionValidatorBuilder::new(
+            mock_provider_with_gas_limit(gas_limit),
+            test_evm_config(),
+        )
+        .build(InMemoryBlobStore::default());
+        let transaction = |gas_limit| {
+            EthPooledTransaction::try_from_consensus(
+                TransactionBuilder::default()
+                    .chain_id(validator.chain_id())
+                    .gas_limit(gas_limit)
+                    .to(Address::ZERO)
+                    .into_eip1559()
+                    .try_into_recovered()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(validator.block_gas_limit(), gas_limit);
+        assert!(validator
+            .validate_stateless(TransactionOrigin::External, &transaction(gas_limit))
+            .is_ok());
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
+            Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
+        ));
     }
 }

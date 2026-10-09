@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -38,7 +38,7 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
     StorageRootProvider, TransactionVariant,
 };
-use reth_tasks::{pool::BlockingTaskGuard, Runtime};
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
@@ -133,6 +133,9 @@ where
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
                 while let Some((index, tx)) = transactions.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
                     let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
@@ -546,6 +549,9 @@ where
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
                         // apply state overrides only once, before the first transaction
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
@@ -711,6 +717,9 @@ where
                 executor.apply_pre_execution_changes().map_err(Eth::Error::from_eth_err)?;
 
                 for tx in block.transactions_recovered().take(tx_index + 1) {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     executor.execute_transaction(tx).map_err(Eth::Error::from_eth_err)?;
                 }
                 drop(executor);
@@ -757,7 +766,7 @@ where
         EthApiError: From<DB::Error>,
     {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
-        let code = if account.code_hash == KECCAK_EMPTY {
+        let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
@@ -831,6 +840,9 @@ where
                 let mut roots = Vec::with_capacity(block.body().transactions().len());
                 let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
                 for tx in block.transactions_recovered() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     evm.transact_commit(tx_env).map_err(Eth::Error::from_evm_err)?;
 
@@ -1045,7 +1057,7 @@ where
                     break
                 }
 
-                let block_id = BlockId::Number(number.into());
+                let block_id = BlockId::number(number);
                 let block = match this.eth_api().recovered_block(block_id).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
@@ -1570,7 +1582,7 @@ mod tests {
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
         let factory = create_test_provider_factory();
         let address = Address::with_last_byte(1);
-        let old_slot = U256::from(1);
+        let old_slot = U256::ONE;
         let new_slot = U256::from(2);
         let old_value = U256::from(10);
         let new_value = U256::from(20);

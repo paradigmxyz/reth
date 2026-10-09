@@ -28,7 +28,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
@@ -164,6 +164,9 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
@@ -872,6 +875,7 @@ mod tests {
     use crate::EthApiBuilder;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
+    use alloy_primitives::bytes;
     use alloy_rpc_types_eth::TransactionRequest;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
@@ -895,8 +899,7 @@ mod tests {
         // Return NUMBER as a 32-byte word.
         provider.add_account(
             target,
-            ExtendedAccount::new(0, U256::ZERO)
-                .with_bytecode("4360005260206000f3".parse().unwrap()),
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("4360005260206000f3")),
         );
         let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
         provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
@@ -918,7 +921,7 @@ mod tests {
         let pending = api.trace_call_many(calls, Some(BlockId::pending())).await.unwrap();
         assert_eq!(omitted, latest);
         assert_ne!(omitted, pending);
-        assert_eq!(U256::from_be_slice(&omitted[0].output), U256::from(1));
+        assert_eq!(U256::from_be_slice(&omitted[0].output), U256::ONE);
         assert_eq!(U256::from_be_slice(&pending[0].output), U256::from(2));
 
         let module = api.into_rpc();
@@ -998,7 +1001,7 @@ mod tests {
             TxLegacy {
                 gas_limit: 500_000,
                 to: TxKind::Call(Address::with_last_byte(0x42)),
-                value: U256::from(1),
+                value: U256::ONE,
                 ..Default::default()
             }
             .into(),
@@ -1118,7 +1121,7 @@ mod tests {
             TxLegacy {
                 gas_limit: 21_000,
                 to: TxKind::Call(Address::with_last_byte(0x42)),
-                value: U256::from(1),
+                value: U256::ONE,
                 ..Default::default()
             }
             .into(),
@@ -1275,7 +1278,7 @@ mod tests {
     async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
         use crate::EthApiBuilder;
         use alloy_consensus::{Header, TxLegacy};
-        use alloy_primitives::{hex, Signature, TxKind};
+        use alloy_primitives::{Signature, TxKind};
         use reth_chain_state::CanonStateNotification;
         use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
         use reth_evm_ethereum::EthEvmConfig;
@@ -1291,9 +1294,8 @@ mod tests {
         let child = Address::with_last_byte(0x43);
         // Increment slot zero, CALLCODE the child, then return the incremented value.
         let root_code: Bytes =
-            hex!("60005460010160005560006000600060006000604361fffff25060005460005260206000f3")
-                .into();
-        let child_code: Bytes = hex!("60025000").into();
+            bytes!("60005460010160005560006000600060006000604361fffff25060005460005260206000f3");
+        let child_code: Bytes = bytes!("60025000");
         provider.add_account(
             target,
             ExtendedAccount::new(0, U256::ZERO).with_bytecode(root_code.clone()),

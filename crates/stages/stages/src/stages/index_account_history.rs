@@ -66,6 +66,12 @@ where
         provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        // Read the durable checkpoint before the prune target advances it. Otherwise a table that
+        // must be rebuilt from empty takes the incremental path and reads a missing last shard for
+        // every key.
+        let first_sync = input.checkpoint().block_number == 0;
+        let mut prune_target_applied = false;
+
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
             .map(|mode| {
@@ -79,6 +85,7 @@ where
             .flatten() &&
             target_prunable_block > input.checkpoint().block_number
         {
+            prune_target_applied = true;
             input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
             // Save prune checkpoint only if we don't have one already.
@@ -100,7 +107,6 @@ where
         }
 
         let mut range = input.next_block_range();
-        let first_sync = input.checkpoint().block_number == 0;
         let use_rocksdb = provider.cached_storage_settings().storage_v2;
 
         // On first sync we might have history coming from genesis. We clear the table since it's
@@ -115,7 +121,10 @@ where
             } else {
                 provider.tx_ref().clear::<tables::AccountsHistory>()?;
             }
-            range = 0..=*input.next_block_range().end();
+            // Pruned history starts after the prune target, otherwise include genesis.
+            if !prune_target_applied {
+                range = 0..=*range.end();
+            }
         }
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
@@ -147,7 +156,7 @@ where
             provider.rocksdb_provider().flush(&[Tables::AccountsHistory.name()])?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput::done(StageCheckpoint::new(*range.end())))
     }
 
     /// Unwind the stage.
@@ -168,12 +177,13 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{address, Address, BlockNumber, B256};
+    use alloy_primitives::{Address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -191,7 +201,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
+    const ADDRESS: Address = Address::with_last_byte(1);
 
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
@@ -246,7 +256,7 @@ mod tests {
         let mut stage = IndexAccountHistoryStage::default();
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
+        assert_eq!(out, ExecOutput::done(StageCheckpoint::new(run_to)));
         provider.commit().unwrap();
     }
 
@@ -494,6 +504,7 @@ mod tests {
             tx.put::<tables::AccountChangeSets>(20, acc()).unwrap();
             tx.put::<tables::AccountChangeSets>(36, acc()).unwrap();
             tx.put::<tables::AccountChangeSets>(100, acc()).unwrap();
+            tx.put::<tables::AccountsHistory>(shard(u64::MAX), list(&[1])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -506,7 +517,7 @@ mod tests {
         };
         let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
-        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
+        assert_eq!(out, ExecOutput::done(StageCheckpoint::new(20000)));
         provider.commit().unwrap();
 
         // verify
@@ -597,10 +608,7 @@ mod tests {
                     return Ok(())
                 }
 
-                assert_eq!(
-                    output,
-                    ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true }
-                );
+                assert_eq!(output, ExecOutput::done(StageCheckpoint::new(input.target())));
 
                 let provider = self.db.factory.provider()?;
                 let mut changeset_cursor =
@@ -704,7 +712,7 @@ mod tests {
             let mut stage = IndexAccountHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             // Verify MDBX table is empty (data should be in RocksDB)
@@ -724,6 +732,46 @@ mod tests {
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
 
+        #[tokio::test]
+        async fn prune_rebuild_retries_after_checkpoint_rollback() {
+            let db = TestStageDB::default();
+            setup_v2_account_data(&db, 0..=10);
+            let rocksdb = db.factory.rocksdb_provider();
+            rocksdb.put::<tables::AccountsHistory>(shard(u64::MAX), &list(&[1, 2, 3])).unwrap();
+            let input = || ExecInput { target: Some(20_000), checkpoint: None };
+            let mut stage = IndexAccountHistoryStage {
+                prune_mode: Some(PruneMode::Before(6)),
+                ..Default::default()
+            };
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
+            drop(provider);
+
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
+            let provider = db.factory.provider().unwrap();
+            assert!(provider.get_prune_checkpoint(PruneSegment::AccountHistory).unwrap().is_none());
+            drop(provider);
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput::done(StageCheckpoint::new(20_000)));
+            provider.commit().unwrap();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
+            let provider = db.factory.provider().unwrap();
+            assert_eq!(
+                provider
+                    .get_prune_checkpoint(PruneSegment::AccountHistory)
+                    .unwrap()
+                    .unwrap()
+                    .block_number,
+                Some(5)
+            );
+        }
+
         /// Test that unwind works correctly when `account_history_in_rocksdb` is enabled.
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
@@ -734,7 +782,7 @@ mod tests {
             let mut stage = IndexAccountHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             // Verify RocksDB has blocks 0-10 before unwind
@@ -770,7 +818,7 @@ mod tests {
             let mut stage = IndexAccountHistoryStage::default();
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(5), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(5)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();
@@ -782,7 +830,7 @@ mod tests {
             let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(5)) };
             let provider = db.factory.database_provider_rw().unwrap();
             let out = stage.execute(&provider, input).unwrap();
-            assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+            assert_eq!(out, ExecOutput::done(StageCheckpoint::new(10)));
             provider.commit().unwrap();
 
             let rocksdb = db.factory.rocksdb_provider();

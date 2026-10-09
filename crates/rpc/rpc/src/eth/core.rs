@@ -570,7 +570,7 @@ mod tests {
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{
-        helpers::{EthBlocks, EthCall},
+        helpers::{EthBlocks, EthCall, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -578,8 +578,10 @@ mod tests {
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
+    use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -624,6 +626,30 @@ mod tests {
         )
         .gas_cap(gas_cap.into())
         .build()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn blocking_task_observes_dropped_request() {
+        let api = build_test_eth_api(MockEthProvider::default());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
+
+        let request = api.spawn_blocking_io(move |_| {
+            let _ = started_tx.send(());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !is_cancelled() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let _ = cancelled_tx.send(is_cancelled());
+            Ok(())
+        });
+        // drop the request while its blocking task is running
+        tokio::select! {
+            _ = request => panic!("blocking task completed before the request was dropped"),
+            _ = started_rx => {}
+        }
+
+        assert!(cancelled_rx.await.unwrap());
     }
 
     #[tokio::test]
@@ -1111,6 +1137,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn call_allowance_respects_rpc_gas_cap() {
+        use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
+        use reth_rpc_eth_types::EthConfig;
+        use reth_tasks::pool::BlockingTaskGuard;
+
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Return the gas remaining after intrinsic gas and the GAS opcode.
+        let code = Bytes::from_static(&[0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3]);
+
+        // RPC cap, supplied gas, price, balance after value, block limit, expected budget.
+        for (gas_cap, gas, price, balance, block_limit, budget) in [
+            (50_000, None, 1, 100_000, 100_000, 50_000),
+            (50_000, None, 0, 100_000, 100_000, 50_000),
+            (50_000, None, 1, 40_000, 100_000, 40_000),
+            (50_000, None, 1, 100_000, 40_000, 40_000),
+            (50_000, Some(70_000), 1, 100_000, 100_000, 50_000),
+            (50_000, Some(30_000), 1, 100_000, 100_000, 30_000),
+            (50_000, Some(70_000), 1, 100_000, 40_000, 50_000),
+            (0, None, 1, 100_000, 100_000, 100_000),
+            (0, Some(70_000), 1, 100_000, 40_000, 70_000),
+        ] {
+            let provider = MockEthProvider::default()
+                .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+            provider.add_block(
+                B256::repeat_byte(0x42),
+                Block {
+                    header: Header {
+                        number: 1,
+                        gas_limit: block_limit,
+                        excess_blob_gas: Some(0),
+                        ..Default::default()
+                    },
+                    body: BlockBody::default(),
+                },
+            );
+            let api = build_test_eth_api_with_gas_cap(provider, gas_cap);
+            let trace_api =
+                crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+            let state_override = StateOverride::from_iter([
+                (
+                    sender,
+                    AccountOverride {
+                        balance: Some(U256::from(balance + 1_000)),
+                        ..Default::default()
+                    },
+                ),
+                (contract, AccountOverride { code: Some(code.clone()), ..Default::default() }),
+            ]);
+
+            for dynamic_fee in [false, true] {
+                let request = TransactionRequest {
+                    gas,
+                    gas_price: (!dynamic_fee).then_some(price),
+                    max_fee_per_gas: dynamic_fee.then_some(price),
+                    max_priority_fee_per_gas: dynamic_fee.then_some(price),
+                    value: Some(U256::from(1_000)),
+                    ..TransactionRequest::default().with_from(sender).with_to(contract)
+                };
+                let output = EthCall::call(
+                    &api,
+                    request.clone(),
+                    Some(BlockId::latest()),
+                    EvmOverrides::state(Some(state_override.clone())),
+                )
+                .await
+                .unwrap();
+                let traces = trace_api
+                    .trace_call(TraceCallRequest {
+                        call: request,
+                        trace_types: std::iter::once(TraceType::Trace).collect(),
+                        block_id: Some(BlockId::latest()),
+                        state_overrides: Some(state_override.clone()),
+                        block_overrides: None,
+                    })
+                    .await
+                    .unwrap();
+
+                assert_eq!(U256::from_be_slice(&output), U256::from(budget - 21_002));
+                assert_eq!(traces.output, output);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn estimate_gas_respects_rpc_gas_cap() {
         const LOW_GAS_CAP: u64 = 50_000;
         const HIGH_GAS_CAP: u64 = 200_000;
@@ -1221,7 +1332,7 @@ mod tests {
         provider.add_block(hash, block);
 
         let api = build_test_eth_api(provider);
-        for block_id in [BlockId::Number(BlockNumberOrTag::Number(1)), BlockId::Hash(hash.into())] {
+        for block_id in [BlockId::number(1), BlockId::hash(hash)] {
             let header = EthBlocks::rpc_block_header(&api, block_id).await.unwrap().unwrap();
             let response = serde_json::to_value(&header).unwrap();
             assert!(response.get("size").is_none());
@@ -1229,10 +1340,7 @@ mod tests {
 
         for full in [false, true] {
             let block =
-                EthBlocks::rpc_block(&api, BlockId::Number(BlockNumberOrTag::Number(1)), full)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
     }

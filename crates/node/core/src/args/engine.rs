@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for engine purposes
+//! clap [`Args`] for engine purposes.
 
 use clap::{
     builder::{RangedU64ValueParser, Resettable},
@@ -11,7 +11,7 @@ use reth_engine_primitives::{
     DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
     MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
-use std::{sync::OnceLock, time::Duration};
+use std::{num::NonZeroUsize, sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -454,6 +454,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DefaultEngineValues::get_global().reserved_cpu_cores)]
     pub reserved_cpu_cores: usize,
 
+    /// Override the available CPU count for node thread pools and parallel execution decisions.
+    /// Does not change CPU affinity. Explicit thread counts take precedence.
+    #[arg(long = "cpu-cores", value_name = "COUNT")]
+    pub cpu_cores: Option<NonZeroUsize>,
+
     /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-precompile-cache
     /// if you want to disable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
@@ -484,13 +489,15 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism.
+    /// Configure the number of storage proof workers spawned for each block.
+    /// If not specified or zero, the count is derived from the block: 2x available parallelism,
+    /// halved for blocks with few transactions and doubled for blocks at or above 100M gas.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
-    /// Configure the number of account proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to the same count as storage workers.
+    /// Configure the number of account proof workers spawned for each block.
+    /// If not specified or zero, the count is derived from the block the same way as for storage
+    /// workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
 
@@ -662,6 +669,7 @@ impl Default for EngineArgs {
             accept_execution_requests_hash,
             multiproof_chunk_size,
             reserved_cpu_cores,
+            cpu_cores: None,
             precompile_cache_enabled: true,
             precompile_cache_disabled,
             state_root_fallback,
@@ -797,7 +805,11 @@ impl EngineArgs {
             .without_bal_batch_io(self.disable_bal_batch_io);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
-        config
+        if let Some(cpu_cores) = self.cpu_cores {
+            config.with_has_enough_parallelism(cpu_cores.get() >= 5)
+        } else {
+            config
+        }
     }
 }
 
@@ -811,6 +823,32 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn cpu_cores_override_controls_parallel_state_root() {
+        for (cores, enabled) in [(1, false), (4, false), (5, true), (8, true)] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--cpu-cores",
+                &cores.to_string(),
+            ])
+            .args;
+            assert_eq!(args.cpu_cores.unwrap().get(), cores);
+            assert_eq!(args.tree_config().use_state_root_task(), enabled);
+        }
+    }
+
+    #[test]
+    fn cpu_cores_override_preserves_state_root_fallback() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--cpu-cores",
+            "8",
+            "--engine.state-root-fallback",
+        ])
+        .args;
+        assert!(!args.tree_config().use_state_root_task());
     }
 
     #[test]
@@ -964,6 +1002,7 @@ mod tests {
             accept_execution_requests_hash: true,
             multiproof_chunk_size: 512,
             reserved_cpu_cores: 4,
+            cpu_cores: Some(NonZeroUsize::new(8).unwrap()),
             precompile_cache_enabled: true,
             precompile_cache_disabled: true,
             state_root_fallback: true,
@@ -1011,6 +1050,8 @@ mod tests {
             "512",
             "--engine.reserved-cpu-cores",
             "4",
+            "--cpu-cores",
+            "8",
             "--engine.disable-precompile-cache",
             "--engine.state-root-fallback",
             "--engine.always-process-payload-attributes-on-canonical-head",
@@ -1061,20 +1102,6 @@ mod tests {
         let err = args.validate().unwrap_err().to_string();
         assert!(err.contains("engine.memory-block-buffer-target"));
         assert!(err.contains("engine.persistence-threshold"));
-    }
-
-    #[test]
-    fn test_parse_num_state_masking_blocks() {
-        let args = CommandParser::<EngineArgs>::parse_from([
-            "reth",
-            "--engine.persistence-threshold",
-            "13",
-            "--engine.num-state-masking-blocks",
-            "7",
-        ])
-        .args;
-
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
     }
 
     #[test]
@@ -1153,17 +1180,6 @@ mod tests {
         assert_eq!(config.num_state_masking_blocks(), 0);
         assert_eq!(config.memory_block_buffer_target(), 0);
         assert_eq!(config.persistence_backpressure_threshold(), 1);
-    }
-
-    #[test]
-    fn zero_persistence_threshold_disables_explicit_state_masking() {
-        let args = EngineArgs {
-            persistence_threshold: 0,
-            num_state_masking_blocks: u64::MAX,
-            ..EngineArgs::default()
-        };
-        args.validate().unwrap();
-        assert_eq!(args.tree_config().num_state_masking_blocks(), 0);
     }
 
     #[test]

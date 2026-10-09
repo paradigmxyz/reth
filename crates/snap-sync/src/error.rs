@@ -193,6 +193,14 @@ pub enum SnapSyncError {
     /// Work stopped because its session was cancelled.
     #[error("snap synchronization was cancelled")]
     Cancelled,
+    /// A reorg was recovered to a pivot below the last block both branches share.
+    #[error("pivot {target} is below reorg ancestor {ancestor}")]
+    PivotBelowAncestor {
+        /// Last block both branches share.
+        ancestor: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
 }
 
 impl SnapSyncError {
@@ -204,6 +212,16 @@ impl SnapSyncError {
         match self {
             Self::Request(error) => !error.is_channel_closed(),
             Self::MissingHeader { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether retrying can't help: storage failed, the node's storage layout or on-disk records
+    /// don't support snap, or the network is gone.
+    pub const fn is_fatal(&self) -> bool {
+        match self {
+            Self::Provider(_) | Self::UnsupportedStorage | Self::UnsupportedRecord { .. } => true,
+            Self::Request(error) => error.is_channel_closed(),
             _ => false,
         }
     }
