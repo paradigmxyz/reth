@@ -156,6 +156,8 @@ pub struct TreeConfig {
     disable_prewarming: bool,
     /// Whether txpool-driven prewarming between payloads is enabled.
     txpool_prewarming: bool,
+    /// Whether validated block-local prewarm results may be reused during serial execution.
+    prewarm_handoff: bool,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -265,6 +267,7 @@ impl Default for TreeConfig {
             disable_state_cache: false,
             disable_prewarming: false,
             txpool_prewarming: false,
+            prewarm_handoff: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -356,6 +359,7 @@ impl TreeConfig {
             disable_state_cache,
             disable_prewarming,
             txpool_prewarming: false,
+            prewarm_handoff: false,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -628,6 +632,17 @@ impl TreeConfig {
     pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
         self.txpool_prewarming = enabled;
         self
+    }
+
+    /// Enables or disables validated reuse without disabling cache prewarming.
+    pub const fn with_prewarm_handoff(mut self, enabled: bool) -> Self {
+        self.prewarm_handoff = enabled;
+        self
+    }
+
+    /// Returns whether canonical execution may reuse strict prewarm results.
+    pub const fn prewarm_handoff_enabled(&self) -> bool {
+        self.prewarm_handoff
     }
 
     /// Setter for whether to always compare trie updates from the state root task to the trie

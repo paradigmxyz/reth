@@ -31,7 +31,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{database::State, primitives::hardfork::SpecId};
+use revm::{context::result::ResultAndState, database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -487,6 +487,23 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
+    }
+
+    /// Whether strict transaction prewarming may hand results to canonical execution.
+    ///
+    /// Configurations must opt in only when raw EVM execution has the same transaction semantics
+    /// as their block executor. BAL and multidimensional block gas require separate admission.
+    fn prewarm_handoff_enabled(&self, _env: &EvmEnvFor<Self>) -> bool {
+        false
+    }
+
+    /// Wraps a validated prewarm result for the configuration's normal commit path.
+    fn prewarm_transaction_result(
+        &self,
+        _tx: &TxTy<Self::Primitives>,
+        _result: ResultAndState<HaltReasonFor<Self>>,
+    ) -> Option<TxExecutionResultFor<Self>> {
+        None
     }
 }
 

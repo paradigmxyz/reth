@@ -609,6 +609,10 @@ pub struct EngineArgs {
         value_parser = humantime::parse_duration,
     )]
     pub proof_jitter: Option<Duration>,
+
+    /// Reuse validated block-local speculative execution results (experimental).
+    #[arg(long = "engine.prewarm-handoff", default_value_t = false, hide = true)]
+    pub prewarm_handoff: bool,
 }
 
 #[allow(deprecated)]
@@ -692,6 +696,7 @@ impl Default for EngineArgs {
             disable_bal_batch_io: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
+            prewarm_handoff: false,
         }
     }
 }
@@ -802,7 +807,8 @@ impl EngineArgs {
             .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
-            .without_bal_batch_io(self.disable_bal_batch_io);
+            .without_bal_batch_io(self.disable_bal_batch_io)
+            .with_prewarm_handoff(self.prewarm_handoff);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         if let Some(cpu_cores) = self.cpu_cores {
@@ -886,6 +892,17 @@ mod tests {
             CommandParser::<EngineArgs>::parse_from(["reth", "--engine.txpool-prewarming"]).args;
         assert!(args.txpool_prewarming_enabled);
         assert!(args.tree_config().txpool_prewarming());
+    }
+
+    #[test]
+    fn prewarm_handoff_is_disabled_by_default_and_can_be_enabled() {
+        let defaults = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!defaults.prewarm_handoff);
+        assert!(!defaults.tree_config().prewarm_handoff_enabled());
+        let enabled =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.prewarm-handoff"]).args;
+        assert!(enabled.prewarm_handoff);
+        assert!(enabled.tree_config().prewarm_handoff_enabled());
     }
 
     #[test]
@@ -1031,6 +1048,7 @@ mod tests {
             disable_bal_batch_io: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
+            prewarm_handoff: false,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([

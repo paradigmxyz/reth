@@ -10,22 +10,34 @@
 //!    and one for actual execution (executed sequentially)
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
+//! 4. Opt-in handoff validates strict worker results against current state and commits matching
+//!    results without re-executing the EVM. Non-matching or unfinished results use normal
+//!    execution.
 
-use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
+use super::{
+    bal_prewarm_pool::BalPrewarmPool,
+    handoff::{
+        HandoffInspector, PrewarmResult, PrewarmResults, RecordingDatabase, MAX_READY_RESULTS,
+    },
+    StateRootHintStream, StateRootUpdateStream,
+};
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::transaction::{Recovered, TxHashRef};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, FromRecoveredTx, HaltReasonFor,
+    RecoveredTx, SpecFor, TxEnvFor,
+};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, TxTy};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
@@ -36,10 +48,15 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use revm::context::Block;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -155,11 +172,14 @@ where
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
+            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(MAX_READY_RESULTS * 2);
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| {
+                        (ctx.evm_for_ctx(ctx.prewarm_results.is_some()), None)
+                    });
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -178,6 +198,7 @@ where
 
                     tx_count += 1;
                     let parent_span = Span::current();
+                    let refresh_tx = &refresh_tx;
                     s.spawn(move |_| {
                         let _enter = trace_span!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -186,8 +207,19 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        Self::transact_worker(
+                            ctx,
+                            index,
+                            tx,
+                            state_root_hint_stream,
+                            Some(refresh_tx),
+                        );
                     });
+                }
+
+                if ctx.prewarm_results.is_some() {
+                    // Start after the first pass has handed out its jobs, using spare capacity.
+                    s.spawn(move |_| Self::refresh_worker(ctx, refresh_rx));
                 }
 
                 // Send withdrawal prefetch targets after all transactions dispatched
@@ -217,16 +249,11 @@ where
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
+        refresh_tx: Option<&crossbeam_channel::Sender<RefreshTransaction<N>>>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
-            else {
-                return;
-            };
-
             if ctx.should_stop() {
                 return;
             }
@@ -238,8 +265,44 @@ where
 
             let start = Instant::now();
 
+            let reusable = ctx.prewarm_results.is_some() &&
+                PrewarmResults::<HaltReasonFor<Evm>>::within_window(
+                    index,
+                    ctx.executed_tx_index.load(Ordering::Relaxed),
+                );
+            let (primary, cache_only) = worker.get_or_init::<PrewarmEvmState<Evm>>(|| {
+                (ctx.evm_for_ctx(ctx.prewarm_results.is_some()), None)
+            });
             let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
+            let execution = {
+                let slot = if reusable || ctx.prewarm_results.is_none() {
+                    primary
+                } else {
+                    &mut *cache_only
+                };
+                if slot.is_none() {
+                    *slot = ctx.evm_for_ctx(reusable);
+                }
+                let Some(evm) = slot.as_mut() else { return };
+                evm.db_mut().set_recording(reusable);
+                evm.inspector_mut().reset(reusable);
+                evm.transact(tx_env).map(|res| (res, reusable.then(|| evm.db_mut().take_reads())))
+            };
+            let execution = match execution {
+                Err(_) if reusable && !ctx.should_stop() => {
+                    // A later nonce or funding dependency can fail against parent state. Keep
+                    // cache-only warming, but never publish a permissively executed result.
+                    ctx.metrics.transaction_errors.increment(1);
+                    if cache_only.is_none() {
+                        *cache_only = ctx.evm_for_ctx(false);
+                    }
+                    let Some(evm) = cache_only.as_mut() else { return };
+                    evm.transact(TxEnvFor::<Evm>::from_recovered_tx(tx.tx(), *tx.signer()))
+                        .map(|res| (res, None))
+                }
+                result => result,
+            };
+            let (res, reads) = match execution {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -259,15 +322,82 @@ where
                 return;
             }
 
-            if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+            if index > 0 && (ctx.prewarm_results.is_none() || state_root_hint_stream.is_some()) {
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state_ref(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
                 }
             }
 
+            if let Some(reads) = reads &&
+                let Some(results) = &ctx.prewarm_results
+            {
+                if let Some(refresh_tx) = refresh_tx {
+                    let _ = refresh_tx
+                        .try_send((index, Recovered::new_unchecked(tx.tx().clone(), *tx.signer())));
+                }
+                results.publish(
+                    index,
+                    ctx.executed_tx_index.load(Ordering::Relaxed),
+                    PrewarmResult::new(*tx.tx().tx_hash(), *tx.signer(), reads, res),
+                );
+            }
+
             ctx.metrics.total_runtime.record(start.elapsed());
+        });
+    }
+
+    /// Retries storage-conflicting ready results off the canonical thread. Predictions affect
+    /// only a private database; ordinary handoff checks every refreshed dependency again.
+    fn refresh_worker(
+        ctx: &PrewarmContext<N, P, Evm>,
+        sources: crossbeam_channel::Receiver<RefreshTransaction<N>>,
+    ) {
+        let Some(results) = &ctx.prewarm_results else {
+            return;
+        };
+        WorkerPool::with_worker_mut(|worker| {
+            let (primary, _) =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(|| (ctx.evm_for_ctx(true), None));
+            let Some(evm) = primary.as_mut() else {
+                return;
+            };
+            let mut transactions = BTreeMap::new();
+            while !ctx.should_stop() {
+                let next = ctx.executed_tx_index.load(Ordering::Relaxed);
+                transactions.retain(|index, _| *index >= next);
+                for (index, tx) in sources.try_iter() {
+                    if PrewarmResults::<HaltReasonFor<Evm>>::within_window(index, next) {
+                        transactions.insert(index, tx);
+                    }
+                }
+                if let Some((index, seed)) =
+                    results.take_refresh(next, |index| transactions.contains_key(&index)) &&
+                    let Some(tx) = transactions.get(&index)
+                {
+                    results.metrics.refresh_attempts.increment(1);
+                    evm.db_mut().set_recording(true);
+                    evm.db_mut().seed_storage(seed);
+                    evm.inspector_mut().reset(true);
+                    if let Ok(result) =
+                        evm.transact(TxEnvFor::<Evm>::from_recovered_tx(tx.tx(), tx.signer()))
+                    {
+                        let reads = evm.db_mut().take_reads();
+                        let mut candidate =
+                            PrewarmResult::new(*tx.tx().tx_hash(), tx.signer(), reads, result);
+                        candidate.refreshed = true;
+                        results.publish(
+                            index,
+                            ctx.executed_tx_index.load(Ordering::Relaxed),
+                            candidate,
+                        );
+                    }
+                } else {
+                    // Yield the core while initial results or canonical write reports arrive.
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+            }
         });
     }
 
@@ -564,9 +694,8 @@ where
     pub cache_state_metrics: Option<CachedStateCacheMetrics>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
-    /// Shared counter tracking the next transaction index to be executed by the main execution
-    /// loop. Prewarm workers skip transactions with `index < counter` since those have already
-    /// been executed.
+    /// Shared counter tracking the next transaction not yet started by canonical execution.
+    /// Prewarm workers skip earlier indices and do not publish late results for them.
     pub executed_tx_index: Arc<AtomicUsize>,
     /// Whether the precompile cache is disabled.
     pub precompile_cache_disabled: bool,
@@ -577,11 +706,21 @@ where
     pub disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
+    /// Optional block-local result handoff; BAL prewarming never populates it.
+    pub(crate) prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
+type WorkerEvm<Evm> = Option<
+    EvmFor<Evm, RecordingDatabase<StateProviderDatabase<EvmStateProviderBox>>, HandoffInspector>,
+>;
+
+/// Primary EVM plus a lazily initialized permissive cache-only fallback.
+type PrewarmEvmState<Evm> = (WorkerEvm<Evm>, WorkerEvm<Evm>);
+
+/// A recovered source transaction retained within the refresh window.
+type RefreshTransaction<N> = (usize, Recovered<TxTy<N>>);
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -599,7 +738,7 @@ where
 {
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
+    fn evm_for_ctx(&self, reusable: bool) -> WorkerEvm<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
             Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {
@@ -621,21 +760,28 @@ where
             );
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider = RecordingDatabase::new(
+            StateProviderDatabase::new(state_provider),
+            self.env.evm_env.block_env.beneficiary(),
+            reusable,
+        );
 
         let mut evm_env = self.env.evm_env.clone();
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
+        evm_env.cfg_env.disable_nonce_check = !reusable;
 
         // disable the balance check so that transactions from senders who were funded by earlier
         // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
+        evm_env.cfg_env.disable_balance_check = !reusable;
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let inspector = state_provider.inspector();
+        let mut evm =
+            self.evm_config.evm_with_env_and_inspector(state_provider, evm_env, inspector);
+        evm.set_inspector_enabled(reusable);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -846,17 +992,20 @@ pub struct PrewarmMetrics {
 mod tests {
 
     use super::*;
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{keccak256, Address, Signature, TxKind, B256, U256};
     use reth_chainspec::ChainSpec;
+    use reth_db::{tables, transaction::DbTxMut};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Account;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::test_utils::{create_test_provider_factory, MockEthProvider};
     use reth_storage_overlay::OverlayManager;
+    use revm::{context::TxEnv, primitives::hardfork::SpecId};
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -879,6 +1028,7 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -901,14 +1051,26 @@ mod tests {
         saved_cache: SavedCache,
         saving_duration: Gauge,
     ) -> PrewarmContext<EthPrimitives, MockEthProvider, EthEvmConfig> {
+        test_prewarm_context_with_provider(
+            saved_cache,
+            saving_duration,
+            OverlayStateProviderFactory::new(
+                MockEthProvider::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+        )
+    }
+
+    fn test_prewarm_context_with_provider<P>(
+        saved_cache: SavedCache,
+        saving_duration: Gauge,
+        provider: OverlayStateProviderFactory<P, EthPrimitives>,
+    ) -> PrewarmContext<EthPrimitives, P, EthEvmConfig> {
         PrewarmContext {
             env: ExecutionEnv { hash: B256::repeat_byte(2), ..ExecutionEnv::test_default() },
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: Some(saved_cache),
-            provider: OverlayStateProviderFactory::new(
-                MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
-            ),
+            provider,
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {
                 cache_saving_duration: saving_duration,
@@ -922,6 +1084,99 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
+        }
+    }
+
+    #[test]
+    #[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled")]
+    fn pool_worker_publishes_only_strict_ready_results() {
+        reth_tracing::init_test_tracing();
+        for (nonce, index, reusable) in [(0, 0, true), (1, 0, false), (0, MAX_READY_RESULTS, false)]
+        {
+            let runtime = Runtime::test();
+            let results = Arc::new(PrewarmResults::default());
+            let provider = create_test_provider_factory();
+            let parent_hash = init_genesis(&provider).unwrap();
+            let sender = Address::repeat_byte(1);
+            let beneficiary = Address::repeat_byte(2);
+            let provider_rw = provider.provider_rw().unwrap();
+            for (address, balance) in [(sender, 1_000_000_000), (beneficiary, 1)] {
+                let account = Account { balance: U256::from(balance), ..Default::default() };
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::PlainAccountState>(address, account.clone())
+                    .unwrap();
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::HashedAccounts>(keccak256(address), account)
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+            let saved = SavedCache::new(parent_hash, crate::tree::ExecutionCache::new(1_000));
+            let mut ctx = test_prewarm_context_with_provider(
+                saved,
+                Gauge::noop(),
+                OverlayStateProviderFactory::new(
+                    provider,
+                    OverlayManager::default().overlay_builder(parent_hash),
+                ),
+            );
+            ctx.env.evm_env.cfg_env.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
+            ctx.env.evm_env.block_env.beneficiary = beneficiary;
+            ctx.env.evm_env.block_env.gas_limit = 30_000_000;
+            ctx.prewarm_results = Some(Arc::clone(&results));
+            let tx = WithTxEnv {
+                tx_env: TxEnv {
+                    caller: sender,
+                    nonce,
+                    gas_limit: 21_000,
+                    gas_price: 1,
+                    kind: TxKind::Call(Address::repeat_byte(3)),
+                    ..Default::default()
+                },
+                tx: Arc::new(Recovered::new_unchecked(
+                    TransactionSigned::Legacy(Signed::new_unchecked(
+                        TxLegacy {
+                            nonce,
+                            gas_limit: 21_000,
+                            gas_price: 1,
+                            to: TxKind::Call(Address::repeat_byte(3)),
+                            ..Default::default()
+                        },
+                        Signature::test_signature(),
+                        B256::ZERO,
+                    )),
+                    sender,
+                )),
+            };
+            runtime.prewarming_pool().in_place_scope(|scope| {
+                scope.spawn(|_| PrewarmCacheTask::transact_worker(&ctx, index, tx, None, None));
+            });
+            assert!(
+                ctx.saved_cache
+                    .as_ref()
+                    .unwrap()
+                    .cache()
+                    .get_or_try_insert_account_with(Address::repeat_byte(3), || Err::<
+                        Option<Account>,
+                        _,
+                    >(
+                        ()
+                    ))
+                    .is_ok(),
+                "recipient was not cache-warmed"
+            );
+            let candidate = results.take(index);
+            if reusable {
+                let mut canonical = StateProviderDatabase::new(
+                    ctx.provider.database_provider_ro().unwrap().into_evm_state_provider(),
+                );
+                assert!(candidate.unwrap().validate(B256::ZERO, &mut canonical).is_some());
+            } else {
+                assert!(candidate.is_none());
+            }
+            runtime.prewarming_pool().clear();
         }
     }
 
@@ -1093,6 +1348,7 @@ mod tests {
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
                 cache_metrics: None,
+                prewarm_results: None::<Arc<PrewarmResults<revm::context::result::HaltReason>>>,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
             _span: Span::none(),

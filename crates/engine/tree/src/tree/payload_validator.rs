@@ -107,7 +107,7 @@ use crate::tree::{
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::transaction::Either;
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
@@ -137,7 +137,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    HaltReasonFor, OnStateHook, SpecFor, TxExecutionResultFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedRevmBal;
@@ -149,7 +149,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable, TxTy,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
@@ -1020,7 +1020,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, HaltReasonFor<Evm>>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1078,6 +1078,7 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let prewarm_results = handle.prewarm_results();
         executor.evm_mut().db_mut().set_state_hook(state_hook);
 
         let execution_start = Instant::now();
@@ -1089,7 +1090,7 @@ where
             handle.iter_transactions(),
             &receipt_tx,
             &executed_tx_index,
-            has_bal,
+            TransactionExecutionMode { has_bal, prewarm_results: prewarm_results.as_deref() },
         )?;
         drop(receipt_tx);
 
@@ -1158,7 +1159,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, HaltReasonFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1242,22 +1243,31 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
+    fn execute_transactions<'a, E, Tx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
-        has_bal: bool,
+        mode: TransactionExecutionMode<'_, HaltReasonFor<Evm>>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
-        InnerTx: TxHashRef,
+        E: BlockExecutor<
+            Transaction = TxTy<N>,
+            Receipt = N::Receipt,
+            Result = TxExecutionResultFor<Evm>,
+            Evm: alloy_evm::Evm<
+                DB = &'a mut State<DB>,
+                HaltReason = HaltReasonFor<Evm>,
+                Spec = SpecFor<Evm>,
+            >,
+        >,
+        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<TxTy<N>>,
         DB: revm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
+        let TransactionExecutionMode { has_bal, prewarm_results } = mode;
         let mut senders = Vec::with_capacity(transaction_count);
 
         // Apply pre-execution changes (e.g., beacon root update)
@@ -1287,7 +1297,7 @@ where
             self.metrics.record_transaction_wait(wait_start.elapsed());
 
             let tx = tx_result.map_err(BlockValidationError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            let tx_signer = *<Tx as alloy_evm::RecoveredTx<TxTy<N>>>::signer(&tx);
 
             senders.push(tx_signer);
 
@@ -1304,11 +1314,31 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            let index = senders.len() - 1;
+            executed_tx_index.store(index + 1, Ordering::Relaxed);
+            let reused = !has_bal &&
+                prewarm_results.is_some_and(|results| {
+                    super::payload_processor::handoff::try_reuse_transaction(
+                        results,
+                        index,
+                        <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
+                        &self.evm_config,
+                        &mut executor,
+                    )
+                });
+            if !reused {
+                if let Some(results) = prewarm_results {
+                    executor.execute_transaction_with_result_closure(tx, |result| {
+                        results.report_execution(
+                            index,
+                            &alloy_evm::block::TxResult::result(result).state,
+                        );
+                    })?;
+                } else {
+                    executor.execute_transaction(tx)?;
+                }
+            }
             self.metrics.record_transaction_execution(tx_start.elapsed());
-
-            // advance the shared counter so prewarm workers skip already-executed txs
-            executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
             let current_len = executor.receipts().len();
             if current_len > last_sent_len {
@@ -1422,6 +1452,7 @@ where
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
+            HaltReasonFor<Evm>,
         >,
         InsertBlockErrorKind,
     > {
@@ -2127,4 +2158,9 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
+}
+
+struct TransactionExecutionMode<'a, H> {
+    has_bal: bool,
+    prewarm_results: Option<&'a super::payload_processor::handoff::PrewarmResults<H>>,
 }
