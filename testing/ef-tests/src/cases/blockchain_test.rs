@@ -19,19 +19,22 @@ use reth_evm::{
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown, StateProvider,
-    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache, TrieWriter,
+    providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
+    test_utils::MockNodeTypesWithDB,
+    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HistoryWriter,
+    OriginalValuesKnown, ProviderFactory, StateProvider, StateWriteConfig, StateWriter,
+    StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettingsCache,
+    TrieWriter,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_tasks::Runtime;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 /// A handler for the blockchain test suite.
@@ -198,7 +201,7 @@ impl Case for BlockchainTestCase {
 fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec = case.network.to_chain_spec();
-    let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+    let factory = create_test_provider_factory(chain_spec.clone());
     let provider = factory.database_provider_rw().unwrap();
 
     // Insert initial test state into the provider.
@@ -455,4 +458,57 @@ pub fn should_skip(path: &Path) -> bool {
 fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
     let rhs = rhs.join(std::path::MAIN_SEPARATOR_STR);
     path_str.contains(&rhs)
+}
+
+/// `RocksDB` instance shared by all test cases of the current process.
+///
+/// Opening `RocksDB` is expensive and ef-tests never use it: the storage settings stay at v1, so
+/// everything is stored in MDBX and static files. A fresh instance per case dominates the runtime.
+///
+/// The backing directory is created with [`reth_db::test_utils::tempdir_path`], which leaks it:
+/// statics are never dropped, so there is no point at which a temp dir guard could clean
+/// up. This costs one small, mostly empty directory in the system temp dir per test process.
+static SHARED_ROCKSDB: LazyLock<RocksDBProvider> = LazyLock::new(|| {
+    RocksDBBuilder::new(reth_db::test_utils::tempdir_path().join("rocksdb"))
+        .with_default_tables()
+        .build()
+        .expect("failed to create shared test RocksDB provider")
+});
+
+/// Creates a provider factory for a single test case.
+///
+/// Mirrors [`reth_provider::test_utils::create_test_provider_factory_with_chain_spec`], except
+/// that it reuses [`SHARED_ROCKSDB`] instead of opening a new `RocksDB` instance. The temp datadir,
+/// MDBX, static files and runtime stay isolated per case.
+fn create_test_provider_factory(
+    chain_spec: Arc<ChainSpec>,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    let genesis_block_number = chain_spec.genesis.number.unwrap_or_default();
+
+    // A single temp directory holds the MDBX and static file dirs. `TempDatabase` removes the
+    // entire directory on drop.
+    let datadir_path = reth_db::test_utils::tempdir_path();
+    let static_files_path = datadir_path.join("static_files");
+    fs::create_dir_all(&static_files_path).expect("failed to create static_files dir");
+
+    let db = reth_db::test_utils::create_test_rw_db_with_datadir(&datadir_path);
+
+    let factory = ProviderFactory::new(
+        db,
+        chain_spec,
+        StaticFileProviderBuilder::read_write(static_files_path)
+            .with_genesis_block_number(genesis_block_number)
+            .build()
+            .expect("static file provider"),
+        SHARED_ROCKSDB.clone(),
+        Runtime::test(),
+    )
+    .expect("failed to create test provider factory");
+
+    assert!(
+        !factory.cached_storage_settings().any_in_rocksdb(),
+        "the shared RocksDB is only valid while ef-tests run with v1 storage settings"
+    );
+
+    factory
 }
