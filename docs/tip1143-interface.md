@@ -12,7 +12,7 @@ Explicit typed account metadata opts new outcomes into chunk publication.
 `MAX_CODE_CHUNKS = 40`, and `MAX_CODE_SIZE = 981640`.
 
 `ValidatedCode::new(Bytes)` keeps original logical bytes and hashes unchanged. It slices
-at 24,541 bytes and scans PUSH, RJUMP (two immediate bytes), and the immediate-bearing EIP-8024 instructions.
+at 24,541 bytes and scans PUSH, RJUMP/RJUMPI (two immediate bytes), and the immediate-bearing EIP-8024 instructions.
 It derives bounded leading-data lengths, up to 32 original lookahead bytes,
 and the next-chunk index or final STOP. Boundary STOPs are not required. The EVM2
 adapter creates execution buffers with valid leading replacement JUMPDESTs and
@@ -187,3 +187,5 @@ Snap account publication and completion verify the typed account commitment, acc
 inline delegation without a marker payload, and derive prepared storage from supplied
 full code when needed. Staging uses the same poison-on-storage-error publisher as
 normal provider code: a partially failed chunk write cannot be committed.
+
+RJUMPI (`0xe1`) shares RJUMP's relative encoding and preparation. It pops a condition and costs 4 gas; an untaken branch leaves its destination chunk unread and cold.

@@ -403,8 +403,13 @@ fn ordinary_account_metadata_does_not_fetch_code_and_kind_preserves_legacy_recor
 }
 
 #[test]
-fn cold_reopen_executes_generated_and_split_rjump() {
-    for suffix in [&[0x60, 0xab, 0x50, 0][..], &[0xe0, 0x80, 0x80, 0][..]] {
+fn cold_reopen_executes_generated_and_split_relative_jumps() {
+    for (condition, suffix, ordinary_gas) in [
+        (None, [0x60, 0xab, 0x50, 0], 19),
+        (None, [0xe0, 0x80, 0x80, 0], 14),
+        (Some(0), [0xe1, 0x80, 0x80, 0], 21),
+        (Some(1), [0xe1, 0x80, 0x80, 0], 19),
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let factory = open_factory(directory.path(), true);
         let settings = StorageSettings::v1();
@@ -414,9 +419,14 @@ fn cold_reopen_executes_generated_and_split_rjump() {
         let address = Address::repeat_byte(0x65);
         let mut raw = vec![0; 24540];
         // Jump to the JUMPDEST preceding the boundary instruction.
-        raw[..4].copy_from_slice(&[0x61, 0x5f, 0xdb, 0x56]);
+        let mut entry = Vec::new();
+        if let Some(condition) = condition {
+            entry.extend([0x60, condition]);
+        }
+        entry.extend([0x61, 0x5f, 0xdb, 0x56]);
+        raw[..entry.len()].copy_from_slice(&entry);
         raw[24539] = 0x5b;
-        raw.extend_from_slice(suffix);
+        raw.extend_from_slice(&suffix);
         let code = ValidatedCode::new(raw.into()).unwrap();
         writer
             .write_chunked_code(
@@ -467,7 +477,6 @@ fn cold_reopen_executes_generated_and_split_rjump() {
             execute_initial_frame(&mut execution, &TxEnvExt::default(), frame, &mut gas, budget, 0)
                 .unwrap();
         assert_eq!(result.stop, InstrStop::Stop);
-        let ordinary_gas = if suffix[0] == 0x60 { 19 } else { 14 };
         assert_eq!(gas.spent(), 2 * 28680 + ordinary_gas);
         let reads = hooks.reads();
         let payloads =
