@@ -211,19 +211,13 @@ struct BlockStateSink<'a> {
 impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
     type Error = core::convert::Infallible;
 
-    fn bytecode(
-        &mut self,
-        hash: alloy_primitives::B256,
-        code: &evm2::bytecode::Bytecode,
-    ) -> Result<(), Self::Error> {
-        self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
-        Ok(())
-    }
-
     fn account_changes(
         &mut self,
         changes: evm2::evm::AccountChanges<'_>,
     ) -> Result<(), Self::Error> {
+        if let Some((hash, code)) = changes.code {
+            self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
+        }
         let Some((original, current, created)) = committed_account(&changes) else {
             return Ok(());
         };
@@ -563,6 +557,7 @@ mod tests {
                 changed: true,
                 created: false,
                 selfdestructed: false,
+                code: None,
                 storage: &StorageOverlay::default(),
             })
             .unwrap();
@@ -605,6 +600,7 @@ mod tests {
                     changed: false,
                     created: false,
                     selfdestructed: false,
+                    code: None,
                     storage: &storage,
                 }
             } else {
@@ -615,6 +611,7 @@ mod tests {
                     changed: true,
                     created: step == 3,
                     selfdestructed: step != 3,
+                    code: (step == 3).then(|| (code.hash_slow(), &code)),
                     storage: &storage,
                 }
             };
@@ -627,12 +624,10 @@ mod tests {
                 changed: false,
                 created: false,
                 selfdestructed: false,
+                code: None,
                 storage: &empty,
             };
             let visit = |sink: &mut dyn StateChangeSink<Error = core::convert::Infallible>| {
-                if step == 3 {
-                    sink.bytecode(code.hash_slow(), &code).unwrap();
-                }
                 sink.account_changes(changes).unwrap();
                 sink.account_changes(read).unwrap();
             };
