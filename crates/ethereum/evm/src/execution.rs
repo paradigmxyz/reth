@@ -1,5 +1,5 @@
 //! EVM-backed Ethereum execution helpers.
-use reth_execution_types::{BlockState, EvmState, TransactionChanges};
+use reth_execution_types::{BlockState, StateUpdate};
 
 use alloy_evm::eth::dao_fork;
 
@@ -152,7 +152,7 @@ pub(crate) fn map_transaction_error(error: HandlerError, hash: B256) -> BlockExe
     }
 }
 
-fn send_state_update(state: EvmState, on_state_update: &mut impl FnMut(EvmState)) {
+fn send_state_update(state: StateUpdate, on_state_update: &mut impl FnMut(StateUpdate)) {
     if !state.is_empty() {
         on_state_update(state);
     }
@@ -162,35 +162,24 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     transaction: &Recovered<T::Tx>,
     commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, HandlerError>
 where
     T::Tx: Typed2718,
 {
-    let mut changes = TransactionChanges::default();
-    let result = match evm.transact(transaction) {
-        Ok(executed) => {
-            if commit(executed.result()).should_commit() {
-                let Ok(result) = if stream_state {
-                    executed.commit_with(&mut changes)
-                } else {
-                    executed.commit_with(&mut block_state.transaction_sink())
-                };
-                Ok(Some(result))
-            } else {
-                let _ = executed.discard();
-                Ok(None)
-            }
-        }
-        Err(error) => Err(error),
-    };
-    if stream_state {
-        block_state.commit(&changes);
-        send_state_update(changes.state, on_state_update);
+    let executed = evm.transact(transaction)?;
+    if !commit(executed.result()).should_commit() {
+        let _ = executed.discard();
+        return Ok(None);
     }
-    result
+    if !stream_state {
+        let Ok(result) = executed.commit_with(&mut block_state.transaction_sink());
+        return Ok(Some(result));
+    }
+    let output = executed.detach();
+    Ok(Some(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output)))
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
@@ -207,15 +196,21 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    accumulate_pending_state(block_state, stream_state, on_state_update, &pending_state);
-    // Reattach the finalized transaction so evm2 retains its account capacity and recycles
-    // storage maps for the next transaction instead of dropping the detached allocations.
-    evm.state_mut().set_pending_state(pending_state);
-    evm.state_mut().commit_transaction();
+    let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
+    if stream_state {
+        // The update moves to the state hook, so fold it into the accepted overlay directly.
+        evm.overlay_db_mut().commit_pending(&pending_state);
+        send_state_update(pending_state, on_state_update);
+    } else {
+        // Reattach the finalized transaction so evm2 retains its account capacity and recycles
+        // storage maps for the next transaction instead of dropping the detached allocations.
+        evm.state_mut().set_pending_state(pending_state);
+        evm.state_mut().commit_transaction();
+    }
     result
 }
 
@@ -223,26 +218,13 @@ pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     pending_state: &evm2::evm::PendingState,
 ) {
-    accumulate_pending_state(block_state, stream_state, on_state_update, pending_state);
+    let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
     evm.overlay_db_mut().commit_pending(pending_state);
-}
-
-fn accumulate_pending_state(
-    block_state: &mut BlockState,
-    stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
-    pending_state: &evm2::evm::PendingState,
-) {
     if stream_state {
-        let mut changes = TransactionChanges::default();
-        let Ok(()) = pending_state.visit(&mut changes);
-        block_state.commit(&changes);
-        send_state_update(changes.state, on_state_update);
-    } else {
-        let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
+        send_state_update(pending_state.clone(), on_state_update);
     }
 }
 
@@ -250,7 +232,7 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
@@ -355,7 +337,7 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
@@ -425,7 +407,7 @@ fn execute_system_call<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     address: Address,
     data: Bytes,
 ) -> Result<TxResult<T>, BlockExecutionError> {
@@ -457,10 +439,10 @@ fn commit_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    let mut converted = TransactionChanges::default();
+    let mut update = StateUpdate::default();
     for (address, original, current) in changes {
         let change = AccountChangeRef {
             address: *address,
@@ -470,11 +452,11 @@ fn commit_state_changes<T: EvmTypes>(
             selfdestructed: false,
         };
         let Ok(()) = evm.overlay_db_mut().account(change);
-        let Ok(()) = converted.account(change);
+        update.insert_account(*address, original.clone(), current.clone());
     }
-    block_state.commit(&converted);
+    let Ok(()) = update.visit(&mut block_state.transaction_sink());
     if stream_state {
-        send_state_update(converted.state, on_state_update);
+        send_state_update(update, on_state_update);
     }
 }
 
@@ -483,7 +465,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(EvmState),
+    on_state_update: &mut impl FnMut(StateUpdate),
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     block_number: u64,
@@ -605,7 +587,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{SignableTransaction, TxLegacy, TxType};
     use alloy_genesis::Genesis;
-    use alloy_primitives::{address, keccak256, Signature, TxKind};
+    use alloy_primitives::{address, Signature, TxKind};
     use evm2::{
         bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
@@ -759,27 +741,7 @@ mod tests {
         assert_eq!(without_hook, output);
         let mut streamed = HashedPostState::default();
         for update in rx.try_iter() {
-            for (address, account) in update {
-                let hash = keccak256(address);
-                if account.is_selfdestructed() || account.info != account.original_info() {
-                    streamed.accounts.insert(
-                        hash,
-                        (!account.is_selfdestructed()).then(|| account.info.clone().into()),
-                    );
-                }
-                if !account.is_selfdestructed() {
-                    for (key, value) in account.storage {
-                        if value.is_changed() {
-                            streamed
-                                .storages
-                                .entry(hash)
-                                .or_default()
-                                .storage
-                                .insert(keccak256(B256::from(key)), value.present_value);
-                        }
-                    }
-                }
-            }
+            streamed.extend(reth_execution_types::state_update_to_hashed_post_state(&update));
         }
         let recomputed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
         assert_eq!(streamed.into_sorted(), recomputed.into_sorted());

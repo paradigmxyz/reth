@@ -8,8 +8,8 @@
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.
 
 use crate::error::StateRootTaskError;
-use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
+use reth_execution_types::{OnStateHook, StateUpdate};
 use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
@@ -23,7 +23,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution.
-    StateUpdate(EvmState),
+    StateUpdate(StateUpdate),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Signals state update stream end.
@@ -367,7 +367,7 @@ pub trait StateRootSink: Send + Sync + 'static {
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
     /// Authoritative state update from normal block execution.
-    fn on_state_update(&self, state: EvmState);
+    fn on_state_update(&self, state: StateUpdate);
 
     /// Authoritative pre-hashed state update, currently used by BAL streaming.
     fn on_hashed_state_update(&self, state: HashedPostState);
@@ -469,7 +469,7 @@ impl fmt::Debug for StateRootUpdateHook {
 }
 
 impl OnStateHook for StateRootUpdateHook {
-    fn on_state(&mut self, state: EvmState) {
+    fn on_state(&mut self, state: StateUpdate) {
         self.inner.on_state_update(state);
     }
 }
@@ -501,7 +501,7 @@ impl StateRootSink for SparseTrieStateRootSink {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
     }
 
-    fn on_state_update(&self, state: EvmState) {
+    fn on_state_update(&self, state: StateUpdate) {
         let _ = self.sender.send(StateRootMessage::StateUpdate(state));
     }
 
@@ -810,7 +810,7 @@ mod tests {
             self.access_hints.fetch_add(1, Ordering::Relaxed);
         }
 
-        fn on_state_update(&self, state: EvmState) {
+        fn on_state_update(&self, state: StateUpdate) {
             assert!(state.is_empty());
             self.state_updates.fetch_add(1, Ordering::Relaxed);
         }
@@ -865,7 +865,7 @@ mod tests {
 
         {
             let mut hook = StateRootUpdateStream::new(sink.clone()).into_state_hook();
-            hook.on_state(EvmState::default());
+            hook.on_state(StateUpdate::default());
         }
 
         assert_eq!(sink.access_hints.load(Ordering::Relaxed), 1);
@@ -930,7 +930,7 @@ mod tests {
 
         {
             let mut hook = handle.take_state_hook();
-            hook.on_state(EvmState::default());
+            hook.on_state(StateUpdate::default());
         }
         assert_eq!(sink.state_updates.load(Ordering::Relaxed), 1);
         assert_eq!(sink.finished_updates.load(Ordering::Relaxed), 1);

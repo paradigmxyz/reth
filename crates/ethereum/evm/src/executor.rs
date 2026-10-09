@@ -1,5 +1,5 @@
 //! EVM-backed Ethereum executor.
-use reth_execution_types::{BlockState, EvmState};
+use reth_execution_types::{BlockState, StateUpdate};
 
 use crate::{
     execution::{
@@ -91,7 +91,7 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
-type StateUpdateHook = Option<Box<dyn FnMut(EvmState) + Send>>;
+type StateUpdateHook = Option<Box<dyn FnMut(StateUpdate) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -215,7 +215,7 @@ where
         &mut self.evm
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.state_update_hook = Some(Box::new(hook));
         true
     }
@@ -819,7 +819,7 @@ where
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
@@ -969,7 +969,7 @@ const fn final_block_gas_used(
     }
 }
 
-fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
+fn emit_state(hook: &mut StateUpdateHook, state: StateUpdate) {
     if let Some(hook) = hook.as_mut() {
         hook(state);
     }

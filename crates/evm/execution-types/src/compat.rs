@@ -2,9 +2,11 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{
+    keccak256,
     map::{hash_map::Entry, AddressMap, AddressSet},
-    Address, U256,
+    Address, B256, U256,
 };
+use reth_trie_common::{HashedPostState, HashedStorage};
 use revm::{
     database::{
         states::{bundle_state::BundleRetention, StorageSlot, TransitionAccount, TransitionState},
@@ -226,16 +228,34 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         Ok(())
     }
 
+    fn account_changes(
+        &mut self,
+        changes: evm2::evm::AccountChanges<'_>,
+    ) -> Result<(), Self::Error> {
+        let Some((original, current, created)) = committed_account(&changes) else {
+            return Ok(());
+        };
+        let slots = changes
+            .storage_changes()
+            .filter(|change| change.original != change.current)
+            .map(|change| (change.key, StorageSlot::new_changed(change.original, change.current)));
+        self.commit_native_account(
+            changes.address,
+            original,
+            current,
+            created,
+            changes.storage.wiped,
+            slots,
+        );
+        Ok(())
+    }
+
     fn account(&mut self, change: evm2::evm::AccountChangeRef<'_>) -> Result<(), Self::Error> {
         let (wiped, slots) = self.storage.remove(&change.address).unwrap_or_default();
-        let mut current = change.current.map(revm_account);
-        if let Some(info) = &mut current {
-            info.code = self.block.contracts.get(&info.code_hash).cloned();
-        }
-        self.block.commit_account(
+        self.commit_native_account(
             change.address,
-            change.original.map(revm_account),
-            current,
+            change.original,
+            change.current,
             change.created,
             wiped,
             slots.into_iter(),
@@ -256,6 +276,116 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
                 created: false,
                 selfdestructed: false,
             })?;
+        }
+        Ok(())
+    }
+}
+
+impl BlockStateSink<'_> {
+    fn commit_native_account(
+        &mut self,
+        address: Address,
+        original: Option<&evm2::evm::AccountInfo>,
+        current: Option<&evm2::evm::AccountInfo>,
+        created: bool,
+        wiped: bool,
+        slots: impl Iterator<Item = (U256, StorageSlot)>,
+    ) {
+        let mut current = current.map(revm_account);
+        if let Some(info) = &mut current {
+            info.code = self.block.contracts.get(&info.code_hash).cloned();
+        }
+        self.block.commit_account(
+            address,
+            original.map(revm_account),
+            current,
+            created,
+            wiped,
+            slots,
+        );
+    }
+}
+
+/// Returns the original info, current info, and creation flag an account commits with, or `None`
+/// when the stream reports it only as a read without storage activity.
+///
+/// Mirrors the per-entry stream: loaded-but-unchanged accounts are committed only when their
+/// storage was wiped or changed, and then as an unchanged account.
+fn committed_account<'a>(
+    changes: &evm2::evm::AccountChanges<'a>,
+) -> Option<(Option<&'a evm2::evm::AccountInfo>, Option<&'a evm2::evm::AccountInfo>, bool)> {
+    if changes.changed {
+        Some((changes.original, changes.current, changes.created))
+    } else if changes.storage.wiped || changes.storage.changed_slots().next().is_some() {
+        Some((changes.current, changes.current, false))
+    } else {
+        None
+    }
+}
+
+/// Hashes a transaction's state update into the trie update consumed by state root tasks.
+///
+/// Produces the same [`HashedPostState`] as hashing the revm state that [`TransactionChanges`]
+/// rebuilds from the update, without materializing it.
+pub fn state_update_to_hashed_post_state(state: &evm2::evm::PendingState) -> HashedPostState {
+    let mut sink = HashedPostStateSink::default();
+    let Ok(()) = evm2::evm::StateChangeSource::visit(state, &mut sink);
+    sink.0
+}
+
+/// Converts a revm [`EvmState`](revm::state::EvmState) into a state update, keeping touched
+/// accounts and their changed slots.
+pub fn evm_state_to_state_update(state: &revm::state::EvmState) -> evm2::evm::PendingState {
+    let mut update = evm2::evm::PendingState::default();
+    for (&address, account) in state {
+        if !account.is_touched() {
+            continue;
+        }
+        let original = (!account.is_loaded_as_not_existing())
+            .then(|| native_account(&account.original_info()));
+        let current = (!account.is_selfdestructed()).then(|| native_account(&account.info));
+        update.insert_account(address, original, current);
+        for (&key, slot) in &account.storage {
+            if slot.is_changed() {
+                update.insert_storage(address, key, slot.original_value, slot.present_value);
+            }
+        }
+    }
+    update
+}
+
+#[derive(Default)]
+struct HashedPostStateSink(HashedPostState);
+
+impl evm2::evm::StateChangeSink for HashedPostStateSink {
+    type Error = core::convert::Infallible;
+
+    fn account_changes(
+        &mut self,
+        changes: evm2::evm::AccountChanges<'_>,
+    ) -> Result<(), Self::Error> {
+        let Some((original, current, _)) = committed_account(&changes) else {
+            return Ok(());
+        };
+        let hashed_address = keccak256(changes.address);
+        let destroyed = current.is_none();
+        let info = current.map(revm_account).unwrap_or_default();
+        // EIP-161: a touched account that ends up empty is deleted, unless it never existed.
+        if destroyed || (info.is_empty() && original.is_some()) {
+            self.0.accounts.insert(hashed_address, None);
+        } else if info != original.map(revm_account).unwrap_or_default() {
+            self.0.accounts.insert(hashed_address, Some(info.into()));
+        }
+
+        if !destroyed {
+            let mut slots = changes
+                .storage_changes()
+                .filter(|change| change.original != change.current)
+                .map(|change| (keccak256(B256::from(change.key)), change.current))
+                .peekable();
+            if slots.peek().is_some() {
+                self.0.storages.insert(hashed_address, HashedStorage::from_iter(slots));
+            }
         }
         Ok(())
     }

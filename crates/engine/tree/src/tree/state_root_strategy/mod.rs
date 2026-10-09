@@ -57,12 +57,12 @@ mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
-use alloy_evm::block::OnStateHook;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
+use reth_execution_types::OnStateHook;
 use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -383,10 +383,10 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// Takes the execution hook, present only when the job wants normal execution updates.
     pub fn take_execution_hook(
         &mut self,
-    ) -> Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>> {
+    ) -> Option<Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>> {
         self.execution_hook.take().map(|mut hook| {
             Box::new(move |state| hook.on_state(state))
-                as Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>
+                as Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>
         })
     }
 
@@ -1859,11 +1859,11 @@ mod tests {
                     accumulated_state.get_mut(address).unwrap().0 =
                         Account::from_revm_account(account);
                 }
-                state_hook.on_state(update);
+                state_hook.on_state(reth_execution_types::evm_state_to_state_update(&update));
                 root_from_regular = state_root(accumulated_state.clone());
             } else {
                 for update in &state_updates {
-                    state_hook.on_state(update.clone());
+                    state_hook.on_state(reth_execution_types::evm_state_to_state_update(update));
                 }
             }
             drop(state_hook);

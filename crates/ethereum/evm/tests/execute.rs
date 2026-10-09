@@ -20,7 +20,7 @@ use reth_evm::{
     BlockValidationError, ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState};
+use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
 };
@@ -738,9 +738,9 @@ fn test_balance_increment_not_duplicated() {
     let tx_clone = tx.clone();
 
     let _output = executor
-        .execute_with_state_hook(block, move |state: EvmState| {
-            if let Some(account) = state.get(&withdrawal_recipient) {
-                let _ = tx_clone.send(account.info.balance);
+        .execute_with_state_hook(block, move |state: StateUpdate| {
+            if let Some(info) = state.account_info(&withdrawal_recipient) {
+                let _ = tx_clone.send(info.balance);
             }
         })
         .expect("Block execution should succeed");
