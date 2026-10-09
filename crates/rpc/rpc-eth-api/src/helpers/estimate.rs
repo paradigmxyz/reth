@@ -316,9 +316,7 @@ pub trait EstimateCall: Call {
         Self: LoadPendingBlock,
     {
         async move {
-            let (evm_env, at) = self.evm_env_at(at).await?;
-
-            self.spawn_blocking_io_with_state(at, move |this, state| {
+            self.spawn_blocking_io_with_state_and_env(at, move |this, state, evm_env| {
                 EstimateCall::estimate_gas_with(
                     &this,
                     evm_env,

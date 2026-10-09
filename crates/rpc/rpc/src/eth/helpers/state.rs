@@ -29,22 +29,29 @@ mod tests {
     use crate::eth::helpers::types::EthRpcConverter;
 
     use super::*;
-    use alloy_eips::BlockId;
+    use alloy_consensus::Transaction as _;
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, BlockId};
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{
         map::{AddressMap, B256Map},
-        Address, StorageKey, StorageValue, B256, U256,
+        Address, Bytes, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+            NoopProvider,
+        },
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
-        helpers::{pending_block::PendingEnvBuilder, EthCall, EthState, SpawnBlocking},
+        helpers::{pending_block::PendingEnvBuilder, Call, EthCall, EthState, SpawnBlocking},
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
@@ -54,7 +61,10 @@ mod tests {
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
     };
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TestPool},
+        TransactionPool,
+    };
     use std::{future::Future, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
@@ -280,6 +290,8 @@ mod tests {
 
     impl EthState for CustomPendingState {}
 
+    impl Call for CustomPendingState {}
+
     #[tokio::test]
     async fn pending_state_reads_use_existing_override() {
         let address = Address::random();
@@ -296,5 +308,83 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    #[tokio::test]
+    async fn pending_call_uses_local_pending_block() {
+        // Stores 42 in slot 0 when called with calldata, otherwise returns slot 0.
+        let code = "0x3615600b57602a600055005b60005460005260206000f3".parse().unwrap();
+        let tx = MockTransaction::eip1559()
+            .with_gas_limit(100_000)
+            .with_max_fee(INITIAL_BASE_FEE.into())
+            .with_input(Bytes::from_static(&[1]));
+        let contract = tx.to().unwrap();
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE.into()))
+            .extend_accounts([
+                (
+                    *tx.get_sender(),
+                    GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+                ),
+                (
+                    contract,
+                    GenesisAccount::default()
+                        .with_code(Some(code))
+                        .with_storage(Some([(B256::ZERO, B256::with_last_byte(7))].into())),
+                ),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let pool = testing_pool();
+        pool.add_external_transaction(tx).await.unwrap();
+        let eth_api = EthApi::builder(
+            provider.clone(),
+            pool,
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+
+        let pending = Some(BlockId::pending());
+        let stored = eth_api.storage_at(contract, U256::ZERO.into(), pending).await.unwrap();
+        let output = eth_api
+            .call(TransactionRequest::default().to(contract), pending, Default::default())
+            .await
+            .unwrap();
+        assert_eq!(stored, B256::with_last_byte(42));
+        assert_eq!(output[..], stored[..]);
+    }
+
+    #[tokio::test]
+    async fn pending_call_uses_existing_override() {
+        let address = Address::random();
+        // Returns slot 0.
+        let code: Bytes = "0x60005460005260206000f3".parse().unwrap();
+        let account = |value: u64| {
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(code.clone())
+                .extend_storage([(B256::ZERO, U256::from(value))])
+        };
+        let eth_api = mock_eth_api(AddressMap::from_iter([(address, account(7))]));
+        let header = alloy_consensus::Header { gas_limit: 30_000_000, ..Default::default() };
+        eth_api.provider().add_block(B256::ZERO, Block { header, ..Default::default() });
+
+        let pending = MockEthProvider::default();
+        pending.extend_accounts([(address, account(42))]);
+        let eth_api = CustomPendingState { inner: eth_api, pending };
+
+        let res = eth_api
+            .transact_call_at(
+                TransactionRequest::default().to(address),
+                BlockId::pending(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.result.output().unwrap()[..], B256::with_last_byte(42)[..]);
     }
 }
