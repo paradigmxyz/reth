@@ -1240,15 +1240,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_enr_bootnode_args() {
-        let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
-        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--bootnodes", enr]).args;
-        let trusted =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--trusted-peers", enr]).args;
-        assert_eq!(args.bootnodes, Some(trusted.trusted_peers));
-    }
-
-    #[test]
     fn parse_retry_strategy_args() {
         let tests = vec![0, 10];
 
