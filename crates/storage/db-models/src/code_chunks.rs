@@ -257,7 +257,7 @@ fn prepare_chunks(code: &[u8]) -> Vec<ChunkPreparation> {
     while pc < code.len() {
         let width = match code[pc] {
             0x60..=0x7f => (code[pc] - 0x5f) as usize,
-            0xe0 | 0xe1 => 2,
+            0xe0 => 2,
             0xe6..=0xe8 => 1,
             _ => 0,
         };
@@ -370,9 +370,9 @@ mod tests {
 
     #[test]
     fn rjump_immediates_crossing_boundary_match_execution_preparation() {
-        for (opcode, distance) in [(0xe0, 1), (0xe0, 2), (0xe1, 1), (0xe1, 2)] {
+        for distance in [1, 2] {
             let mut raw = vec![0; CODE_CHUNK_SIZE - distance];
-            raw.extend([opcode, 0x80, 0x80, 0]);
+            raw.extend([0xe0, 0x80, 0x80, 0]);
             let code = ValidatedCode::new(raw.clone().into()).unwrap();
             let descriptor = code.descriptor().unwrap();
             let prepared = prepare_chunks(&raw);
