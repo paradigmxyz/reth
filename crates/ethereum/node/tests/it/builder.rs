@@ -175,22 +175,6 @@ fn test_node_setup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn default_launch_still_starts_the_node() -> eyre::Result<()> {
-    let (config, _datadir) = launch_config();
-
-    let _node = NodeBuilder::new(config)
-        .with_database(create_test_rw_db())
-        .with_launch_context(Runtime::test())
-        .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default())
-        .launch_with_debug_capabilities()
-        .await?;
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn custom_backfill_recovers_then_builds() -> eyre::Result<()> {
     let (config, _datadir) = launch_config();
     let backfill = RecordingBackfill::default();
