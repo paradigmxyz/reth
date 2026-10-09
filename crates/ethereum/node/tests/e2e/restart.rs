@@ -6,6 +6,7 @@ use alloy_provider::Provider;
 use futures::TryStreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
+    node::DATABASE_RELEASE_TIMEOUT,
     wait::{poll_until, WAIT_TIMEOUT},
     E2ETestSetupExt,
 };
@@ -103,6 +104,49 @@ async fn stop_persists_canonical_chain_only() -> eyre::Result<()> {
 
     node.import_payload(side_block).await?;
     assert_eq!(node.inner.provider.best_block_number()?, 4);
+
+    Ok(())
+}
+
+/// Nodes are not restartable unless the setup opts in.
+#[tokio::test]
+async fn stop_requires_restartable_node() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Prague).build_single().await?;
+
+    let err = node.stop().await.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the node is not restartable, launch it with \
+         `E2ETestSetupBuilder::with_restartable_nodes` to stop it"
+    );
+
+    Ok(())
+}
+
+/// A provider of the node that is held across `stop` keeps its database open, which `stop`
+/// reports instead of closing the database under it.
+#[tokio::test]
+async fn stop_fails_while_provider_is_held() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Prague)
+        .with_restartable_nodes()
+        .build_single()
+        .await?;
+
+    let provider = node.inner.provider.clone();
+    let err = node.stop().await.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
+             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
+             of `inner.provider`, before stopping it"
+        )
+    );
+    assert_eq!(provider.best_block_number()?, 0);
 
     Ok(())
 }
