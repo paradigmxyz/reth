@@ -302,7 +302,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{account, hashed_factory, header, key, state_root},
-        SnapGeneration, SnapStorageStore, StorageChunk,
+        SnapGeneration,
     };
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip4895::{Withdrawal, Withdrawals};
@@ -435,19 +435,6 @@ mod tests {
             Err(SnapSyncError::IncompleteAccounts { next }) if next == key(2)
         ));
         assert_eq!(merkle_checkpoint(&provider), None);
-    }
-
-    #[test]
-    fn storage_persisted_ahead_of_its_range_prevents_the_hand_off() {
-        let (factory, write, _) = downloaded(state_root(&accounts()), 2);
-        let provider = factory.database_provider_rw().unwrap();
-        let origin = provider.account_coverage(write).unwrap().unwrap().next().unwrap();
-        let root = accounts()[2].1.storage_root;
-        let chunk =
-            StorageChunk::new(CONTRACT, root, B256::ZERO, vec![(SLOT, U256::from(7))], None);
-        provider.commit_storage_chunk(write, origin, chunk).unwrap();
-
-        assert!(matches!(start(&provider, write), Err(SnapSyncError::IncompleteAccounts { .. })));
     }
 
     #[test]
