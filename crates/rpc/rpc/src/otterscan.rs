@@ -837,6 +837,22 @@ mod tests {
     }
 
     #[test]
+    fn selfdestruct_after_a_child_call_uses_enclosing_depth() {
+        // Call another account, then destroy the root contract. The destruction is a sibling
+        // of that call, not its child.
+        let (result, traces) =
+            execute(bytes!("60006000600060006000603361fffff1506022ff"), SpecId::CANCUN);
+        assert!(result.is_success());
+        assert_eq!(traces.len(), 3);
+        assert_eq!(traces[1].r#type, "CALL");
+        assert_eq!(traces[1].depth, 1);
+        assert_eq!(traces[2].r#type, "SELFDESTRUCT");
+        assert_eq!(traces[2].depth, 1);
+        assert_eq!(traces[2].from, Address::repeat_byte(0x11));
+        assert_eq!(traces[2].to, Address::with_last_byte(0x22));
+    }
+
+    #[test]
     fn selfdestructs_follow_children_and_precede_siblings() {
         let nodes = [0, 1, 2, 1]
             .into_iter()

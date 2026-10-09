@@ -350,6 +350,25 @@ mod tests {
         assert_eq!(parsed.unwrap(), Obj { key: "value".into() });
     }
 
+    /// Multiple messages fed one byte at a time.
+    #[test]
+    fn pipelined_messages_byte_by_byte() {
+        let payload = br#"{"a":1}{"b":2}{"c":3}"#;
+        let mut buf = BytesMut::with_capacity(256);
+        let mut codec = StreamCodec::stream_incoming();
+        let mut decoded = Vec::new();
+
+        for byte in payload {
+            buf.put_u8(*byte);
+            while let Some(m) = codec.decode(&mut buf).unwrap() {
+                decoded.push(m);
+            }
+        }
+
+        assert_eq!(decoded, vec![r#"{"a":1}"#, r#"{"b":2}"#, r#"{"c":3}"#]);
+        assert!(buf.is_empty());
+    }
+
     /// The stateless `Separator::Empty` decode loop that `ScanState` replaced, kept as the
     /// reference implementation for the differential tests below.
     struct ReferenceDecoder;
