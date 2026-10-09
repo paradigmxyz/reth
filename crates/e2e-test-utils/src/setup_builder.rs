@@ -743,6 +743,13 @@ mod tests {
     use reth_node_ethereum::EthereumNode;
 
     #[test]
+    fn tree_config_uses_small_cross_block_cache() {
+        let (_, tree_config) =
+            EthereumNode::test_setup_for(EthereumHardfork::Cancun).node_and_tree_config();
+        assert_eq!(tree_config.cross_block_cache_size(), 1024 * 1024);
+    }
+
+    #[test]
     fn tree_config_follows_node_config() {
         let (_, tree_config) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
             .with_node_config_modifier(|mut config| {

@@ -1356,6 +1356,20 @@ mod tests {
     }
 
     #[test]
+    fn test_download_print_plan_json_parses() {
+        let args = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::parse_from([
+            "reth",
+            "--manifest-path",
+            "manifest.json",
+            "--minimal",
+            "--print-plan-json",
+        ])
+        .args;
+
+        assert!(args.prints_plan_json());
+    }
+
+    #[test]
     fn test_download_print_plan_json_rejects_single_archive() {
         let result = CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from([
             "reth",

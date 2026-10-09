@@ -1105,6 +1105,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_backfill_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        let config = args.tree_config();
+        assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
+
+        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--engine.backfill-threshold",
+                threshold,
+            ])
+            .args;
+            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
+        }
+    }
+
+    #[test]
     fn validate_rejects_state_masking_window_at_or_above_threshold() {
         let args = EngineArgs {
             persistence_threshold: 4,
