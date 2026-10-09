@@ -3156,6 +3156,16 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn max_open_files_adapts_to_file_descriptor_limit() {
+        assert_eq!(max_open_files_for_limit(Some(HIGH_FILE_DESCRIPTOR_LIMIT)), KEEP_ALL_FILES_OPEN);
+        assert_eq!(
+            max_open_files_for_limit(Some(HIGH_FILE_DESCRIPTOR_LIMIT - 1)),
+            LIMITED_MAX_OPEN_FILES
+        );
+        assert_eq!(max_open_files_for_limit(None), LIMITED_MAX_OPEN_FILES);
+    }
+
+    #[test]
     fn test_with_default_tables_registers_required_column_families() {
         let temp_dir = TempDir::new().unwrap();
 

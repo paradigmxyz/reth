@@ -3229,6 +3229,136 @@ mod tests {
     }
 
     #[test]
+    fn state_range_provider_serves_persisted_root_with_in_memory_overlay() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        // State A: one account, persisted at block 1. Block 1 is not the database head, so only
+        // the persisted-history fallback can resolve its root.
+        let (address, account_a) = random_account(1);
+        let hashed_address = keccak256(address);
+        let factory = test_provider_factory_with_genesis()?;
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
+        provider_rw.commit()?;
+        let persisted_root = factory.latest()?.state_root(HashedPostState::default())?;
+
+        let genesis_hash = factory.sealed_header(0)?.unwrap().hash();
+        let mut persisted_block = random_block(
+            &mut rng,
+            1,
+            BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        persisted_block.header.state_root = persisted_root;
+        let persisted_block =
+            persisted_block.seal_slow().try_recover().expect("failed to seal block with senders");
+        let persisted_hash = persisted_block.hash();
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.insert_block(&persisted_block)?;
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1))?;
+        provider_rw.commit()?;
+
+        // State B: block 2 changes the account and becomes the database head, with a root
+        // different from block 1's.
+        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a.clone() };
+        let mut state_b = HashedPostState::default();
+        state_b.accounts.insert(hashed_address, Some(account_b.clone()));
+        let head_root = factory.latest()?.state_root(state_b.clone())?;
+        assert_ne!(head_root, persisted_root);
+
+        let mut head_block = random_block(
+            &mut rng,
+            2,
+            BlockParams { parent: Some(persisted_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        head_block.header.state_root = head_root;
+        let head_block =
+            head_block.seal_slow().try_recover().expect("failed to seal block with senders");
+        let head_hash = head_block.hash();
+
+        let provider_rw = factory.provider_rw()?;
+        provider_rw.append_blocks_with_state(
+            vec![head_block],
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(
+                        address,
+                        Some(account_a.clone().into()),
+                        Some(account_b.into()),
+                        Default::default(),
+                    )],
+                    [[(address, Some(Some(account_a.clone().into())), [])]],
+                    [],
+                ),
+                first_block: 2,
+                ..Default::default()
+            },
+            state_b.into_sorted(),
+        )?;
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
+        provider_rw.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+
+        // An in-memory block on top of the head adds another account under a root of its own.
+        let (memory_address, memory_account) = random_account(3);
+        let mut memory_state = HashedPostState::default();
+        memory_state.accounts.insert(keccak256(memory_address), Some(memory_account));
+
+        let memory_root = B256::repeat_byte(0x77);
+        assert_ne!(memory_root, persisted_root);
+        let mut memory_block = random_block(
+            &mut rng,
+            3,
+            BlockParams { parent: Some(head_hash), tx_count: Some(0), ..Default::default() },
+        )
+        .unseal();
+        memory_block.header.state_root = memory_root;
+        let memory_block =
+            memory_block.seal_slow().try_recover().expect("failed to seal block with senders");
+        let trie_data = SortedTrieData::new(
+            Arc::new(memory_state.into_sorted()),
+            Arc::new(TrieUpdates::default().into_sorted()),
+        );
+        let execution_output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: Default::default(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            state: Default::default(),
+        };
+        let executed =
+            ExecutedBlock::new(Arc::new(memory_block), Arc::new(execution_output), trie_data);
+        provider.database.overlay_manager().insert_block(executed.clone());
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+
+        // No in-memory block carries the persisted root, so the persisted-history fallback must
+        // resolve it, ignoring both the later database block and the in-memory block above it.
+        assert!(!provider
+            .canonical_in_memory_state
+            .canonical_chain()
+            .any(|state| state.state_root() == persisted_root));
+        let state =
+            provider.state_range_provider(persisted_root)?.expect("persisted root must resolve");
+        let range = state.account_range(B256::ZERO, B256::repeat_byte(0xff), 10_000)?;
+        assert_eq!(range.items, vec![(hashed_address, account_a)]);
+
+        // The first node of a boundary proof is the trie root, so this is the root the view
+        // reports.
+        let proof = state.account_range_proof(&[hashed_address])?;
+        assert!(!proof.is_empty());
+        assert_eq!(keccak256(&proof[0]), persisted_root);
+
+        Ok(())
+    }
+
+    #[test]
     fn latest_reads_in_memory_state_like_the_hash_lookup() -> eyre::Result<()> {
         use crate::{AccountReader, StateProvider, StateProviderBox};
         use reth_storage_api::DatabaseProviderROFactory;
