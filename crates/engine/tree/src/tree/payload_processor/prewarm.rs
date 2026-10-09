@@ -16,7 +16,9 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    handoff::{HandoffInspector, PrewarmResult, PrewarmResults, RecordingDatabase},
+    handoff::{
+        HandoffInspector, PrewarmResult, PrewarmResults, RecordingDatabase, MAX_READY_RESULTS,
+    },
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -170,7 +172,7 @@ where
             let ctx = &ctx;
             let pool = executor.prewarming_pool();
 
-            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(256);
+            let (refresh_tx, refresh_rx) = crossbeam_channel::bounded(MAX_READY_RESULTS * 2);
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             pool.in_place_scope(|s| {
@@ -1090,7 +1092,8 @@ mod tests {
     #[allow(clippy::clone_on_copy, reason = "Account is not Copy with account-ext enabled")]
     fn pool_worker_publishes_only_strict_ready_results() {
         reth_tracing::init_test_tracing();
-        for (nonce, index, reusable) in [(0, 0, true), (1, 0, false), (0, 128, false)] {
+        for (nonce, index, reusable) in [(0, 0, true), (1, 0, false), (0, MAX_READY_RESULTS, false)]
+        {
             let runtime = Runtime::test();
             let results = Arc::new(PrewarmResults::default());
             let provider = create_test_provider_factory();

@@ -44,7 +44,7 @@ use std::{
 };
 
 const MAX_READS: usize = 8_192;
-const MAX_READY_RESULTS: usize = 128;
+pub(super) const MAX_READY_RESULTS: usize = 256;
 const MAX_REFRESHES: usize = 128;
 
 /// A parent-state database that records every account and storage dependency.
