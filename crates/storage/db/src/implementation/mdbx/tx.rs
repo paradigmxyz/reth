@@ -352,6 +352,15 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
         self.inner.disable_timeout();
     }
+
+    fn contains_key<T: Table>(&self, key: T::Key) -> Result<bool, DatabaseError> {
+        self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
+            // Unit decoding ignores the MDBX value pointer, including dirty pages in a writer.
+            tx.get::<()>(self.get_dbi::<T>()?, key.encode().as_ref())
+                .map(|value| value.is_some())
+                .map_err(|error| DatabaseError::Read(error.into()))
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -449,11 +458,22 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
-    use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
+    use super::*;
+    use crate::{
+        mdbx::DatabaseArguments, tables, test_utils::create_test_rw_db, DatabaseEnv,
+        DatabaseEnvKind,
+    };
+    use alloy_primitives::B256;
+    use reth_db_api::{
+        database::Database, models::ClientVersion, transaction::DbTx, RawKey, RawTable, RawValue,
+    };
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
-    use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
+    use std::{
+        sync::atomic::Ordering,
+        thread::sleep,
+        time::{Duration, Instant},
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -503,5 +523,78 @@ mod tests {
             DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn contains_key_observes_writes_deletions_and_the_read_snapshot() {
+        let db = create_test_rw_db();
+        let hash = B256::with_last_byte(1);
+        let tx = db.tx_mut().unwrap();
+        assert!(!tx.contains_key::<tables::Bytecodes>(hash).unwrap());
+        DbTxMut::put::<RawTable<tables::Bytecodes>>(
+            &tx,
+            RawKey::new(hash),
+            RawValue::from_vec(vec![7; 128 * 1024]),
+        )
+        .unwrap();
+        assert!(tx.contains_key::<tables::Bytecodes>(hash).unwrap());
+        tx.commit().unwrap();
+        let snapshot = db.tx().unwrap();
+        assert!(snapshot.contains_key::<tables::Bytecodes>(hash).unwrap());
+        let tx = db.tx_mut().unwrap();
+        tx.delete::<tables::Bytecodes>(hash, None).unwrap();
+        assert!(!tx.contains_key::<tables::Bytecodes>(hash).unwrap());
+        tx.commit().unwrap();
+        assert!(snapshot.contains_key::<tables::Bytecodes>(hash).unwrap());
+        assert!(!db.tx().unwrap().contains_key::<tables::Bytecodes>(hash).unwrap());
+    }
+
+    #[test]
+    fn contains_key_does_not_decode_the_value() {
+        let db = create_test_rw_db();
+        let tx = db.tx_mut().unwrap();
+        // HeaderNumbers expects a compressed block number. Presence does not inspect that value.
+        let hash = B256::with_last_byte(1);
+        DbTxMut::put::<RawTable<tables::HeaderNumbers>>(
+            &tx,
+            RawKey::new(hash),
+            RawValue::from_vec(vec![0xff; 32]),
+        )
+        .unwrap();
+        assert!(tx.contains_key::<tables::HeaderNumbers>(hash).unwrap());
+        assert!(!tx.contains_key::<tables::HeaderNumbers>(B256::ZERO).unwrap());
+    }
+
+    #[test]
+    #[ignore = "manual performance measurement"]
+    fn bytecode_presence_latency_measurement() {
+        let db = create_test_rw_db();
+        let hash = B256::with_last_byte(1);
+        let bytes = 32 * 1024;
+        let tx = db.tx_mut().unwrap();
+        DbTxMut::put::<RawTable<tables::Bytecodes>>(
+            &tx,
+            RawKey::new(hash),
+            RawValue::from_vec(vec![7; bytes]),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let tx = db.tx().unwrap();
+        let iterations = 100_000;
+        for copy in [true, false] {
+            let start = Instant::now();
+            for _ in 0..iterations {
+                let present = if copy {
+                    tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(hash)).unwrap().is_some()
+                } else {
+                    tx.contains_key::<tables::Bytecodes>(hash).unwrap()
+                };
+                assert!(std::hint::black_box(present));
+            }
+            println!(
+                "bytecode_presence copy={copy} bytes={bytes} lookups={iterations} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+        }
     }
 }

@@ -14,7 +14,6 @@ use alloy_primitives::{
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
@@ -303,7 +302,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             .map(|(_, account)| account);
         if let Some(hash) = account.map(|account| account.code_hash) &&
             hash != KECCAK256_EMPTY &&
-            self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
+            !self.tx_ref().contains_key::<tables::Bytecodes>(hash)?
         {
             return Err(SnapSyncError::MissingCode { hash })
         }
@@ -374,10 +373,10 @@ impl RangeDependencies {
                     persisted.push(*hash);
                 }
             }
-            // Only presence matters, so stored code is not decoded.
+            // Only presence matters, so stored code is neither copied nor decoded.
             if account.code_hash != KECCAK256_EMPTY &&
                 available.insert(account.code_hash) &&
-                tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(account.code_hash))?.is_none()
+                !tx.contains_key::<tables::Bytecodes>(account.code_hash)?
             {
                 return Err(SnapSyncError::MissingCode { hash: account.code_hash })
             }
