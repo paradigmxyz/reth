@@ -622,6 +622,35 @@ mod tests {
     }
 
     #[test]
+    fn missing_code_is_named_after_contracts_whose_code_is_stored() {
+        let stored_code = code();
+        let missing_code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x01]));
+        let mut first = account(1);
+        first.code_hash = stored_code.hash_slow();
+        let mut second = account(2);
+        second.code_hash = missing_code.hash_slow();
+        let accounts = vec![(key(1), first), (key(2), second), (key(3), account(3))];
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_state_changes(StateChangeset {
+                contracts: vec![(stored_code.hash_slow(), stored_code)],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let refused = provider.commit_account_range(write, &range, Default::default(), Vec::new());
+
+        assert!(matches!(
+            refused,
+            Err(SnapSyncError::MissingCode { hash }) if hash == missing_code.hash_slow()
+        ));
+        assert_eq!(stored_accounts(&provider), Vec::<B256>::new());
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
+    }
+
+    #[test]
     fn storage_and_code_are_checked_against_what_the_account_commits_to() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
