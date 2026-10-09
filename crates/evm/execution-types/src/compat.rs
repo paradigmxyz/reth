@@ -235,10 +235,8 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         let Some((original, current, created)) = committed_account(&changes) else {
             return Ok(());
         };
-        let slots = changes
-            .storage_changes()
-            .filter(|change| change.original != change.current)
-            .map(|change| (change.key, StorageSlot::new_changed(change.original, change.current)));
+        let slots = written_slots(changes.storage)
+            .map(|(key, original, current)| (key, StorageSlot::new_changed(original, current)));
         self.commit_native_account(
             changes.address,
             original,
@@ -323,6 +321,23 @@ fn committed_account<'a>(
     }
 }
 
+/// Returns the slots whose value differs from the transaction-boundary original as `(key,
+/// original, current)`, comparing each slot once. A wiped overlay also skips slots it leaves zero,
+/// matching the per-entry stream.
+fn written_slots(
+    storage: &evm2::evm::StorageOverlay,
+) -> impl Iterator<Item = (U256, U256, U256)> + '_ {
+    let wiped = storage.wiped;
+    storage
+        .slots
+        .iter()
+        .filter(move |(_, slot)| {
+            let value = &slot.value;
+            value.original != value.current && !(wiped && value.current.is_zero())
+        })
+        .map(|(&key, slot)| (key, slot.value.original, slot.value.current))
+}
+
 /// Hashes a transaction's state update into the trie update consumed by state root tasks.
 ///
 /// Produces the same [`HashedPostState`] as hashing the revm state that [`TransactionChanges`]
@@ -378,10 +393,8 @@ impl evm2::evm::StateChangeSink for HashedPostStateSink {
         }
 
         if !destroyed {
-            let mut slots = changes
-                .storage_changes()
-                .filter(|change| change.original != change.current)
-                .map(|change| (keccak256(B256::from(change.key)), change.current))
+            let mut slots = written_slots(changes.storage)
+                .map(|(key, _, current)| (keccak256(B256::from(key)), current))
                 .peekable();
             if slots.peek().is_some() {
                 self.0.storages.insert(hashed_address, HashedStorage::from_iter(slots));

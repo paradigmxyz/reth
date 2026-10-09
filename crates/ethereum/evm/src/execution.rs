@@ -202,15 +202,12 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     let TxResultWithState { result, pending_state, .. } = output;
     let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
     if stream_state {
-        // The update moves to the state hook, so fold it into the accepted overlay directly.
-        evm.overlay_db_mut().commit_pending(&pending_state);
-        send_state_update(pending_state, on_state_update);
-    } else {
-        // Reattach the finalized transaction so evm2 retains its account capacity and recycles
-        // storage maps for the next transaction instead of dropping the detached allocations.
-        evm.state_mut().set_pending_state(pending_state);
-        evm.state_mut().commit_transaction();
+        send_state_update(pending_state.clone(), on_state_update);
     }
+    // Reattach the finalized transaction so evm2 retains its account capacity and recycles
+    // storage maps for the next transaction instead of dropping the detached allocations.
+    evm.state_mut().set_pending_state(pending_state);
+    evm.state_mut().commit_transaction();
     result
 }
 
