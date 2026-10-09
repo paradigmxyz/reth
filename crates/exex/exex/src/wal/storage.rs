@@ -191,8 +191,8 @@ mod tests {
     use reth_trie_common::{
         serde_bincode_compat,
         updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
-        LazyTrieData, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted, LazyTrieData,
+        Nibbles, SortedTrieData,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -318,7 +318,7 @@ mod tests {
             )]),
         };
 
-        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
+        let trie_data = LazyTrieData::ready(SortedTrieData::new(
             Arc::new(hashed_state.into_sorted()),
             Arc::new(trie_updates.into_sorted()),
         ));

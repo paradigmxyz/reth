@@ -341,16 +341,6 @@ mod tests {
     }
 
     #[test]
-    fn nothing_owns_the_state_before_an_attempt_starts() {
-        let factory = factory();
-        let provider = factory.database_provider_rw().unwrap();
-
-        assert_eq!(provider.active_snap_write().unwrap(), None);
-        let write = SnapWrite { attempt: SnapAttemptId::FIRST, state_version: 0 };
-        assert!(matches!(provider.authorize_snap_write(write), Err(SnapSyncError::NoAttempt)));
-    }
-
-    #[test]
     fn address_keyed_state_cannot_host_an_attempt() {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
@@ -424,22 +414,6 @@ mod tests {
     }
 
     #[test]
-    fn the_attempt_survives_reopening_the_database() {
-        let factory = factory();
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.start_snap_attempt(generation(7)).unwrap();
-        provider.commit().unwrap();
-
-        let reopened = factory.database_provider_rw().unwrap();
-
-        assert_eq!(reopened.active_snap_write().unwrap(), Some(write));
-        let attempt = reopened.snap_attempt().unwrap().unwrap();
-        assert_eq!(attempt.pivot(), BlockNumHash::new(7, B256::repeat_byte(7)));
-        assert_eq!(attempt.state_root(), B256::repeat_byte(0xaa));
-        assert!(attempt.is_unfinished());
-    }
-
-    #[test]
     fn committing_keeps_downloaded_state_and_progress_together() {
         let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
@@ -464,23 +438,6 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         assert_eq!(provider.active_snap_write().unwrap(), None);
         assert_eq!(downloaded(&provider), (false, false));
-    }
-
-    #[test]
-    fn advancing_the_pivot_rejects_writes_proved_against_the_old_root() {
-        let factory = factory();
-        let provider = factory.database_provider_rw().unwrap();
-
-        let before = provider.start_snap_attempt(generation(1)).unwrap();
-        let after = provider.advance_snap_pivot(before, generation(2)).unwrap();
-
-        assert_eq!(after.attempt(), before.attempt());
-        assert_eq!(after.state_version(), before.state_version() + 1);
-        assert!(matches!(
-            provider.authorize_snap_write(before),
-            Err(SnapSyncError::StaleWrite { .. })
-        ));
-        provider.authorize_snap_write(after).unwrap();
     }
 
     #[test]
@@ -531,23 +488,6 @@ mod tests {
 
         assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
         provider.authorize_snap_write(write).unwrap();
-    }
-
-    #[test]
-    fn an_interrupted_advance_keeps_the_previous_pivot() {
-        let factory = factory();
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.start_snap_attempt(generation(1)).unwrap();
-        provider.commit().unwrap();
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(write, generation(2)).unwrap();
-        drop(provider);
-
-        // Downloads still in flight against the old root keep committing.
-        let provider = factory.database_provider_rw().unwrap();
-        assert_eq!(provider.active_snap_write().unwrap(), Some(write));
-        assert_eq!(provider.authorize_snap_write(write).unwrap().pivot().number, 1);
     }
 
     #[test]

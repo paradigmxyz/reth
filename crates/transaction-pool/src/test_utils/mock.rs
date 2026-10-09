@@ -14,7 +14,7 @@ use alloy_consensus::{
         LEGACY_TX_TYPE_ID,
     },
     EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702,
-    TxLegacy, TxType, Typed2718,
+    TxEnvelope, TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::{calc_effective_gas_price, MIN_PROTOCOL_BASE_FEE},
@@ -1106,14 +1106,10 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
     }
 }
 
-impl TryFrom<Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>>
-    for MockTransaction
-{
+impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(
-        tx: Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(tx: Recovered<TxEnvelope>) -> Result<Self, Self::Error> {
         let (transaction, sender) = tx.into_parts();
         let hash = *transaction.tx_hash();
         let size = transaction.size();

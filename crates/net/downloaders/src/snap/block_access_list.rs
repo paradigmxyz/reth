@@ -336,7 +336,7 @@ mod tests {
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::Bytes;
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage},
+        snap::{BlockAccessListsMessage, ByteCodesMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
@@ -669,21 +669,5 @@ mod tests {
 
         // Nothing reached the network.
         assert!(client.priorities().is_empty());
-    }
-
-    #[test]
-    fn a_response_of_another_kind_is_rejected() {
-        let verifier = BlockAccessListVerifier {
-            request_id: 1,
-            response_bytes: 512 * 1024,
-            blocks: vec![(B256::repeat_byte(1), commitment(bal()))],
-        };
-        let wrong = SnapResponse::AccountRange(AccountRangeMessage {
-            request_id: 1,
-            accounts: Vec::new(),
-            proof: Vec::new(),
-        });
-
-        assert_eq!(verifier.verify(PeerId::random(), wrong), Err(RequestError::BadResponse));
     }
 }

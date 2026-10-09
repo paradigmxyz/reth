@@ -26,6 +26,7 @@ tracing.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 
 [features]
+dst = []
 default = []
 return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]

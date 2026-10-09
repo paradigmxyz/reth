@@ -68,6 +68,7 @@ proptest.workspace = true
 assert_matches.workspace = true
 
 [features]
+dst = ["reth-libmdbx?/dst"]
 default = ["mdbx"]
 mdbx = [
     "dep:reth-libmdbx",

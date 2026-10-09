@@ -39,7 +39,7 @@ use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
 use reth_tasks::spawn_os_thread;
-use reth_trie_common::ComputedTrieData;
+use reth_trie_common::SortedTrieData;
 use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
@@ -406,6 +406,21 @@ impl TestHarness {
 
         self.provider.extend_blocks(block_data);
     }
+
+    // Consumes the latest finalized block, which the tree forwards ahead of every backfill start.
+    fn expect_finalized_forwarded(&mut self) {
+        let finalized =
+            self.tree.state.forkchoice_state_tracker.latest_state().unwrap().finalized_block_hash;
+        let event = self.from_tree_rx.try_recv().unwrap();
+        assert!(
+            matches!(
+                event,
+                EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash))
+                    if hash == finalized
+            ),
+            "expected finalized update, got {event:#?}"
+        );
+    }
 }
 
 /// Simplified test metrics for validation calls
@@ -742,6 +757,7 @@ fn backfill_action_waits_while_payload_build_is_active() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let EngineApiEvent::BackfillAction(emitted_action) =
         test_harness.from_tree_rx.try_recv().unwrap()
     else {
@@ -755,15 +771,20 @@ fn forkchoice_notifies_active_backfill_of_a_new_head() {
     let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
     harness.tree.backfill_sync_state = BackfillSyncState::Active;
     let head = B256::repeat_byte(0x42);
+    let finalized = B256::repeat_byte(0x41);
     let state = ForkchoiceState {
         head_block_hash: head,
         safe_block_hash: B256::ZERO,
-        finalized_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
     };
     assert!(harness.tree.validate_forkchoice_state(state).unwrap().is_some());
     assert!(matches!(
         harness.from_tree_rx.try_recv().unwrap(),
         EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(target)) if target == head
+    ));
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
     ));
     assert!(harness.tree.backfill_sync_state.is_active());
 }
@@ -848,6 +869,7 @@ fn backfill_action_catches_up_state_trie_before_starting_pipeline() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
@@ -912,6 +934,7 @@ fn deferred_backfill_uses_latest_sync_target() {
 
     test_harness.tree.advance_persistence().unwrap();
 
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(BackfillAction::Start(target)) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
@@ -959,11 +982,35 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     test_harness.tree.advance_persistence().unwrap();
 
     assert!(test_harness.tree.backfill_sync_state.is_pending());
+    test_harness.expect_finalized_forwarded();
     let emitted = test_harness.from_tree_rx.try_recv().unwrap();
     let EngineApiEvent::BackfillAction(emitted_action) = emitted else {
         panic!("expected backfill action, got {emitted:?}")
     };
     assert_eq!(emitted_action, action);
+}
+
+#[test]
+fn a_backfill_starts_with_the_latest_finalized_block() {
+    let mut harness = TestHarness::with_config(MAINNET.clone(), TreeConfig::default());
+    let finalized = B256::repeat_byte(0x41);
+    let state = ForkchoiceState {
+        head_block_hash: B256::repeat_byte(0x42),
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: finalized,
+    };
+    harness.tree.state.forkchoice_state_tracker.set_latest(state, ForkchoiceStatus::Syncing);
+
+    harness.tree.dispatch_backfill_action(BackfillAction::Start(B256::ZERO.into()));
+
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(hash)) if hash == finalized
+    ));
+    assert!(matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::BackfillAction(BackfillAction::Start(_))
+    ));
 }
 
 #[test]
@@ -1454,7 +1501,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
-    let empty_trie_data = ComputedTrieData::default;
+    let empty_trie_data = SortedTrieData::default;
 
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
@@ -3396,6 +3443,9 @@ async fn assert_post_backfill_recheck_uses_threshold(
     });
     let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
+    if expect_backfill {
+        test_harness.expect_finalized_forwarded();
+    }
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
         EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target))
@@ -3492,7 +3542,7 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                SortedTrieData::default(),
             )
         })
         .collect();
@@ -3530,7 +3580,7 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                SortedTrieData::default(),
             )
         })
         .collect();

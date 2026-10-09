@@ -13,7 +13,7 @@ use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, SnapWrite};
 use reth_stages::{
     stages::MerkleStage, BlockErrorKind, ExecInput, PipelineError, Stage, StageError, StageId,
 };
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{error, info};
 use tokio_util::sync::CancellationToken;
 
 /// Hands one attempt's downloaded state over to the staged pipeline.
@@ -32,7 +32,8 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
     }
 
     /// Rebuilds the trie at the pivot of `write`'s attempt and checks its root, abandoning the
-    /// attempt on a mismatch. Progress commits as it goes, and `stop` ends it early.
+    /// attempt on a mismatch so the next run starts a new one. Progress commits as it goes, and
+    /// `stop` ends it early.
     ///
     /// The attempt's state must have been handed to the merkle stage with
     /// [`SnapStateVerifier::start_trie_rebuild`].
@@ -42,17 +43,18 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         stop: &CancellationToken,
     ) -> Result<RebuildOutcome, PipelineError> {
         let pivot = self.pivot(write)?;
-        let rebuilt = self.rebuild_trie(pivot, stop);
-        if matches!(
-            &rebuilt,
+        match self.rebuild_trie(pivot, stop) {
             Err(PipelineError::Stage(StageError::Block {
-                error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(_)),
+                error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(diff)),
                 ..
-            }))
-        ) {
-            self.abandon()?;
+            })) => {
+                // Downloaded state is authenticated against the pivot, so this is a local fault.
+                error!(target: "sync::snap", ?pivot, %diff, "Snap state root mismatch, abandoning the attempt");
+                self.abandon()?;
+                Ok(RebuildOutcome::RootMismatch)
+            }
+            rebuilt => rebuilt,
         }
-        rebuilt
     }
 
     /// Publishes the state downloaded under `write` at its attempt's pivot and accepts it, so the
@@ -73,8 +75,10 @@ impl<N: ProviderNodeTypes> SnapHandoff<N> {
         }
 
         // A trie already rebuilt to the pivot returns at once.
-        if self.rebuild(write, stop)? == RebuildOutcome::Stopped {
-            return Ok(HandoffOutcome::Stopped)
+        match self.rebuild(write, stop)? {
+            RebuildOutcome::Rebuilt => {}
+            RebuildOutcome::RootMismatch => return Ok(HandoffOutcome::RootMismatch),
+            RebuildOutcome::Stopped => return Ok(HandoffOutcome::Stopped),
         }
 
         self.publish(write)?;
@@ -179,6 +183,9 @@ pub enum HandoffOutcome {
     Completed,
     /// The pivot left the canonical chain, so the attempt was abandoned for a new one.
     PivotReorged,
+    /// The rebuilt root differs from the pivot's header, so the attempt was abandoned for a new
+    /// one.
+    RootMismatch,
     /// The trie rebuild was stopped before reaching the pivot, so nothing was published.
     Stopped,
 }
@@ -189,13 +196,17 @@ pub enum HandoffOutcome {
 pub enum RebuildOutcome {
     /// The trie is rebuilt at the pivot and its root matches the pivot's header.
     Rebuilt,
+    /// The rebuilt root differs from the pivot's header, so the attempt was abandoned for a new
+    /// one.
+    RootMismatch,
     /// The rebuild was stopped before reaching the pivot. Its progress so far is committed.
     Stopped,
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::snap::tests::hashed_factory;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use futures::future::{ready, Ready};
@@ -214,9 +225,8 @@ mod tests {
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::Account;
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, MetadataProvider, MetadataWriter, StaticFileProviderFactory,
-        StaticFileSegment, StaticFileWriter, StorageSettings, StorageSettingsCache,
+        test_utils::MockNodeTypesWithDB, BlockWriter, MetadataProvider, StaticFileProviderFactory,
+        StaticFileSegment, StaticFileWriter,
     };
     use reth_snap_sync::{
         SnapAccountStore, SnapGeneration, DEFAULT_RESPONSE_BYTES, DEFAULT_SCAN_CHUNK, MAX_HASH,
@@ -225,7 +235,7 @@ mod tests {
     use reth_tasks::Runtime;
     use reth_trie_common::{root::state_root_unsorted, TrieAccount};
 
-    const PIVOT: u64 = 1;
+    pub(crate) const PIVOT: u64 = 1;
 
     // Serves every account range from one trie, as a peer holding all of it would. A complete
     // trie needs no proof.
@@ -298,12 +308,7 @@ mod tests {
 
     // Headers through the pivot on storage v2, each committing to `state_root`.
     fn with_headers_committing_to(state_root: B256) -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = create_test_provider_factory();
-        let provider = factory.database_provider_rw().unwrap();
-        provider.write_storage_settings(StorageSettings::v2()).unwrap();
-        provider.commit().unwrap();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-
+        let factory = hashed_factory();
         let static_files = factory.static_file_provider();
         let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
         let mut parent = B256::ZERO;
@@ -330,7 +335,7 @@ mod tests {
     }
 
     // Headers committing to two plain accounts, with an attempt at the pivot that downloaded both.
-    fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
+    pub(crate) fn downloaded_attempt() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let accounts: Vec<_> = (1..=2)
             .map(|nonce| {
                 (
@@ -503,7 +508,7 @@ mod tests {
 
         let handoff = SnapHandoff::new(factory.clone()).hand_off(write, &CancellationToken::new());
 
-        assert!(handoff.is_err());
+        assert_eq!(handoff.unwrap(), HandoffOutcome::RootMismatch);
 
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.active_snap_write().unwrap().is_none());

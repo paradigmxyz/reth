@@ -241,6 +241,11 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
+    /// Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with
+    /// it, and uses the staged pipeline while the chain head predates block access lists.
+    #[arg(long = "snap.v2")]
+    pub snap_v2: bool,
+
     #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs or ENRs of trusted peers for P2P connections.
     ///
@@ -591,6 +596,7 @@ impl NetworkArgs {
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
+            .with_snap(self.snap_v2)
             .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
@@ -726,6 +732,7 @@ impl Default for NetworkArgs {
         } = DefaultNetworkArgs::get_global().clone();
         Self {
             discovery: DiscoveryArgs::default(),
+            snap_v2: false,
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
@@ -1169,6 +1176,7 @@ mod tests {
     use clap::Parser;
     use reth_chainspec::MAINNET;
     use reth_config::Config;
+    use reth_network::EthNetworkPrimitives;
     use reth_network_peers::NodeRecord;
     use secp256k1::SecretKey;
     use std::{
@@ -1602,6 +1610,31 @@ mod tests {
     }
 
     #[test]
+    fn snap_v2_flag_controls_advertisement() {
+        for (cli, enabled) in [(vec!["reth"], false), (vec!["reth", "--snap.v2"], true)] {
+            let args = CommandParser::<NetworkArgs>::parse_from(cli).args;
+            assert_eq!(args.snap_v2, enabled);
+            let config = args
+                .network_config::<EthNetworkPrimitives>(
+                    &Config::default(),
+                    MAINNET.clone(),
+                    SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+                    PathBuf::new(),
+                    Runtime::test(),
+                )
+                .build_with_noop_provider(MAINNET.clone());
+            let versions = config
+                .hello_message
+                .protocols
+                .iter()
+                .filter(|protocol| protocol.cap.name == "snap")
+                .map(|protocol| protocol.cap.version)
+                .collect::<Vec<_>>();
+            assert_eq!(versions, if enabled { vec![2] } else { vec![] });
+        }
+    }
+
+    #[test]
     fn network_config_preserves_basic_nodes_from_peers_file() {
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -1618,7 +1651,7 @@ mod tests {
 
         // Build the network config using a deterministic secret key
         let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
-        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+        let builder = args.network_config::<EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
             secret_key,
@@ -1644,7 +1677,7 @@ mod tests {
         let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
         let boot_nodes = |args: &NetworkArgs| {
-            args.network_config::<reth_network::EthNetworkPrimitives>(
+            args.network_config::<EthNetworkPrimitives>(
                 &config,
                 MAINNET.clone(),
                 secret_key,

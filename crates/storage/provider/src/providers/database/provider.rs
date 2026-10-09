@@ -75,7 +75,7 @@ use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
 use reth_trie::{
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    ComputedTrieData, HashedPostStateSorted,
+    HashedPostStateSorted, SortedTrieData,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
 use revm::database::states::{
@@ -2713,7 +2713,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                     let mut storage = storage_revert
                         .into_iter()
-                        .map(|(k, v)| (B256::from(k.to_be_bytes()), v))
+                        .map(|(k, v)| (B256::from(k), v))
                         .collect::<Vec<_>>();
                     // sort storage slots by key.
                     storage.par_sort_unstable_by_key(|a| a.0);
@@ -3663,7 +3663,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
 
         self.save_blocks_inner(
@@ -3854,7 +3854,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
                 for (address, account_revert) in block_reverts {
                     account_transitions.entry(*address).or_default().push(block_number);
                     for storage_key in account_revert.storage.keys() {
-                        let key = B256::from(storage_key.to_be_bytes());
+                        let key = B256::from(*storage_key);
                         storage_transitions.entry((*address, key)).or_default().push(block_number);
                     }
                 }
@@ -4108,7 +4108,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -4258,22 +4258,6 @@ mod tests {
         let end = 9u64;
         let result = provider.receipts_by_block_range(start..=end).unwrap();
         assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
-    }
-
-    #[test]
-    fn metadata_can_be_deleted() {
-        let factory = create_test_provider_factory();
-        let key = "metadata-delete-test";
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.write_metadata(key, vec![1]).unwrap();
-        provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), Some(vec![1]));
-
-        let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.delete_metadata(key).unwrap();
-        provider_rw.commit().unwrap();
-        assert_eq!(factory.provider().unwrap().get_metadata(key).unwrap(), None);
     }
 
     #[test]
@@ -4822,7 +4806,7 @@ mod tests {
         let full_persist_block = ExecutedBlock::new(
             Arc::clone(&full_persist_base.recovered_block),
             Arc::clone(&full_persist_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(full_persist_hashed_state),
                 Arc::new(full_persist_trie_updates),
             ),
@@ -4847,7 +4831,7 @@ mod tests {
         let deferred_trie_block = ExecutedBlock::new(
             Arc::clone(&deferred_trie_base.recovered_block),
             Arc::clone(&deferred_trie_base.execution_output),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(deferred_trie_hashed_state),
                 Arc::new(deferred_trie_updates),
             ),
@@ -5575,7 +5559,7 @@ mod tests {
                 },
                 state: Default::default(),
             }),
-            ComputedTrieData::default(),
+            SortedTrieData::default(),
         );
         let provider_rw = factory.provider_rw().unwrap();
         save_genesis(&provider_rw, &genesis_executed).unwrap();
@@ -5644,9 +5628,7 @@ mod tests {
                     },
                     state: bundle,
                 }),
-                ComputedTrieData {
-                    sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
-                },
+                SortedTrieData::new(Arc::new(hashed_state), Default::default()),
             );
             blocks.push(executed);
         }

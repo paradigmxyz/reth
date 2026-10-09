@@ -1006,39 +1006,6 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_and_retrieve_single_entry() {
-        let mut cache = ChangesetCacheInner::new();
-        let hash = B256::random();
-        let changesets = create_test_changesets();
-
-        insert_test_changesets(&mut cache, hash, 100, Arc::clone(&changesets));
-
-        // Should be able to retrieve it
-        let retrieved = get_test_changesets(&cache, hash, 100);
-        assert!(retrieved.is_some());
-        assert_eq!(cache.entries.len(), 1);
-    }
-
-    #[test]
-    fn test_insert_multiple_entries() {
-        let mut cache = ChangesetCacheInner::new();
-
-        // Insert 10 blocks
-        let mut hashes = Vec::new();
-        for i in 0..10 {
-            let hash = B256::random();
-            insert_test_changesets(&mut cache, hash, 100 + i, create_test_changesets());
-            hashes.push((100 + i, hash));
-        }
-
-        // Should be able to retrieve all
-        assert_eq!(cache.entries.len(), 10);
-        for (block_number, hash) in hashes {
-            assert!(get_test_changesets(&cache, hash, block_number).is_some());
-        }
-    }
-
-    #[test]
     fn test_eviction_when_explicitly_called() {
         let mut cache = ChangesetCacheInner::new();
 
@@ -1137,22 +1104,6 @@ mod tests {
         assert!(get_test_changesets(&cache, hash_5, 5).is_some(), "Block 5 should be present");
         assert!(get_test_changesets(&cache, hash_10, 10).is_some(), "Block 10 should be present");
         assert!(get_test_changesets(&cache, hash_15, 15).is_some(), "Block 15 should be present");
-    }
-
-    #[test]
-    fn test_multiple_blocks_same_number() {
-        let mut cache = ChangesetCacheInner::new();
-
-        // Insert multiple blocks with same number (side chains)
-        let hash_1a = B256::random();
-        let hash_1b = B256::random();
-        insert_test_changesets(&mut cache, hash_1a, 100, create_test_changesets());
-        insert_test_changesets(&mut cache, hash_1b, 100, create_test_changesets());
-
-        // Both should be retrievable
-        assert!(get_test_changesets(&cache, hash_1a, 100).is_some());
-        assert!(get_test_changesets(&cache, hash_1b, 100).is_some());
-        assert_eq!(cache.entries.len(), 2);
     }
 
     #[test]

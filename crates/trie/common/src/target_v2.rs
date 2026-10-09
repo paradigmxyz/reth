@@ -112,6 +112,10 @@ impl MultiProofTargetsV2 {
     }
 
     /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, chunk_size: usize) -> impl Iterator<Item = Self> {
         ChunkedMultiProofTargetsV2::new(self, chunk_size)
     }
@@ -148,7 +152,7 @@ impl MultiProofTargetsV2 {
                     continue
                 }
 
-                let hashed_slot = keccak256(B256::new(key.to_be_bytes()));
+                let hashed_slot = keccak256(B256::from(key));
                 storage_slots.push(ProofV2Target::from(hashed_slot));
             }
 
@@ -183,7 +187,12 @@ pub struct ChunkedMultiProofTargetsV2 {
 
 impl ChunkedMultiProofTargetsV2 {
     /// Creates a new chunked iterator for the given targets.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is zero.
     pub fn new(targets: MultiProofTargetsV2, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         Self {
             account_targets: targets.account_targets.into_iter(),
             storage_targets: targets.storage_targets,
