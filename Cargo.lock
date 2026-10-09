@@ -1702,7 +1702,7 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 [[package]]
 name = "bedrock-assertions"
 version = "0.1.0"
-source = "git+https://github.com/oss-garage/bedrock?rev=1d75d79122a6204efb61cbf1026513e655f38586#1d75d79122a6204efb61cbf1026513e655f38586"
+source = "git+https://github.com/oss-garage/bedrock#1d75d79122a6204efb61cbf1026513e655f38586"
 dependencies = [
  "serde",
 ]

@@ -482,7 +482,7 @@ arrayvec = { version = "0.7.6", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
 backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
-bedrock-assertions = { git = "https://github.com/oss-garage/bedrock", rev = "1d75d79122a6204efb61cbf1026513e655f38586" }
+bedrock-assertions = { git = "https://github.com/oss-garage/bedrock" }
 bincode = "1.3"
 bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
