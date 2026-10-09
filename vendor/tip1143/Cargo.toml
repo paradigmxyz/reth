@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["alloy-trie-0.9.8", "revm-state-43.0.1", "reth-primitives-traits-0.8.2"]
+
+[patch.crates-io]
+alloy-trie = { path = "alloy-trie-0.9.8" }
+revm-state = { path = "revm-state-43.0.1" }
+reth-primitives-traits = { path = "reth-primitives-traits-0.8.2" }
