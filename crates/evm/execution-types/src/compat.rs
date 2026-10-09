@@ -215,11 +215,11 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         &mut self,
         changes: evm2::evm::AccountChanges<'_>,
     ) -> Result<(), Self::Error> {
-        if let Some((hash, code)) = changes.code {
-            self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
-        }
         if !changes.is_changed() {
             return Ok(());
+        }
+        if let Some((hash, code)) = changes.code {
+            self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
         }
         let address = changes.address;
         let created = changes.created;
