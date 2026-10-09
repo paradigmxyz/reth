@@ -12,6 +12,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-bedrock-assertions = { git = "https://github.com/oss-garage/bedrock", rev = "1d75d79122a6204efb61cbf1026513e655f38586" }
+bedrock-assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
