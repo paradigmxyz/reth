@@ -169,17 +169,24 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
 where
     T::Tx: Typed2718,
 {
-    let executed = evm.transact(transaction)?;
-    if !commit(executed.result()).should_commit() {
-        let _ = executed.discard();
-        return Ok(None);
+    let mut update = StateUpdate::default();
+    let result = match evm.transact(transaction) {
+        Ok(executed) => {
+            if commit(executed.result()).should_commit() {
+                let sink = &mut block_state.transaction_sink(stream_state.then_some(&mut update));
+                let Ok(result) = executed.commit_with(sink);
+                Ok(Some(result))
+            } else {
+                let _ = executed.discard();
+                Ok(None)
+            }
+        }
+        Err(error) => Err(error),
+    };
+    if stream_state {
+        send_state_update(update, on_state_update);
     }
-    if !stream_state {
-        let Ok(result) = executed.commit_with(&mut block_state.transaction_sink());
-        return Ok(Some(result));
-    }
-    let output = executed.detach();
-    Ok(Some(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output)))
+    result
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
@@ -219,20 +226,17 @@ pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm.overlay_db_mut().commit_pending(pending_state);
 }
 
-/// Folds a transaction's state into the block state, recording the hook update when streaming.
 fn accumulate_pending_state(
     block_state: &mut BlockState,
     stream_state: bool,
     on_state_update: &mut impl FnMut(StateUpdate),
     pending_state: &evm2::evm::PendingState,
 ) {
+    let mut update = StateUpdate::default();
+    let Ok(()) =
+        pending_state.visit(&mut block_state.transaction_sink(stream_state.then_some(&mut update)));
     if stream_state {
-        let mut update = StateUpdate::default();
-        let Ok(()) =
-            pending_state.visit(&mut block_state.transaction_sink_with_update(&mut update));
         send_state_update(update, on_state_update);
-    } else {
-        let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
     }
 }
 
