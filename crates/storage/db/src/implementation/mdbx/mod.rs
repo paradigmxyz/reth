@@ -409,6 +409,10 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                // Sparse page reuse makes MDBX's mincore residency probes expensive on Linux.
+                // Let the kernel fault pages in on demand instead of pre-faulting reclaimed pages.
+                #[cfg(target_os = "linux")]
+                inner_env.set_prefault_write(false);
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
