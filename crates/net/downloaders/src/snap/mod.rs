@@ -522,6 +522,9 @@ mod tests {
             vec![key(3)]
         );
         assert_eq!(chunk.state_root(), root_hash);
+
+        // The batch holds only the two accounts with storage, so this range is out of bounds.
+        assert_eq!(batch.range(1..3), None);
     }
 
     #[test]

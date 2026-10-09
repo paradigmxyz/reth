@@ -134,6 +134,11 @@ mod tests {
     fn test_set_cancel_task() {
         let c = ManualCancel::default();
         assert!(!c.is_cancelled());
+
+        // Dropping a clone must not cancel the original, unlike `CancelOnDrop`.
+        drop(c.clone());
+        assert!(!c.is_cancelled());
+
         let c2 = c.clone();
         let c3 = c.clone();
         c.cancel();
