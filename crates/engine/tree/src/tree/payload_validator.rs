@@ -1313,6 +1313,7 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
+    #[expect(clippy::too_many_arguments)]
     fn execute_transactions<'a, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: BlockExecutorForEvm<'a, Evm, DB>,
@@ -1480,6 +1481,7 @@ where
             parallel_bal_execution
         )
     )]
+    #[expect(clippy::too_many_arguments)]
     fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,

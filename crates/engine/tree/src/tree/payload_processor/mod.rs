@@ -166,6 +166,7 @@ where
     /// Spawns transaction conversion and cache prewarming, optionally wiring prewarm output into
     /// an externally-owned state-root task.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[expect(clippy::too_many_arguments)]
     pub fn spawn_with_state_root_streams<
         P,
         I: ExecutableTxIterator<Evm>,
@@ -409,6 +410,7 @@ where
     /// that case prewarm runs in BAL mode: it streams BAL-derived sparse-trie updates and,
     /// unless `disable_bal_batch_io` is set, prefetches BAL-declared state into the shared cache.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[expect(clippy::too_many_arguments)]
     fn spawn_caching_with<P, X: PayloadExecutionStrategy<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
