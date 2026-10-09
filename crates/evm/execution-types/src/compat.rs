@@ -225,7 +225,10 @@ impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
         let wiped = changes.storage.wiped;
         let original = original.map(revm_account);
         let current = current.map(revm_account);
-        let slots = written_slots(changes.storage);
+        let slots = changes
+            .storage
+            .changed_slots()
+            .map(|(&key, value)| (key, StorageSlot::new_changed(value.original, value.current)));
         let Some(update) = self.update.as_deref_mut() else {
             self.block.commit_account(address, original, current, created, wiped, slots);
             return Ok(());
@@ -254,29 +257,11 @@ fn committed_account<'a>(
 ) -> Option<(Option<&'a evm2::evm::AccountInfo>, Option<&'a evm2::evm::AccountInfo>, bool)> {
     if changes.changed {
         Some((changes.original, changes.current, changes.created))
-    } else if changes.storage.wiped || changes.storage.changed_slots().next().is_some() {
+    } else if changes.storage.is_changed() {
         Some((changes.current, changes.current, false))
     } else {
         None
     }
-}
-
-/// Returns the slots whose value differs from the transaction-boundary original, comparing each
-/// slot once. A wiped overlay also skips slots it leaves zero.
-fn written_slots(
-    storage: &evm2::evm::StorageOverlay,
-) -> impl Iterator<Item = (U256, StorageSlot)> + '_ {
-    let wiped = storage.wiped;
-    storage
-        .slots
-        .iter()
-        .filter(move |(_, slot)| {
-            let value = &slot.value;
-            value.original != value.current && !(wiped && value.current.is_zero())
-        })
-        .map(|(&key, slot)| {
-            (key, StorageSlot::new_changed(slot.value.original, slot.value.current))
-        })
 }
 
 /// Per-transaction state changes streamed to execution state hooks.
