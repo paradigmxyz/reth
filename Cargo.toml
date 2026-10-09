@@ -22,6 +22,7 @@ members = [
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
+    "crates/dst/",
     "crates/e2e-test-utils/",
     "crates/engine/invalid-block-hooks/",
     "crates/engine/local",
