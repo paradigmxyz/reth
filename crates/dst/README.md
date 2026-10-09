@@ -16,6 +16,7 @@ evaluate exactly once. Names must be nonempty constant strings.
 Set `BEDROCK_ASSERTIONS_PATH` to a JSONL file path. The first macro call opens
 it, and concurrent calls share one writer. The path is read once per process.
 Without it, arguments still evaluate, but nothing is serialized or written.
-Records use Bedrock's `Always` and `Sometimes` format, including its
-`timestamp_unix_nano` field. Optional details appear in a `details` field.
+Records use Bedrock's `Always` and `Sometimes` format. `reth-dst` adds the
+`timestamp_unix_nano` field used by Bedrock's per-writer assertion collection.
+Optional details appear in a `details` field.
 Records are limited to 16 KiB.

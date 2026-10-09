@@ -8,6 +8,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{self, Write},
     sync::{Mutex, OnceLock},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bedrock_assertions::Assertion;
@@ -40,15 +41,18 @@ pub fn __report(assertion: Assertion, details: impl Serialize) {
 
         let mut record = serde_json::to_value(&assertion).map_err(io::Error::other)?;
         let details = serde_json::to_value(details).map_err(io::Error::other)?;
+        let kind = match assertion {
+            Assertion::Always(_) => "Always",
+            Assertion::Sometimes(_) => "Sometimes",
+        };
+        let data = record[kind].as_object_mut().expect("Bedrock assertion has an object payload");
+        data.insert(
+            "timestamp_unix_nano".into(),
+            (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64)
+                .into(),
+        );
         if !details.is_null() {
-            let kind = match assertion {
-                Assertion::Always(_) => "Always",
-                Assertion::Sometimes(_) => "Sometimes",
-            };
-            record[kind]
-                .as_object_mut()
-                .expect("Bedrock assertion has an object payload")
-                .insert("details".into(), details);
+            data.insert("details".into(), details);
         }
         let mut line = serde_json::to_vec(&record).map_err(io::Error::other)?;
         line.push(b'\n');
