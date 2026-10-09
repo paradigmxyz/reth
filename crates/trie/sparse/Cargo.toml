@@ -48,6 +48,7 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+dst = []
 default = ["std", "metrics"]
 std = [
     "dep:either",

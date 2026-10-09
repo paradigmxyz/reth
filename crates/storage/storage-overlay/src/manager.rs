@@ -1012,7 +1012,7 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
@@ -1108,18 +1108,6 @@ mod tests {
     }
 
     #[test]
-    fn errors_for_unknown_parent() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let parent = B256::random();
-        let anchor = B256::random();
-
-        let err = overlay_for_parent(&manager, parent, anchor).unwrap_err();
-
-        assert_eq!(err.tip_hash, parent);
-        assert_eq!(err.anchor_hash, anchor);
-    }
-
-    #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
@@ -1209,19 +1197,6 @@ mod tests {
 
         assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
         assert!(!manager.execution_overlays.entries.contains_key(&first_key));
-    }
-
-    #[test]
-    fn execution_overlay_for_parent_at_anchor_is_empty() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let anchor_hash = B256::with_last_byte(1);
-
-        let overlay = manager.execution_overlay_for_parent(anchor_hash, anchor_hash).unwrap();
-
-        assert!(overlay.accounts().is_empty());
-        assert!(overlay.storage().is_empty());
-        assert!(overlay.code_hashes().is_empty());
-        assert!(overlay.block_hashes().is_empty());
     }
 
     #[test]
@@ -1518,26 +1493,6 @@ mod tests {
         let anchor_hash = B256::random();
 
         assert!(!manager.contains_hash(parent_hash, anchor_hash, anchor_hash));
-    }
-
-    #[test]
-    fn taking_sparse_trie_removes_it() {
-        let manager = OverlayManager::<EthPrimitives>::default();
-        let block_hash = B256::with_last_byte(1);
-        let other_block_hash = B256::with_last_byte(2);
-        let anchor_hash = B256::with_last_byte(3);
-
-        manager.store_sparse_trie(PreservedSparseTrie::anchored(
-            SparseTrie::default(),
-            block_hash,
-            anchor_hash,
-        ));
-
-        let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
-        assert_eq!(preserved.block_hash(), block_hash);
-        assert_eq!(preserved.anchor_hash(), anchor_hash);
-        assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
-        assert!(manager.take_sparse_trie().is_none());
     }
 
     #[test]

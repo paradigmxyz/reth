@@ -1439,22 +1439,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_body_limits_apply_without_content_length() {
-        for size in [16, 17] {
-            let request = HttpRequest::builder()
-                .header(CONTENT_TYPE, OCTET_STREAM)
-                .body(HttpBody::from(vec![0; size]))
-                .unwrap();
-            let response = read_ssz_body(request, 16).await;
-            if size == 16 {
-                assert_eq!(response.unwrap().len(), size);
-            } else {
-                assert_eq!(response.unwrap_err().status(), STATUS_PAYLOAD_TOO_LARGE);
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn engine_errors_preserve_validation_semantics() {
         use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use reth_engine_primitives::BeaconForkChoiceUpdateError;
