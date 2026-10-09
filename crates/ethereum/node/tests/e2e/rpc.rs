@@ -1,5 +1,8 @@
 use alloy_eips::{
-    eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
+    eip2718::Encodable2718,
+    eip7910::EthConfig,
+    eip7928::{AccountChanges, BlockAccessList, BlockAccessListValidationError},
+    BlockNumberOrTag,
 };
 use alloy_primitives::{bytes, keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
@@ -750,6 +753,26 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("block access list hash mismatch"), "{err}");
+
+    // A decodable BAL with invalid structure is a caller error, not an internal RPC failure.
+    let mut invalid_structure_request = request.clone();
+    let address = Address::ZERO;
+    invalid_structure_request.request.execution_payload.block_access_list =
+        alloy_rlp::encode(vec![AccountChanges::new(address), AccountChanges::new(address)]).into();
+    update_block_hash_v6(&mut invalid_structure_request)?;
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_structure_request,),
+        )
+        .await
+        .unwrap_err();
+    let err = err.as_error_resp().expect("RPC error response");
+    assert_eq!(err.code, -32602);
+    assert_eq!(
+        err.message,
+        BlockAccessListValidationError::DuplicateAccount { address }.to_string()
+    );
 
     request.request.execution_payload.payload_inner.payload_inner.payload_inner.state_root =
         B256::ZERO;

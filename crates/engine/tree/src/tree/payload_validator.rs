@@ -592,6 +592,11 @@ where
                 .as_bal()
                 .validate_gas_limit(input.gas_limit())
                 .map_err(ConsensusError::from));
+            // Validate untrusted indices and ordering before any BAL consumers are started.
+            ensure_ok!(decoded_bal
+                .as_bal()
+                .validate_structure(input.transaction_count())
+                .map_err(ConsensusError::from));
         }
 
         let env = ExecutionEnv {
