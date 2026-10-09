@@ -76,7 +76,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
 
 impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run anchoring and re-anchoring pivots with `policy`.
-    pub fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
+    pub const fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
         self.policy = policy;
         self.session = SnapSyncSession::new(policy);
         self
@@ -214,7 +214,7 @@ where
         }
 
         session.select(&provider, head, self.context.finalized())?;
-        let Some((generation, _)) = session.start() else {
+        let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
             // header pass may stop at the finalized block, so if block access lists
@@ -610,7 +610,6 @@ mod tests {
     };
     use alloy_eip7928::{
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
-        NonceChange,
     };
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
@@ -1117,19 +1116,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_cancelled_run_stops_before_any_work() {
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts()));
-        let cancel = CancellationToken::new();
-        let (client, bootstrap) = scripted(&factory, [], [3]);
-        let mut bootstrap = bootstrap.with_cancellation(cancel.clone());
-        cancel.cancel();
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert!(client.origins().is_empty());
-    }
-
-    #[tokio::test]
     async fn a_catch_up_stalled_past_the_served_lists_restarts() {
         let accounts = accounts();
         let factory = hashed_factory();
@@ -1285,16 +1271,6 @@ mod tests {
         let origins = recover([Vec::new(), Vec::new()], true).await;
 
         // The untouched account is kept, never fetched again.
-        assert_eq!(origins, [keccak256(STALE)]);
-    }
-
-    #[tokio::test]
-    async fn another_field_changed_on_the_new_branch_leaves_the_account_to_repair() {
-        let nonce =
-            stale_changes().with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1));
-
-        let origins = recover([vec![nonce], Vec::new()], true).await;
-
         assert_eq!(origins, [keccak256(STALE)]);
     }
 

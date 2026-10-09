@@ -78,7 +78,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if revealing fails.
+    /// `Ok(())` if successful, or an error if revealing fails. Implementations may reject
+    /// unsupported root variants. The arena implementation requires extensions to be merged
+    /// into branch nodes and returns an error for standalone [`TrieNodeV2::Extension`] roots.
     ///
     /// # Panics
     ///

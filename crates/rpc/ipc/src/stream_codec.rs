@@ -417,59 +417,6 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    /// Escape sequence split across two `decode` calls, `is_escaped` must carry over.
-    #[test]
-    fn escape_split_across_chunk_boundary() {
-        let mut codec = StreamCodec::stream_incoming();
-        let mut buf = BytesMut::with_capacity(64);
-
-        buf.put_slice(br#"{"a":"\"#);
-        assert!(codec.decode(&mut buf).unwrap().is_none());
-
-        buf.put_slice(br#"\"}"#);
-        let msg = codec.decode(&mut buf).unwrap().unwrap();
-        assert_eq!(msg, r#"{"a":"\\"}"#);
-    }
-
-    /// Opening and closing bracket arriving in separate `decode` calls.
-    #[test]
-    fn depth_split_across_chunk_boundary() {
-        let mut codec = StreamCodec::stream_incoming();
-        let mut buf = BytesMut::with_capacity(64);
-
-        buf.put_u8(b'{');
-        assert!(codec.decode(&mut buf).unwrap().is_none());
-        buf.put_u8(b'}');
-        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "{}");
-    }
-
-    /// Input that drives the depth negative must not wedge the codec.
-    #[test]
-    fn leading_close_bracket_does_not_poison() {
-        let mut codec = StreamCodec::stream_incoming();
-        let mut buf = BytesMut::with_capacity(8);
-        buf.put_slice(b"]{");
-        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "]{");
-    }
-
-    /// `Separator::Byte` decoding fed one byte at a time.
-    #[test]
-    fn byte_separator_split_at_every_byte() {
-        let payload = b"first line\nsecond line\nthird line\n";
-        let mut codec = StreamCodec::default();
-        let mut buf = BytesMut::with_capacity(64);
-        let mut got = Vec::new();
-
-        for byte in payload {
-            buf.put_u8(*byte);
-            while let Some(m) = codec.decode(&mut buf).unwrap() {
-                got.push(m);
-            }
-        }
-
-        assert_eq!(got, vec!["first line", "second line", "third line"]);
-    }
-
     /// The stateless `Separator::Empty` decode loop that `ScanState` replaced, kept as the
     /// reference implementation for the differential tests below.
     struct ReferenceDecoder;

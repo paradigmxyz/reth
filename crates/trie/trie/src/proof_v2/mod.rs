@@ -3,7 +3,7 @@
 //! This module provides a rewritten proof calculator that:
 //! - Combines hashed account or storage leaves with cached branch hashes from a trie cursor.
 //! - Recalculates subtries containing proof targets or changed keys instead of using cached hashes.
-//! - Returns proof nodes sorted lexicographically by path
+//! - Returns proof nodes in depth-first post-order (children before parents).
 //! - Automatically resets after each calculation
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
@@ -45,8 +45,8 @@ const RLP_ENCODE_BUF_SIZE: usize = 1024;
 /// recalculated.
 ///
 /// The calculator:
-/// - Accepts one or more B256 proof targets sorted lexicographically
-/// - Returns proof nodes sorted lexicographically by path
+/// - Accepts proof targets in any order and sorts them in place by parent context, then key.
+/// - Returns proof nodes in depth-first post-order (children before parents).
 /// - Automatically resets after each calculation
 /// - Re-uses cursors from one calculation to the next
 #[derive(Debug)]
@@ -1492,11 +1492,10 @@ where
     /// Generate a proof for the given targets.
     ///
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted depth-first by path.
+    /// returned nodes are sorted in depth-first post-order (children before parents).
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
+    /// context, then by key within each group.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
@@ -1607,11 +1606,10 @@ where
     /// Generate a proof for a storage trie at the given hashed address.
     ///
     /// Given a set of [`ProofV2Target`]s, returns nodes whose paths are a prefix of any target. The
-    /// returned nodes will be sorted depth-first by path.
+    /// returned nodes are sorted in depth-first post-order (children before parents).
     ///
-    /// # Panics
-    ///
-    /// In debug builds, panics if the targets are not sorted lexicographically.
+    /// Targets may be supplied in any order. Calculation sorts the slice in place by known parent
+    /// context, then by key within each group.
     #[instrument(target = TRACE_TARGET, level = "trace", skip(self, targets))]
     pub fn storage_proof(
         &mut self,
