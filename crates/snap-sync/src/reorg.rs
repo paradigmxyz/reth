@@ -6,7 +6,7 @@
 //! chain, so the attempt keeps them from the moment it anchors.
 
 use crate::{common::SnapRecord, SnapSyncError};
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Sealable, B256};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
@@ -14,9 +14,9 @@ use reth_storage_api::{
 };
 use serde::{Deserialize, Serialize};
 
-// Blocks an attempt keeps through its pivot, bounding how deep a recoverable reorg can reach.
-// Two epochs, the depth past which finality rules out reorgs.
-const KEPT_BLOCKS: u64 = 2 * EPOCH_SLOTS;
+// Blocks an attempt keeps through its pivot, bounding how deep a recoverable reorg can reach. A
+// deeper reorg restarts the attempt.
+const KEPT_BLOCKS: u64 = 64;
 
 /// Where a reorg left an attempt: the last block both branches share and the orphaned blocks
 /// after it.
