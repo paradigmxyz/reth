@@ -464,7 +464,8 @@ where
 
     /// Prunes account and storage trie nodes last modified before `prune_before`.
     ///
-    /// Storage tries whose root epochs predate the cutoff are fully evicted.
+    /// Storage tries whose root epochs predate the cutoff are fully evicted. Hashed addresses
+    /// in `retained_storage` keep their entire storage trie, including older revealed nodes.
     ///
     /// # Preconditions
     ///
@@ -478,7 +479,7 @@ where
         target = "trie::sparse",
         skip_all
     )]
-    pub fn prune(&mut self, prune_before: TrieNodeEpoch) {
+    pub fn prune(&mut self, prune_before: TrieNodeEpoch, retained_storage: &[B256]) {
         let total_storage_tries_before = self.storage.tries.len();
 
         let parent_span = tracing::Span::current();
@@ -498,7 +499,7 @@ where
 
                 self.state.as_revealed_mut().map(|trie| trie.prune(prune_before)).unwrap_or(0)
             },
-            || self.storage.prune(prune_before, &parent_span),
+            || self.storage.prune(prune_before, retained_storage, &parent_span),
         );
 
         debug!(
@@ -527,13 +528,21 @@ struct StorageTries<S = ArenaParallelSparseTrie> {
 #[cfg(feature = "std")]
 impl<S: SparseTrieTrait> StorageTries<S> {
     /// Prunes storage tries by epoch, returning fully old tries to the reuse pool.
-    fn prune(&mut self, prune_before: TrieNodeEpoch, parent_span: &tracing::Span) -> usize {
+    fn prune(
+        &mut self,
+        prune_before: TrieNodeEpoch,
+        retained_storage: &[B256],
+        parent_span: &tracing::Span,
+    ) -> usize {
         use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
         let addresses_to_evict: Vec<B256> = self
             .tries
             .par_iter_mut()
             .filter_map(|(address, trie)| {
+                if retained_storage.contains(address) {
+                    return None;
+                }
                 let hashed_address = Some(*address);
                 let _span = tracing::trace_span!(
                     target: "trie::sparse",
@@ -762,128 +771,145 @@ mod tests {
     }
 
     #[test]
-    fn prune_uses_epochs_for_account_and_storage_tries() {
-        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
+    fn prune_uses_epochs_and_preserves_retained_storage_tries() {
+        for retain in [false, true] {
+            let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default();
 
-        let account = B256::ZERO;
-        let old_account =
-            b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
-        let prewarmed_account =
-            b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
-        let slot = B256::ZERO;
-        let account_path = leaf_key([0x0], 64);
-        let old_account_path = leaf_key([0x1], 64);
-        let storage_path = leaf_key([0x0], 64);
+            let account = B256::ZERO;
+            let old_account =
+                b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
+            let prewarmed_account =
+                b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
+            let slot = B256::ZERO;
+            let account_path = leaf_key([0x0], 64);
+            let old_account_path = leaf_key([0x1], 64);
+            let storage_path = leaf_key([0x0], 64);
 
-        let leaf_value = alloy_rlp::encode(TrieAccount::default());
-        let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
-            leaf_key([], 63),
-            leaf_value.clone(),
-        )));
-        let leaf_1 =
-            alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
+            let leaf_value = alloy_rlp::encode(TrieAccount::default());
+            let leaf_0 = alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(
+                leaf_key([], 63),
+                leaf_value.clone(),
+            )));
+            let leaf_1 =
+                alloy_rlp::encode(TrieNodeV2::Leaf(LeafNode::new(leaf_key([], 63), leaf_value)));
 
-        let subtree = || {
-            ProofNodes::from_iter([
-                (
-                    Nibbles::default(),
-                    alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
-                        key: Nibbles::default(),
-                        stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
-                        state_mask: TrieMask::new(0b11),
-                        branch_rlp_node: None,
-                    }))
-                    .into(),
-                ),
-                (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
-                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
-            ])
-        };
+            let subtree = || {
+                ProofNodes::from_iter([
+                    (
+                        Nibbles::default(),
+                        alloy_rlp::encode(TrieNodeV2::Branch(BranchNodeV2 {
+                            key: Nibbles::default(),
+                            stack: vec![RlpNode::from_rlp(&leaf_0), RlpNode::from_rlp(&leaf_1)],
+                            state_mask: TrieMask::new(0b11),
+                            branch_rlp_node: None,
+                        }))
+                        .into(),
+                    ),
+                    (Nibbles::from_nibbles([0x0]), leaf_0.clone().into()),
+                    (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+                ])
+            };
 
-        let multiproof = MultiProof {
-            account_subtree: subtree(),
-            storages: HashMap::from_iter([
-                (
-                    account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-                (
-                    old_account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-                (
-                    prewarmed_account,
-                    StorageMultiProof {
-                        root: B256::ZERO,
-                        subtree: subtree(),
-                        branch_node_masks: Default::default(),
-                    },
-                ),
-            ]),
-            ..Default::default()
-        };
+            let multiproof = MultiProof {
+                account_subtree: subtree(),
+                storages: HashMap::from_iter([
+                    (
+                        account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                    (
+                        old_account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                    (
+                        prewarmed_account,
+                        StorageMultiProof {
+                            root: B256::ZERO,
+                            subtree: subtree(),
+                            branch_node_masks: Default::default(),
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            };
 
-        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+            sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
 
-        sparse.storage_root(&account, epoch(0)).unwrap();
-        sparse.storage_root(&old_account, epoch(0)).unwrap();
-        sparse.root(epoch(0)).unwrap();
-        assert!(!sparse.storage_trie_ref(&prewarmed_account).unwrap().is_root_cached());
+            sparse.storage_root(&account, epoch(0)).unwrap();
+            sparse.storage_root(&old_account, epoch(0)).unwrap();
+            sparse.root(epoch(0)).unwrap();
+            assert!(!sparse.storage_trie_ref(&prewarmed_account).unwrap().is_root_cached());
 
-        let mut storage_updates = B256Map::from_iter([(
-            slot,
-            LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
-        )]);
-        sparse
-            .storage_trie_mut(&account)
-            .unwrap()
-            .update_leaves(&mut storage_updates, |_, _| {
-                panic!("fully revealed storage trie must not request proofs")
-            })
-            .unwrap();
-        assert!(storage_updates.is_empty());
+            let mut storage_updates = B256Map::from_iter([(
+                slot,
+                LeafUpdate::Changed(alloy_rlp::encode_fixed_size(&U256::from(2)).to_vec()),
+            )]);
+            sparse
+                .storage_trie_mut(&account)
+                .unwrap()
+                .update_leaves(&mut storage_updates, |_, _| {
+                    panic!("fully revealed storage trie must not request proofs")
+                })
+                .unwrap();
+            assert!(storage_updates.is_empty());
 
-        let trie_account = TrieAccount {
-            storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
-            ..Default::default()
-        };
-        apply_account_update(
-            &mut sparse,
-            account,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
-        );
-        let root_before = sparse.root(epoch(10)).unwrap();
-        sparse.prune(epoch(10));
+            let trie_account = TrieAccount {
+                storage_root: sparse.storage_root(&account, epoch(10)).unwrap(),
+                ..Default::default()
+            };
+            apply_account_update(
+                &mut sparse,
+                account,
+                LeafUpdate::Changed(alloy_rlp::encode(trie_account)),
+            );
+            let root_before = sparse.root(epoch(10)).unwrap();
+            let retained_storage = if retain { vec![account] } else { vec![] };
+            sparse.prune(epoch(10), &retained_storage);
 
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(matches!(
-            sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
-            Ok(LeafLookup::Exists)
-        ));
-        assert!(matches!(
-            sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
-            Err(crate::LeafLookupError::BlindedNode { .. })
-        ));
-        assert!(sparse.storage_trie_ref(&old_account).is_none());
-        assert!(sparse.storage_trie_ref(&prewarmed_account).is_none());
-        assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
+            let old_leaf =
+                sparse.storage_trie_ref(&account).unwrap().find_leaf(&leaf_key([0x1], 64), None);
+            if retain {
+                assert!(matches!(old_leaf, Ok(LeafLookup::Exists)));
+            } else {
+                assert!(matches!(old_leaf, Err(crate::LeafLookupError::BlindedNode { .. })));
+            }
 
-        // An intermediate storage root does not advance without another change, so the trie
-        // becomes eligible once the cutoff passes its last modification epoch.
-        sparse.prune(epoch(11));
-        assert!(sparse.storage_trie_ref(&account).is_none());
-        assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&account_path, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert!(matches!(
+                sparse.storage_trie_ref(&account).unwrap().find_leaf(&storage_path, None),
+                Ok(LeafLookup::Exists)
+            ));
+            assert!(matches!(
+                sparse.state_trie_ref().unwrap().find_leaf(&old_account_path, None),
+                Err(crate::LeafLookupError::BlindedNode { .. })
+            ));
+            assert!(sparse.storage_trie_ref(&old_account).is_none());
+            assert!(sparse.storage_trie_ref(&prewarmed_account).is_none());
+            assert_eq!(sparse.root(epoch(10)).unwrap(), root_before);
+
+            // An intermediate storage root does not advance without another change, so the trie
+            // becomes eligible once the cutoff passes its last modification epoch.
+            sparse.prune(epoch(11), &retained_storage);
+            assert_eq!(sparse.storage_trie_ref(&account).is_some(), retain);
+            if retain {
+                assert_eq!(
+                    sparse.storage_root(&account, epoch(11)).unwrap(),
+                    trie_account.storage_root
+                );
+            }
+            assert_eq!(sparse.root(epoch(11)).unwrap(), root_before);
+        }
     }
 
     #[test]

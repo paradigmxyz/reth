@@ -471,6 +471,8 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    /// Hashed addresses whose revealed storage nodes remain cached regardless of age.
+    retained_storage_tries: Arc<[B256]>,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -480,6 +482,12 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
+    /// Keeps these storage tries fully revealed across sparse-trie cache pruning.
+    pub fn with_retained_storage_tries(mut self, addresses: Vec<B256>) -> Self {
+        self.retained_storage_tries = addresses.into();
+        self
+    }
+
     /// Transaction count at or below which a block gets a quarter of the proof worker pool, since
     /// fewer transactions produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
@@ -637,6 +645,7 @@ impl DefaultStateRootStrategy {
             pending_sparse_trie_prune_blocks,
         } = options;
         let trie_metrics = self.metrics.clone();
+        let retained_storage_tries = self.retained_storage_tries.clone();
         let executor = executor.clone();
 
         let parent_span = Span::current();
@@ -747,7 +756,7 @@ impl DefaultStateRootStrategy {
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
-                    trie.prune(prune_before);
+                    trie.prune(prune_before, &retained_storage_tries);
                     trie_metrics
                         .sparse_trie_prune_duration_histogram
                         .record(prune_start.elapsed().as_secs_f64());
