@@ -57,7 +57,8 @@ pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
-/// A header with a state root distinctive to its number, and a commitment when one is given.
+/// A header with a state root distinctive to its number, and a block access list hash when one
+/// is given.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
@@ -72,7 +73,7 @@ pub(crate) fn header(
     }
 }
 
-/// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
+/// Blocks `0..=3`, carrying a block access list hash from `bal_from` onwards.
 pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
@@ -274,7 +275,7 @@ pub(crate) struct BalChain {
 impl BalChain {
     /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
     pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
-        let (commitments, lists): (Vec<B256>, Vec<Bytes>) = lists
+        let (access_list_hashes, lists): (Vec<B256>, Vec<Bytes>) = lists
             .into_iter()
             .map(|changes| {
                 (
@@ -289,9 +290,12 @@ impl BalChain {
             headers.push(SealedHeader::seal_slow(header(number, parent, None)));
             parent = headers[number as usize].hash();
         }
-        for (index, commitment) in commitments.into_iter().enumerate() {
-            let sealed =
-                SealedHeader::seal_slow(header(pivot + index as u64 + 1, parent, Some(commitment)));
+        for (index, access_list_hash) in access_list_hashes.into_iter().enumerate() {
+            let sealed = SealedHeader::seal_slow(header(
+                pivot + index as u64 + 1,
+                parent,
+                Some(access_list_hash),
+            ));
             parent = sealed.hash();
             headers.push(sealed);
         }

@@ -189,11 +189,11 @@ mod tests {
     }
 
     #[test]
-    fn pivot_without_a_bal_commitment_is_not_selectable() {
+    fn pivot_without_a_block_access_list_hash_is_not_selectable() {
         let provider = provider_with(chain(Some(3)));
 
         assert_eq!(policy().select(&provider, 3, None).unwrap(), None);
-        // Neither the finalized anchor nor the fallback carries a commitment.
+        // Neither the finalized anchor nor the fallback carries a block access list hash.
         assert_eq!(policy().select(&provider, 3, Some(1)).unwrap(), None);
     }
 

@@ -1,7 +1,7 @@
-//! Downloads block access lists and authenticates them against header commitments.
+//! Downloads block access lists and authenticates them against their headers' hashes.
 //!
 //! Responses are positional: entry `i` answers the `i`th requested block hash, and is accepted
-//! only if it hashes to the commitment carried by that block's header, as defined by
+//! only if it hashes to the block access list hash carried by that block's header, as defined by
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189).
 
 use super::request::{SnapVerifier, VerifyingRequest};
@@ -23,7 +23,7 @@ use std::{
 };
 use tracing::debug;
 
-/// Downloads block access lists and authenticates each against its header commitment.
+/// Downloads block access lists and authenticates each against its header's hash.
 ///
 /// Invalid responses penalize their peer and retry. Decoding and hashing run on the blocking
 /// pool.
@@ -33,8 +33,8 @@ pub struct BlockAccessListDownloader<C: SnapClient>(VerifyingRequest<C, BlockAcc
 impl<C: SnapClient> BlockAccessListDownloader<C> {
     /// Creates a downloader that verifies responses against `headers`.
     ///
-    /// Headers must match the requested block hashes in order and carry their block-access-list
-    /// commitments.
+    /// Headers must match the requested block hashes in order and carry their block access list
+    /// hashes.
     pub fn new<H: BlockHeader + Sealable>(
         client: C,
         request: GetBlockAccessListsMessage,
@@ -50,42 +50,43 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
                 })
             }
         }
-        let commitments = headers.iter().map(|header| header.block_access_list_hash()).collect();
-        Self::with_commitments(client, request, commitments, runtime)
+        let access_list_hashes =
+            headers.iter().map(|header| header.block_access_list_hash()).collect();
+        Self::with_access_list_hashes(client, request, access_list_hashes, runtime)
     }
 
-    /// Creates a downloader that verifies each requested block's list against the commitment at
-    /// the same position of `commitments`, which every block must carry.
+    /// Creates a downloader that verifies each requested block's list against the hash at the
+    /// same position of `access_list_hashes`, which every block must carry.
     ///
-    /// The caller guarantees each commitment belongs to the requested hash at its position.
-    pub fn with_commitments(
+    /// The caller guarantees each hash belongs to the requested block at its position.
+    pub fn with_access_list_hashes(
         client: C,
         request: GetBlockAccessListsMessage,
-        commitments: Vec<Option<B256>>,
+        access_list_hashes: Vec<Option<B256>>,
         runtime: Runtime,
     ) -> Result<Self, InvalidBlockAccessListRequest> {
         if request.block_hashes.is_empty() {
             return Err(InvalidBlockAccessListRequest::NoBlocks)
         }
-        if request.block_hashes.len() != commitments.len() {
-            return Err(InvalidBlockAccessListRequest::CommitmentCount {
+        if request.block_hashes.len() != access_list_hashes.len() {
+            return Err(InvalidBlockAccessListRequest::AccessListHashCount {
                 requested: request.block_hashes.len(),
-                supplied: commitments.len(),
+                supplied: access_list_hashes.len(),
             })
         }
         // Only authenticated block identities cross into blocking work, so the verifier stays
         // free of the caller's header type.
-        let mut blocks = Vec::with_capacity(commitments.len());
-        for (index, (requested, commitment)) in
-            request.block_hashes.iter().zip(commitments).enumerate()
+        let mut blocks = Vec::with_capacity(access_list_hashes.len());
+        for (index, (requested, access_list_hash)) in
+            request.block_hashes.iter().zip(access_list_hashes).enumerate()
         {
-            let Some(commitment) = commitment else {
-                return Err(InvalidBlockAccessListRequest::MissingCommitment {
+            let Some(access_list_hash) = access_list_hash else {
+                return Err(InvalidBlockAccessListRequest::MissingAccessListHash {
                     index,
                     block_hash: *requested,
                 })
             };
-            blocks.push((*requested, commitment));
+            blocks.push((*requested, access_list_hash));
         }
         let verifier = BlockAccessListVerifier {
             request_id: request.request_id,
@@ -115,16 +116,16 @@ pub enum BlockAccessListOutcome {
         /// The peer that answered.
         peer_id: PeerId,
     },
-    /// Lists authenticated against their header commitments.
+    /// Lists authenticated against their headers' hashes.
     Verified(VerifiedBlockAccessLists),
 }
 
-/// Positional block access lists authenticated against their header commitments.
+/// Positional block access lists authenticated against their headers' hashes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedBlockAccessLists {
     // Needed to avoid retrying unavailable entries against the peer that omitted them.
     peer_id: PeerId,
-    // Each list stays bound to the block whose header commitment authenticated it.
+    // Each list stays bound to the block whose header hash authenticated it.
     block_access_lists: Vec<(B256, Option<DecodedBal>)>,
     // Requested blocks the response left unanswered, in request order.
     missing: Vec<B256>,
@@ -171,12 +172,12 @@ pub enum InvalidBlockAccessListRequest {
     /// The request asks for no blocks.
     #[error("block access list request has no block hashes")]
     NoBlocks,
-    /// A different number of commitments was supplied than blocks requested.
-    #[error("requested {requested} block access lists but supplied {supplied} commitments")]
-    CommitmentCount {
+    /// A different number of block access list hashes was supplied than blocks requested.
+    #[error("requested {requested} block access lists but supplied {supplied} hashes")]
+    AccessListHashCount {
         /// Blocks the request asks for.
         requested: usize,
-        /// Commitments supplied to authenticate them.
+        /// Block access list hashes supplied to authenticate them.
         supplied: usize,
     },
     /// A requested hash does not match the header at the same position.
@@ -189,17 +190,18 @@ pub enum InvalidBlockAccessListRequest {
         /// Hash of the header supplied for it.
         supplied: B256,
     },
-    /// A supplied header carries no commitment, so its list could never be authenticated.
-    #[error("header for block {block_hash} at index {index} has no block access list commitment")]
-    MissingCommitment {
-        /// Position of the header without a commitment.
+    /// A supplied header carries no block access list hash, so its list could never be
+    /// authenticated.
+    #[error("header for block {block_hash} at index {index} has no block access list hash")]
+    MissingAccessListHash {
+        /// Position of the header without a block access list hash.
         index: usize,
         /// Block the header belongs to.
         block_hash: B256,
     },
 }
 
-// Authenticates each returned list against the commitment of the block it answers.
+// Authenticates each returned list against the block access list hash of the block it answers.
 //
 // Keeps only response identity and authenticated block pairs, avoiding the caller's generic
 // header type on the blocking pool.
@@ -209,7 +211,7 @@ struct BlockAccessListVerifier {
     request_id: u64,
     // Soft byte limit the request was sent with, carried into any follow-up.
     response_bytes: u64,
-    // Requested hashes paired with their header commitments, in wire order.
+    // Requested hashes paired with their headers' block access list hashes, in wire order.
     blocks: Vec<(B256, B256)>,
 }
 
@@ -245,16 +247,15 @@ impl BlockAccessListVerifier {
         Ok(response)
     }
 
-    // Keeps each decoded entry tied to the commitment at the same request position.
+    // Keeps each decoded entry tied to the block access list hash at the same request position.
     fn authenticate_entries(
         &self,
         entries: Vec<Option<Bytes>>,
     ) -> Result<Vec<(B256, Option<DecodedBal>)>, RequestError> {
         let mut block_access_lists = Vec::with_capacity(entries.len());
         for (index, entry) in entries.into_iter().enumerate() {
-            let (block_hash, commitment) = self.blocks[index];
-            // An omitted list stays in place, so every later entry keeps the commitment it
-            // answers.
+            let (block_hash, access_list_hash) = self.blocks[index];
+            // An omitted list stays in place, so every later entry keeps the hash it answers.
             let Some(raw) = entry else {
                 block_access_lists.push((block_hash, None));
                 continue
@@ -262,13 +263,13 @@ impl BlockAccessListVerifier {
             // Hashing the raw bytes settles authenticity without decoding, so a peer cannot
             // charge us the decode of a list it was never able to serve.
             let raw = RawBal::new(raw);
-            raw.ensure_hash(commitment).map_err(|error| {
+            raw.ensure_hash(access_list_hash).map_err(|error| {
                 debug!(
                     target: "downloaders::snap",
                     %block_hash,
                     expected = %error.expected,
                     got = %error.computed,
-                    "Block access list does not match its header commitment"
+                    "Block access list does not match its header hash"
                 );
                 RequestError::BadResponse
             })?;
@@ -341,12 +342,12 @@ mod tests {
         Bytes::from(alloy_rlp::encode(Bal::default()))
     }
 
-    fn commitment(raw: Bytes) -> B256 {
+    fn access_list_hash(raw: Bytes) -> B256 {
         DecodedBal::from_rlp_bytes(raw).expect("test bal decodes").hash()
     }
 
-    // Headers committing to `entries`, sealed with distinct block hashes. A `None` entry gets a
-    // commitment no list can match, since nothing authenticates against it.
+    // Headers carrying the hashes of `entries`, sealed with distinct block hashes. A `None` entry
+    // gets a hash no list can match, since nothing authenticates against it.
     fn headers(entries: &[Option<Bytes>]) -> Vec<SealedHeader<Header>> {
         entries
             .iter()
@@ -354,7 +355,7 @@ mod tests {
             .map(|(index, raw)| {
                 let header = Header {
                     block_access_list_hash: Some(
-                        raw.clone().map_or(B256::repeat_byte(0xee), commitment),
+                        raw.clone().map_or(B256::repeat_byte(0xee), access_list_hash),
                     ),
                     ..Default::default()
                 };
@@ -437,9 +438,9 @@ mod tests {
                 .map(|(block_hash, entry)| (*block_hash, entry.as_ref().map(DecodedBal::hash)))
                 .collect::<Vec<_>>(),
             [
-                (headers[0].hash(), Some(commitment(bal()))),
+                (headers[0].hash(), Some(access_list_hash(bal()))),
                 (headers[1].hash(), None),
-                (headers[2].hash(), Some(commitment(bal()))),
+                (headers[2].hash(), Some(access_list_hash(bal()))),
             ]
         );
         // The list after the omission stays authenticated, so only the gap is asked for again.
@@ -545,8 +546,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_list_that_misses_its_header_commitment_is_rejected() {
-        // The header commits to something this list cannot hash to.
+    async fn a_list_that_misses_its_header_hash_is_rejected() {
+        // The header carries a hash this list cannot hash to.
         let headers = vec![SealedHeader::new(
             Header { block_access_list_hash: Some(B256::repeat_byte(0xab)), ..Default::default() },
             B256::repeat_byte(1),
@@ -566,7 +567,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_an_entry_instead_of_omitting_it_in_place_is_rejected() {
         // The peer holds no list for the first block and drops the slot rather than sending
-        // `None`, so the second block's list lands on the first block's commitment.
+        // `None`, so the second block's list lands on the first block's hash.
         let headers = headers(&[None, Some(bal())]);
         let peer = PeerId::random();
         let client = Arc::new(TestSnapClient::new(always(peer, 1, vec![Some(bal())])));
@@ -634,7 +635,7 @@ mod tests {
 
         assert!(matches!(
             downloader(Arc::clone(&client), request(&headers), &[]).unwrap_err(),
-            InvalidBlockAccessListRequest::CommitmentCount { requested: 1, supplied: 0 }
+            InvalidBlockAccessListRequest::AccessListHashCount { requested: 1, supplied: 0 }
         ));
 
         let mut wrong_block = request(&headers);
@@ -644,10 +645,10 @@ mod tests {
             InvalidBlockAccessListRequest::HashMismatch { index: 0, .. }
         ));
 
-        let uncommitted = vec![SealedHeader::new(Header::default(), headers[0].hash())];
+        let unhashed = vec![SealedHeader::new(Header::default(), headers[0].hash())];
         assert!(matches!(
-            downloader(Arc::clone(&client), request(&headers), &uncommitted).unwrap_err(),
-            InvalidBlockAccessListRequest::MissingCommitment { index: 0, .. }
+            downloader(Arc::clone(&client), request(&headers), &unhashed).unwrap_err(),
+            InvalidBlockAccessListRequest::MissingAccessListHash { index: 0, .. }
         ));
 
         // Nothing reached the network.

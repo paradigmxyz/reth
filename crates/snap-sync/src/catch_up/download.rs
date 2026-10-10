@@ -149,7 +149,7 @@ where
         Ok(Some(lists))
     }
 
-    // Requests the lists of `blocks`, each authenticated against its commitment.
+    // Requests the lists of `blocks`, each authenticated against its block access list hash.
     async fn request(
         &mut self,
         blocks: &[BlockWithAccessListHash],
@@ -159,7 +159,7 @@ where
             block_hashes: blocks.iter().map(|kept| kept.block().block.hash).collect(),
             response_bytes: self.context.response_bytes(),
         };
-        let downloader = BlockAccessListDownloader::with_commitments(
+        let downloader = BlockAccessListDownloader::with_access_list_hashes(
             self.context.client().clone(),
             request,
             blocks.iter().map(BlockWithAccessListHash::block_access_list_hash).collect(),

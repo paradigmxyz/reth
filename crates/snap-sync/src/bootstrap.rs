@@ -712,11 +712,11 @@ mod tests {
 
     // Blocks `0..=tip`, each committing to an empty list and to `root`.
     fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
-        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
+        let access_list_hash = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
         let mut parent = B256::ZERO;
         (0..=tip)
             .map(|number| {
-                let mut header = header(number, parent, Some(commitment));
+                let mut header = header(number, parent, Some(access_list_hash));
                 header.state_root = root;
                 let sealed = SealedHeader::seal_slow(header);
                 parent = sealed.hash();
@@ -735,8 +735,8 @@ mod tests {
         lists
             .iter()
             .map(|list| {
-                let commitment = compute_block_access_list_hash(list);
-                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
+                let access_list_hash = compute_block_access_list_hash(list);
+                let mut header = header(parent.number() + 1, parent.hash(), Some(access_list_hash));
                 header.state_root = root;
                 parent = SealedHeader::seal_slow(header);
                 parent.clone()
