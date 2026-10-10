@@ -264,11 +264,14 @@ where
     Ok(out)
 }
 
-/// Applies precompile move overrides from state overrides to the EVM's precompiles map.
+/// Applies precompile overrides from state overrides to the EVM's precompiles map.
 ///
 /// This function processes `movePrecompileToAddress` entries from the state overrides and
 /// moves precompiles from their original addresses to new addresses. The original address
 /// is cleared (precompile removed) and the precompile is installed at the destination address.
+///
+/// A `code` override on a precompile address replaces the precompile, so the precompile is
+/// removed there and the overriding code runs instead.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     precompiles: &mut PrecompilesMap,
@@ -294,6 +297,12 @@ pub fn apply_precompile_overrides(
             EthSimulateError::NotAPrecompile(addr)
         },
     )?;
+
+    for (address, account_override) in state_overrides {
+        if account_override.code.is_some() && precompiles.get(address).is_some() {
+            precompiles.apply_precompile(address, |_| None);
+        }
+    }
 
     Ok(())
 }
@@ -596,7 +605,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, Address, U256};
+    use alloy_primitives::{address, bytes, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
@@ -680,6 +689,58 @@ mod tests {
 
         assert!(precompiles.get(&source).is_none());
         assert!(precompiles.get(&dest).is_some());
+    }
+
+    #[test]
+    fn code_override_replaces_precompile() {
+        let identity = Address::with_last_byte(4);
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            identity,
+            AccountOverride { code: Some(bytes!("60006000fd")), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&identity).is_none());
+        assert!(precompiles.get(&Address::with_last_byte(1)).is_some());
+    }
+
+    #[test]
+    fn code_override_on_moved_precompile_source() {
+        let source = Address::with_last_byte(4);
+        let dest = address!("0000000000000000000000000000000000123456");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride {
+                code: Some(bytes!("60006000fd")),
+                move_precompile_to: Some(dest),
+                ..Default::default()
+            },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&source).is_none());
+        assert!(precompiles.get(&dest).is_some());
+    }
+
+    #[test]
+    fn non_code_override_keeps_precompile() {
+        let identity = Address::with_last_byte(4);
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            identity,
+            AccountOverride { balance: Some(U256::from(1)), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&identity).is_some());
     }
 
     #[test]
