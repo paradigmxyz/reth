@@ -82,8 +82,8 @@ where
             return Ok(CatchUpStep::Complete)
         }
 
-        let blocks = headers.iter().map(BlockWithAccessListHash::from).collect::<Vec<_>>();
-        let verified = match self.request(&blocks).await? {
+        let requested = headers.iter().map(BlockWithAccessListHash::from).collect::<Vec<_>>();
+        let verified = match self.request(&requested).await? {
             BlockAccessListOutcome::Verified(verified) => verified,
             BlockAccessListOutcome::Unavailable { peer_id } => {
                 return Ok(CatchUpStep::Unavailable { peer_id })
@@ -96,7 +96,7 @@ where
         let applied = verified
             .into_block_access_lists()
             .into_iter()
-            .zip(&blocks)
+            .zip(&requested)
             .map_while(|((_, list), kept)| list.map(|list| (kept.block(), list)))
             .collect::<Vec<_>>();
         if applied.is_empty() {
