@@ -4,7 +4,7 @@ use crate::utils::eth_payload_attributes_amsterdam;
 use alloy_consensus::{BlockHeader, TxEip8141};
 use alloy_eips::eip8141::{
     Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
-    ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER,
+    ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME, NONCE_MANAGER, NONCE_MANAGER_CODE,
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_signer::SignerSync;
@@ -24,10 +24,27 @@ const fn recipient() -> Address {
 }
 
 fn chain_spec() -> Arc<reth_chainspec::ChainSpec> {
+    let mut genesis: alloy_genesis::Genesis =
+        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    // Devnet contracts are ordinary genesis allocations, not fork-installed code. The nonce
+    // manager must be nonempty so EIP-161 does not clear its keyed-nonce storage after execution.
+    for (address, code) in [
+        (EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME.as_slice()),
+        (NONCE_MANAGER, NONCE_MANAGER_CODE.as_slice()),
+    ] {
+        genesis.alloc.insert(
+            address,
+            alloy_genesis::GenesisAccount {
+                nonce: Some(1),
+                code: Some(Bytes::copy_from_slice(code)),
+                ..Default::default()
+            },
+        );
+    }
     Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .genesis(genesis)
             // The Frames devnet aliases Bogotá to Amsterdam. The E2E chain enables both so the
             // pool gate and the V6 payload path exercise the same configuration.
             .bogota_activated()
