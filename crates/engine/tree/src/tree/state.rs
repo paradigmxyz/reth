@@ -327,8 +327,12 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    pub const fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    ///
+    /// This also evicts cached overlays for tips on branches competing with the new head, so
+    /// overlays for the head, its ancestors, and its descendants stay cached for the next payload.
+    pub fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
+        self.overlay_manager.evict_competing_overlays(new_head);
     }
 
     /// Returns the tracked canonical head.

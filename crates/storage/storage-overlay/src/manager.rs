@@ -366,6 +366,62 @@ impl<N: NodePrimitives> OverlayManager<N> {
         );
     }
 
+    /// Evicts cached overlays whose tips are on branches competing with the canonical `head`.
+    ///
+    /// Call this whenever the canonical head changes. An overlay is kept when its tip is the head,
+    /// an ancestor of the head, or a descendant of the head, because the next payload builds on
+    /// the head or on a block extending it. An overlay is also kept when the in-memory block graph
+    /// cannot relate its tip to the head; [`Self::remove_blocks`] prunes it once its blocks leave
+    /// the graph.
+    ///
+    /// Only ready overlays are evicted. An in-flight computation for a competing tip keeps its
+    /// entry so concurrent requests still share it, and the next head change evicts the
+    /// published overlay. Overlay lookups and background precomputes never evict, so a
+    /// best-effort precompute for a side-chain block cannot drop the overlay of the head.
+    #[tracing::instrument(
+        level = "trace",
+        target = "storage::overlay::manager",
+        skip_all,
+        fields(head = ?head, evicted_overlays = tracing::field::Empty)
+    )]
+    pub fn evict_competing_overlays(&self, head: BlockNumHash) {
+        // Lock order: the cache keys are snapshotted first, then tip ancestry is resolved against
+        // `blocks`, and entries are removed one key at a time. No cache shard guard is held while
+        // `blocks` is read, and no `blocks` guard is held while a cache shard is locked.
+        let state_trie_keys = self.state_trie_overlays.keys();
+        let execution_keys = self.execution_overlays.keys();
+        let mut tips = state_trie_keys
+            .iter()
+            .chain(&execution_keys)
+            .map(|key| key.tip_hash)
+            .filter(|tip| *tip != head.hash)
+            .collect::<Vec<_>>();
+        if tips.is_empty() {
+            return
+        }
+        tips.sort_unstable();
+        tips.dedup();
+
+        let competing_tips = self.competing_tips(head, tips);
+        if competing_tips.is_empty() {
+            return
+        }
+
+        // The decision depends only on the key, so an entry published after the snapshot is
+        // evicted too, while an entry that went back to computing is left alone.
+        let is_competing = |key: &&OverlayCacheKey| competing_tips.contains(&key.tip_hash);
+        let evicted_overlays =
+            self.state_trie_overlays.remove_ready(state_trie_keys.iter().filter(is_competing)) +
+                self.execution_overlays.remove_ready(execution_keys.iter().filter(is_competing));
+        tracing::Span::current().record("evicted_overlays", evicted_overlays);
+        debug!(
+            target: "storage::overlay::manager",
+            ?head,
+            evicted_overlays,
+            "evicted overlays competing with the canonical head"
+        );
+    }
+
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
     #[tracing::instrument(
         level = "trace",
@@ -540,15 +596,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
             Compute(Arc<OverlayWaiter<T>>),
         }
 
-        let parent_hash = parent_state.block_ref().recovered_block().parent_hash();
-        cache.retain(|sibling_key, entry| {
-            sibling_key.tip_hash == tip_hash ||
-                !matches!(entry, OverlayCacheEntry::Ready(_)) ||
-                self.blocks
-                    .get(&sibling_key.tip_hash)
-                    .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
-        });
-
+        // Lookups never evict other cached overlays. Competing tips are dropped only when the
+        // canonical head changes, see `Self::evict_competing_overlays`.
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
                 let entry = entry.get().clone();
@@ -656,6 +705,54 @@ impl<N: NodePrimitives> OverlayManager<N> {
             let Some(block) = self.blocks.get(&current_hash) else { return false };
             current_hash = block.recovered_block().parent_hash();
         }
+    }
+
+    /// Returns the `tips` that are on a branch competing with `head`.
+    ///
+    /// A tip competes when it is neither the head, an ancestor of the head, nor a descendant of
+    /// the head. Tips whose relation to the head cannot be resolved from the in-memory block graph
+    /// are not returned.
+    fn competing_tips(&self, head: BlockNumHash, tips: Vec<B256>) -> Vec<B256> {
+        let tips = tips
+            .into_iter()
+            .filter_map(|tip| {
+                self.blocks.get(&tip).map(|block| (tip, block.recovered_block().number()))
+            })
+            .collect::<Vec<_>>();
+
+        // `canonical[i]` is the ancestor of the head at height `head.number - i`. Only walk as
+        // deep as the lowest tip at or below the head requires.
+        let mut canonical = vec![head.hash];
+        if let Some(lowest) =
+            tips.iter().map(|(_, number)| *number).filter(|number| *number <= head.number).min()
+        {
+            let mut hash = head.hash;
+            while (canonical.len() as u64) <= head.number - lowest {
+                let Some(block) = self.blocks.get(&hash) else { break };
+                hash = block.recovered_block().parent_hash();
+                canonical.push(hash);
+            }
+        }
+
+        tips.into_iter()
+            .filter(|(tip, number)| {
+                if *number <= head.number {
+                    // The tip is canonical only if it is the head's ancestor at its height.
+                    return canonical
+                        .get((head.number - number) as usize)
+                        .is_some_and(|ancestor| ancestor != tip)
+                }
+
+                // Walk the tip down to the head's height and compare it with the head.
+                let mut hash = *tip;
+                for _ in head.number..*number {
+                    let Some(block) = self.blocks.get(&hash) else { return false };
+                    hash = block.recovered_block().parent_hash();
+                }
+                hash != head.hash
+            })
+            .map(|(tip, _)| tip)
+            .collect()
     }
 
     fn compute_state_trie_overlay(
@@ -799,6 +896,26 @@ impl<T> OverlayCache<T> {
             self.entries.remove_if(key, |_, entry| matches!(entry, OverlayCacheEntry::Ready(_)))?;
         let OverlayCacheEntry::Ready(input) = entry else { unreachable!() };
         Some(input)
+    }
+
+    /// Returns a snapshot of the cached keys.
+    ///
+    /// Shard guards are released before this returns.
+    fn keys(&self) -> Vec<OverlayCacheKey> {
+        self.entries.iter().map(|entry| *entry.key()).collect()
+    }
+
+    /// Removes the ready entries for `keys` and returns how many were removed.
+    ///
+    /// Computing entries are kept. Each removal locks a single shard.
+    fn remove_ready<'a>(&self, keys: impl IntoIterator<Item = &'a OverlayCacheKey>) -> usize {
+        keys.into_iter()
+            .filter(|key| {
+                self.entries
+                    .remove_if(key, |_, entry| matches!(entry, OverlayCacheEntry::Ready(_)))
+                    .is_some()
+            })
+            .count()
     }
 }
 
@@ -1107,6 +1224,39 @@ mod tests {
         manager.overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
     }
 
+    fn insert_ready_overlays(manager: &OverlayManager, key: OverlayCacheKey) {
+        manager
+            .state_trie_overlays
+            .entries
+            .insert(key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
+        manager
+            .execution_overlays
+            .entries
+            .insert(key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+    }
+
+    fn has_ready_overlays(manager: &OverlayManager, key: OverlayCacheKey) -> bool {
+        let state_trie = manager.state_trie_overlays.ready(&key).is_some();
+        let execution = manager.execution_overlays.ready(&key).is_some();
+        assert_eq!(state_trie, execution, "overlay caches disagree for {key:?}");
+        state_trie
+    }
+
+    #[cfg(feature = "rayon")]
+    fn wait_for_execution_overlay(
+        manager: &OverlayManager,
+        key: OverlayCacheKey,
+    ) -> Arc<ExecutionOverlay> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            if let Some(overlay) = manager.execution_overlays.ready(&key) {
+                return overlay
+            }
+            assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
         let manager = OverlayManager::default();
@@ -1169,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    fn computing_sibling_evicts_ready_cached_overlays() {
+    fn computing_sibling_keeps_ready_cached_overlays() {
         let manager = OverlayManager::default();
         let mut builder = TestBlockBuilder::eth();
         let anchor_hash = B256::random();
@@ -1179,24 +1329,34 @@ mod tests {
         let sibling = builder.get_executed_block_with_number(2, parent_hash);
         let sibling_hash = sibling.recovered_block().hash();
         let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
+        let sibling_key = OverlayCacheKey { anchor_hash, tip_hash: sibling_hash };
 
         manager.insert_block(parent);
         manager.insert_block(first);
         manager.insert_block(sibling);
-        manager
-            .state_trie_overlays
-            .entries
-            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
-        manager
-            .execution_overlays
-            .entries
-            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+        insert_ready_overlays(&manager, first_key);
 
+        // A best-effort precompute for the sibling must not evict the first block's overlay.
+        let sibling_state = manager.block_state(sibling_hash).unwrap();
+        manager
+            .execution_overlay_for_parent_inner(
+                &sibling_state,
+                anchor_hash,
+                OverlayCacheConfig { precompute: true, write_to_cache: true },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(manager.execution_overlays.ready(&sibling_key).is_some());
+        assert!(manager.execution_overlays.ready(&first_key).is_some());
+
+        // Neither does a required lookup.
         overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
         manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
 
-        assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
-        assert!(!manager.execution_overlays.entries.contains_key(&first_key));
+        assert!(manager.state_trie_overlays.ready(&first_key).is_some());
+        assert!(manager.execution_overlays.ready(&first_key).is_some());
+        assert!(manager.state_trie_overlays.ready(&sibling_key).is_some());
+        assert!(manager.execution_overlays.ready(&sibling_key).is_some());
     }
 
     #[test]
@@ -1562,5 +1722,190 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
             .unwrap();
         assert_eq!(execution.accounts().len(), 1);
+    }
+
+    #[test]
+    fn head_change_evicts_competing_overlays() {
+        let manager = OverlayManager::default();
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let head = builder.get_executed_block_with_number(2, parent_hash);
+        let head_num_hash = head.recovered_block().num_hash();
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling_num_hash = sibling.recovered_block().num_hash();
+        let head_child = builder.get_executed_block_with_number(3, head_num_hash.hash);
+        let sibling_child = builder.get_executed_block_with_number(3, sibling_num_hash.hash);
+        let key_for = |block: &ExecutedBlock<EthPrimitives>| OverlayCacheKey {
+            anchor_hash,
+            tip_hash: block.recovered_block().hash(),
+        };
+        let (parent_key, head_key, sibling_key) =
+            (key_for(&parent), key_for(&head), key_for(&sibling));
+        let (head_child_key, sibling_child_key) = (key_for(&head_child), key_for(&sibling_child));
+        let unknown_key = OverlayCacheKey { anchor_hash, tip_hash: B256::random() };
+
+        for block in [&parent, &head, &sibling, &head_child, &sibling_child] {
+            manager.insert_block(block.clone());
+        }
+        for key in
+            [parent_key, head_key, sibling_key, head_child_key, sibling_child_key, unknown_key]
+        {
+            insert_ready_overlays(&manager, key);
+        }
+
+        // The ancestor, the head, the descendant, and the unrelated tip are kept.
+        manager.evict_competing_overlays(head_num_hash);
+        for key in [parent_key, head_key, head_child_key, unknown_key] {
+            assert!(has_ready_overlays(&manager, key));
+        }
+        assert!(!has_ready_overlays(&manager, sibling_key));
+        assert!(!has_ready_overlays(&manager, sibling_child_key));
+
+        // Once the engine moves to the sibling branch, the previous head's branch is evicted.
+        insert_ready_overlays(&manager, sibling_key);
+        insert_ready_overlays(&manager, sibling_child_key);
+        manager.evict_competing_overlays(sibling_num_hash);
+        for key in [parent_key, sibling_key, sibling_child_key, unknown_key] {
+            assert!(has_ready_overlays(&manager, key));
+        }
+        assert!(!has_ready_overlays(&manager, head_key));
+        assert!(!has_ready_overlays(&manager, head_child_key));
+    }
+
+    #[test]
+    fn head_change_evicts_concurrently_computed_siblings() {
+        let manager = OverlayManager::default();
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let head = builder.get_executed_block_with_number(2, parent_hash);
+        let head_hash = head.recovered_block().hash();
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling_hash = sibling.recovered_block().hash();
+        let pending_sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let head_child = builder.get_executed_block_with_number(3, head_hash);
+        let head_key = OverlayCacheKey { anchor_hash, tip_hash: head_hash };
+        let sibling_key = OverlayCacheKey { anchor_hash, tip_hash: sibling_hash };
+        let pending_key =
+            OverlayCacheKey { anchor_hash, tip_hash: pending_sibling.recovered_block().hash() };
+
+        for block in [&parent, &head, &sibling, &pending_sibling, &head_child] {
+            manager.insert_block(block.clone());
+        }
+
+        // Both siblings publish ready overlays, as when their computations overlap.
+        for tip_hash in [head_hash, sibling_hash] {
+            overlay_for_parent(&manager, tip_hash, anchor_hash).unwrap();
+            manager.execution_overlay_for_parent(tip_hash, anchor_hash).unwrap();
+        }
+        let head_overlay = manager.execution_overlays.ready(&head_key).unwrap();
+        assert!(has_ready_overlays(&manager, sibling_key));
+
+        // A third sibling is still computing when the head changes.
+        let state_trie_waiter = Arc::new(OverlayWaiter::new());
+        let execution_waiter = Arc::new(OverlayWaiter::new());
+        manager
+            .state_trie_overlays
+            .entries
+            .insert(pending_key, OverlayCacheEntry::Computing(Arc::clone(&state_trie_waiter)));
+        manager
+            .execution_overlays
+            .entries
+            .insert(pending_key, OverlayCacheEntry::Computing(Arc::clone(&execution_waiter)));
+
+        manager.evict_competing_overlays(head.recovered_block().num_hash());
+        assert!(has_ready_overlays(&manager, head_key));
+        assert!(!has_ready_overlays(&manager, sibling_key));
+        assert!(matches!(
+            manager.execution_overlays.entries.get(&pending_key).as_deref(),
+            Some(OverlayCacheEntry::Computing(_))
+        ));
+        assert!(matches!(
+            manager.state_trie_overlays.entries.get(&pending_key).as_deref(),
+            Some(OverlayCacheEntry::Computing(_))
+        ));
+
+        // The pending sibling publishes after the head change and is evicted by the next one.
+        state_trie_waiter.finish(Arc::new(TrieInputSorted::default()));
+        execution_waiter.finish(Arc::new(ExecutionOverlay::default()));
+        insert_ready_overlays(&manager, pending_key);
+        manager.evict_competing_overlays(head_child.recovered_block().num_hash());
+        assert!(!has_ready_overlays(&manager, pending_key));
+
+        let cached = manager.execution_overlay_for_parent(head_hash, anchor_hash).unwrap();
+        assert!(Arc::ptr_eq(&head_overlay, &cached));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn side_chain_precompute_keeps_head_overlay() {
+        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let head = builder.get_executed_block_with_number(2, parent_hash);
+        let head_hash = head.recovered_block().hash();
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling_hash = sibling.recovered_block().hash();
+        let head_key = OverlayCacheKey { anchor_hash, tip_hash: head_hash };
+        let sibling_key = OverlayCacheKey { anchor_hash, tip_hash: sibling_hash };
+
+        manager.insert_block(parent);
+        manager.insert_block(head.clone());
+        let head_overlay = manager.execution_overlay_for_parent(head_hash, anchor_hash).unwrap();
+
+        // Validating the sibling caches its parent's overlay, so inserting the sibling schedules
+        // a background precompute for it.
+        manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+        manager.insert_block(sibling);
+        wait_for_execution_overlay(&manager, sibling_key);
+
+        let cached = manager.execution_overlays.ready(&head_key).unwrap();
+        assert!(Arc::ptr_eq(&head_overlay, &cached));
+
+        manager.evict_competing_overlays(head.recovered_block().num_hash());
+        assert!(manager.execution_overlays.ready(&sibling_key).is_none());
+        let cached = manager.execution_overlay_for_parent(head_hash, anchor_hash).unwrap();
+        assert!(Arc::ptr_eq(&head_overlay, &cached));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn side_chain_precompute_keeps_post_persistence_head_overlay() {
+        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let mut builder = TestBlockBuilder::eth();
+        let persisted = builder.get_executed_block_with_number(1, B256::random());
+        let new_anchor = persisted.recovered_block().hash();
+        let parent = builder.get_executed_block_with_number(2, new_anchor);
+        let parent_hash = parent.recovered_block().hash();
+        let head = builder.get_executed_block_with_number(3, parent_hash);
+        let head_hash = head.recovered_block().hash();
+        let sibling = builder.get_executed_block_with_number(3, parent_hash);
+        let sibling_hash = sibling.recovered_block().hash();
+        let head_key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash: head_hash };
+        let sibling_key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash: sibling_hash };
+
+        for block in [&persisted, &parent, &head, &sibling] {
+            manager.insert_block(block.clone());
+        }
+        manager.remove_blocks([new_anchor]);
+
+        // The engine precomputes the head's overlay against the new anchor after persistence.
+        manager.precompute_execution_overlay(head_hash, new_anchor);
+        let head_overlay = wait_for_execution_overlay(&manager, head_key);
+
+        manager.precompute_execution_overlay(sibling_hash, new_anchor);
+        wait_for_execution_overlay(&manager, sibling_key);
+
+        let cached = manager.execution_overlays.ready(&head_key).unwrap();
+        assert!(Arc::ptr_eq(&head_overlay, &cached));
+
+        manager.evict_competing_overlays(head.recovered_block().num_hash());
+        assert!(manager.execution_overlays.ready(&sibling_key).is_none());
+        assert!(manager.execution_overlays.ready(&head_key).is_some());
     }
 }
