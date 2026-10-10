@@ -21705,7 +21705,7 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     return false;
   }
 
-  for (size_t i = 1; i < ARRAY_LENGTH(lck->mincore_cache.begin); ++i) {
+  for (size_t i = ARRAY_LENGTH(lck->mincore_cache.begin) - 1; i > 0; --i) {
     lck->mincore_cache.begin[i] = lck->mincore_cache.begin[i - 1];
     lck->mincore_cache.mask[i] = lck->mincore_cache.mask[i - 1];
   }
