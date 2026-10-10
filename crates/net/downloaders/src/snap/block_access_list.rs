@@ -55,10 +55,8 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
         Self::with_access_list_hashes(client, request, access_list_hashes, runtime)
     }
 
-    /// Creates a downloader that verifies each requested block's list against the hash at the
-    /// same position of `access_list_hashes`, which every block must carry.
-    ///
-    /// The caller guarantees each hash belongs to the requested block at its position.
+    /// Creates a downloader that checks each requested list against its block's access list hash.
+    /// `access_list_hashes` must follow the request's block order, one hash per block.
     pub fn with_access_list_hashes(
         client: C,
         request: GetBlockAccessListsMessage,

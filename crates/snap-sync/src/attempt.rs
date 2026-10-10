@@ -70,7 +70,7 @@ pub trait SnapAttemptStore {
     /// Returns where the canonical chain diverges from the branch the pivot of `write`'s attempt
     /// is on.
     ///
-    /// `Ok(None)` when the kept headers do not reach back to where the branches part.
+    /// `Ok(None)` when the kept blocks do not reach back to where the branches part.
     fn snap_reorg(&self, write: SnapWrite) -> Result<Option<SnapReorg>, SnapSyncError>
     where
         Self: BlockHashReader;

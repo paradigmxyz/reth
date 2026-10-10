@@ -2,8 +2,8 @@
 //!
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) repairs it from
 //! the abandoned branch's lists: every field they change is fetched again unless a list of the
-//! new branch overwrites it first. The reorg removes that branch's headers from the canonical
-//! chain, so the attempt keeps them from the moment it anchors.
+//! new branch overwrites it first. The reorg removes that branch's blocks from the canonical
+//! chain, so the attempt keeps what recovery needs of them from the moment it anchors.
 
 use crate::{common::SnapRecord, SnapSyncError};
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
@@ -253,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ancestor_can_sit_just_below_the_kept_headers() {
+    fn the_ancestor_can_sit_just_below_the_kept_blocks() {
         let address = Address::repeat_byte(0x11);
         let old = BalChain::new(0, [credit(address, 1), credit(address, 2)]);
         let new = BalChain::new(0, [credit(address, 10)]);
@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reorg_below_the_kept_headers_is_unrecoverable() {
+    fn a_reorg_below_the_kept_blocks_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
         let depth = KEPT_BLOCKS + 2;
         let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
@@ -298,7 +298,7 @@ mod tests {
             Err(SnapSyncError::StaleWrite { .. })
         ));
         drop(provider);
-        // The kept headers follow the new pivot.
+        // The kept blocks follow the new pivot.
         let reorg = reorg(&factory, recovered).unwrap();
         assert_eq!(reorg.ancestor(), new.tip());
     }
