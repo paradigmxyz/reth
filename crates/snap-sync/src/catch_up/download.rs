@@ -143,7 +143,7 @@ where
                 .request(
                     blocks[lists.len()..end]
                         .iter()
-                        .map(|block| (block.num_hash().hash, block.commitment()))
+                        .map(|block| (block.block().block.hash, block.commitment()))
                         .collect(),
                 )
                 .await?
@@ -359,7 +359,7 @@ mod tests {
     fn orphaned(chain: &BalChain) -> (Vec<KeptBlock>, Vec<B256>) {
         let headers = &chain.headers[PIVOT as usize + 1..];
         (
-            headers.iter().map(KeptBlock::of).collect(),
+            headers.iter().map(KeptBlock::from).collect(),
             headers.iter().map(SealedHeader::hash).collect(),
         )
     }

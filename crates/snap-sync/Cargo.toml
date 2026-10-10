@@ -28,7 +28,7 @@ reth-trie-common.workspace = true
 
 # alloy
 alloy-eip7928.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 
 # revm

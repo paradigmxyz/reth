@@ -6,7 +6,7 @@
 //! chain, so the attempt keeps them from the moment it anchors.
 
 use crate::{common::SnapRecord, SnapSyncError};
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Sealable, B256};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
@@ -42,40 +42,27 @@ impl SnapReorg {
 /// A block an attempt keeps through its pivot, holding what recovery from a reorg reads of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeptBlock {
-    // Block number.
-    number: u64,
-    // Block hash.
-    hash: B256,
-    // Hash of the parent block.
-    parent_hash: B256,
+    // Block number and hash, with its parent's hash.
+    block: BlockWithParent,
     // Block access list commitment, absent before their activation.
     commitment: Option<B256>,
 }
 
 impl KeptBlock {
-    /// Keeps what recovery reads of `header`.
-    pub fn of<H: AlloyBlockHeader + Sealable>(header: &SealedHeader<H>) -> Self {
-        Self {
-            number: header.number(),
-            hash: header.hash(),
-            parent_hash: header.parent_hash(),
-            commitment: header.block_access_list_hash(),
-        }
-    }
-
-    /// Block number and hash.
-    pub const fn num_hash(&self) -> BlockNumHash {
-        BlockNumHash::new(self.number, self.hash)
-    }
-
-    /// Hash of the parent block.
-    pub const fn parent_hash(&self) -> B256 {
-        self.parent_hash
+    /// Block number and hash, with its parent's hash.
+    pub const fn block(&self) -> BlockWithParent {
+        self.block
     }
 
     /// Block access list commitment, absent before their activation.
     pub const fn commitment(&self) -> Option<B256> {
         self.commitment
+    }
+}
+
+impl<H: AlloyBlockHeader + Sealable> From<&SealedHeader<H>> for KeptBlock {
+    fn from(header: &SealedHeader<H>) -> Self {
+        Self { block: header.block_with_parent(), commitment: header.block_access_list_hash() }
     }
 }
 
@@ -109,7 +96,7 @@ impl StoredAncestry {
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
             return Self::clear(provider)
         }
-        let blocks = headers.iter().map(KeptBlock::of).collect();
+        let blocks = headers.iter().map(KeptBlock::from).collect();
         Self { version: Self::VERSION, attempt, blocks }.write(provider)
     }
 
@@ -126,15 +113,16 @@ impl StoredAncestry {
             return Ok(None)
         };
         // Kept blocks end at the pivot they were recorded for.
-        if blocks.last().map(KeptBlock::num_hash) != Some(attempt.pivot()) {
+        if blocks.last().map(|kept| kept.block.block) != Some(attempt.pivot()) {
             return Ok(None)
         }
 
         // The highest kept block still canonical is where the branches part.
         let mut split = None;
-        for (index, block) in blocks.iter().enumerate().rev() {
+        for (index, kept) in blocks.iter().enumerate().rev() {
+            let block = kept.block.block;
             if provider.block_hash(block.number)? == Some(block.hash) {
-                split = Some((block.num_hash(), index + 1));
+                split = Some((block, index + 1));
                 break
             }
         }
@@ -142,12 +130,12 @@ impl StoredAncestry {
             Some(split) => split,
             None => {
                 // Otherwise they part just below the lowest kept block, or further down.
-                let lowest = blocks[0];
-                let Some(parent) = lowest.number.checked_sub(1) else { return Ok(None) };
-                if provider.block_hash(parent)? != Some(lowest.parent_hash) {
+                let lowest = blocks[0].block;
+                let Some(parent) = lowest.block.number.checked_sub(1) else { return Ok(None) };
+                if provider.block_hash(parent)? != Some(lowest.parent) {
                     return Ok(None)
                 }
-                (BlockNumHash::new(parent, lowest.parent_hash), 0)
+                (BlockNumHash::new(parent, lowest.parent), 0)
             }
         };
         Ok(Some(SnapReorg { ancestor, orphaned: blocks.split_off(from) }))
@@ -229,7 +217,7 @@ mod tests {
     }
 
     fn kept(headers: &[SealedHeader]) -> Vec<KeptBlock> {
-        headers.iter().map(KeptBlock::of).collect()
+        headers.iter().map(KeptBlock::from).collect()
     }
 
     // A verified list carrying `changes`.
