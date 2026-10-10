@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
+use super::{StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
     map::{hash_map::Entry, B256Map},
     B256,
@@ -308,8 +308,8 @@ where
                     SparseTrieTaskMessage::PrefetchProofs(targets)
                 }
                 StateRootMessage::StateUpdate(state) => {
-                    let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
-                    let hashed = evm_state_to_hashed_post_state(state);
+                    let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update").entered();
+                    let hashed = reth_execution_types::state_update_to_hashed_post_state(&state);
                     SparseTrieTaskMessage::HashedState(hashed)
                 }
                 StateRootMessage::FinishedStateUpdates => {
