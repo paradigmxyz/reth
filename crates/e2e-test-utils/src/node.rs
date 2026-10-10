@@ -1767,6 +1767,7 @@ pub(crate) type Relaunch<Ctx> =
 mod tests {
     use super::*;
     use crate::{
+        snap::SnapControl,
         wait::{assert_holds_for, poll_until_with, PollOpts},
         NodeHelperType,
     };
@@ -1823,6 +1824,8 @@ mod tests {
         assert_send(node.import_payload(payload));
         assert_send(poll_until_with(PollOpts::default(), "", || async { Ok(Some(())) }));
         assert_send(assert_holds_for(Duration::ZERO, "", || async { Ok(true) }));
+        let mut gate = SnapControl::default().pause_on(|_| true);
+        assert_send(gate.reached());
     }
 
     /// Like [`test_helper_futures_are_send`], for the helpers that stop and restart a node.

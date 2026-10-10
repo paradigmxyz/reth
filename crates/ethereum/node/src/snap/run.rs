@@ -251,7 +251,9 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
-        let Some((target, ahead)) = self.resolve_target(targets).await? else { return Ok(STOPPED) };
+        let Some((target, ahead)) = self.resolve_target(pipeline, targets).await? else {
+            return Ok(STOPPED)
+        };
         // A stale target never completes the header stage, so the stages run to the local
         // head and the engine follows forkchoice from there.
         let target = if ahead { target } else { self.local_head()? };
@@ -266,7 +268,7 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Pass, PipelineError> {
-        let Some((target, ahead)) = self.resolve_target(targets).await? else {
+        let Some((target, ahead)) = self.resolve_target(pipeline, targets).await? else {
             return Ok(Pass::Stopped)
         };
         if !ahead {
@@ -288,22 +290,35 @@ where
 
     // Whether `target` is above the local headers, or `None` when no peer serves its header. The
     // header stage only finishes once it downloads the block after the local head, so a pass to a
-    // sibling or an older block never completes.
-    async fn is_ahead(&self, target: B256) -> Result<Option<bool>, PipelineError> {
+    // sibling or an older block never completes. A detached immediate successor also returns the
+    // unwind target needed to make the next pass validate attachment through a header batch.
+    async fn is_ahead(&self, target: B256) -> Result<Option<(bool, Option<u64>)>, PipelineError> {
         let head = {
             let provider = self.factory.provider()?;
             if provider.block_number(target)?.is_some() {
-                return Ok(Some(false))
+                return Ok(Some((false, None)))
             }
-            provider.last_block_number()?
+            let number = provider.last_block_number()?;
+            BlockNumHash::new(number, provider.block_hash(number)?.unwrap_or_default())
         };
         let header = self.client.get_header(target.into()).await;
         // A peer may answer with another block's header.
-        Ok(header
+        let Some(header) = header
             .ok()
             .and_then(|header| header.into_data())
             .filter(|header| header.hash_slow() == target)
-            .map(|header| header.number() > head))
+        else {
+            return Ok(None)
+        };
+        // A tip-only download does not pass through the downloader's batch parent check.
+        let detached = if header.number() == head.number + 1 && header.parent_hash() != head.hash {
+            Some(head.number.checked_sub(1).ok_or_else(|| {
+                PipelineError::Internal(RethError::msg("snap headers do not connect to genesis"))
+            })?)
+        } else {
+            None
+        };
+        Ok(Some((header.number() > head.number, detached)))
     }
 
     // Returns the hash of the highest local header.
@@ -324,6 +339,7 @@ where
     // headers buffered. Only the peer lookup and retry delay are interrupted by forkchoice.
     async fn resolve_target(
         &self,
+        pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Option<(B256, bool)>, PipelineError> {
         loop {
@@ -334,7 +350,18 @@ where
                 Ok(()) = targets.changed() => continue,
                 ahead = self.is_ahead(target) => ahead?,
             };
-            if let Some(ahead) = ahead {
+            if let Some((ahead, detached)) = ahead {
+                if let Some(unwind_to) = detached {
+                    // Reopen a two-header gap so the downloader validates attachment and performs
+                    // its normal fork unwind before snap uses the canonical headers.
+                    let unwind = pipeline
+                        .run_until(StageId::Headers, Some(PipelineTarget::Unwind(unwind_to)));
+                    let Some(result) = self.stop.run_until_cancelled(unwind).await else {
+                        return Ok(None)
+                    };
+                    result?;
+                    continue
+                }
                 return Ok(Some((target, ahead)))
             }
             tokio::select! {
@@ -976,5 +1003,24 @@ pub(crate) mod tests {
         let receiver = watch::channel(sibling.hash_slow()).1;
         let client = ServesHeaders { headers: vec![sibling], ..Default::default() };
         (snap_run_with(factory, client).0, head.hash(), receiver)
+    }
+
+    #[tokio::test]
+    async fn a_detached_single_header_reopens_the_gap_before_snap_resumes() {
+        let factory = hashed_factory();
+        let genesis = SealedHeader::seal_slow(Header::default());
+        let parent = SealedHeader::seal_slow(Header {
+            number: 1,
+            parent_hash: genesis.hash(),
+            ..Default::default()
+        });
+        insert_headers(&factory, &[genesis, parent.clone()]);
+        for (parent_hash, expected) in [(parent.hash(), None), (B256::repeat_byte(1), Some(0))] {
+            let child = Header { number: 2, parent_hash, ..Default::default() };
+            let hash = child.hash_slow();
+            let client = ServesHeaders { headers: vec![child], ..Default::default() };
+            let (run, _) = snap_run_with(&factory, client);
+            assert_eq!(run.is_ahead(hash).await.unwrap(), Some((true, expected)));
+        }
     }
 }

@@ -157,11 +157,12 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         &self,
         state: Arc<BlockState<N::Primitives>>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_state_is_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder_for_state(state),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
@@ -749,11 +750,12 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         parent_hash: BlockHash,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
+        let provider = self.database.provider()?;
+        provider.ensure_state_is_verified()?;
+        Ok(Box::new(OverlayStateProvider::new(
+            provider,
             self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
-        );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        )))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -796,29 +798,36 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        let provider = provider.into_database_provider();
+        provider.ensure_state_is_verified()?;
+        Ok(self.state_provider_from_database(provider, hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        let provider = provider.into_database_provider();
+        provider.ensure_state_is_verified()?;
+        Ok(self.state_provider_from_database(provider, block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             self.state_provider_for_state(state)
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
         } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+            match self.history_by_block_hash(hash) {
+                Ok(state) => Ok(state),
+                Err(error @ ProviderError::UnverifiedSnapState { .. }) => Err(error),
+                Err(_) => {
+                    if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
+                        Ok(pending)
+                    } else {
+                        Err(ProviderError::StateForHashNotFound(hash))
+                    }
+                }
+            }
         }
     }
 
@@ -1054,7 +1063,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 #[cfg(test)]
 #[allow(clippy::clone_on_copy)]
 mod tests {
-    use super::SNAPSHOT_STATE_RETENTION;
+    use super::*;
     use crate::{
         providers::BlockchainProvider,
         test_utils::{
@@ -1073,7 +1082,7 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -1086,10 +1095,10 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
-        TransactionsProvider,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -3614,6 +3623,69 @@ mod tests {
             .expect("account must have storage");
         assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn unfinished_snap_state_cannot_be_read_as_canonical_state() -> eyre::Result<()> {
+        for in_memory in [false, true] {
+            let factory = test_provider_factory_with_genesis()?;
+            let provider = BlockchainProvider::new(factory.clone())?;
+            let genesis = provider.canonical_in_memory_state.get_canonical_head();
+            let mut head_hash = genesis.hash();
+            if in_memory {
+                let mut rng = generators::rng();
+                let block = random_block(
+                    &mut rng,
+                    1,
+                    BlockParams {
+                        parent: Some(genesis.hash()),
+                        tx_count: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .try_recover()?;
+                head_hash = block.hash();
+                let executed =
+                    ExecutedBlock { recovered_block: Arc::new(block), ..Default::default() };
+                provider.database.overlay_manager().insert_block(executed.clone());
+                provider
+                    .canonical_in_memory_state
+                    .update_chain(NewCanonicalChain::Commit { new: vec![executed.clone()] });
+                provider.canonical_in_memory_state.set_pending_block(executed);
+            }
+            let attempt = SnapAttempt::start(None, genesis.num_hash(), genesis.state_root);
+            let mut abandoned = attempt;
+            abandoned.abandon();
+            let mut verified = attempt;
+            verified.verify();
+
+            for marker in [None, Some(attempt), Some(abandoned), Some(verified)] {
+                if let Some(marker) = marker {
+                    let db = factory.database_provider_rw()?;
+                    db.write_snap_attempt(&marker)?;
+                    db.commit()?;
+                }
+                for result in [
+                    factory.latest(),
+                    provider.latest(),
+                    provider.pending(),
+                    provider.history_by_block_number(0),
+                    provider.history_by_block_hash(genesis.hash()),
+                    provider.state_by_block_hash(genesis.hash()),
+                    provider.state_by_block_hash(head_hash),
+                ] {
+                    if marker.is_some_and(|attempt| !attempt.is_verified()) {
+                        assert!(matches!(
+                            result,
+                            Err(ProviderError::UnverifiedSnapState { attempt: 0 })
+                        ));
+                    } else {
+                        assert!(result.is_ok());
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

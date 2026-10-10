@@ -1491,6 +1491,16 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         }
     }
 
+    /// Rejects canonical state reads until the downloaded snap state has been verified.
+    pub fn ensure_state_is_verified(&self) -> ProviderResult<()> {
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Refuses snap sync on a database without the hashed state layout it downloads into.
     pub fn ensure_snap_sync_layout(&self) -> ProviderResult<()> {
         if self.cached_storage_settings().use_hashed_state() {

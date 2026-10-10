@@ -45,6 +45,8 @@ pub mod wait;
 
 pub mod engine;
 
+pub mod snap;
+
 mod chain_spec;
 pub use chain_spec::{
     eth_payload_attributes, test_chain_spec, test_chain_spec_builder, test_genesis,
