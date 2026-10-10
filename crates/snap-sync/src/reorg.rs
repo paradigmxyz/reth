@@ -2,108 +2,131 @@
 //!
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) repairs it from
 //! the abandoned branch's lists: every field they change is fetched again unless a list of the
-//! new branch overwrites it first. The reorg removes that branch's headers from the canonical
-//! chain, so the attempt keeps them from the moment it anchors.
+//! new branch overwrites it first. The reorg removes that branch's blocks from the canonical
+//! chain, so the attempt keeps what recovery needs of them from the moment it anchors.
 
 use crate::{common::SnapRecord, SnapSyncError};
-use alloy_eips::BlockNumHash;
-use alloy_primitives::Bytes;
-use alloy_rlp::Decodable;
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
+use alloy_primitives::{Sealable, B256};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
     BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId,
 };
-use reth_storage_errors::provider::ProviderError;
 use serde::{Deserialize, Serialize};
 
-// Blocks of headers an attempt keeps through its pivot, bounding how deep a recoverable reorg
-// can reach.
-const KEPT_HEADERS: u64 = 64;
+// Blocks an attempt keeps through its pivot, bounding how deep a recoverable reorg can reach. A
+// deeper reorg restarts the attempt.
+const KEPT_BLOCKS: u64 = 64;
 
 /// Where a reorg left an attempt: the last block both branches share and the orphaned blocks
 /// after it.
 #[derive(Clone, Debug)]
-pub struct SnapReorg<H> {
+pub struct SnapReorg {
     // Last block both branches share.
     ancestor: BlockNumHash,
-    // Headers of the orphaned blocks through the pivot, oldest first. Empty while the pivot is
-    // canonical.
-    orphaned: Vec<SealedHeader<H>>,
+    // Orphaned blocks through the pivot, oldest first. Empty while the pivot is canonical.
+    orphaned: Vec<BlockWithAccessListHash>,
 }
 
-impl<H> SnapReorg<H> {
+impl SnapReorg {
     /// Last block both branches share.
     pub const fn ancestor(&self) -> BlockNumHash {
         self.ancestor
     }
 
-    /// Headers of the orphaned blocks through the pivot, oldest first.
-    pub fn orphaned(&self) -> &[SealedHeader<H>] {
+    /// Orphaned blocks through the pivot, oldest first.
+    pub fn orphaned(&self) -> &[BlockWithAccessListHash] {
         &self.orphaned
     }
 }
 
-// Headers an attempt keeps of the blocks through its pivot, as RLP.
+/// A block an attempt keeps through its pivot, holding what recovery from a reorg reads of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockWithAccessListHash {
+    // Block number and hash, with its parent's hash.
+    block: BlockWithParent,
+    // Block access list hash, absent before Amsterdam.
+    block_access_list_hash: Option<B256>,
+}
+
+impl BlockWithAccessListHash {
+    /// Block number and hash, with its parent's hash.
+    pub const fn block(&self) -> BlockWithParent {
+        self.block
+    }
+
+    /// Block access list hash, absent before Amsterdam.
+    pub const fn block_access_list_hash(&self) -> Option<B256> {
+        self.block_access_list_hash
+    }
+}
+
+impl<H: AlloyBlockHeader + Sealable> From<&SealedHeader<H>> for BlockWithAccessListHash {
+    fn from(header: &SealedHeader<H>) -> Self {
+        Self {
+            block: header.block_with_parent(),
+            block_access_list_hash: header.block_access_list_hash(),
+        }
+    }
+}
+
+// Blocks an attempt keeps through its pivot.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct StoredAncestry {
     // Encoding version, checked before the rest is decoded.
     version: u32,
-    // Attempt the headers belong to.
+    // Attempt the blocks belong to.
     attempt: SnapAttemptId,
-    // Encoded headers, oldest first and ending at the pivot.
-    headers: Vec<Bytes>,
+    // Kept blocks, oldest first and ending at the pivot.
+    blocks: Vec<BlockWithAccessListHash>,
 }
 
 impl SnapRecord for StoredAncestry {
     const KEY: &'static str = "snap_ancestry";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
 }
 
 impl StoredAncestry {
-    // Keeps the canonical headers of the last `KEPT_HEADERS` blocks through `pivot` for `attempt`.
-    // Keeps none unless they reach the pivot, leaving a reorg unrecoverable.
+    // Keeps the canonical blocks of the last `KEPT_BLOCKS` through `pivot` for `attempt`. Keeps
+    // none unless they reach the pivot, leaving a reorg unrecoverable.
     pub(crate) fn record<P: HeaderProvider + MetadataWriter>(
         provider: &P,
         attempt: SnapAttemptId,
         pivot: BlockNumHash,
     ) -> Result<(), SnapSyncError> {
-        let from = pivot.number.saturating_sub(KEPT_HEADERS) + 1;
+        let from = pivot.number.saturating_sub(KEPT_BLOCKS) + 1;
         let headers = provider.sealed_headers_range(from..=pivot.number)?;
         let contiguous = headers.windows(2).all(|pair| pair[1].parent_hash() == pair[0].hash());
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
             return Self::clear(provider)
         }
-        let headers =
-            headers.iter().map(|header| alloy_rlp::encode(header.header()).into()).collect();
-        Self { version: Self::VERSION, attempt, headers }.write(provider)
+        let blocks = headers.iter().map(BlockWithAccessListHash::from).collect();
+        Self { version: Self::VERSION, attempt, blocks }.write(provider)
     }
 
-    // Finds where the canonical chain diverges from the headers `attempt` keeps. `None` when they
+    // Finds where the canonical chain diverges from the blocks `attempt` keeps. `None` when they
     // do not reach back to where the branches part.
-    pub(crate) fn reorg<P: MetadataProvider + HeaderProvider + BlockHashReader>(
+    pub(crate) fn reorg<P: MetadataProvider + BlockHashReader>(
         provider: &P,
         attempt: &SnapAttempt,
-    ) -> Result<Option<SnapReorg<P::Header>>, SnapSyncError> {
-        let Some(stored) = Self::read(provider)?.filter(|stored| stored.attempt == attempt.id())
+    ) -> Result<Option<SnapReorg>, SnapSyncError> {
+        let Some(mut blocks) = Self::read(provider)?
+            .filter(|stored| stored.attempt == attempt.id())
+            .map(|stored| stored.blocks)
         else {
             return Ok(None)
         };
-        let mut headers = stored
-            .headers
-            .iter()
-            .map(|header| P::Header::decode(&mut header.as_ref()).map(SealedHeader::seal_slow))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(ProviderError::other)?;
-        // Kept headers end at the pivot they were recorded for.
-        if headers.last().map(SealedHeader::num_hash) != Some(attempt.pivot()) {
+        // Kept blocks end at the pivot they were recorded for.
+        if blocks.last().map(|kept| kept.block.block) != Some(attempt.pivot()) {
             return Ok(None)
         }
 
         // The highest kept block still canonical is where the branches part.
         let mut split = None;
-        for (index, header) in headers.iter().enumerate().rev() {
-            if provider.block_hash(header.number())? == Some(header.hash()) {
-                split = Some((header.num_hash(), index + 1));
+        for (index, kept) in blocks.iter().enumerate().rev() {
+            let block = kept.block.block;
+            if provider.block_hash(block.number)? == Some(block.hash) {
+                split = Some((block, index + 1));
                 break
             }
         }
@@ -111,15 +134,15 @@ impl StoredAncestry {
             Some(split) => split,
             None => {
                 // Otherwise they part just below the lowest kept block, or further down.
-                let lowest = &headers[0];
-                let Some(parent) = lowest.number().checked_sub(1) else { return Ok(None) };
-                if provider.block_hash(parent)? != Some(lowest.parent_hash()) {
+                let lowest = blocks[0].block;
+                let Some(parent) = lowest.block.number.checked_sub(1) else { return Ok(None) };
+                if provider.block_hash(parent)? != Some(lowest.parent) {
                     return Ok(None)
                 }
-                (BlockNumHash::new(parent, lowest.parent_hash()), 0)
+                (BlockNumHash::new(parent, lowest.parent), 0)
             }
         };
-        Ok(Some(SnapReorg { ancestor, orphaned: headers.split_off(from) }))
+        Ok(Some(SnapReorg { ancestor, orphaned: blocks.split_off(from) }))
     }
 }
 
@@ -193,8 +216,12 @@ mod tests {
         (factory, write)
     }
 
-    fn reorg(factory: &Factory, write: SnapWrite) -> Option<SnapReorg<alloy_consensus::Header>> {
+    fn reorg(factory: &Factory, write: SnapWrite) -> Option<SnapReorg> {
         factory.database_provider_ro().unwrap().snap_reorg(write).unwrap()
+    }
+
+    fn kept(headers: &[SealedHeader]) -> Vec<BlockWithAccessListHash> {
+        headers.iter().map(BlockWithAccessListHash::from).collect()
     }
 
     // A verified list carrying `changes`.
@@ -222,11 +249,11 @@ mod tests {
         let reorg = reorg(&factory, write).unwrap();
 
         assert_eq!(reorg.ancestor(), old.block(0));
-        assert_eq!(reorg.orphaned(), &old.headers[3..]);
+        assert_eq!(reorg.orphaned(), kept(&old.headers[3..]));
     }
 
     #[test]
-    fn the_ancestor_can_sit_just_below_the_kept_headers() {
+    fn the_ancestor_can_sit_just_below_the_kept_blocks() {
         let address = Address::repeat_byte(0x11);
         let old = BalChain::new(0, [credit(address, 1), credit(address, 2)]);
         let new = BalChain::new(0, [credit(address, 10)]);
@@ -236,13 +263,13 @@ mod tests {
         let reorg = reorg(&factory, write).unwrap();
 
         assert_eq!(reorg.ancestor(), old.block(0));
-        assert_eq!(reorg.orphaned(), &old.headers[1..]);
+        assert_eq!(reorg.orphaned(), kept(&old.headers[1..]));
     }
 
     #[test]
-    fn a_reorg_below_the_kept_headers_is_unrecoverable() {
+    fn a_reorg_below_the_kept_blocks_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
-        let depth = KEPT_HEADERS + 2;
+        let depth = KEPT_BLOCKS + 2;
         let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
         let new = BalChain::new(1, (0..depth).map(|n| credit(address, n + 100)));
         let (factory, write) = started(&old, 1 + depth);
@@ -271,7 +298,7 @@ mod tests {
             Err(SnapSyncError::StaleWrite { .. })
         ));
         drop(provider);
-        // The kept headers follow the new pivot.
+        // The kept blocks follow the new pivot.
         let reorg = reorg(&factory, recovered).unwrap();
         assert_eq!(reorg.ancestor(), new.tip());
     }

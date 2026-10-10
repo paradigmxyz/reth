@@ -54,7 +54,7 @@ pub trait SnapCatchUpStore {
 
     /// Applies `bal` to the downloaded state and records `block` as the last one applied.
     ///
-    /// The list must be authenticated against `block`'s header commitment, and `block` must be
+    /// The list must be authenticated against `block`'s header hash, and `block` must be
     /// canonical and the child of the last applied one.
     fn commit_block_access_list(
         &self,
