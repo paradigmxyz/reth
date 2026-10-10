@@ -41,12 +41,6 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
         headers: &[SealedHeader<H>],
         runtime: Runtime,
     ) -> Result<Self, InvalidBlockAccessListRequest> {
-        if request.block_hashes.len() != headers.len() {
-            return Err(InvalidBlockAccessListRequest::HeaderCount {
-                requested: request.block_hashes.len(),
-                supplied: headers.len(),
-            })
-        }
         for (index, (requested, header)) in request.block_hashes.iter().zip(headers).enumerate() {
             if *requested != header.hash() {
                 return Err(InvalidBlockAccessListRequest::HashMismatch {
@@ -62,6 +56,8 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
 
     /// Creates a downloader that verifies each requested block's list against the commitment at
     /// the same position of `commitments`, which every block must carry.
+    ///
+    /// The caller guarantees each commitment belongs to the requested hash at its position.
     pub fn with_commitments(
         client: C,
         request: GetBlockAccessListsMessage,
@@ -72,7 +68,7 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
             return Err(InvalidBlockAccessListRequest::NoBlocks)
         }
         if request.block_hashes.len() != commitments.len() {
-            return Err(InvalidBlockAccessListRequest::HeaderCount {
+            return Err(InvalidBlockAccessListRequest::CommitmentCount {
                 requested: request.block_hashes.len(),
                 supplied: commitments.len(),
             })
@@ -175,14 +171,12 @@ pub enum InvalidBlockAccessListRequest {
     /// The request asks for no blocks.
     #[error("block access list request has no block hashes")]
     NoBlocks,
-    /// A different number of headers or commitments was supplied than blocks requested.
-    #[error(
-        "requested {requested} block access lists but supplied {supplied} headers or commitments"
-    )]
-    HeaderCount {
+    /// A different number of commitments was supplied than blocks requested.
+    #[error("requested {requested} block access lists but supplied {supplied} commitments")]
+    CommitmentCount {
         /// Blocks the request asks for.
         requested: usize,
-        /// Headers or commitments supplied to authenticate them.
+        /// Commitments supplied to authenticate them.
         supplied: usize,
     },
     /// A requested hash does not match the header at the same position.
@@ -640,7 +634,7 @@ mod tests {
 
         assert!(matches!(
             downloader(Arc::clone(&client), request(&headers), &[]).unwrap_err(),
-            InvalidBlockAccessListRequest::HeaderCount { requested: 1, supplied: 0 }
+            InvalidBlockAccessListRequest::CommitmentCount { requested: 1, supplied: 0 }
         ));
 
         let mut wrong_block = request(&headers);
@@ -654,17 +648,6 @@ mod tests {
         assert!(matches!(
             downloader(Arc::clone(&client), request(&headers), &uncommitted).unwrap_err(),
             InvalidBlockAccessListRequest::MissingCommitment { index: 0, .. }
-        ));
-
-        let uncounted = BlockAccessListDownloader::with_commitments(
-            Arc::clone(&client),
-            request(&headers),
-            Vec::new(),
-            Runtime::test(),
-        );
-        assert!(matches!(
-            uncounted.unwrap_err(),
-            InvalidBlockAccessListRequest::HeaderCount { requested: 1, supplied: 0 }
         ));
 
         // Nothing reached the network.
