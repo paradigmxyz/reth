@@ -29,9 +29,9 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth-oss'
+    if: (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss')
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth-oss' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -56,7 +56,7 @@ jobs:
 
       - name: Get hive commit hash
         id: hive-commit
-        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -210,7 +210,7 @@ jobs:
       - prepare-hive
     name: Hive-Amsterdam / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth-oss' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
@@ -275,7 +275,7 @@ jobs:
 
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" -print0 | xargs -0 -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}
@@ -294,104 +294,128 @@ jobs:
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
-          # Bogota is currently narrowed to the EIP-8141 fixtures only.
+          # Run EIP-8141 and the additional frames-devnet-1 EIPs separately.
           - sim: ethereum/eels/consume-engine
-            name: all
+            name: eip8141-all
             limit: '.*8141.*'
             include: []
           # consume-rlp
           - sim: ethereum/eels/consume-rlp
-            name: all
+            name: eip8141-all
             limit: '.*8141.*'
+            include: []
+          - sim: ethereum/eels/consume-engine
+            name: eip8250-keyed-nonces
+            limit: '.*tests/bogota/eip8250_.*'
+            include: []
+          - sim: ethereum/eels/consume-rlp
+            name: eip8250-keyed-nonces
+            limit: '.*tests/bogota/eip8250_.*'
+            include: []
+          - sim: ethereum/eels/consume-engine
+            name: eip8272-recent-roots
+            limit: '.*tests/bogota/eip8272_.*'
+            include: []
+          - sim: ethereum/eels/consume-rlp
+            name: eip8272-recent-roots
+            limit: '.*tests/bogota/eip8272_.*'
+            include: []
+          - sim: ethereum/eels/consume-engine
+            name: eip7906-transaction-assertions
+            limit: '.*tests/bogota/eip7906_.*'
+            include: []
+          - sim: ethereum/eels/consume-rlp
+            name: eip7906-transaction-assertions
+            limit: '.*tests/bogota/eip7906_.*'
             include: []
           # Isolate EIP-8141 failures by test module.
           - sim: ethereum/eels/consume-engine
             name: admission-validity
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_admission_validity\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_admission_validity\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: admission-validity
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_admission_validity\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_admission_validity\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: block-access-lists
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_block_access_lists\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_block_access_lists\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: block-access-lists
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_block_access_lists\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_block_access_lists\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: expiry-verifier
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_expiry_verifier\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_expiry_verifier\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: expiry-verifier
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_expiry_verifier\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_expiry_verifier\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: frame-transactions
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_frame_transactions\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_frame_transactions\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: frame-transactions
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_frame_transactions\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_frame_transactions\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: gas-settlement
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_gas_settlement\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_gas_settlement\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: gas-settlement
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_gas_settlement\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_gas_settlement\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: introspection
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_introspection\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_introspection\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: introspection
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_introspection\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_introspection\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: state-gas
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_state_gas\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_state_gas\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: state-gas
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_state_gas\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_state_gas\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: static-validity
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_static_validity\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_static_validity\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: static-validity
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_static_validity\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_static_validity\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: target-resolution
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_target_resolution\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_target_resolution\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: target-resolution
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_target_resolution\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_target_resolution\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: value-transfer
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_value_transfer\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_value_transfer\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: value-transfer
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_value_transfer\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_value_transfer\.py.*'
             include: []
           - sim: ethereum/eels/consume-engine
             name: warmth
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_warmth\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_warmth\.py.*'
             include: []
           - sim: ethereum/eels/consume-rlp
             name: warmth
-            limit: '.*tests/amsterdam/eip8141_frame_transactions/test_warmth\.py.*'
+            limit: '.*tests/bogota/eip8141_frame_transactions/test_warmth\.py.*'
             include: []
           # Run the valid EIP-8141 cases separately so expected-invalid cases do not obscure
           # failures in transactions that should execute successfully.
@@ -442,7 +466,7 @@ jobs:
       - prepare-hive
     name: Hive-Bogota / ${{ matrix.scenario.name }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth-oss' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
@@ -507,7 +531,7 @@ jobs:
 
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" -print0 | xargs -0 -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}
@@ -632,7 +656,7 @@ jobs:
 #      - prepare-hive
 #    name: Hive-Osaka / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
 #    # Use larger runners for eels tests to avoid OOM runner crashes
-#    runs-on: ${{ github.repository == 'paradigmxyz/reth-oss' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+#    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
 #    permissions:
 #      contents: read
 #      issues: write
@@ -695,7 +719,7 @@ jobs:
 #
 #      - name: Parse hive output
 #        run: |
-#          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
+#          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" -print0 | xargs -0 -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
 #
 #      - name: Print simulator output
 #        if: ${{ failure() }}
@@ -716,5 +740,5 @@ jobs:
         uses: rtCamp/action-slack-notify@33ca3be66c6f378fe1610fd1d5258632dbed5e58 # v2.4.0
         env:
           SLACK_COLOR: ${{ job.status }}
-          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "Failed run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}
