@@ -1,5 +1,7 @@
 use super::collect_account_history_indices;
-use crate::stages::utils::{collect_history_indices, load_account_history};
+use crate::stages::utils::{
+    collect_history_indices, load_account_history, load_account_history_parallel,
+};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, tables, transaction::DbTxMut, Tables};
 use reth_provider::{
@@ -146,8 +148,12 @@ where
 
         provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-            load_account_history(collector, first_sync, &mut writer)
-                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+            if use_rocksdb && !first_sync {
+                load_account_history_parallel(collector, &provider.rocksdb_provider(), &mut writer)
+            } else {
+                load_account_history(collector, first_sync, &mut writer)
+            }
+            .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
@@ -838,6 +844,76 @@ mod tests {
             assert!(result.is_some(), "RocksDB should have merged data");
             let blocks: Vec<u64> = result.unwrap().iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+        /// Incremental sync over many addresses reads last shards in parallel and rechunks
+        /// shards that fill up.
+        #[tokio::test]
+        async fn execute_incremental_sync_many_addresses() {
+            let db = TestStageDB::default();
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
+            let addresses = (1..=32).map(Address::repeat_byte).collect::<Vec<_>>();
+            let last_block = LAST_BLOCK_IN_FULL_SHARD + 5;
+
+            db.commit(|tx| {
+                for block in 0..=last_block {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+            {
+                let static_file_provider = db.factory.static_file_provider();
+                let mut writer = static_file_provider
+                    .latest_writer(StaticFileSegment::AccountChangeSets)
+                    .unwrap();
+                for block in 0..=last_block {
+                    let changeset = addresses
+                        .iter()
+                        .map(|&address| AccountBeforeTx { address, info: None })
+                        .collect();
+                    writer.append_account_changeset(changeset, block).unwrap();
+                }
+                writer.commit().unwrap();
+            }
+
+            let mut stage = IndexAccountHistoryStage::default();
+            for (checkpoint, target) in [
+                (None, LAST_BLOCK_IN_FULL_SHARD - 3),
+                (Some(LAST_BLOCK_IN_FULL_SHARD - 3), last_block),
+            ] {
+                let input = ExecInput {
+                    target: Some(target),
+                    checkpoint: checkpoint.map(StageCheckpoint::new),
+                };
+                let provider = db.factory.database_provider_rw().unwrap();
+                let out = stage.execute(&provider, input).unwrap();
+                assert_eq!(
+                    out,
+                    ExecOutput { checkpoint: StageCheckpoint::new(target), done: true }
+                );
+                provider.commit().unwrap();
+            }
+
+            let rocksdb = db.factory.rocksdb_provider();
+            for address in addresses {
+                let shards = rocksdb
+                    .account_history_shards(address)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(key, list)| (key.highest_block_number, list.iter().collect::<Vec<_>>()))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    shards,
+                    vec![
+                        (LAST_BLOCK_IN_FULL_SHARD - 1, (0..LAST_BLOCK_IN_FULL_SHARD).collect()),
+                        (u64::MAX, (LAST_BLOCK_IN_FULL_SHARD..=last_block).collect()),
+                    ],
+                    "address {address}"
+                );
+            }
         }
     }
 }

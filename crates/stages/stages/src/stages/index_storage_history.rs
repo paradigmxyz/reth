@@ -1,5 +1,8 @@
 use super::{collect_history_indices, collect_storage_history_indices};
-use crate::{stages::utils::load_storage_history, StageCheckpoint, StageId};
+use crate::{
+    stages::utils::{load_storage_history, load_storage_history_parallel},
+    StageCheckpoint, StageId,
+};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -151,8 +154,12 @@ where
 
         provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-            load_storage_history(collector, first_sync, &mut writer)
-                .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
+            if use_rocksdb && !first_sync {
+                load_storage_history_parallel(collector, &provider.rocksdb_provider(), &mut writer)
+            } else {
+                load_storage_history(collector, first_sync, &mut writer)
+            }
+            .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
 
@@ -949,6 +956,78 @@ mod tests {
                 "Should only have blocks 0 to {} after unwind",
                 unwind_to
             );
+        }
+        /// Incremental sync over many slots reads last shards in parallel and rechunks shards
+        /// that fill up.
+        #[tokio::test]
+        async fn execute_incremental_sync_many_slots() {
+            let db = TestStageDB::default();
+            db.factory.set_storage_settings_cache(StorageSettings::v2());
+            let slots = (1..=32).map(B256::repeat_byte).collect::<Vec<_>>();
+            let last_block = LAST_BLOCK_IN_FULL_SHARD + 5;
+
+            db.commit(|tx| {
+                for block in 0..=last_block {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+            {
+                let static_file_provider = db.factory.static_file_provider();
+                let mut writer = static_file_provider
+                    .latest_writer(StaticFileSegment::StorageChangeSets)
+                    .unwrap();
+                for block in 0..=last_block {
+                    let changeset = slots
+                        .iter()
+                        .map(|&key| StorageBeforeTx { address: ADDRESS, key, value: U256::ZERO })
+                        .collect();
+                    writer.append_storage_changeset(changeset, block).unwrap();
+                }
+                writer.commit().unwrap();
+            }
+
+            let mut stage = IndexStorageHistoryStage::default();
+            for (checkpoint, target) in [
+                (None, LAST_BLOCK_IN_FULL_SHARD - 3),
+                (Some(LAST_BLOCK_IN_FULL_SHARD - 3), last_block),
+            ] {
+                let input = ExecInput {
+                    target: Some(target),
+                    checkpoint: checkpoint.map(StageCheckpoint::new),
+                };
+                let provider = db.factory.database_provider_rw().unwrap();
+                let out = stage.execute(&provider, input).unwrap();
+                assert_eq!(
+                    out,
+                    ExecOutput { checkpoint: StageCheckpoint::new(target), done: true }
+                );
+                provider.commit().unwrap();
+            }
+
+            let rocksdb = db.factory.rocksdb_provider();
+            for slot in slots {
+                let shards = rocksdb
+                    .storage_history_shards(ADDRESS, slot)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(key, list)| {
+                        (key.sharded_key.highest_block_number, list.iter().collect::<Vec<_>>())
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    shards,
+                    vec![
+                        (LAST_BLOCK_IN_FULL_SHARD - 1, (0..LAST_BLOCK_IN_FULL_SHARD).collect()),
+                        (u64::MAX, (LAST_BLOCK_IN_FULL_SHARD..=last_block).collect()),
+                    ],
+                    "slot {slot}"
+                );
+            }
         }
     }
 }
