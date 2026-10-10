@@ -216,11 +216,6 @@ impl WorkerPool {
         self.pool.get().is_some()
     }
 
-    /// Returns the number of threads the pool is configured with, without creating it.
-    pub const fn num_threads(&self) -> usize {
-        self.num_threads
-    }
-
     /// Returns the total number of threads in the underlying rayon pool.
     pub fn current_num_threads(&self) -> usize {
         self.pool().current_num_threads()
@@ -399,13 +394,13 @@ impl WorkerPool {
 }
 
 /// Records a worker pool job's run time when the job finishes or unwinds.
-struct RecordWorkerPoolJobDurationOnDrop {
+pub(crate) struct RecordWorkerPoolJobDurationOnDrop {
     metrics: WorkerPoolMetrics,
     started_at: Instant,
 }
 
 impl RecordWorkerPoolJobDurationOnDrop {
-    const fn new(metrics: WorkerPoolMetrics, started_at: Instant) -> Self {
+    pub(crate) const fn new(metrics: WorkerPoolMetrics, started_at: Instant) -> Self {
         Self { metrics, started_at }
     }
 }

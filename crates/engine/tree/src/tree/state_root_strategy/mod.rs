@@ -494,14 +494,15 @@ impl DefaultStateRootStrategy {
     ///
     /// Explicit counts take precedence. Otherwise, small transaction counts use a quarter of
     /// the capacity, large gas usage uses all of it, and unknown or regular blocks use half.
-    /// The transaction threshold is checked first, regardless of gas usage.
+    /// The transaction threshold is checked first, regardless of gas usage. A count of zero is
+    /// raised to one worker by [`ProofWorkerHandle::new`].
     const fn proof_worker_count(
         pool_threads: usize,
         configured_threads: Option<usize>,
         transaction_count: Option<usize>,
         gas_used: Option<u64>,
     ) -> usize {
-        let count = if let Some(configured_threads) = configured_threads {
+        if let Some(configured_threads) = configured_threads {
             configured_threads
         } else {
             match (transaction_count, gas_used) {
@@ -513,14 +514,6 @@ impl DefaultStateRootStrategy {
                 }
                 _ => pool_threads / 2,
             }
-        };
-
-        // Pools can be smaller than two threads, and a pinned count can be zero; a block without
-        // workers stalls the proofs.
-        if count == 0 {
-            1
-        } else {
-            count
         }
     }
 
@@ -561,13 +554,13 @@ impl DefaultStateRootStrategy {
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let worker_counts = ProofWorkerCounts::new(
             Self::proof_worker_count(
-                executor.proof_storage_worker_pool().num_threads(),
+                executor.proof_storage_worker_pool().max_threads(),
                 executor.proof_storage_worker_threads_override(),
                 transaction_count,
                 gas_used,
             ),
             Self::proof_worker_count(
-                executor.proof_account_worker_pool().num_threads(),
+                executor.proof_account_worker_pool().max_threads(),
                 executor.proof_account_worker_threads_override(),
                 transaction_count,
                 gas_used,
@@ -1403,14 +1396,6 @@ mod tests {
                 48
             );
         }
-
-        // Pools smaller than two threads, and a pinned count of zero, still get a worker.
-        assert_eq!(
-            DefaultStateRootStrategy::proof_worker_count(1, None, Some(1), Some(1_000_000)),
-            1
-        );
-        assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, None, None, None), 1);
-        assert_eq!(DefaultStateRootStrategy::proof_worker_count(1, Some(0), None, None), 1);
     }
 
     #[test]
@@ -1524,9 +1509,7 @@ mod tests {
                 Err(RecvTimeoutError::Disconnected)
             ));
         }
-        for name in ["sparse-trie", "storage-workers", "account-workers"] {
-            runtime.spawn_blocking_named(name, || {}).get();
-        }
+        runtime.spawn_blocking_named("sparse-trie", || {}).get();
     }
 
     #[test]
@@ -1574,7 +1557,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("handed-off trie must be completed");
         drop(handle);
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+        for name in ["sparse-trie", "trie-hashing", "drop"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
     }
@@ -1832,7 +1815,7 @@ mod tests {
                 assert_eq!(preserved.anchor_hash(), genesis_hash);
             }
         }
-        for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+        for name in ["sparse-trie", "trie-hashing", "drop"] {
             runtime.spawn_blocking_named(name, || {}).get();
         }
     }

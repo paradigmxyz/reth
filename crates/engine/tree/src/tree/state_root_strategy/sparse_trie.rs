@@ -1679,9 +1679,7 @@ mod tests {
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
-        for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
-            runtime.spawn_blocking_named(task_name, || {}).get();
-        }
+        runtime.spawn_blocking_named("trie-hashing", || {}).get();
     }
 
     fn test_task(
