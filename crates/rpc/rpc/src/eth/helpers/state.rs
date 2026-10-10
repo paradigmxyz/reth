@@ -35,6 +35,7 @@ mod tests {
         Address, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
+    use alloy_serde::JsonStorageKey;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
@@ -49,6 +50,7 @@ mod tests {
         EthApiTypes,
     };
     use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
+    use reth_rpc_server_types::constants::DEFAULT_MAX_PROOF_SLOTS;
     use reth_storage_api::{StateProviderBox, StateProviderFactory};
     use reth_tasks::{
         pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -114,6 +116,56 @@ mod tests {
         let address = Address::random();
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         assert!(account.is_none());
+    }
+
+    #[test]
+    fn test_get_proof_key_cap() {
+        let eth_api = noop_eth_api();
+        let address = Address::random();
+        let keys = |len| vec![JsonStorageKey::from(B256::ZERO); len];
+
+        assert!(eth_api.get_proof(address, keys(DEFAULT_MAX_PROOF_SLOTS), None).is_ok());
+
+        let Err(err) = eth_api.get_proof(address, keys(DEFAULT_MAX_PROOF_SLOTS + 1), None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
+    }
+
+    #[test]
+    fn test_get_multi_proof_cap() {
+        let eth_api = noop_eth_api();
+        let address = Address::random();
+
+        // Exactly at the limit, on both axes.
+        let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS])];
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
+        let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS];
+        assert!(eth_api.get_multi_proof(targets, None).is_ok());
+
+        // Too many slots in a single target.
+        let targets = vec![(address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS + 1])];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
+
+        // Too many slots in total, spread across targets.
+        let targets = vec![
+            (address, vec![B256::ZERO; DEFAULT_MAX_PROOF_SLOTS]),
+            (Address::random(), vec![B256::ZERO]),
+        ];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
+
+        // Too many targets without any slots.
+        let targets = vec![(address, Vec::new()); DEFAULT_MAX_PROOF_SLOTS + 1];
+        let Err(err) = eth_api.get_multi_proof(targets, None) else {
+            panic!("expected over-limit request to be rejected");
+        };
+        assert!(matches!(err, EthApiError::InvalidParams(_)), "{err:?}");
     }
 
     #[cfg(feature = "account-ext")]
