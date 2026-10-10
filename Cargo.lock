@@ -3907,6 +3907,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-pureth-query"
+version = "0.0.0"
+dependencies = [
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-signer-local",
+ "eyre",
+ "jsonrpsee",
+ "reth-chainspec",
+ "reth-ethereum",
+ "reth-pureth-query",
+ "reth-pureth-receipt",
+ "tokio",
+]
+
+[[package]]
 name = "example-rpc-db"
 version = "0.0.0"
 dependencies = [
@@ -7324,6 +7343,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pureth-withdrawal-root"
+version = "2.7.0"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "ethereum_ssz",
+ "reth-pureth-ssz",
+ "sha2 0.10.9",
+ "tree_hash",
+]
+
+[[package]]
 name = "quanta"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10016,6 +10047,59 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "reth-pureth-block"
+version = "2.7.0"
+dependencies = [
+ "alloy-primitives",
+ "reth-pureth-ssz",
+]
+
+[[package]]
+name = "reth-pureth-query"
+version = "2.7.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "ethereum_ssz",
+ "jsonrpsee",
+ "reth-chainspec",
+ "reth-ethereum-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-pureth-receipt",
+ "reth-pureth-ssz",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
+name = "reth-pureth-receipt"
+version = "2.7.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "ethereum_ssz",
+ "reth-chainspec",
+ "reth-ethereum-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-pureth-ssz",
+ "serde_json",
+ "tree_hash",
+]
+
+[[package]]
+name = "reth-pureth-ssz"
+version = "2.7.0"
+dependencies = [
+ "alloy-primitives",
+ "tree_hash",
 ]
 
 [[package]]

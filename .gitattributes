@@ -3,4 +3,6 @@ book/cli/cli.md -linguist-vendored
 
 crates/storage/libmdbx-rs/mdbx-sys/libmdbx/** linguist-vendored
 
+crates/pureth/query/test-data/** text eol=lf whitespace=-blank-at-eof
+
 bun.lock linguist-language=JSON-with-Comments
