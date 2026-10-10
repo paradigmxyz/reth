@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn publishing_moves_the_covered_stages_while_the_trie_and_finish_wait() {
+    fn publishing_moves_the_covered_stages_and_prunes_the_history_below_the_pivot() {
         let factory = hashed_factory();
         let provider = factory.database_provider_rw().unwrap();
 
@@ -591,6 +591,12 @@ mod tests {
             let expected = published.then(|| StageCheckpoint::new(7));
             assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), expected, "{stage}");
         }
+
+        // The history below the pivot is recorded as pruned for every segment.
+        for segment in PruneSegment::variants() {
+            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
+            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
+        }
     }
 
     #[test]
@@ -599,19 +605,6 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
 
         assert!(matches!(provider.publish_snap_state(0), Err(SnapSyncError::GenesisPivot)));
-    }
-
-    #[test]
-    fn publishing_records_the_history_below_the_pivot_as_pruned() {
-        let factory = hashed_factory();
-        let provider = factory.database_provider_rw().unwrap();
-
-        provider.publish_snap_state(7).unwrap();
-
-        for segment in PruneSegment::variants() {
-            let checkpoint = provider.get_prune_checkpoint(segment).unwrap();
-            assert_eq!(checkpoint, Some(PruneCheckpoint::pruned_through(7)), "{segment}");
-        }
     }
 
     #[test]

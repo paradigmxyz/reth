@@ -76,7 +76,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
 
 impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run anchoring and re-anchoring pivots with `policy`.
-    pub fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
+    pub const fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
         self.policy = policy;
         self.session = SnapSyncSession::new(policy);
         self
@@ -214,7 +214,7 @@ where
         }
 
         session.select(&provider, head, self.context.finalized())?;
-        let Some((generation, _)) = session.start() else {
+        let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
             // header pass may stop at the finalized block, so if block access lists
