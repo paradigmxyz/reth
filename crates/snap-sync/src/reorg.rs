@@ -80,7 +80,7 @@ pub(crate) struct StoredAncestry {
 
 impl SnapRecord for StoredAncestry {
     const KEY: &'static str = "snap_ancestry";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
 }
 
 impl StoredAncestry {
