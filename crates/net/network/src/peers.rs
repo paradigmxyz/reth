@@ -1173,12 +1173,15 @@ impl PeersManager {
         }
 
         // as long as there are slots available fill them with the best peers
-        while self.connection_info.has_out_capacity() {
+        while self.connection_info.has_out_dial_capacity() {
+            // Trusted peers are dialed even when all outbound slots are taken, so discovered
+            // peers can never crowd them out; only the concurrent dial limit applies to them.
+            let has_out_capacity = self.connection_info.has_out_capacity();
             let action = {
-                let (peer_id, peer) = match self.best_unconnected() {
-                    Some(peer) => peer,
-                    _ => break,
-                };
+                let Some((peer_id, peer)) = self.best_unconnected() else { break };
+                if !has_out_capacity && !peer.is_trusted() {
+                    break
+                }
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
@@ -1345,8 +1348,7 @@ impl ConnectionInfo {
 
     ///  Returns `true` if there's still capacity to perform an outgoing connection.
     const fn has_out_capacity(&self) -> bool {
-        self.num_pending_out < self.config.max_concurrent_outbound_dials &&
-            self.num_outbound < self.config.max_outbound
+        self.has_out_dial_capacity() && self.num_outbound < self.config.max_outbound
     }
 
     /// Returns `true` if all active outbound slots are occupied (ignoring pending dials).
@@ -1367,6 +1369,12 @@ impl ConnectionInfo {
     /// Returns `true` if we can handle an additional incoming pending connection.
     const fn has_in_pending_capacity(&self) -> bool {
         self.num_pending_in < self.config.max_inbound
+    }
+
+    /// Returns `true` if another outgoing dial can be started without exceeding the concurrent
+    /// dial limit.
+    const fn has_out_dial_capacity(&self) -> bool {
+        self.num_pending_out < self.config.max_concurrent_outbound_dials
     }
 
     const fn decr_state(&mut self, state: PeerConnectionState) {
@@ -2770,6 +2778,45 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_trusted_peers_bypass_outbound_capacity() {
+        let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(1));
+
+        // an untrusted peer takes the only outbound slot
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        peers.add_peer(basic_peer, PeerAddr::from_tcp(basic_sock), None);
+        peers.fill_outbound_slots();
+        peers.on_active_outgoing_established(basic_peer);
+        assert!(!peers.connection_info.has_out_capacity());
+        peers.queued_actions.clear();
+
+        // a trusted peer is dialed regardless
+        let trusted_peer = PeerId::random();
+        let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 3)), 8008);
+        peers.add_trusted_peer(trusted_peer, PeerAddr::from_tcp(trusted_sock));
+        peers.queued_actions.clear();
+        peers.fill_outbound_slots();
+        match peers.queued_actions.pop_front() {
+            Some(PeerAction::Connect { peer_id, remote_addr }) => {
+                assert_eq!(peer_id, trusted_peer);
+                assert_eq!(remote_addr, trusted_sock);
+            }
+            action => panic!("expected the trusted peer to be dialed, got {action:?}"),
+        }
+        assert!(peers.queued_actions.is_empty());
+        peers.on_active_outgoing_established(trusted_peer);
+
+        // untrusted peers still wait for a free slot
+        let other_peer = PeerId::random();
+        let other_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 4)), 8008);
+        peers.add_peer(other_peer, PeerAddr::from_tcp(other_sock), None);
+        peers.queued_actions.clear();
+        peers.fill_outbound_slots();
+        assert!(peers.queued_actions.is_empty());
+        assert!(peers.peers[&other_peer].state.is_idle());
     }
 
     #[tokio::test]
