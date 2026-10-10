@@ -3,8 +3,8 @@
 //! Headers are read again each request, so a reorged anchor is caught before peers are asked.
 
 use crate::{
-    common::DownloadContext, CatchUpProgress, KeptBlock, SnapAttemptStore, SnapCatchUpStore,
-    SnapSyncError, SnapWrite,
+    common::DownloadContext, BlockWithAccessListHash, CatchUpProgress, SnapAttemptStore,
+    SnapCatchUpStore, SnapSyncError, SnapWrite,
 };
 use alloy_eips::eip7928::bal::DecodedBal;
 use reth_db_api::transaction::DbTxMut;
@@ -82,7 +82,7 @@ where
             return Ok(CatchUpStep::Complete)
         }
 
-        let blocks = headers.iter().map(KeptBlock::from).collect::<Vec<_>>();
+        let blocks = headers.iter().map(BlockWithAccessListHash::from).collect::<Vec<_>>();
         let verified = match self.request(&blocks).await? {
             BlockAccessListOutcome::Verified(verified) => verified,
             BlockAccessListOutcome::Unavailable { peer_id } => {
@@ -129,7 +129,7 @@ where
     /// state needs every one.
     pub async fn orphaned_lists(
         &mut self,
-        blocks: &[KeptBlock],
+        blocks: &[BlockWithAccessListHash],
     ) -> Result<Option<Vec<DecodedBal>>, SnapSyncError> {
         let mut lists = Vec::with_capacity(blocks.len());
         while lists.len() < blocks.len() {
@@ -152,7 +152,7 @@ where
     // Requests the lists of `blocks`, each authenticated against its commitment.
     async fn request(
         &mut self,
-        blocks: &[KeptBlock],
+        blocks: &[BlockWithAccessListHash],
     ) -> Result<BlockAccessListOutcome, SnapSyncError> {
         let request = GetBlockAccessListsMessage {
             request_id: self.context.next_request_id(),
@@ -162,7 +162,7 @@ where
         let downloader = BlockAccessListDownloader::with_commitments(
             self.context.client().clone(),
             request,
-            blocks.iter().map(KeptBlock::commitment).collect(),
+            blocks.iter().map(BlockWithAccessListHash::block_access_list_hash).collect(),
             self.context.runtime().clone(),
         )?;
         Ok(downloader.await?)
@@ -343,10 +343,10 @@ mod tests {
 
     // Blocks of `chain` after the pivot, kept as a reorg orphaning it finds them, with their
     // hashes.
-    fn orphaned(chain: &BalChain) -> (Vec<KeptBlock>, Vec<B256>) {
+    fn orphaned(chain: &BalChain) -> (Vec<BlockWithAccessListHash>, Vec<B256>) {
         let headers = &chain.headers[PIVOT as usize + 1..];
         (
-            headers.iter().map(KeptBlock::from).collect(),
+            headers.iter().map(BlockWithAccessListHash::from).collect(),
             headers.iter().map(SealedHeader::hash).collect(),
         )
     }

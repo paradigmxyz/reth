@@ -25,7 +25,7 @@ pub struct SnapReorg {
     // Last block both branches share.
     ancestor: BlockNumHash,
     // Orphaned blocks through the pivot, oldest first. Empty while the pivot is canonical.
-    orphaned: Vec<KeptBlock>,
+    orphaned: Vec<BlockWithAccessListHash>,
 }
 
 impl SnapReorg {
@@ -35,35 +35,38 @@ impl SnapReorg {
     }
 
     /// Orphaned blocks through the pivot, oldest first.
-    pub fn orphaned(&self) -> &[KeptBlock] {
+    pub fn orphaned(&self) -> &[BlockWithAccessListHash] {
         &self.orphaned
     }
 }
 
 /// A block an attempt keeps through its pivot, holding what recovery from a reorg reads of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct KeptBlock {
+pub struct BlockWithAccessListHash {
     // Block number and hash, with its parent's hash.
     block: BlockWithParent,
-    // Block access list commitment, absent before their activation.
-    commitment: Option<B256>,
+    // Block access list hash, absent before Amsterdam.
+    block_access_list_hash: Option<B256>,
 }
 
-impl KeptBlock {
+impl BlockWithAccessListHash {
     /// Block number and hash, with its parent's hash.
     pub const fn block(&self) -> BlockWithParent {
         self.block
     }
 
-    /// Block access list commitment, absent before their activation.
-    pub const fn commitment(&self) -> Option<B256> {
-        self.commitment
+    /// Block access list hash, absent before Amsterdam.
+    pub const fn block_access_list_hash(&self) -> Option<B256> {
+        self.block_access_list_hash
     }
 }
 
-impl<H: AlloyBlockHeader + Sealable> From<&SealedHeader<H>> for KeptBlock {
+impl<H: AlloyBlockHeader + Sealable> From<&SealedHeader<H>> for BlockWithAccessListHash {
     fn from(header: &SealedHeader<H>) -> Self {
-        Self { block: header.block_with_parent(), commitment: header.block_access_list_hash() }
+        Self {
+            block: header.block_with_parent(),
+            block_access_list_hash: header.block_access_list_hash(),
+        }
     }
 }
 
@@ -75,7 +78,7 @@ pub(crate) struct StoredAncestry {
     // Attempt the blocks belong to.
     attempt: SnapAttemptId,
     // Kept blocks, oldest first and ending at the pivot.
-    blocks: Vec<KeptBlock>,
+    blocks: Vec<BlockWithAccessListHash>,
 }
 
 impl SnapRecord for StoredAncestry {
@@ -97,7 +100,7 @@ impl StoredAncestry {
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
             return Self::clear(provider)
         }
-        let blocks = headers.iter().map(KeptBlock::from).collect();
+        let blocks = headers.iter().map(BlockWithAccessListHash::from).collect();
         Self { version: Self::VERSION, attempt, blocks }.write(provider)
     }
 
@@ -217,8 +220,8 @@ mod tests {
         factory.database_provider_ro().unwrap().snap_reorg(write).unwrap()
     }
 
-    fn kept(headers: &[SealedHeader]) -> Vec<KeptBlock> {
-        headers.iter().map(KeptBlock::from).collect()
+    fn kept(headers: &[SealedHeader]) -> Vec<BlockWithAccessListHash> {
+        headers.iter().map(BlockWithAccessListHash::from).collect()
     }
 
     // A verified list carrying `changes`.
