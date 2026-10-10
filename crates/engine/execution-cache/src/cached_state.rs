@@ -1178,8 +1178,12 @@ impl ExecutionCache {
                     return Ok(())
                 }
 
-                self.0.account_cache.remove(addr);
-                continue;
+                // An account re-created after its destruction carries all of its non-zero storage
+                // in the bundle, so it is cached like any other modified account below.
+                if account.info.is_none() {
+                    self.0.account_cache.remove(addr);
+                    continue;
+                }
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -1572,6 +1576,74 @@ mod tests {
         assert!(caches.insert_state(&bundle).is_ok());
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
+    }
+
+    #[test]
+    fn test_insert_state_recreated_account_updates_cached_storage() {
+        use revm::{
+            database::{states::bundle_state::BundleRetention, InMemoryDB, State},
+            state::{
+                Account as EvmAccount, AccountStatus as EvmAccountStatus, Bytecode as EvmBytecode,
+                EvmState, EvmStorageSlot,
+            },
+            DatabaseCommit,
+        };
+
+        // A funded address without code, e.g. a precomputed CREATE2 address.
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let slot = U256::from_be_bytes(storage_key.0);
+        let funded = AccountInfo { balance: U256::from(1), ..Default::default() };
+
+        let mut db = InMemoryDB::default();
+        db.insert_account_info(address, funded.clone());
+        let mut state = State::builder().with_database(db).with_bundle_update().build();
+        let _ = revm::Database::basic(&mut state, address).unwrap();
+
+        // tx1 creates the contract and self-destructs it in the same transaction.
+        let mut created = EvmAccount::from(funded.clone());
+        created.status = EvmAccountStatus::Touched |
+            EvmAccountStatus::Created |
+            EvmAccountStatus::SelfDestructed;
+        state.commit(EvmState::from_iter([(address, created)]));
+
+        // tx2 re-creates the contract at the same address and writes a storage slot.
+        let code = EvmBytecode::new_raw([0x60, 0x00].into());
+        let mut recreated = EvmAccount::from(AccountInfo {
+            nonce: 1,
+            code_hash: code.hash_slow(),
+            code: Some(code),
+            ..funded
+        });
+        recreated.status = EvmAccountStatus::Touched | EvmAccountStatus::Created;
+        recreated.storage.insert(
+            slot,
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(5), Default::default()),
+        );
+        state.commit(EvmState::from_iter([(address, recreated)]));
+
+        state.merge_transitions(BundleRetention::Reverts);
+        let bundle = state.take_bundle();
+        assert_eq!(bundle.state[&address].status, AccountStatus::DestroyedChanged);
+
+        // BAL prewarming fills the slot from the parent state before the block's post-state is
+        // inserted into the cache.
+        let caches = ExecutionCache::new(1000);
+        caches.insert_storage(address, storage_key, Some(U256::ZERO));
+        assert!(caches.insert_state(&bundle).is_ok());
+
+        // The next block must observe the value written by the re-created contract.
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            address,
+            ExtendedAccount::new(1, U256::from(1)).extend_storage([(storage_key, U256::from(5))]),
+        );
+        let state_provider = CachedStateProvider::new(
+            provider.into_evm_state_provider(),
+            caches,
+            Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
+        );
+        assert_eq!(state_provider.storage(address, storage_key).unwrap(), Some(U256::from(5)));
     }
 
     #[test]
