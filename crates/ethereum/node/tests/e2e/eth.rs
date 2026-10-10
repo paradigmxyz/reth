@@ -1,6 +1,6 @@
 use crate::utils::{advance_with_random_transactions, EngineSszRequestExt, EngineSszResponseExt};
-use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{Bytes, B256};
+use alloy_eips::{eip4895::Withdrawal, eip7685::RequestsOrHash};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
@@ -506,6 +506,43 @@ async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
 
     let best_block = node.inner.provider.best_block_number()?;
     assert_eq!(best_block, num_blocks as u64, "Expected {} blocks, got {}", num_blocks, best_block);
+
+    Ok(())
+}
+
+/// Tests that a state root computed by the shared sparse trie pipeline includes the block's
+/// post-execution changes.
+///
+/// Withdrawals are credited when the block executor finishes, after the last transaction. The
+/// block built with the payload builder's state-root task is imported into a second node, which
+/// validates its state root.
+#[tokio::test]
+async fn test_share_sparse_trie_with_payload_builder_withdrawals() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
+    let attributes_chain_spec = chain_spec.clone();
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec)
+        .with_tree_config_modifier(|config| {
+            config.with_share_sparse_trie_with_payload_builder(true)
+        })
+        .with_attributes_generator(move |timestamp| PayloadAttributes {
+            withdrawals: Some(vec![Withdrawal {
+                index: 0,
+                validator_index: 0,
+                address: Address::with_last_byte(1),
+                amount: 1,
+            }]),
+            ..eth_payload_attributes(&*attributes_chain_spec, timestamp)
+        })
+        .with_connect_nodes(false)
+        .build()
+        .await?;
+    let validator = nodes.pop().unwrap();
+    let mut builder = nodes.pop().unwrap();
+
+    let payload = builder.new_payload().await?;
+    validator.import_payload(payload).await?;
 
     Ok(())
 }
