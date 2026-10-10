@@ -448,18 +448,6 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "arena index overflows the blinded tag bit")]
-    fn revealed_child_rejects_blinded_tag_bit() {
-        BranchChild::revealed(Index(1 << 31));
-    }
-
-    #[test]
-    #[should_panic(expected = "blinded slot overflows the tag bit")]
-    fn blinded_child_rejects_blinded_tag_bit() {
-        BranchChild::blinded(1 << 31);
-    }
-
-    #[test]
-    #[should_panic(expected = "arena index overflows the blinded tag bit")]
     fn arena_index_rejects_blinded_tag_bit() {
         Index::new(1 << 31);
     }

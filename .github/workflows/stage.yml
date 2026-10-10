@@ -13,6 +13,12 @@ env:
   FROM_BLOCK: 0
   TO_BLOCK: 50000
   RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. The installed binary reports a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -32,6 +38,8 @@ jobs:
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
+      # This is a smoke test of `reth stage run`, so LTO only adds link time.
+      CARGO_PROFILE_RELEASE_LTO: "off"
     timeout-minutes: 60
     steps:
       - name: Secure runner

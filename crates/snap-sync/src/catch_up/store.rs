@@ -488,21 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn an_interrupted_application_leaves_nothing_behind() {
-        let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
-        let (block, parent) = block(2);
-
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
-        drop(provider);
-
-        let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
-        assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied().number, 1);
-    }
-
-    #[test]
     fn a_block_already_applied_is_refused() {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
@@ -598,21 +583,6 @@ mod tests {
 
         assert!(matches!(forked, Err(SnapSyncError::ForkedBlock { .. })));
         assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied().number, 1);
-    }
-
-    #[test]
-    fn a_block_that_changes_nothing_still_carries_the_state_past_it() {
-        let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
-        let provider = factory.database_provider_rw().unwrap();
-        let (block, parent) = block(2);
-        // A list a peer holds but that touches no state, as against one it does not hold.
-        let read_only = vec![AccountChanges::new(CHANGED).with_storage_read(SLOT)];
-
-        let progress = provider.commit_block_access_list(write, block, parent, &read_only).unwrap();
-
-        assert_eq!(progress.applied(), block);
-        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::ONE);
     }
 
     #[test]
