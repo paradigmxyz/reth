@@ -63,6 +63,9 @@ pub enum NetworkError {
     /// See also [`DnsResolver`](reth_dns_discovery::DnsResolver::from_system_conf)
     #[error("failed to configure DNS resolver: {0}")]
     DnsResolver(#[from] NetError),
+    /// Snap cannot be combined with additional `RLPx` subprotocols.
+    #[error("snap/2 does not support additional RLPx subprotocols; disable snap/2 or remove the additional protocols")]
+    SnapWithExtraProtocols,
 }
 
 impl NetworkError {

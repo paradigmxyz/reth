@@ -125,6 +125,11 @@ impl RlpxSubProtocols {
         self.protocols.push(protocol.into_rlpx_sub_protocol());
     }
 
+    /// Returns whether no additional protocols are registered.
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.protocols.is_empty()
+    }
+
     /// Returns all additional protocol handlers that should be announced to the remote during the
     /// Rlpx handshake on an incoming connection.
     pub(crate) fn on_incoming(&self, socket_addr: SocketAddr) -> RlpxSubProtocolHandlers {

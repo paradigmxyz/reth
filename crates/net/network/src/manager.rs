@@ -201,8 +201,15 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
-    pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        self.swarm.add_rlpx_sub_protocol(protocol)
+    ///
+    /// Returns [`NetworkError::SnapWithExtraProtocols`] when snap/2 is enabled.
+    pub fn add_rlpx_sub_protocol(
+        &mut self,
+        protocol: impl IntoRlpxSubProtocol,
+    ) -> Result<(), NetworkError> {
+        self.handle.ensure_rlpx_sub_protocol_supported()?;
+        self.swarm.add_rlpx_sub_protocol(protocol);
+        Ok(())
     }
 
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
@@ -234,9 +241,15 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
+    ///
+    /// Returns [`NetworkError::SnapWithExtraProtocols`] before opening sockets when snap/2 and
+    /// additional `RLPx` subprotocols are configured together.
     pub async fn new<C: BlockNumReader + 'static>(
         config: NetworkConfig<C, N>,
     ) -> Result<Self, NetworkError> {
+        config.ensure_snap_compatible()?;
+        let snap_enabled = config.snap_enabled();
+
         let NetworkConfig {
             client,
             secret_key,
@@ -348,6 +361,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             discv5,
             event_sender.clone(),
             nat,
+            snap_enabled,
         );
 
         // Spawn required block peer filter if configured
@@ -794,7 +808,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 let peer_ids = self.swarm.peers().peers_by_kind(kind);
                 let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
-            NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
+            NetworkHandleMessage::AddRlpxSubProtocol(proto) => {
+                // The handle validates registration before enqueueing this message.
+                self.swarm.add_rlpx_sub_protocol(proto);
+            }
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
                 if let Some(ref tx_inner) = self.to_transactions_manager {
                     let _ = tx_inner.try_send(NetworkTransactionEvent::GetTransactionsHandle(tx));

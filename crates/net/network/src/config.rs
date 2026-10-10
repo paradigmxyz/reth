@@ -13,7 +13,7 @@ use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
+    Capability, EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
     UnifiedStatus,
 };
 use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
@@ -146,6 +146,24 @@ impl<C, N: NetworkPrimitives> NetworkConfig<C, N> {
     /// Returns the address for the incoming `RLPx` connection listener.
     pub const fn listener_addr(&self) -> &SocketAddr {
         &self.listener_addr
+    }
+
+    /// Returns whether `snap/2` is advertised.
+    pub(crate) fn snap_enabled(&self) -> bool {
+        self.hello_message.protocols.iter().any(|protocol| protocol.cap == Capability::snap_2())
+    }
+
+    /// Rejects additional `RLPx` protocols when `snap/2` is advertised.
+    pub(crate) fn ensure_snap_compatible(&self) -> Result<(), NetworkError> {
+        let has_extra_protocols = !self.extra_protocols.is_empty() ||
+            self.hello_message
+                .protocols
+                .iter()
+                .any(|protocol| !protocol.cap.is_eth() && protocol.cap != Capability::snap_2());
+        if self.snap_enabled() && has_extra_protocols {
+            return Err(NetworkError::SnapWithExtraProtocols)
+        }
+        Ok(())
     }
 }
 
@@ -553,7 +571,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
     ///
-    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]).
+    /// Not for `snap/2`, which is supported natively (see [`Self::with_snap`]). Starting a network
+    /// with both configured returns [`NetworkError::SnapWithExtraProtocols`].
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
         self
@@ -562,6 +581,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
     ///
     /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
+    /// Additional `RLPx` subprotocols are unsupported with snap/2; starting a network with both
+    /// configured returns [`NetworkError::SnapWithExtraProtocols`].
     pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
         self.snap_enabled = snap_enabled;
         self
