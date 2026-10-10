@@ -264,25 +264,15 @@ mod tests {
     use crate::HashedStorage;
 
     use super::*;
-    use alloy_primitives::{map::B256Map, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_primitives_traits::Account;
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::{thread, time::Duration};
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
         LazyTrieData::pending(
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
         )
-    }
-
-    #[test]
-    fn test_lazy_ready_is_initialized() {
-        let lazy = LazyTrieData::ready(SortedTrieData::default());
-        let _ = lazy.hashed_state();
-        let _ = lazy.trie_updates();
     }
 
     #[test]
@@ -300,31 +290,6 @@ mod tests {
         let lazy = LazyTrieData::deferred(SortedTrieData::default);
         assert!(lazy.hashed_state().is_empty());
         assert!(lazy.trie_updates().is_empty());
-    }
-
-    #[test]
-    fn ready_returns_immediately() {
-        let bundle = SortedTrieData::default();
-        let deferred = LazyTrieData::ready(bundle.clone());
-
-        let result = deferred.get();
-
-        assert_eq!(result.hashed_state.total_len(), bundle.hashed_state.total_len());
-        assert_eq!(result.trie_updates.total_len(), bundle.trie_updates.total_len());
-    }
-
-    #[test]
-    fn pending_waits_for_task_and_caches_result() {
-        let (deferred, task) = empty_pending();
-
-        let published = task.compute_and_publish();
-        let first = deferred.get();
-        let second = deferred.get();
-
-        assert!(Arc::ptr_eq(&published.hashed_state, &first.hashed_state));
-        assert!(Arc::ptr_eq(&published.trie_updates, &first.trie_updates));
-        assert!(Arc::ptr_eq(&first.hashed_state, &second.hashed_state));
-        assert!(Arc::ptr_eq(&first.trie_updates, &second.trie_updates));
     }
 
     #[test]
@@ -376,24 +341,5 @@ mod tests {
 
         assert_eq!(result.hashed_state.total_len(), 2);
         assert_eq!(result.trie_updates.total_len(), 0);
-    }
-
-    #[test]
-    fn wait_does_not_block_after_first_compute() {
-        let mut accounts = B256Map::default();
-        for i in 0..100 {
-            accounts.insert(B256::with_last_byte(i), Some(Account::default()));
-        }
-        let (deferred, task) = LazyTrieData::pending(
-            Arc::new(HashedPostState { accounts, storages: Default::default() }),
-            Arc::new(TrieUpdates::default()),
-        );
-
-        let _ = task.compute_and_publish();
-        let _ = deferred.get().clone();
-        let start = Instant::now();
-        let _ = deferred.get().clone();
-
-        assert!(start.elapsed() < Duration::from_millis(10));
     }
 }

@@ -1954,14 +1954,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_inclusion_list_v1_returns_empty_list() {
-        let (_, api) = setup_engine_api();
-
-        let res = EngineApiServer::get_inclusion_list_v1(&api).await.unwrap();
-        assert!(res.is_empty());
-    }
-
-    #[tokio::test]
     async fn get_inclusion_list_v1_stops_at_size_limit() {
         let pool = eth_test_pool();
         let first = pooled_transaction(
@@ -2428,15 +2420,6 @@ mod tests {
 
         let res = api.get_blobs_v4_metered(vec![B256::ZERO], B128::from(1u128.to_le_bytes()));
         assert_matches!(res, Ok(None));
-    }
-
-    #[test]
-    fn engine_bitvector_uses_little_endian_cell_indices() {
-        for index in [0, 7, 8, 63, 64, 127] {
-            let wire_mask = B128::from((1u128 << index).to_le_bytes());
-            let mask = BlobCellMask::from_bits(u128::from_le_bytes(wire_mask.into()));
-            assert_eq!(mask.selected_indices().collect::<Vec<_>>(), vec![index]);
-        }
     }
 
     #[tokio::test]

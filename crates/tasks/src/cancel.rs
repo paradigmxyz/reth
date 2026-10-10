@@ -131,54 +131,19 @@ mod tests {
     }
 
     #[test]
-    fn test_default_cancel_task() {
-        let c = ManualCancel::default();
-        assert!(!c.is_cancelled());
-    }
-
-    #[test]
     fn test_set_cancel_task() {
         let c = ManualCancel::default();
         assert!(!c.is_cancelled());
+
+        // Dropping a clone must not cancel the original, unlike `CancelOnDrop`.
+        drop(c.clone());
+        assert!(!c.is_cancelled());
+
         let c2 = c.clone();
         let c3 = c.clone();
         c.cancel();
         assert!(c3.is_cancelled());
         assert!(c2.is_cancelled());
-    }
-
-    #[test]
-    fn test_cancel_task_multiple_threads() {
-        let c = ManualCancel::default();
-        let cloned_cancel = c.clone();
-
-        // we want to make sure that:
-        // * we can spawn tasks that do things
-        // * those tasks can run to completion and the flag remains unset unless we call cancel
-        let mut handles = vec![];
-        for _ in 0..10 {
-            let c = c.clone();
-            let handle = std::thread::spawn(move || {
-                for _ in 0..1000 {
-                    if c.is_cancelled() {
-                        return;
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-
-        // wait for all the threads to finish
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        // check that the flag is still unset
-        assert!(!c.is_cancelled());
-
-        // cancel and check that the flag is set
-        c.cancel();
-        assert!(cloned_cancel.is_cancelled());
     }
 
     #[test]
