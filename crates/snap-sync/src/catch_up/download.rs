@@ -6,8 +6,7 @@ use crate::{
     common::DownloadContext, CatchUpProgress, KeptBlock, SnapAttemptStore, SnapCatchUpStore,
     SnapSyncError, SnapWrite,
 };
-use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
-use alloy_primitives::B256;
+use alloy_eips::eip7928::bal::DecodedBal;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
@@ -83,9 +82,8 @@ where
             return Ok(CatchUpStep::Complete)
         }
 
-        let blocks =
-            headers.iter().map(|header| (header.hash(), header.block_access_list_hash())).collect();
-        let verified = match self.request(blocks).await? {
+        let blocks = headers.iter().map(KeptBlock::from).collect::<Vec<_>>();
+        let verified = match self.request(&blocks).await? {
             BlockAccessListOutcome::Verified(verified) => verified,
             BlockAccessListOutcome::Unavailable { peer_id } => {
                 return Ok(CatchUpStep::Unavailable { peer_id })
@@ -98,11 +96,8 @@ where
         let applied = verified
             .into_block_access_lists()
             .into_iter()
-            .zip(&headers)
-            .map_while(|((_, list), header)| {
-                let block = BlockNumHash::new(header.number(), header.hash());
-                list.map(|list| (block, header.parent_hash(), list))
-            })
+            .zip(&blocks)
+            .map_while(|((_, list), kept)| list.map(|list| (kept.block(), list)))
             .collect::<Vec<_>>();
         if applied.is_empty() {
             return Ok(CatchUpStep::Unavailable { peer_id })
@@ -113,11 +108,11 @@ where
             .context
             .commit(move |provider| {
                 let mut progress = None;
-                for (block, parent, list) in applied {
+                for (block, list) in applied {
                     progress = Some(provider.commit_block_access_list(
                         write,
-                        block,
-                        parent,
+                        block.block,
+                        block.parent,
                         list.as_bal(),
                     )?);
                 }
@@ -139,14 +134,8 @@ where
         let mut lists = Vec::with_capacity(blocks.len());
         while lists.len() < blocks.len() {
             let end = blocks.len().min(lists.len() + self.max_blocks as usize);
-            let BlockAccessListOutcome::Verified(verified) = self
-                .request(
-                    blocks[lists.len()..end]
-                        .iter()
-                        .map(|block| (block.block().block.hash, block.commitment()))
-                        .collect(),
-                )
-                .await?
+            let BlockAccessListOutcome::Verified(verified) =
+                self.request(&blocks[lists.len()..end]).await?
             else {
                 return Ok(None)
             };
@@ -160,22 +149,20 @@ where
         Ok(Some(lists))
     }
 
-    // Requests the lists of `blocks`, given as hash and commitment, each authenticated against
-    // its commitment.
+    // Requests the lists of `blocks`, each authenticated against its commitment.
     async fn request(
         &mut self,
-        blocks: Vec<(B256, Option<B256>)>,
+        blocks: &[KeptBlock],
     ) -> Result<BlockAccessListOutcome, SnapSyncError> {
-        let (block_hashes, commitments) = blocks.into_iter().unzip();
         let request = GetBlockAccessListsMessage {
             request_id: self.context.next_request_id(),
-            block_hashes,
+            block_hashes: blocks.iter().map(|kept| kept.block().block.hash).collect(),
             response_bytes: self.context.response_bytes(),
         };
         let downloader = BlockAccessListDownloader::with_commitments(
             self.context.client().clone(),
             request,
-            commitments,
+            blocks.iter().map(KeptBlock::commitment).collect(),
             self.context.runtime().clone(),
         )?;
         Ok(downloader.await?)
