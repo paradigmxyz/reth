@@ -28,7 +28,9 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
 };
 use reth_primitives_traits::AlloyBlockHeader;
-use reth_provider::{providers::BlockchainProvider, BlockReaderIdExt};
+use reth_provider::{
+    providers::BlockchainProvider, BlockReaderIdExt, DatabaseProviderFactory, MetadataProvider,
+};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
 use std::{
@@ -750,9 +752,19 @@ fn relaunch_node<N: NodeBuilderHelper>(
 /// Sends a forkchoice update to a restarted node that restates the head, safe and finalized block
 /// it loaded from disk.
 ///
+/// Unfinished snap attempts wait for the test to reconnect peers and supply a target.
 /// Returns an error if the engine does not report the update valid.
 async fn restate_forkchoice<N: NodeBuilderHelper>(node: &NodeHelperType<N>) -> eyre::Result<()> {
     let provider = &node.inner.provider;
+    // During snap sync the latest stored header has no executable state yet. Let the test send
+    // the consensus target after reconnecting peers instead of requiring a VALID response here.
+    if provider
+        .database_provider_ro()?
+        .snap_attempt()?
+        .is_some_and(|attempt| !attempt.is_verified())
+    {
+        return Ok(())
+    }
     let hash = |tag| -> eyre::Result<Option<B256>> {
         Ok(provider.sealed_header_by_number_or_tag(tag)?.map(|header| header.hash()))
     };
