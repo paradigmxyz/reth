@@ -23,6 +23,14 @@ alloy-rpc-types-engine.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
+parking_lot.workspace = true
+
+[dev-dependencies]
+metrics-util = { workspace = true, features = ["debugging"] }

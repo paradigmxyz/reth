@@ -1,7 +1,7 @@
 //! Prometheus recorder
 
 use eyre::WrapErr;
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use std::sync::{atomic::AtomicBool, OnceLock};
 
@@ -31,6 +31,15 @@ pub fn init_prometheus_recorder(recorder: PrometheusRecorder) -> &'static Promet
     PROMETHEUS_RECORDER_HANDLE.set(recorder).expect("Prometheus recorder already installed");
     PROMETHEUS_RECORDER_HANDLE.get().expect("Prometheus recorder is set")
 }
+
+/// Histograms rendered as Prometheus histograms with fixed buckets instead of rolling summaries.
+///
+/// Rolling summaries only cover the last minute, which makes them useless for rare events.
+const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[(
+    // Peak active subscription count per RPC connection, recorded when a connection closes.
+    "reth_rpc_server_subscriptions_connection_peak",
+    &[1., 2., 4., 8., 16., 32., 64., 128., 256., 512., 1024.],
+)];
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
@@ -104,7 +113,16 @@ impl PrometheusRecorder {
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install() -> eyre::Result<Self> {
-        Self::install_with_builder(PrometheusBuilder::new())
+        Self::install_with_builder(Self::default_builder()?)
+    }
+
+    /// Returns the builder used by [`Self::install`].
+    fn default_builder() -> eyre::Result<PrometheusBuilder> {
+        HISTOGRAM_BUCKETS.iter().try_fold(PrometheusBuilder::new(), |builder, (name, buckets)| {
+            builder
+                .set_buckets_for_metric(Matcher::Full((*name).to_owned()), buckets)
+                .wrap_err_with(|| format!("Couldn't set buckets for {name}"))
+        })
     }
 
     /// Installs Prometheus as the metrics recorder with a custom builder.
@@ -128,6 +146,7 @@ impl PrometheusRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use metrics_util::layers::Layer;
     // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
     // may not be able to communicate with each other through the global recorder.
     //
@@ -143,5 +162,22 @@ mod tests {
 
         let metrics = recorder.handle().render();
         assert!(metrics.contains("process_cpu_seconds_total"), "{metrics:?}");
+    }
+
+    #[test]
+    fn histogram_buckets() {
+        let recorder = PrometheusRecorder::default_builder().unwrap().build_recorder();
+        let handle = recorder.handle();
+        let recorder = PrefixLayer::new("reth").layer(recorder);
+
+        metrics::with_local_recorder(&recorder, || {
+            metrics::histogram!("rpc_server.subscriptions.connection_peak").record(3);
+        });
+
+        let metrics = handle.render();
+        assert!(
+            metrics.contains(r#"reth_rpc_server_subscriptions_connection_peak_bucket{le="4"} 1"#),
+            "{metrics}"
+        );
     }
 }

@@ -15,7 +15,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use futures::Stream;
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
+use jsonrpsee::{core::RpcResult, Extensions, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
@@ -32,7 +32,9 @@ use reth_rpc_eth_api::{
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_rpc_server_types::{
+    result::internal_rpc_err, subscriptions::track_subscription, ToRpcResult,
+};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
     ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
@@ -995,6 +997,7 @@ where
     async fn debug_subscribe(
         &self,
         pending: PendingSubscriptionSink,
+        ext: &Extensions,
         subscription: String,
         start_exclusive: BlockNumberOrTag,
         end_inclusive: BlockNumberOrTag,
@@ -1048,7 +1051,7 @@ where
         let sink = pending.accept().await?;
         let this = self.clone();
         let task_spawner = self.inner.task_spawner.clone();
-        task_spawner.spawn_task(async move {
+        task_spawner.spawn_task(track_subscription(ext, "traceChain", async move {
             let end_number = end.number();
             let opts = opts.unwrap_or_default();
 
@@ -1119,7 +1122,7 @@ where
             // client that this finite stream completed. Retain it so the subscription remains
             // explicitly unsubscribable until the client unsubscribes or disconnects.
             sink.closed().await;
-        });
+        }));
 
         Ok(())
     }
