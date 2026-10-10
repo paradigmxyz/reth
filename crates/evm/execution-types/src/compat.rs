@@ -48,20 +48,45 @@ impl BlockState {
         }
     }
 
-    /// Streams one finalized native transaction into the block without materializing EVM state.
+    /// Commits one account's finalized evm2 transaction changes into the block without
+    /// materializing EVM state. Accounts that were only loaded are skipped.
     ///
-    /// The sink must be fed by an evm2 transaction source (`State` or `PendingState`), which
-    /// delivers each account through
-    /// [`account_changes`](evm2::evm::StateChangeSink::account_changes); per-entry storage and
-    /// account callbacks are ignored.
-    ///
-    /// When `update` is set, each committed account is also recorded into it for execution state
+    /// When `update` is set, the committed account is also recorded into it for execution state
     /// hooks.
-    pub fn transaction_sink<'a>(
-        &'a mut self,
-        update: Option<&'a mut StateUpdate>,
-    ) -> impl evm2::evm::StateChangeSink<Error = core::convert::Infallible> + 'a {
-        BlockStateSink { block: self, update }
+    pub fn commit_account_changes(
+        &mut self,
+        changes: evm2::evm::AccountChanges<'_>,
+        update: Option<&mut StateUpdate>,
+    ) {
+        if !changes.is_changed() {
+            return;
+        }
+        if let Some((hash, code)) = changes.code {
+            self.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
+        }
+        let address = changes.address;
+        let created = changes.created;
+        let wiped = changes.storage.wiped;
+        let original = changes.original.map(revm_account);
+        let current = changes.current.map(revm_account);
+        let slots = changes
+            .storage
+            .changed_slots()
+            .map(|(&key, value)| (key, StorageSlot::new_changed(value.original, value.current)));
+        let Some(update) = update else {
+            self.commit_account(address, original, current, created, wiped, slots);
+            return;
+        };
+        let storage: Vec<_> = slots.collect();
+        self.commit_account(
+            address,
+            original.clone(),
+            current.clone(),
+            created,
+            wiped,
+            storage.iter().copied(),
+        );
+        update.accounts.push(AccountUpdate { address, original, current, created, wiped, storage });
     }
 
     fn commit_account(
@@ -197,53 +222,6 @@ impl evm2::evm::StateChangeSink for TransactionChanges {
                 &self.contracts,
             );
         }
-        Ok(())
-    }
-}
-
-/// Commits each account's storage and metadata, delivered together through `account_changes`,
-/// into the block's transitions.
-struct BlockStateSink<'a> {
-    block: &'a mut BlockState,
-    update: Option<&'a mut StateUpdate>,
-}
-
-impl evm2::evm::StateChangeSink for BlockStateSink<'_> {
-    type Error = core::convert::Infallible;
-
-    fn account_changes(
-        &mut self,
-        changes: evm2::evm::AccountChanges<'_>,
-    ) -> Result<(), Self::Error> {
-        if !changes.is_changed() {
-            return Ok(());
-        }
-        if let Some((hash, code)) = changes.code {
-            self.block.contracts.entry(hash).or_insert_with(|| revm_bytecode(code));
-        }
-        let address = changes.address;
-        let created = changes.created;
-        let wiped = changes.storage.wiped;
-        let original = changes.original.map(revm_account);
-        let current = changes.current.map(revm_account);
-        let slots = changes
-            .storage
-            .changed_slots()
-            .map(|(&key, value)| (key, StorageSlot::new_changed(value.original, value.current)));
-        let Some(update) = self.update.as_deref_mut() else {
-            self.block.commit_account(address, original, current, created, wiped, slots);
-            return Ok(());
-        };
-        let storage: Vec<_> = slots.collect();
-        self.block.commit_account(
-            address,
-            original.clone(),
-            current.clone(),
-            created,
-            wiped,
-            storage.iter().copied(),
-        );
-        update.accounts.push(AccountUpdate { address, original, current, created, wiped, storage });
         Ok(())
     }
 }
@@ -517,9 +495,8 @@ mod tests {
         updated.balance = U256::from(20);
         updated.extension = evm2::evm::AccountExtension::copy_from_slice(b"updated extension");
         let mut state = BlockState::new();
-        state
-            .transaction_sink(None)
-            .account_changes(AccountChanges {
+        state.commit_account_changes(
+            AccountChanges {
                 address,
                 original: Some(&native),
                 current: Some(&updated),
@@ -527,8 +504,9 @@ mod tests {
                 selfdestructed: false,
                 code: None,
                 storage: &StorageOverlay::default(),
-            })
-            .unwrap();
+            },
+            None,
+        );
         let mut bundle = state.into_bundle();
         let account = bundle.state.get(&address).unwrap();
         assert_eq!(
@@ -592,14 +570,12 @@ mod tests {
                 code: None,
                 storage: &empty,
             };
-            let visit = |sink: &mut dyn StateChangeSink<Error = core::convert::Infallible>| {
-                sink.account_changes(changes).unwrap();
-                sink.account_changes(read).unwrap();
-            };
-            let mut changes = TransactionChanges::default();
-            visit(&mut changes);
-            converted.commit(&changes);
-            visit(&mut native.transaction_sink(None));
+            let mut transaction = TransactionChanges::default();
+            let Ok(()) = changes.visit(&mut transaction);
+            let Ok(()) = read.visit(&mut transaction);
+            converted.commit(&transaction);
+            native.commit_account_changes(changes, None);
+            native.commit_account_changes(read, None);
             assert_eq!(native.transitions, converted.transitions, "step {step}");
             assert_eq!(native.contracts, converted.contracts);
         }

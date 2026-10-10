@@ -20,8 +20,8 @@ use alloy_sol_types::{sol, SolEvent};
 use core::any::Any;
 use evm2::{
     evm::{
-        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, SystemTx,
-        BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        AccountChangeRef, AccountInfo, StateChangeSink, SystemTx, BEACON_ROOTS_ADDRESS,
+        BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     interpreter::InstrStop,
@@ -173,9 +173,11 @@ where
     let result = match evm.transact(transaction) {
         Ok(executed) => {
             if commit(executed.result()).should_commit() {
-                let sink = &mut block_state.transaction_sink(stream_state.then_some(&mut update));
-                let Ok(result) = executed.commit_with(sink);
-                Ok(Some(result))
+                for changes in executed.account_changes() {
+                    block_state
+                        .commit_account_changes(changes, stream_state.then_some(&mut update));
+                }
+                Ok(Some(executed.commit()))
             } else {
                 let _ = executed.discard();
                 Ok(None)
@@ -233,8 +235,9 @@ fn accumulate_pending_state(
     pending_state: &evm2::evm::PendingState,
 ) {
     let mut update = StateUpdate::default();
-    let Ok(()) =
-        pending_state.visit(&mut block_state.transaction_sink(stream_state.then_some(&mut update)));
+    for changes in pending_state.account_changes() {
+        block_state.commit_account_changes(changes, stream_state.then_some(&mut update));
+    }
     if stream_state {
         send_state_update(update, on_state_update);
     }
