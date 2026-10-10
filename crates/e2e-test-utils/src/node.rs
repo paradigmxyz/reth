@@ -1002,6 +1002,17 @@ where
     /// [`Finality`] policy of the context. Returns an error if the node does not sync within
     /// [`WAIT_TIMEOUT`].
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.sync_to_forkchoice(ForkchoiceState::same_hash(block)).await
+    }
+
+    /// Sends the forkchoice update `state` and waits for the node to sync to its head, like
+    /// [`Self::sync_to`], but with the safe and finalized blocks of `state`.
+    ///
+    /// A finalized block below the head, e.g. one the node does not know yet, lets a backfill
+    /// anchor to it, as a snap sync anchors its pivot to the finalized block. Returns an error if
+    /// the node does not sync within [`WAIT_TIMEOUT`].
+    pub async fn sync_to_forkchoice(&self, state: ForkchoiceState) -> eyre::Result<()> {
+        let block = state.head_block_hash;
         let sync = async {
             while self
                 .inner
@@ -1010,7 +1021,11 @@ where
                 .is_none_or(|h| h.hash() != block)
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                self.update_forkchoice(block, block).await?;
+                self.inner
+                    .add_ons_handle
+                    .beacon_engine_handle
+                    .fork_choice_updated(state, None)
+                    .await?;
             }
             Ok(())
         };
@@ -1802,6 +1817,7 @@ mod tests {
         assert_send(node.wait_for_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.sync_to_forkchoice(ForkchoiceState::default()));
         assert_send(node.submit_payload(payload.clone()));
         assert_send(node.submit_payload_with_status(payload.clone()));
         assert_send(node.import_payload(payload));
