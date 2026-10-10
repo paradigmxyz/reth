@@ -2,7 +2,7 @@ use crate::{
     error::{mdbx_result, Error, Result},
     flags::*,
     mdbx_try_optional,
-    transaction::{TransactionKind, RW},
+    transaction::{TransactionKind, TransactionPtr, RW},
     TableObject, Transaction,
 };
 use ffi::{
@@ -20,6 +20,14 @@ where
 {
     txn: Transaction<K>,
     cursor: *mut ffi::MDBX_cursor,
+    /// Optional transaction pointer for parallel writes. When set, write operations
+    /// use this pointer directly instead of going through `self.txn.txn_execute()`.
+    /// This is needed because `new_with_ptr` opens a cursor on a subtransaction,
+    /// but stores the parent transaction in `txn`.
+    ///
+    /// Uses `TransactionPtr` to ensure proper mutex locking for thread-safety,
+    /// as MDBX requires serialized access to transactions.
+    owned_txn_ptr: Option<TransactionPtr>,
 }
 
 impl<K> Cursor<K>
@@ -30,10 +38,54 @@ where
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         unsafe {
             txn.txn_execute(|txn_ptr| {
-                mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
+                mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))?;
+                txn.cursor_opened();
+                Ok::<_, Error>(())
             })??;
         }
-        Ok(Self { txn, cursor })
+        Ok(Self { txn, cursor, owned_txn_ptr: None })
+    }
+
+    /// Creates a new cursor using a specific transaction pointer.
+    ///
+    /// This is used for parallel writes where the cursor should be opened on
+    /// a subtransaction rather than the parent transaction. The cursor stores
+    /// this pointer and uses it directly for write operations.
+    ///
+    /// The transaction pointer's cursor count is incremented on creation and
+    /// decremented when the cursor is dropped.
+    pub(crate) fn new_with_ptr(
+        txn: Transaction<K>,
+        dbi: ffi::MDBX_dbi,
+        txn_ptr: TransactionPtr,
+    ) -> Result<Self> {
+        let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
+        txn_ptr.txn_execute_fail_on_timeout(|ptr| unsafe {
+            mdbx_result(ffi::mdbx_cursor_open(ptr, dbi, &mut cursor))?;
+            txn_ptr.increment_cursor_count();
+            Ok::<_, Error>(())
+        })??;
+        Ok(Self { txn, cursor, owned_txn_ptr: Some(txn_ptr) })
+    }
+
+    /// Executes a closure on the transaction pointer.
+    ///
+    /// If this cursor was created with `new_with_ptr`, uses the stored txn pointer
+    /// with proper locking. Otherwise, delegates to `self.txn.txn_execute()`.
+    fn execute_on_txn<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            txn_ptr.txn_execute_fail_on_timeout(f)
+        } else {
+            self.txn.txn_execute(f)
+        }
+    }
+
+    /// Returns whether this cursor has an owned transaction pointer (for parallel writes).
+    pub const fn has_owned_txn_ptr(&self) -> bool {
+        self.owned_txn_ptr.is_some()
     }
 
     fn new_at_position(other: &Self) -> Result<Self> {
@@ -41,10 +93,19 @@ where
             let cursor = ffi::mdbx_cursor_create(ptr::null_mut());
 
             let res = ffi::mdbx_cursor_copy(other.cursor(), cursor);
+            if let Err(err) = mdbx_result(res) {
+                ffi::mdbx_cursor_close(cursor);
+                return Err(err);
+            }
 
-            let s = Self { txn: other.txn.clone(), cursor };
+            let s =
+                Self { txn: other.txn.clone(), cursor, owned_txn_ptr: other.owned_txn_ptr.clone() };
 
-            mdbx_result(res)?;
+            if let Some(ptr) = &s.owned_txn_ptr {
+                ptr.increment_cursor_count();
+            } else {
+                s.txn.cursor_opened();
+            }
 
             Ok(s)
         }
@@ -90,25 +151,52 @@ where
             let mut data_val = slice_to_val(data);
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
-            self.txn.txn_execute(|txn| {
-                let v = mdbx_result(ffi::mdbx_cursor_get(
-                    self.cursor,
-                    &mut key_val,
-                    &mut data_val,
-                    op,
-                ))?;
-                assert_ne!(data_ptr, data_val.iov_base);
-                let key_out = {
-                    // MDBX wrote in new key
-                    if ptr::eq(key_ptr, key_val.iov_base) {
+
+            // Serialize cursors sharing a child, while independent DBIs remain parallel.
+            if let Some(ref txn_ptr) = self.owned_txn_ptr {
+                txn_ptr.txn_execute_fail_on_timeout(|txn| {
+                    let rc = ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op);
+                    let v = mdbx_result(rc)?;
+
+                    // Check for NULL data pointer (can happen on partial matches)
+                    if data_val.iov_base.is_null() && data_val.iov_len > 0 {
+                        return Err(Error::NotFound);
+                    }
+                    // Check for NULL key pointer (can happen on partial matches)
+                    if key_val.iov_base.is_null() && key_val.iov_len > 0 {
+                        return Err(Error::NotFound);
+                    }
+
+                    assert_ne!(data_ptr, data_val.iov_base);
+                    let key_out = if ptr::eq(key_ptr, key_val.iov_base) {
                         None
                     } else {
                         Some(Key::decode_val::<K>(txn, key_val)?)
-                    }
-                };
-                let data_out = Value::decode_val::<K>(txn, data_val)?;
-                Ok((key_out, data_out, v))
-            })?
+                    };
+                    let data_out = Value::decode_val::<K>(txn, data_val)?;
+                    Ok((key_out, data_out, v))
+                })?
+            } else {
+                // Normal cursor path - use transaction locking
+                self.txn.txn_execute(|txn| {
+                    let v = mdbx_result(ffi::mdbx_cursor_get(
+                        self.cursor,
+                        &mut key_val,
+                        &mut data_val,
+                        op,
+                    ))?;
+                    assert_ne!(data_ptr, data_val.iov_base);
+                    let key_out = {
+                        if ptr::eq(key_ptr, key_val.iov_base) {
+                            None
+                        } else {
+                            Some(Key::decode_val::<K>(txn, key_val)?)
+                        }
+                    };
+                    let data_out = Value::decode_val::<K>(txn, data_val)?;
+                    Ok((key_out, data_out, v))
+                })?
+            }
         }
     }
 
@@ -438,11 +526,13 @@ impl Cursor<RW> {
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
-        mdbx_result(unsafe {
-            self.txn.txn_execute(|_| {
+
+        unsafe {
+            let ret = self.execute_on_txn(|_| {
                 ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
-            })?
-        })?;
+            })?;
+            mdbx_result(ret)?;
+        }
 
         Ok(())
     }
@@ -455,9 +545,8 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
+            self.execute_on_txn(|_txn_ptr| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
-
         Ok(())
     }
 }
@@ -467,7 +556,7 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        self.txn.txn_execute(|_| Self::new_at_position(self).unwrap()).unwrap()
+        self.execute_on_txn(|_| Self::new_at_position(self).unwrap()).unwrap()
     }
 }
 
@@ -485,11 +574,18 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        // To be able to close a cursor of a timed out transaction, we need to renew it first.
-        // Hence the usage of `txn_execute_renew_on_timeout` here.
-        let _ = self
-            .txn
-            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+        if let Some(ref txn_ptr) = self.owned_txn_ptr {
+            // Cursor was opened on a subtransaction - close on that transaction
+            let _ = txn_ptr
+                .txn_execute_fail_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+            txn_ptr.decrement_cursor_count();
+        } else {
+            // Standard cursor - use parent transaction with renew-on-timeout
+            let _ = self
+                .txn
+                .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
+            self.txn.cursor_closed();
+        }
     }
 }
 
@@ -504,6 +600,37 @@ const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
 
 unsafe impl<K> Send for Cursor<K> where K: TransactionKind {}
 unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
+
+/// A parallel cursor retaining its parent transaction and participating in cursor tracking.
+/// Finishing subtransactions while this cursor exists returns `Error::Busy`.
+#[derive(Debug)]
+pub struct ParallelCursor<'txn> {
+    inner: Cursor<RW>,
+    _txn: &'txn Transaction<RW>,
+}
+
+impl<'txn> ParallelCursor<'txn> {
+    pub(crate) fn new(
+        txn: &'txn Transaction<RW>,
+        dbi: ffi::MDBX_dbi,
+        ptr: TransactionPtr,
+    ) -> Result<Self> {
+        Ok(Self { inner: Cursor::new_with_ptr(txn.clone(), dbi, ptr)?, _txn: txn })
+    }
+}
+
+impl std::ops::Deref for ParallelCursor<'_> {
+    type Target = Cursor<RW>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for ParallelCursor<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]

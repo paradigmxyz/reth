@@ -45,6 +45,7 @@ use std::{
 };
 use tracing::{info, instrument, trace, warn};
 
+mod parallel_writes;
 mod provider;
 pub use provider::{CommitOrder, DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
