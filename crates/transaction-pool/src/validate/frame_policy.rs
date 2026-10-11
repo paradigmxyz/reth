@@ -428,7 +428,7 @@ mod tests {
         .is_err());
         assert!(FrameValidationPolicy::new(
             &tx(vec![
-                root_frame.clone(),
+                root_frame,
                 recent_root_frame(&[(source_id, 8, root)]),
                 frame(FrameMode::Verify, 3, sender()),
             ]),

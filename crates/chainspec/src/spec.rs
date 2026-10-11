@@ -940,7 +940,6 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
-        validate_nonce_manager_genesis(&genesis, &hardforks);
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -1253,7 +1252,6 @@ impl ChainSpecBuilder {
             })
         };
         let genesis = self.genesis.expect("The genesis is required");
-        validate_nonce_manager_genesis(&genesis, &self.hardforks);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
@@ -1276,26 +1274,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
         }
-    }
-}
-
-// The genesis allocation is authoritative: injecting fork contracts here would change its state
-// root and hash. The nonce manager is installed during the block-execution fork transition.
-fn validate_nonce_manager_genesis(genesis: &Genesis, hardforks: &ChainHardforks) {
-    use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
-    let ForkCondition::Timestamp(timestamp) = hardforks.fork(EthereumHardfork::Bogota) else {
-        return;
-    };
-    if let Some(account) = genesis.alloc.get(&NONCE_MANAGER) {
-        assert!(
-            account.storage.as_ref().is_none_or(|storage| storage.values().all(B256::is_zero)),
-            "EIP-8250 nonce manager address contains storage"
-        );
-        assert!(
-            account.code.as_ref().is_none_or(|code| code.is_empty() ||
-                (genesis.timestamp >= timestamp && code.as_ref() == NONCE_MANAGER_CODE)),
-            "EIP-8250 nonce manager address contains code"
-        );
     }
 }
 
@@ -1385,6 +1363,7 @@ mod tests {
                 balance: U256::from(19),
                 nonce: Some(7),
                 code: Some(NONCE_MANAGER_CODE.into()),
+                storage: Some([(B256::from(U256::from(1)), B256::from(U256::from(7)))].into()),
                 ..Default::default()
             }),
         ] {
@@ -1423,18 +1402,26 @@ mod tests {
             alloy_genesis::GenesisAccount {
                 balance: U256::from(19),
                 nonce: Some(7),
+                code: Some(alloy_eips::eip8141::NONCE_MANAGER_CODE.into()),
+                storage: Some([(B256::from(U256::from(1)), B256::from(U256::from(7)))].into()),
                 ..Default::default()
             },
         );
         let builder = ChainSpecBuilder::default().chain(1.into()).genesis(genesis);
         let disabled = builder.clone().build();
-        assert!(disabled.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        assert_eq!(
+            disabled.genesis.alloc[&NONCE_MANAGER].code,
+            Some(alloy_eips::eip8141::NONCE_MANAGER_CODE.into())
+        );
         let future = builder.with_bogota_at(10).build();
-        assert!(future.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        assert_eq!(
+            future.genesis.alloc[&NONCE_MANAGER].code,
+            disabled.genesis.alloc[&NONCE_MANAGER].code
+        );
         let account = &future.genesis.alloc[&NONCE_MANAGER];
         assert_eq!(account.balance, U256::from(19));
         assert_eq!(account.nonce, Some(7));
-        assert!(account.storage.is_none());
+        assert_eq!(account.storage, disabled.genesis.alloc[&NONCE_MANAGER].storage);
         assert_eq!(future.genesis_header.state_root, disabled.genesis_header.state_root);
     }
 
