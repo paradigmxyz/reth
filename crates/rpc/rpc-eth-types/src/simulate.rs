@@ -264,11 +264,19 @@ where
     Ok(out)
 }
 
-/// Applies precompile move overrides from state overrides to the EVM's precompiles map.
+/// Applies precompile overrides from state overrides to the EVM's precompiles map.
 ///
-/// This function processes `movePrecompileToAddress` entries from the state overrides and
-/// moves precompiles from their original addresses to new addresses. The original address
-/// is cleared (precompile removed) and the precompile is installed at the destination address.
+/// This handles two independent override effects:
+///
+/// 1. `movePrecompileToAddress` — moves a precompile from its original address to a new address.
+///    The original address is cleared and the precompile is installed at the destination.
+/// 2. `code` — a code override on a precompile address replaces the precompile so the bytecode
+///    in the overridden state runs instead (matching geth/erigon/nethermind and
+///    ethereum/execution-apis#931).
+///
+/// Moves are applied before code shadowing so an entry that both moves a precompile and sets
+/// `code` on the source address keeps working: the precompile is relocated first, then the
+/// (already empty) source slot is cleared for the code override.
 pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     precompiles: &mut PrecompilesMap,
@@ -294,6 +302,13 @@ pub fn apply_precompile_overrides(
             EthSimulateError::NotAPrecompile(addr)
         },
     )?;
+
+    // A `code` override on a precompile address replaces the precompile.
+    for (address, account_override) in state_overrides.iter() {
+        if account_override.code.is_some() {
+            precompiles.apply_precompile(address, |_| None);
+        }
+    }
 
     Ok(())
 }
@@ -596,7 +611,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, Address, U256};
+    use alloy_primitives::{address, bytes, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
@@ -673,6 +688,49 @@ mod tests {
         state_overrides.insert(
             source,
             AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+
+        assert!(precompiles.get(&source).is_none());
+        assert!(precompiles.get(&dest).is_some());
+    }
+
+    #[test]
+    fn code_override_shadows_precompile() {
+        // Identity precompile (0x04): a code override must remove it from the precompile set so
+        // the overridden bytecode runs instead (paradigmxyz/reth#27806).
+        let identity = Address::with_last_byte(4);
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            identity,
+            AccountOverride {
+                code: Some(bytes!("0x60006000fd")),
+                ..Default::default()
+            },
+        );
+        let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
+
+        assert!(precompiles.get(&identity).is_some());
+        apply_precompile_overrides(&state_overrides, &mut precompiles).unwrap();
+        assert!(precompiles.get(&identity).is_none());
+        // Unrelated precompiles stay installed.
+        assert!(precompiles.get(&Address::with_last_byte(1)).is_some());
+    }
+
+    #[test]
+    fn code_override_after_move_keeps_destination_precompile() {
+        let source = Address::with_last_byte(4);
+        let dest = address!("0000000000000000000000000000000000123456");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            source,
+            AccountOverride {
+                code: Some(bytes!("0x60006000fd")),
+                move_precompile_to: Some(dest),
+                ..Default::default()
+            },
         );
         let mut precompiles = PrecompilesMap::from_static(Precompiles::prague());
 

@@ -378,6 +378,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 replay_block_txs = false;
             }
 
+            // Kept for every tx: DB overrides apply once, but each `transact` builds a fresh EVM
+            // whose precompile set must still be shadowed by any `code` overrides.
+            let precompile_overrides = state_override.clone();
+
             self.spawn_with_state_at_block(at, move |this, mut db| {
                 let _permit = permit;
                 let mut all_results = Vec::with_capacity(bundles.len());
@@ -410,7 +414,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         let overrides =
                             EvmOverrides::new(state_override.take(), block_overrides.clone());
 
-                        let (current_evm_env, prepared_tx) = this
+                        let (current_evm_env, prepared_tx, _) = this
                             .prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
@@ -419,15 +423,20 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                                     err.into(),
                                 ))
                             })?;
-                        let res = this.transact(&mut db, current_evm_env, prepared_tx).map_err(
-                            |err| {
+                        let res = this
+                            .transact_with_overrides(
+                                &mut db,
+                                current_evm_env,
+                                prepared_tx,
+                                precompile_overrides.as_ref(),
+                            )
+                            .map_err(|err| {
                                 Self::Error::from_eth_err(EthApiError::call_many_error(
                                     bundle_index,
                                     tx_index,
                                     err.into(),
                                 ))
-                            },
-                        )?;
+                            })?;
 
                         match Self::Error::ensure_success(res.result) {
                             Ok(output) => {
@@ -489,7 +498,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
+            let (evm_env, mut tx_env, state_overrides) = this.prepare_call_env(
                 evm_env,
                 request,
                 &mut db,
@@ -501,6 +510,10 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 evm_env,
                 AccessListInspector::new(initial),
             );
+            if let Some(ref overrides) = state_overrides {
+                simulate::apply_precompile_overrides(overrides, evm.precompiles_mut())
+                    .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+            }
 
             let result = evm.transact(tx_env.clone())?;
             let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
@@ -577,7 +590,26 @@ pub trait Call:
     where
         DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
     {
+        self.transact_with_overrides(db, evm_env, tx_env, None)
+    }
+
+    /// Executes the `TxEnv` against the given [Database] without committing state changes,
+    /// applying precompile overrides from `state_overrides` when present.
+    fn transact_with_overrides<DB>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
+        state_overrides: Option<&StateOverride>,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
+    {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        if let Some(overrides) = state_overrides {
+            simulate::apply_precompile_overrides(overrides, evm.precompiles_mut())
+                .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+        }
         let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
@@ -596,7 +628,27 @@ pub trait Call:
         DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
     {
+        self.transact_with_inspector_and_overrides(db, evm_env, tx_env, inspector, None)
+    }
+
+    /// Like [`Self::transact_with_inspector`], applying precompile overrides when present.
+    fn transact_with_inspector_and_overrides<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
+        inspector: I,
+        state_overrides: Option<&StateOverride>,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
+        I: InspectorFor<Self::Evm, DB>,
+    {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        if let Some(overrides) = state_overrides {
+            simulate::apply_precompile_overrides(overrides, evm.precompiles_mut())
+                .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+        }
         let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
         Ok(res)
@@ -627,14 +679,24 @@ pub trait Call:
             let this = self.clone();
 
             let res = self
-                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-                    let _permit = permit;
-                    if cancel.is_cancelled() {
-                        // callsite dropped the guard
-                        return Err(EthApiError::InternalEthError.into())
-                    }
-                    this.transact(db, evm_env, tx_env)
-                })
+                .spawn_with_call_at(
+                    request,
+                    at,
+                    overrides,
+                    move |db, evm_env, tx_env, state_overrides| {
+                        let _permit = permit;
+                        if cancel.is_cancelled() {
+                            // callsite dropped the guard
+                            return Err(EthApiError::InternalEthError.into())
+                        }
+                        this.transact_with_overrides(
+                            db,
+                            evm_env,
+                            tx_env,
+                            state_overrides.as_ref(),
+                        )
+                    },
+                )
                 .await;
             drop(guard);
             res
@@ -687,6 +749,7 @@ pub trait Call:
                 &mut StateCacheDb,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
+                Option<StateOverride>,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -695,10 +758,10 @@ pub trait Call:
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                let (evm_env, tx_env) =
+                let (evm_env, tx_env, state_overrides) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
-                f(&mut db, evm_env, tx_env)
+                f(&mut db, evm_env, tx_env, state_overrides)
             })
             .await
         }
@@ -853,6 +916,11 @@ pub trait Call:
     ///  - `nonce` is set to `None`
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
+    /// Returns the configured EVM/tx env and the state overrides that were applied.
+    ///
+    /// The returned [`StateOverride`] must be passed to [`Self::transact_with_overrides`] (or the
+    /// inspector equivalent) so that a `code` override on a precompile address shadows the
+    /// precompile (see #27806).
     #[expect(clippy::type_complexity)]
     fn prepare_call_env<DB>(
         &self,
@@ -860,7 +928,7 @@ pub trait Call:
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         db: &mut DB,
         overrides: EvmOverrides,
-    ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>), Self::Error>
+    ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>, Option<StateOverride>), Self::Error>
     where
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
@@ -914,8 +982,10 @@ pub trait Call:
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, evm_env.block_env.inner_mut());
         }
-        if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db)
+        // Retain overrides for precompile shadowing: DB apply consumes a clone.
+        let state_overrides = overrides.state;
+        if let Some(ref overrides) = state_overrides {
+            apply_state_overrides(overrides.clone(), db)
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
@@ -941,6 +1011,6 @@ pub trait Call:
             }
         }
 
-        Ok((evm_env, tx_env))
+        Ok((evm_env, tx_env, state_overrides))
     }
 }

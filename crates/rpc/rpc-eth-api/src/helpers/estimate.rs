@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
         api::{FromEvmHalt, FromRevert},
         FromEvmError,
     },
-    EthApiError, RpcInvalidTransactionError,
+    simulate, EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{EvmStateProvider, StateProvider};
@@ -90,9 +90,11 @@ pub trait EstimateCall: Call {
             apply_block_overrides(*block_overrides, &mut db, evm_env.block_env.inner_mut());
         }
 
-        // Apply any state overrides if specified.
-        if let Some(state_override) = overrides.state {
-            apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
+        // Apply any state overrides if specified. Retain for precompile shadowing below.
+        let state_overrides = overrides.state;
+        if let Some(ref state_override) = state_overrides {
+            apply_state_overrides(state_override.clone(), &mut db)
+                .map_err(Self::Error::from_eth_err)?;
         }
 
         // the gas limit of the corresponding block
@@ -144,6 +146,10 @@ pub trait EstimateCall: Call {
 
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+        if let Some(ref overrides) = state_overrides {
+            simulate::apply_precompile_overrides(overrides, evm.precompiles_mut())
+                .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+        }
 
         // For basic transfers, try 21_000 gas before running the full binary search.
         if is_basic_transfer {

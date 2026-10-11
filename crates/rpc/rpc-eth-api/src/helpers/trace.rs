@@ -5,7 +5,7 @@ use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::B256;
-use alloy_rpc_types_eth::{BlockId, TransactionInfo};
+use alloy_rpc_types_eth::{state::StateOverride, BlockId, TransactionInfo};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
@@ -15,7 +15,7 @@ use reth_evm::{
 use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::{
     cache::db::{attach_bal_before_tx, StateCacheDb},
-    EthApiError,
+    simulate, EthApiError,
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use reth_tasks::cancel::is_cancelled;
@@ -34,10 +34,27 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
         inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
-        self.evm_config()
-            .evm_with_env_and_inspector(db, evm_env, inspector)
-            .transact(tx_env)
-            .map_err(Self::Error::from_evm_err)
+        self.inspect_with_overrides(db, evm_env, tx_env, inspector, None)
+    }
+
+    /// Like [`Self::inspect`], applying precompile overrides from `state_overrides` when present.
+    ///
+    /// A `code` override on a precompile address must remove that precompile so the overridden
+    /// bytecode runs (see #27806).
+    fn inspect_with_overrides<'a>(
+        &self,
+        db: &'a mut StateCacheDb,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
+        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        state_overrides: Option<&StateOverride>,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        if let Some(overrides) = state_overrides {
+            simulate::apply_precompile_overrides(overrides, evm.precompiles_mut())
+                .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+        }
+        evm.transact(tx_env).map_err(Self::Error::from_evm_err)
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
