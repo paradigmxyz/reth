@@ -236,6 +236,39 @@ where
         ))
     }
 
+    fn update_cfg_env_from_block_env(&self, evm_env: &mut EvmEnv<SpecId>) {
+        let timestamp = evm_env.block_env.timestamp.saturating_to::<u64>();
+        let block_number = evm_env.block_env.number.saturating_to::<u64>();
+        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
+        let spec =
+            revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, block_number);
+
+        evm_env.cfg_env.set_spec_and_mainnet_gas_params(spec);
+        // `set_spec_and_mainnet_gas_params` only ever enables the Amsterdam flags, so reset them
+        // from the spec to avoid leaking Amsterdam behavior when an override moves back
+        // before activation.
+        let is_amsterdam = spec.is_enabled_in(SpecId::AMSTERDAM);
+        evm_env.cfg_env.enable_amsterdam_eip8037 = is_amsterdam;
+        evm_env.cfg_env.enable_amsterdam_eip2780 = is_amsterdam;
+        evm_env.cfg_env.max_blobs_per_tx = blob_params.map(|params| params.max_blobs_per_tx);
+        evm_env.cfg_env.tx_gas_limit_cap = self
+            .chain_spec()
+            .is_osaka_active_at_timestamp(timestamp)
+            .then_some(MAX_TX_GAS_LIMIT_OSAKA);
+
+        // Cancun requires excess blob gas in the environment, but a pre-Cancun block has none;
+        // default it unless a block override or the base block already provided a value.
+        if spec.is_enabled_in(SpecId::CANCUN) &&
+            evm_env.block_env.blob_excess_gas_and_price.is_none() &&
+            let Some(params) = blob_params
+        {
+            evm_env.block_env.blob_excess_gas_and_price = Some(BlobExcessGasAndPrice {
+                excess_blob_gas: 0,
+                blob_gasprice: params.calc_blob_fee(0),
+            });
+        }
+    }
+
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<Block>,
@@ -376,10 +409,11 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, ForkCondition};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{
         context::{BlockEnv, CfgEnv},
+        context_interface::Cfg,
         database::CacheDB,
         database_interface::EmptyDBTyped,
         inspector::NoOpInspector,
@@ -408,6 +442,68 @@ mod tests {
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
         assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+    }
+
+    #[test]
+    fn update_cfg_env_from_block_env_switches_forks() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1000))
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(2000))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let header = Header { timestamp: 0, ..Default::default() };
+        let mut evm_env = evm_config.evm_env(&header).unwrap();
+        assert!(!evm_env.cfg_env.spec.is_enabled_in(SpecId::CANCUN));
+
+        evm_env.block_env.timestamp = U256::from(1500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert!(evm_env.cfg_env.spec.is_enabled_in(SpecId::CANCUN));
+        assert!(!evm_env.cfg_env.spec.is_enabled_in(SpecId::PRAGUE));
+
+        evm_env.block_env.timestamp = U256::from(2500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert!(evm_env.cfg_env.spec.is_enabled_in(SpecId::PRAGUE));
+
+        // Moving back before Cancun must not leak the later fork's rules.
+        evm_env.block_env.timestamp = U256::from(500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert!(!evm_env.cfg_env.spec.is_enabled_in(SpecId::CANCUN));
+    }
+
+    #[test]
+    fn update_cfg_env_from_block_env_resets_osaka_gas_cap() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .cancun_activated()
+            .prague_activated()
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(1000))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+
+        let header = Header { timestamp: 0, ..Default::default() };
+        let mut evm_env = evm_config.evm_env(&header).unwrap();
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap, None);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX);
+
+        evm_env.block_env.timestamp = U256::from(1500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap, Some(MAX_TX_GAS_LIMIT_OSAKA));
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), MAX_TX_GAS_LIMIT_OSAKA);
+
+        evm_env.block_env.timestamp = U256::from(500);
+        evm_config.update_cfg_env_from_block_env(&mut evm_env);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap, None);
+        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX);
     }
 
     #[test]
