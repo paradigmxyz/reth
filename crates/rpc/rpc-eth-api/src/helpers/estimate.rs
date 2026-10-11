@@ -51,6 +51,19 @@ pub trait EstimateCall: Call {
     where
         S: EvmStateProvider,
     {
+        // Configure the evm env
+        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
+
+        // Apply any block overrides before deriving fork-dependent settings, block-derived limits
+        // and the tx env, so overrides for `time`, `gasLimit`, `baseFee` and `blobBaseFee` are
+        // visible everywhere. Mirrors geth's behavior, see:
+        // <https://github.com/ethereum/go-ethereum/pull/30695>
+        if let Some(block_overrides) = overrides.block {
+            apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
+            // Re-derive fork rules (spec, precompiles, warm set) from the overridden block context.
+            self.evm_config().update_cfg_env_from_block_env(&mut evm_env);
+        }
+
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
         evm_env.version_mut().features.remove(EvmFeatures::EIP3607);
@@ -72,17 +85,6 @@ pub trait EstimateCall: Call {
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
-
-        // Configure the evm env
-        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
-
-        // Apply any block overrides before deriving block-derived limits and the tx env so
-        // overrides for `gasLimit`, `baseFee` and `blobBaseFee` are visible to estimation.
-        // Mirrors geth's behavior, see:
-        // <https://github.com/ethereum/go-ethereum/pull/30695>
-        if let Some(block_overrides) = overrides.block {
-            apply_block_overrides(*block_overrides, &mut db, &mut evm_env);
-        }
 
         // Apply any state overrides if specified.
         if let Some(state_override) = overrides.state {
