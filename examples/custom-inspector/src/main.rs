@@ -70,7 +70,7 @@ fn main() {
                                 call_request,
                                 BlockId::latest(),
                                 EvmOverrides::default(),
-                                move |db, evm_env, tx_env| {
+                                move |db, evm_env, tx_env, _state_overrides| {
                                     let mut dummy_inspector = DummyInspector::default();
                                     let mut evm = evm_config.evm_with_env_and_inspector(
                                         db,
