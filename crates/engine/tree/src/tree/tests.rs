@@ -39,7 +39,7 @@ use reth_provider::{
     test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
 };
 use reth_tasks::spawn_os_thread;
-use reth_trie_common::ComputedTrieData;
+use reth_trie_common::SortedTrieData;
 use revm::state::bal::Bal as RevmBal;
 use std::{
     collections::BTreeMap,
@@ -652,18 +652,6 @@ async fn test_tree_persist_blocks() {
 
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_request() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-    let persisted = blocks[0].recovered_block().num_hash();
-    test_harness.tree.persistence_state.finish(persisted, persisted);
-
-    test_harness.tree.on_new_persisted_block().unwrap();
-
-    assert!(test_harness.tree.state.pending_sparse_trie_prune());
-}
-
-#[test]
-fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     let persisted = blocks[0].recovered_block().num_hash();
@@ -1501,7 +1489,7 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
-    let empty_trie_data = ComputedTrieData::default;
+    let empty_trie_data = SortedTrieData::default;
 
     for block in &chain_a {
         test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
@@ -3542,7 +3530,7 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                SortedTrieData::default(),
             )
         })
         .collect();
@@ -3580,7 +3568,7 @@ async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len
             ExecutedBlock::new(
                 Arc::new(block),
                 Arc::new(BlockExecutionOutput::default()),
-                ComputedTrieData::default(),
+                SortedTrieData::default(),
             )
         })
         .collect();

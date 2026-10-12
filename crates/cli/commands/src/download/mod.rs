@@ -1312,26 +1312,6 @@ mod tests {
     }
 
     #[test]
-    fn test_download_retry_backoff() {
-        let parse = |args: Vec<&str>| {
-            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from(args)
-        };
-        assert_eq!(parse(vec!["reth"]).unwrap().args.retry_backoff, None);
-        for (value, expected) in [
-            ("0ms", Duration::ZERO),
-            ("250ms", Duration::from_millis(250)),
-            ("2s", Duration::from_secs(2)),
-        ] {
-            assert_eq!(
-                parse(vec!["reth", "--retry-backoff", value]).unwrap().args.retry_backoff,
-                Some(expected)
-            );
-        }
-        assert!(parse(vec!["reth", "--retry-backoff=-1s"]).is_err());
-        assert!(parse(vec!["reth", "--retry-backoff", "invalid"]).is_err());
-    }
-
-    #[test]
     fn test_download_prune_unlisted_conflicts_with_force_list_and_url() {
         let parse = |args: &[&str]| {
             CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from(args)

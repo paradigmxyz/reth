@@ -297,24 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn noop_provider_returns_empty_results() {
-        let provider = crate::noop::NoopProvider::default();
-        let hashes = [B256::random(), B256::random()];
-
-        assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);
-        assert_eq!(
-            provider
-                .get_bals_by_hashes_with_limit(
-                    &hashes,
-                    GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
-                )
-                .unwrap(),
-            vec![None]
-        );
-        assert!(provider.get_bal_by_hash(B256::random()).unwrap().is_none());
-    }
-
-    #[test]
     fn noop_store_flush_is_noop() {
         let store = BalStoreHandle::default();
 

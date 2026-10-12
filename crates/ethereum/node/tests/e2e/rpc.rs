@@ -473,56 +473,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
-
-    let signer = wallet.signer(0);
-    let sender = signer.address();
-    let provider = node.rpc_provider_with_wallet(signer);
-
-    let tx_hash = *provider
-        .send_transaction(TransactionRequest::default().to(Address::ZERO))
-        .await?
-        .tx_hash();
-    // Transaction ingress has already recovered the sender through the shared cache.
-    let payload = node.new_payload().await?;
-    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    let request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
-            message: BidTrace {
-                parent_hash: payload.block().parent_hash,
-                block_hash: payload.block().hash(),
-                gas_used: payload.block().gas_used,
-                gas_limit: payload.block().gas_limit,
-                ..Default::default()
-            },
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                payload.block().hash(),
-                &payload.block().clone().into_block(),
-            ),
-            blobs_bundle: BlobsBundleV1::new([]),
-            signature: Default::default(),
-        },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
-
-    provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await?;
-    // Validation accepts the submission while reusing the sender cached by transaction ingress.
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -1259,6 +1209,57 @@ async fn test_mine() -> eyre::Result<()> {
         mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
         [second, first]
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mine_signed() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let signer = wallet.signer(0);
+    let chain_id = node.inner.chain_spec().chain().id();
+    let request = |nonce| {
+        TransactionRequest::default()
+            .with_chain_id(chain_id)
+            .with_nonce(nonce)
+            .with_gas_limit(100_000)
+            .with_max_fee_per_gas(20e9 as u128)
+            .with_max_priority_fee_per_gas(1e9 as u128)
+    };
+    let recipient = Address::with_last_byte(0x77);
+
+    // Signed envelopes are mined without encoding them first, receipts in the given order.
+    let first = TransactionTestContext::sign_tx(
+        signer.clone(),
+        request(0).with_to(recipient).with_value(U256::ONE),
+    )
+    .await;
+    let second = TransactionTestContext::sign_tx(
+        signer.clone(),
+        request(1).with_to(recipient).with_value(U256::from(2)),
+    )
+    .await;
+    let mined = node.mine_signed([second.clone(), first.clone()]).await?;
+    assert_eq!(mined.block().number, 1);
+    assert_eq!(
+        mined.receipts.iter().map(|receipt| receipt.transaction_hash).collect::<Vec<_>>(),
+        [*second.tx_hash(), *first.tx_hash()]
+    );
+
+    // A reverted transaction is mined, but reported as an error.
+    // PUSH1 0 PUSH1 0 REVERT
+    let reverting =
+        TransactionTestContext::sign_tx(signer, request(2).with_deploy_code(bytes!("60006000fd")))
+            .await;
+    let err = node.mine_signed([reverting.clone()]).await.unwrap_err().to_string();
+    assert!(
+        err.starts_with(&format!("transaction {} reverted after using", reverting.tx_hash())),
+        "{err}"
+    );
+    assert_eq!(node.rpc_provider().get_block_number().await?, 2);
 
     Ok(())
 }

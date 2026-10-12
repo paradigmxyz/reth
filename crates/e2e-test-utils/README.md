@@ -69,6 +69,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Change node settings that have a CLI flag | `with_node_config_modifier`, `with_rpc_modifier` (default: all modules except `testing` over HTTP), `with_pruning` |
 | Change engine tree settings | `with_tree_config_modifier`, applied last, on top of the tree config derived from the node config |
 | Choose the storage layout | `with_storage_v2(bool)`, defaults to the node default |
+| Sync with another backfill, e.g. snap with `--snap.v2` | `with_backfill(EthereumBackfill::new)`, which picks the backfill from the final node config like the binary, so snap needs `config.network.snap_v2 = true` and `with_storage_v2(true)`; a `--snap.v2` node without `with_backfill` fails to launch; not combinable with `with_dev_mining` |
 | Let a local miner build the blocks | `with_dev_mining(block_time)`, `map_dev_payload_attributes`; `with_dev_mode` only sets `--dev` |
 | **Accounts and transactions** | |
 | Sign transactions from a funded account that tracks its nonce | `wallet.account(i)` (a `TestAccount`), then `account.transfer(to, value).await`, `account.call(to, input)` or `account.deploy(init_code)` |
@@ -79,6 +80,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | Put a raw transaction into the pool | `node.rpc.inject_tx(raw)` |
 | **Producing blocks** | |
 | Mine given transactions and get their receipts | `node.mine(txs)`, which fails if the block misses one of them or includes another pool transaction; `mine_including(txs)` allows other pool transactions |
+| Mine signed transactions, e.g. of a custom transaction type, that must all succeed | `node.mine_signed(txs)`, which encodes them, mines them like `mine` and fails if one reverted |
 | Mine transactions that are already in the pool, e.g. sent through a provider | `node.mine_pooled(hashes)`, with the checks of `mine` and an error for a hash that is not in the pool |
 | Produce blocks from the pool | `advance_block()`, `advance_blocks(n)`; `advance_block_synced()` also waits for the pool to process the block |
 | Produce blocks until a transaction is included | `advance_until_receipt(hash)` |
@@ -98,7 +100,7 @@ RUST_LOG=info,engine::tree=debug cargo nextest run -p reth-node-ethereum --test 
 | **Multiple nodes** | |
 | Connect two nodes | `a.connect(&mut b)`, done by `build()` unless disabled |
 | Give a node the block of another node | `follower.import_payload(payload)`; the parent must be known |
-| Let a node download a chain from its peers | `follower.sync_to(hash)`, which makes the block head, safe and finalized; after a forkchoice update of the test's own, `wait_for_head(hash)` |
+| Let a node download a chain from its peers | `follower.sync_to(hash)`, which makes the block head, safe and finalized; `sync_to_forkchoice(state)` to keep the finalized block below the head; after a forkchoice update of the test's own, `wait_for_head(hash)` |
 | **Stopping and restarting** | |
 | Make nodes restartable | `with_restartable_nodes()`; opt-in because each node then runs on a runtime of its own, which costs a few threads per node; not combinable with `with_runtime` |
 | Stop a node and keep its datadir | `node.stop()`, which returns a `StoppedNode`; `stopped.data_dir()` while it is stopped; dropping it removes the datadir |

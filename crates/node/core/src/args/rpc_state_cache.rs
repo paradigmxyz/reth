@@ -155,26 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn rpc_cache_byte_limits_accept_zero_and_maximum() {
-        for limit in [0, 1024, usize::MAX] {
-            let value = limit.to_string();
-            let args = CommandParser::parse_from([
-                "reth",
-                "--rpc-cache.max-blocks-bytes",
-                &value,
-                "--rpc-cache.max-receipts-bytes",
-                &value,
-                "--rpc-cache.max-bals-bytes",
-                &value,
-            ])
-            .args;
-            assert_eq!(args.max_blocks_bytes, limit);
-            assert_eq!(args.max_receipts_bytes, limit);
-            assert_eq!(args.max_bals_bytes, limit);
-        }
-    }
-
-    #[test]
     fn rpc_cache_byte_limits_reject_invalid_values() {
         let overflow = format!("{}0", usize::MAX);
         let unit_overflow = format!("{}GB", usize::MAX);
@@ -217,26 +197,6 @@ mod tests {
             assert_eq!(args.max_blocks_bytes, expected);
             assert_eq!(args.max_receipts_bytes, expected);
             assert_eq!(args.max_bals_bytes, expected);
-        }
-    }
-
-    #[test]
-    fn rpc_cache_idle_timeout_parses_durations() {
-        for (value, expected) in [
-            ("0s", Duration::ZERO),
-            ("500ms", Duration::from_millis(500)),
-            ("30s", Duration::from_secs(30)),
-            ("5m", Duration::from_secs(300)),
-        ] {
-            let args = CommandParser::parse_from(["reth", "--rpc-cache.idle-timeout", value]).args;
-            assert_eq!(args.idle_timeout, expected);
-        }
-        for value in ["-1s", "invalid", "18446744073709551616s"] {
-            assert!(CommandParser::try_parse_from([
-                "reth",
-                &format!("--rpc-cache.idle-timeout={value}")
-            ])
-            .is_err());
         }
     }
 

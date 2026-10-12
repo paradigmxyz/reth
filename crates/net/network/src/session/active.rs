@@ -1793,35 +1793,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn snap_request_times_out() {
-        let mut builder = snap_session_builder();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
-            let _client_stream = client_stream;
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        });
-        tokio::task::spawn(fut);
-        let (incoming, _) = listener.accept().await.unwrap();
-        let mut session = builder.connect_incoming(incoming).await;
-
-        // Tiny timeout so the deadline (computed at insert) is already in the past.
-        session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, rx) = dispatch_snap_request(&mut session, 0);
-
-        // The first check resolves the caller with a timeout but keeps the entry so the session
-        // can escalate to a protocol breach.
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert!(!session.check_timed_out_requests(Instant::now()));
-        assert!(session.inflight_requests.contains_key(&id));
-        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
-
-        // Once the breach timeout passes without a response, the session flags a protocol breach.
-        session.protocol_breach_request_timeout = Duration::from_millis(1);
-        assert!(session.check_timed_out_requests(Instant::now()));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn late_snap_response_is_consumed_without_penalty() {
         let mut builder = snap_session_builder();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1835,9 +1806,10 @@ mod tests {
         let mut session = builder.connect_incoming(incoming).await;
 
         session.internal_request_timeout.store(1, Ordering::Relaxed);
-        let (id, _rx) = dispatch_snap_request(&mut session, 0);
+        let (id, rx) = dispatch_snap_request(&mut session, 0);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!session.check_timed_out_requests(Instant::now()));
+        assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::Timeout);
 
         // A response arriving after the timeout clears the entry without a bad-message report.
         let outcome = session.on_incoming_snap_message(SnapProtocolMessage::BlockAccessLists(

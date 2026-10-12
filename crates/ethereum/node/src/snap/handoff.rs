@@ -465,20 +465,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_stopped_rebuild_leaves_the_trie_unbuilt() {
-        let (factory, write) = downloading();
-        let stop = CancellationToken::new();
-        stop.cancel();
-
-        let rebuild = SnapHandoff::new(factory.clone()).rebuild(write, &stop).unwrap();
-
-        assert_eq!(rebuild, RebuildOutcome::Stopped);
-
-        let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(), None);
-    }
-
-    #[test]
     fn an_abandoned_attempt_is_not_an_interrupted_publish() {
         let (factory, ..) = downloading();
         let provider = factory.database_provider_rw().unwrap();

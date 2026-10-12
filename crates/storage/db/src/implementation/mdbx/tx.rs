@@ -198,8 +198,8 @@ struct MetricsHandler<K: TransactionKind> {
     /// Shared database environment metrics.
     env_metrics: Arc<DatabaseEnvMetrics>,
     /// Backtrace of the location where the transaction has been opened. Reported only with debug
-    /// assertions, because capturing the backtrace on every transaction opening is expensive.
-    #[cfg(debug_assertions)]
+    /// assertions outside DST, because capturing every transaction opening is expensive.
+    #[cfg(all(debug_assertions, not(feature = "dst")))]
     open_backtrace: Backtrace,
     _marker: PhantomData<K>,
 }
@@ -213,7 +213,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, not(feature = "dst")))]
             open_backtrace: Backtrace::force_capture(),
             env_metrics,
             _marker: PhantomData,
@@ -254,9 +254,9 @@ impl<K: TransactionKind> MetricsHandler<K> {
             let open_duration = self.start.elapsed();
             if open_duration >= self.long_transaction_duration {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
-                #[cfg(debug_assertions)]
+                #[cfg(all(debug_assertions, not(feature = "dst")))]
                 let open_backtrace = format_args!("{}", self.open_backtrace);
-                #[cfg(not(debug_assertions))]
+                #[cfg(not(all(debug_assertions, not(feature = "dst"))))]
                 let open_backtrace = tracing::field::Empty;
                 warn!(
                     target: "storage::db::mdbx",

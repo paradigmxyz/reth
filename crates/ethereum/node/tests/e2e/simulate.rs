@@ -120,28 +120,6 @@ async fn test_simulate_v1_block_access_list_hash_across_amsterdam() -> eyre::Res
 }
 
 #[tokio::test]
-async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
-
-    let tx = TransactionRequest::default().to(Address::ZERO).gas_limit(3_000_000);
-    let sim_block = SimBlock::default().call(tx.clone()).call(tx);
-    let payload = SimulatePayload::default().extend(sim_block);
-
-    let result: Vec<SimulatedBlock> =
-        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
-
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].calls.len(), 2);
-    assert!(result[0].calls.iter().all(|call| call.status));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

@@ -371,7 +371,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::AccessRights;
+    use super::*;
 
     #[test]
     fn inconsistent_access_rights_skip_consistency_checks() {
