@@ -314,7 +314,7 @@ checksum = "7b6bd5f7e5ce9858bac99275e3f548c3b63bb3e5806da0142dc0b2f518d3ec4a"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-hardforks 0.4.9",
+ "alloy-hardforks 0.4.10",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -356,9 +356,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d5ff0394d9547798fa4b666c46e356d09a113f33d45fb3d75175681c1e2652"
+checksum = "67bc1e34b9e64d1cff9fe7f65627f6e09e3db5893c918cc4b90b8e2a09da1aa5"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -1698,6 +1698,14 @@ name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+
+[[package]]
+name = "bedrock-assertions"
+version = "0.1.0"
+source = "git+https://github.com/oss-garage/bedrock#1d75d79122a6204efb61cbf1026513e655f38586"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bimap"
@@ -3368,6 +3376,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
+ "reth-tasks",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
@@ -7610,7 +7619,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-evm",
- "alloy-hardforks 0.4.9",
+ "alloy-hardforks 0.4.10",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
@@ -8165,6 +8174,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-dst"
+version = "2.7.0"
+dependencies = [
+ "bedrock-assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-e2e-test-utils"
 version = "2.7.0"
 dependencies = [
@@ -8528,7 +8546,7 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
- "alloy-hardforks 0.4.9",
+ "alloy-hardforks 0.4.10",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -8647,7 +8665,7 @@ name = "reth-ethereum-forks"
 version = "2.7.0"
 dependencies = [
  "alloy-eip2124",
- "alloy-hardforks 0.4.9",
+ "alloy-hardforks 0.4.10",
  "alloy-primitives",
  "arbitrary",
  "auto_impl",

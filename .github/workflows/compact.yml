@@ -54,6 +54,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.base_ref || 'main' }}
+          # The default `git clean -ffdx` would delete the `target/` restored by rust-cache.
+          clean: false
           persist-credentials: false
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
       - name: Generate compact vectors
