@@ -90,6 +90,7 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             account.balance = balance;
         }
 
+        let replaces_storage = account_override.state.is_some();
         let storage = match (account_override.state, account_override.state_diff) {
             (Some(_), Some(_)) => return Err(StateOverrideError::BothStateAndStateDiff(address)),
             (Some(state), None) => {
@@ -100,8 +101,12 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             (None, None) => None,
         };
 
-        // Account existence affects authorization refunds and new-account gas charges.
-        if existed || !account.is_empty() || storage.as_ref().is_some_and(|state| !state.is_empty())
+        // Account existence affects authorization refunds and new-account gas charges. A full
+        // storage replacement always materializes the account, even with no slots.
+        if existed ||
+            !account.is_empty() ||
+            replaces_storage ||
+            storage.as_ref().is_some_and(|state| !state.is_empty())
         {
             db.insert_account_info(&address, account);
         }
