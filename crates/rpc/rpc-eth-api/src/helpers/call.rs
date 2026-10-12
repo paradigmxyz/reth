@@ -483,7 +483,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, tx_env) = this.prepare_call_env(
+            let (evm_env, mut tx_env) = this.prepare_call_env(
                 evm_env,
                 request,
                 &mut db,
@@ -506,7 +506,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 });
             }
 
-            let mut tx_env = tx_env;
             tx_env.inner_mut().set_access_list(access_list.clone());
 
             // Transact again to get the exact gas used with the returned access list.
