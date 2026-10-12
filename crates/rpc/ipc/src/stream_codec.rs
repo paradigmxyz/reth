@@ -48,10 +48,13 @@ impl Default for Separator {
 }
 
 /// Stream codec for streaming protocols (ipc, tcp)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StreamCodec {
     incoming_separator: Separator,
     outgoing_separator: Separator,
+    max_length: usize,
+    /// The first `max_length + 1` bytes of the message being skipped.
+    truncated: Option<BytesMut>,
     scan: ScanState,
 }
 
@@ -63,7 +66,32 @@ impl StreamCodec {
 
     /// New custom stream codec
     pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
-        Self { incoming_separator, outgoing_separator, scan: ScanState::new() }
+        Self {
+            incoming_separator,
+            outgoing_separator,
+            max_length: usize::MAX,
+            truncated: None,
+            scan: ScanState::new(),
+        }
+    }
+
+    /// Truncates messages longer than `max_length` bytes to `max_length + 1` bytes, so the
+    /// reader can reject them without buffering the whole message.
+    pub const fn with_max_length(mut self, max_length: usize) -> Self {
+        self.max_length = max_length;
+        self
+    }
+
+    /// Starts skipping the message at the start of `buf`, keeping its first bytes.
+    fn truncate(&mut self, buf: &mut BytesMut) {
+        self.truncated = Some(buf.split_to(self.max_length + 1));
+        buf.clear();
+    }
+}
+
+impl Default for StreamCodec {
+    fn default() -> Self {
+        Self::new(Default::default(), Default::default())
     }
 }
 
@@ -99,6 +127,14 @@ const fn is_whitespace(byte: u8) -> bool {
     matches!(byte, 0x0D | 0x0A | 0x20 | 0x09)
 }
 
+/// Converts the start of a truncated message, which may end inside a UTF-8 sequence.
+///
+/// Replacement characters are never shorter than the bytes they replace, so the message stays
+/// longer than the limit.
+fn lossy(truncated: &[u8]) -> String {
+    String::from_utf8_lossy(truncated).into_owned()
+}
+
 impl tokio_util::codec::Decoder for StreamCodec {
     type Item = String;
     type Error = io::Error;
@@ -107,13 +143,21 @@ impl tokio_util::codec::Decoder for StreamCodec {
         if let Separator::Byte(separator) = self.incoming_separator {
             if let Some(i) = buf.as_ref().iter().position(|&b| b == separator) {
                 let line = buf.split_to(i);
-                let _ = buf.split_to(1);
+                buf.advance(1);
+                if let Some(truncated) = self.truncated.take() {
+                    return Ok(Some(lossy(&truncated)))
+                }
 
                 match str::from_utf8(line.as_ref()) {
                     Ok(s) => Ok(Some(s.to_string())),
                     Err(_) => Err(io::Error::other("invalid UTF-8")),
                 }
             } else {
+                if self.truncated.is_some() {
+                    buf.clear();
+                } else if buf.len() > self.max_length {
+                    self.truncate(buf);
+                }
                 Ok(None)
             }
         } else {
@@ -137,6 +181,13 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 self.scan.is_escaped = byte == b'\\' && !self.scan.is_escaped && self.scan.in_str;
 
                 if self.scan.depth == 0 &&
+                    let Some(truncated) = self.truncated.take()
+                {
+                    self.scan = ScanState::new();
+                    buf.advance(idx + 1);
+                    return Ok(Some(lossy(&truncated)))
+                }
+                if self.scan.depth == 0 &&
                     idx != self.scan.start_idx &&
                     idx - self.scan.start_idx + 1 > self.scan.whitespaces
                 {
@@ -152,6 +203,18 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 }
 
                 self.scan.cursor += 1;
+            }
+
+            if self.truncated.is_some() {
+                buf.clear();
+                self.scan.cursor = 0;
+            } else if self.scan.depth > 0 && buf.len() - self.scan.start_idx > self.max_length {
+                buf.advance(self.scan.start_idx);
+                self.truncate(buf);
+                self.scan.start_idx = 0;
+                self.scan.cursor = 0;
+            } else if buf.len() > self.max_length {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
             }
             Ok(None)
         }
@@ -585,5 +648,30 @@ mod tests {
                 "well-formed message should decode to at least one frame"
             );
         }
+    }
+
+    #[test]
+    fn max_length() {
+        let mut codec = StreamCodec::stream_incoming().with_max_length(8);
+        let mut buf = BytesMut::from(&br#"{"a":1}  {"b":"#[..]);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(br#""long","c":["#);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(br#"]}{"d":2}"#);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"b":"lon"#);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"d":2}"#);
+        assert!(buf.is_empty());
+
+        let mut buf = BytesMut::from(&b"          "[..]);
+        assert_eq!(codec.decode(&mut buf).unwrap_err().kind(), io::ErrorKind::InvalidData);
+
+        let mut codec = StreamCodec::default().with_max_length(4);
+        let mut buf = BytesMut::from(&b"abcd\nabcdef"[..]);
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcd");
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(b"gh\nij\n");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcde");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "ij");
     }
 }
