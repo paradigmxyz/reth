@@ -311,7 +311,7 @@ pub fn evm_state_to_state_update(state: &revm::state::EvmState) -> StateUpdate {
                     .then(|| without_code(&account.original_info())),
                 current: (!account.is_selfdestructed()).then(|| without_code(&account.info)),
                 created: account.is_created(),
-                wiped: false,
+                wiped: account.is_selfdestructed(),
                 storage: account
                     .storage
                     .iter()
