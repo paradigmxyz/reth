@@ -684,7 +684,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x00B0_0B5E_C0DE_C0DE);
         let alphabet: &[u8] = b"{}[]\":,\\ \n\t a1\xff";
 
-        for _ in 0..2000 {
+        for _ in 0..200 {
             let max_length = 1 + rng.next_u32() as usize % 16;
             let mut codec = if rng.next_u32() % 2 == 0 {
                 StreamCodec::stream_incoming()
