@@ -129,7 +129,8 @@ mod tests {
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{
-        BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
+        BlobTransactionSidecar, Block, BlockBody, Header, SidecarBuilder, SimpleCoder, Transaction,
+        TxLegacy,
     };
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
@@ -326,6 +327,59 @@ mod tests {
             };
             assert_eq!(actual.into_sidecar(), sidecar);
         }
+    }
+
+    #[tokio::test]
+    async fn mined_transaction_recovery_reads_sender_cache() {
+        let cache = SenderRecoveryCache::new(16);
+        let eth_api = mock_eth_api_builder(Default::default())
+            .sender_recovery_cache(Some(cache.clone()))
+            .build();
+        let signed = TransactionSigned::new_unhashed(
+            TxLegacy::default().into(),
+            Signature::test_signature(),
+        );
+        // Stands in for a transaction whose sender was attributed without a valid signature, such
+        // as an impersonated transaction on a dev node.
+        let unsigned = TransactionSigned::new_unhashed(
+            TxLegacy { nonce: 1, ..Default::default() }.into(),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        );
+        eth_api.provider().add_block(
+            B256::with_last_byte(1),
+            Block::new(
+                Header { number: 1, ..Default::default() },
+                BlockBody {
+                    transactions: vec![signed.clone(), unsigned.clone()],
+                    ..Default::default()
+                },
+            ),
+        );
+        let invalid_signature = EthApiError::InvalidTransactionSignature.to_string();
+
+        // A miss recovers the sender from the signature without caching it.
+        let source = LoadTransaction::transaction_by_hash(&eth_api, *signed.tx_hash())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(source.into_recovered().signer(), signed.try_recover().unwrap());
+        assert_eq!(cache.get(signed.tx_hash()), None);
+        let err =
+            LoadTransaction::transaction_by_hash(&eth_api, *unsigned.tx_hash()).await.unwrap_err();
+        assert_eq!(err.to_string(), invalid_signature);
+        let err = eth_api.load_transaction_and_receipt(*unsigned.tx_hash()).await.unwrap_err();
+        assert_eq!(err.to_string(), invalid_signature);
+
+        // A cached sender is used without recovering it from the signature.
+        let sender = Address::repeat_byte(0xaa);
+        cache.recover_with(&unsigned, |_| Ok(sender)).unwrap();
+        let source = LoadTransaction::transaction_by_hash(&eth_api, *unsigned.tx_hash())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(source.into_recovered().signer(), sender);
+        // The mock provider has no receipts by hash, so recovering the sender yields no receipt.
+        assert!(eth_api.load_transaction_and_receipt(*unsigned.tx_hash()).await.unwrap().is_none());
     }
 
     #[tokio::test]
