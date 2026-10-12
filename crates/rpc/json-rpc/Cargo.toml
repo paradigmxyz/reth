@@ -38,6 +38,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 
 [dev-dependencies]
+criterion.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
@@ -56,3 +57,8 @@ server = [
 client = ["tokio/time"]
 http-client = ["client", "dep:reqwest"]
 ws-client = ["client", "dep:tokio-tungstenite", "tokio/net"]
+
+[[bench]]
+name = "module"
+harness = false
+required-features = ["macros"]

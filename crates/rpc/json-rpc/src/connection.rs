@@ -1,6 +1,6 @@
 use crate::{
     reject_too_big_batch_request, reject_too_big_request,
-    request::{parse_message, split_batch, Message},
+    request::{parse, Entry, Message, Parsed},
     response::batch_json,
     subscription::Connection,
     BatchRequestConfig, ConnectionId, ErrorObject, Id, MethodResponse, RpcModule, RpcService,
@@ -66,10 +66,10 @@ pub async fn serve_connection<R, W, L>(
                 continue
             }
             let service = service.clone();
-            let extensions = extensions.clone();
+            let extensions = Extensions::clone(&extensions);
             calls.spawn(async move {
                 if let Some((json, on_sent)) =
-                    handle_message(&*service, msg, max_response_size, batch_config, &extensions)
+                    handle_message(&*service, msg, max_response_size, batch_config, extensions)
                         .await
                 {
                     permit.send(json);
@@ -116,12 +116,12 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
     msg: Bytes,
     max_response_size: usize,
     batch_config: BatchRequestConfig,
-    extensions: &Extensions,
+    extensions: Extensions,
 ) -> Option<(String, Vec<oneshot::Sender<()>>)> {
     let mut on_sent = Vec::new();
-    let entries = match split_batch(&msg) {
-        None => {
-            let response = match parse_message(&msg, extensions) {
+    let entries = match parse(&msg) {
+        Ok(Parsed::Single(entry)) => {
+            let response = match entry.into_message(&msg, extensions) {
                 Message::Call(req) => service.call(req).await,
                 Message::Notification(n) => {
                     service.notification(n).await;
@@ -131,11 +131,25 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
             };
             return Some((response.into_json_with(&mut on_sent), on_sent))
         }
-        Some(Ok(entries)) => entries,
-        Some(Err(code)) => {
-            return Some((MethodResponse::error(Id::Null, code).into_json(), on_sent))
-        }
+        Ok(Parsed::Batch(entries)) => entries,
+        Err(code) => return Some((MethodResponse::error(Id::Null, code).into_json(), on_sent)),
     };
+    Box::pin(handle_batch(service, &msg, entries, max_response_size, batch_config, extensions))
+        .await
+}
+
+/// Handles the entries of a batch.
+///
+/// Boxed by the caller to keep the future of single messages small.
+async fn handle_batch<S: RpcServiceT>(
+    service: &S,
+    msg: &Bytes,
+    entries: Vec<Entry<'_>>,
+    max_response_size: usize,
+    batch_config: BatchRequestConfig,
+    extensions: Extensions,
+) -> Option<(String, Vec<oneshot::Sender<()>>)> {
+    let mut on_sent = Vec::new();
     let err = match batch_config {
         BatchRequestConfig::Disabled => {
             Some(ErrorObject::borrowed(BATCHES_NOT_SUPPORTED_CODE, BATCHES_NOT_SUPPORTED_MSG))
@@ -153,8 +167,8 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
     let mut responses = Vec::with_capacity(entries.len());
     let mut reqs = Vec::with_capacity(entries.len());
     let mut notifications = Vec::new();
-    for entry in &entries {
-        match parse_message(entry, extensions) {
+    for entry in entries {
+        match entry.into_message(msg, extensions.clone()) {
             Message::Call(req) => {
                 reqs.push(req);
                 responses.push(None);
@@ -163,7 +177,7 @@ pub(crate) async fn handle_message<S: RpcServiceT>(
             Message::Invalid(id, code) => responses.push(Some(MethodResponse::error(id, code))),
         }
     }
-    drop(entries);
+    drop(extensions);
     let notify = join_all(notifications.into_iter().map(|n| service.notification(n)));
     let calls = async {
         if reqs.is_empty() {
@@ -205,7 +219,7 @@ mod tests {
         let mut extensions = Extensions::new();
         extensions.insert(ConnectionId(7));
         let msg = Bytes::copy_from_slice(msg.as_bytes());
-        handle_message(service, msg, usize::MAX, config, &extensions).await.map_or_default(|r| r.0)
+        handle_message(service, msg, usize::MAX, config, extensions).await.map_or_default(|r| r.0)
     }
 
     #[tokio::test]

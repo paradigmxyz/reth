@@ -126,14 +126,31 @@ impl<'a> ParamsSequence<'a> {
     /// Parses the next parameter.
     #[expect(clippy::should_implement_trait)]
     pub fn next<T: Deserialize<'a>>(&mut self) -> Result<T, ErrorObject> {
+        let missing = self.missing();
+        self.next_inner()?.ok_or_else(missing)
+    }
+
+    /// Parses the next parameter, deserializing a missing one from `null`.
+    ///
+    /// This makes trailing `Option` parameters optional.
+    fn next_or_null<T: Deserialize<'a>>(&mut self) -> Result<T, ErrorObject> {
+        let missing = self.missing();
+        match self.next_inner()? {
+            Some(value) => Ok(value),
+            None => serde_json::from_str("null").map_err(|_| missing()),
+        }
+    }
+
+    /// Returns a function that creates the error for a missing next parameter.
+    fn missing(&self) -> impl FnOnce() -> ErrorObject + use<'a> {
         let name = match &self.0 {
             Seq::Array(_) => None,
             Seq::Object { names, .. } => names.as_slice().first().and_then(|keys| keys.first()),
         };
-        self.next_inner()?.ok_or_else(|| match name {
+        move || match name {
             Some(name) => invalid_params(format_args!("Missing param {name:?}")),
             None => invalid_params("No more params"),
-        })
+        }
     }
 
     /// Parses the next optional parameter, returning `None` for `null` or missing values.
@@ -141,6 +158,40 @@ impl<'a> ParamsSequence<'a> {
         self.next_inner::<Option<T>>().map(Option::flatten)
     }
 }
+
+/// Positional or named parameters parsed into a tuple, used by the `rpc` macro.
+#[doc(hidden)]
+pub trait FromParams<'a>: Sized {
+    /// Parses `params`, where `names` lists the accepted keys of each parameter.
+    fn from_params(params: &'a Params, names: &'a [&'a [&'a str]]) -> Result<Self, ErrorObject>;
+}
+
+macro_rules! impl_from_params {
+    ($($t:ident),+) => {
+        impl<'a, $($t: Deserialize<'a>),+> FromParams<'a> for ($($t,)+) {
+            fn from_params(
+                params: &'a Params,
+                names: &'a [&'a [&'a str]],
+            ) -> Result<Self, ErrorObject> {
+                let mut seq = params.sequence_named(names)?;
+                Ok(($(seq.next_or_null::<$t>()?,)+))
+            }
+        }
+    };
+}
+
+impl_from_params!(A);
+impl_from_params!(A, B);
+impl_from_params!(A, B, C);
+impl_from_params!(A, B, C, D);
+impl_from_params!(A, B, C, D, E);
+impl_from_params!(A, B, C, D, E, F);
+impl_from_params!(A, B, C, D, E, F, G);
+impl_from_params!(A, B, C, D, E, F, G, H);
+impl_from_params!(A, B, C, D, E, F, G, H, I);
+impl_from_params!(A, B, C, D, E, F, G, H, I, J);
+impl_from_params!(A, B, C, D, E, F, G, H, I, J, K);
+impl_from_params!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 #[cfg(test)]
 mod tests {
@@ -201,6 +252,21 @@ mod tests {
         assert!(seq.next::<bool>().unwrap());
 
         assert!(params(r#"{"full":}"#).sequence_named(NAMES).is_err());
+    }
+
+    #[test]
+    fn from_params() {
+        const NAMES: &[&[&str]] = &[&["a"], &["b"]];
+        let parse = |p| <(u8, Option<u8>)>::from_params(&params(p), NAMES);
+        assert_eq!(parse("[1, 2]").unwrap(), (1, Some(2)));
+        assert_eq!(parse("[1]").unwrap(), (1, None));
+        assert_eq!(parse(r#"{"a": 1}"#).unwrap(), (1, None));
+        assert_eq!(parse("[]").unwrap_err().data().unwrap().get(), r#""No more params""#);
+        assert_eq!(
+            parse(r#"{"b": 1}"#).unwrap_err().data().unwrap().get(),
+            r#""Missing param \"a\"""#
+        );
+        assert!(parse("[1, 2, 3]").is_ok());
     }
 
     #[test]

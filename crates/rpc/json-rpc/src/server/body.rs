@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
-use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Empty, Full};
+use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
+use hyper::body::Incoming;
 use std::{
     fmt,
     pin::Pin,
@@ -15,7 +16,16 @@ pub type HttpRequest<B = HttpBody> = http::Request<B>;
 pub type HttpResponse<B = HttpBody> = http::Response<B>;
 
 /// A type-erased HTTP body.
-pub struct HttpBody(UnsyncBoxBody<Bytes, BoxError>);
+///
+/// Received bodies and full or empty bodies are stored without boxing.
+pub struct HttpBody(Inner);
+
+enum Inner {
+    Empty,
+    Full(Full<Bytes>),
+    Incoming(Incoming),
+    Boxed(UnsyncBoxBody<Bytes, BoxError>),
+}
 
 impl HttpBody {
     /// Wraps a body.
@@ -24,12 +34,12 @@ impl HttpBody {
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError>,
     {
-        Self(body.map_err(Into::into).boxed_unsync())
+        Self(Inner::Boxed(body.map_err(Into::into).boxed_unsync()))
     }
 
     /// Returns an empty body.
-    pub fn empty() -> Self {
-        Self::new(Empty::new())
+    pub const fn empty() -> Self {
+        Self(Inner::Empty)
     }
 }
 
@@ -53,15 +63,36 @@ impl Body for HttpBody {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
-        Pin::new(&mut self.0).poll_frame(cx)
+        match &mut self.0 {
+            Inner::Empty => Poll::Ready(None),
+            Inner::Full(body) => Pin::new(body).poll_frame(cx).map_err(|err| match err {}),
+            Inner::Incoming(body) => Pin::new(body).poll_frame(cx).map_err(Into::into),
+            Inner::Boxed(body) => Pin::new(body).poll_frame(cx),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.is_end_stream()
+        match &self.0 {
+            Inner::Empty => true,
+            Inner::Full(body) => body.is_end_stream(),
+            Inner::Incoming(body) => body.is_end_stream(),
+            Inner::Boxed(body) => body.is_end_stream(),
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
-        self.0.size_hint()
+        match &self.0 {
+            Inner::Empty => SizeHint::with_exact(0),
+            Inner::Full(body) => body.size_hint(),
+            Inner::Incoming(body) => body.size_hint(),
+            Inner::Boxed(body) => body.size_hint(),
+        }
+    }
+}
+
+impl From<Incoming> for HttpBody {
+    fn from(body: Incoming) -> Self {
+        Self(Inner::Incoming(body))
     }
 }
 
@@ -69,7 +100,7 @@ macro_rules! impl_from_full {
     ($($t:ty),*) => {$(
         impl From<$t> for HttpBody {
             fn from(value: $t) -> Self {
-                Self::new(Full::new(Bytes::from(value)))
+                Self(Inner::Full(Full::new(Bytes::from(value))))
             }
         }
     )*};

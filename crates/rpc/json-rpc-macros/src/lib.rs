@@ -33,8 +33,9 @@ use syn::{
 /// after `&self` and the subscription sink, and `param_kind = map`, which makes the client send
 /// named parameters.
 ///
-/// Parameters are positional, or named by their name or its `lowerCamelCase` form. A trailing
-/// `Option` parameter may be omitted. `#[argument(rename = "..")]` sets the parameter name.
+/// Parameters are positional, or named by their name or its `lowerCamelCase` form. A missing
+/// parameter is read as `null`, so trailing `Option` parameters may be omitted. Methods take at
+/// most 12 parameters. `#[argument(rename = "..")]` sets the parameter name.
 #[proc_macro_attribute]
 pub fn rpc(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut args = RpcArgs::default();
@@ -177,7 +178,10 @@ impl Rpc {
                     }
                     Err(syn::Error::new_spanned(arg, "expected an identifier"))
                 })
-                .collect::<syn::Result<_>>()?;
+                .collect::<syn::Result<Vec<_>>>()?;
+            if args.len() > 12 {
+                return Err(syn::Error::new_spanned(&func.sig, "expected at most 12 parameters"))
+            }
             methods.push(Method {
                 func: func.clone(),
                 name,
@@ -237,47 +241,59 @@ impl Rpc {
             let call = quote!(<Self as #name #ty_generics>::#rust_name);
             let is_async = m.func.sig.asyncness.is_some();
             let wait = is_async.then(|| quote!(.await));
-            let args = m.args.iter().map(|arg| &arg.ident);
+            let args = m.args.iter().map(|arg| &arg.ident).collect::<Vec<_>>();
             let params = if m.args.is_empty() { quote!(_) } else { quote!(__params) };
             let ext = if m.with_extensions { quote!(__ext) } else { quote!(_) };
             let ext_arg = m.with_extensions.then(|| quote!(, &__ext));
             let mut unsubscribe_aliases = None;
+            let pat = quote!((#(#args,)*));
+            let parse = parse_args(&m.args);
             let register = match &m.kind {
                 Kind::Method { blocking } => {
-                    let on_err = quote! {
-                        return ::reth_json_rpc::__private::MethodResult::Err(__err)
-                    };
-                    let parse = parse_args(&m.args, &on_err);
-                    let mut body = quote!(#call(&__ctx #ext_arg #(, #args)*) #wait);
-                    if !m.args.is_empty() {
-                        body = quote!(#parse ::reth_json_rpc::__private::MethodResult::Ok(#body));
-                    }
-                    if is_async {
+                    let body = quote!(#call(&__ctx #ext_arg #(, #args)*) #wait);
+                    if is_async && m.args.is_empty() {
                         quote! {
-                            rpc.register_async_method(#rpc_name, move |#params, #ext| {
+                            rpc.register_async_method(#rpc_name, move |_, #ext| {
                                 let __ctx = __ctx.clone();
                                 async move { #body }
                             })
                         }
-                    } else if *blocking {
+                    } else if is_async {
                         quote! {
-                            rpc.register_blocking_method(#rpc_name, move |#params, #ext| {
-                                #body
+                            rpc.register_async_method_or_err(#rpc_name, move |__params, #ext| {
+                                let __ctx = __ctx.clone();
+                                #parse.map(move |#pat| async move { #body })
                             })
                         }
                     } else {
-                        quote!(rpc.register_method(#rpc_name, move |#params, #ext| { #body }))
+                        let register = if *blocking {
+                            quote!(register_blocking_method)
+                        } else {
+                            quote!(register_method)
+                        };
+                        let body = if m.args.is_empty() {
+                            body
+                        } else {
+                            quote!(::reth_json_rpc::__private::MethodResult(#parse.map(|#pat| #body)))
+                        };
+                        quote!(rpc.#register(#rpc_name, move |#params, #ext| #body))
                     }
                 }
                 Kind::Subscription {
                     notification, unsubscribe, unsubscribe_aliases: a, ..
                 } => {
                     unsubscribe_aliases = Some((unsubscribe, a));
-                    let on_err = quote! {{
-                        __pending.reject(__err);
-                        return ::core::result::Result::Ok(())
-                    }};
-                    let parse = parse_args(&m.args, &on_err);
+                    let parse = (!m.args.is_empty()).then(|| {
+                        quote! {
+                            let #pat = match #parse {
+                                ::core::result::Result::Ok(__args) => __args,
+                                ::core::result::Result::Err(__err) => {
+                                    __pending.reject(__err);
+                                    return ::core::result::Result::Ok(())
+                                }
+                            };
+                        }
+                    });
                     quote! {
                         rpc.register_subscription(
                             #rpc_name, #notification, #unsubscribe,
@@ -357,54 +373,38 @@ impl Rpc {
             let rpc_name = &m.name;
             let mut sig = m.func.sig.clone();
             sig.asyncness = None;
-            let (output, call) = match &m.kind {
+            let (output, func, unsubscribe) = match &m.kind {
                 Kind::Method { .. } => match result_ok_type(&sig.output) {
-                    Ok(ty) => (
-                        quote!(#ty),
-                        quote! {
-                            ::reth_json_rpc::client::ClientT::request::<#ty, _>(
-                                self, #rpc_name, __rpc_params,
-                            )
-                        },
-                    ),
+                    Ok(ty) => {
+                        (quote!(#ty), quote!(ClientT::request::<#ty, _>), None)
+                    }
                     Err(err) => return err.to_compile_error(),
                 },
                 Kind::Subscription { unsubscribe, item, .. } => (
                     quote!(::reth_json_rpc::client::Subscription<#item>),
-                    quote! {
-                        ::reth_json_rpc::client::SubscriptionClientT::subscribe::<#item, _>(
-                            self, #rpc_name, __rpc_params, #unsubscribe,
-                        )
-                    },
+                    quote!(SubscriptionClientT::subscribe::<#item, _>),
+                    Some(quote!(, #unsubscribe)),
                 ),
             };
+            let call =
+                |params| quote!(::reth_json_rpc::client::#func(self, #rpc_name, #params #unsubscribe));
             sig.output = parse_quote! {
                 -> impl ::core::future::Future<
                     Output = ::core::result::Result<#output, ::reth_json_rpc::client::Error>,
                 > + ::core::marker::Send
             };
             let attrs = &m.func.attrs;
-            let (params, inserts) = if m.named_params {
+            let body = if m.named_params {
                 let inserts = m.args.iter().map(|arg| {
                     let ident = &arg.ident;
                     let name = arg.rename.clone().unwrap_or_else(|| ident.unraw().to_string());
                     quote!(__rpc_params.insert(#name, #ident))
                 });
-                (quote!(ObjectParams), inserts.collect::<Vec<_>>())
-            } else {
-                let inserts = m.args.iter().map(|arg| {
-                    let ident = &arg.ident;
-                    quote!(__rpc_params.insert(#ident))
-                });
-                (quote!(ArrayParams), inserts.collect())
-            };
-            quote! {
-                #(#attrs)*
-                #[allow(non_snake_case, clippy::used_underscore_binding)]
-                #sig {
+                let call = call(quote!(__rpc_params));
+                quote! {
                     async move {
                         #[allow(unused_mut)]
-                        let mut __rpc_params = ::reth_json_rpc::client::#params::new();
+                        let mut __rpc_params = ::reth_json_rpc::client::ObjectParams::new();
                         #(
                             if let ::core::result::Result::Err(__err) = #inserts {
                                 return ::core::result::Result::Err(
@@ -414,6 +414,16 @@ impl Rpc {
                         )*
                         #call.await
                     }
+                }
+            } else {
+                let args = m.args.iter().map(|arg| &arg.ident);
+                call(quote!((#(#args,)*)))
+            };
+            quote! {
+                #(#attrs)*
+                #[allow(non_snake_case, clippy::used_underscore_binding)]
+                #sig {
+                    #body
                 }
             }
         });
@@ -582,21 +592,9 @@ fn parse_bounds(meta: &ParseNestedMeta<'_>) -> syn::Result<Vec<WherePredicate>> 
     Ok(content.parse_terminated(WherePredicate::parse, Token![,])?.into_iter().collect())
 }
 
-/// Generates code that parses `__params` into one variable per argument, running `on_err` with
-/// `__err` on failure.
-fn parse_args(args: &[Arg], on_err: &TokenStream2) -> TokenStream2 {
-    if args.is_empty() {
-        return TokenStream2::new()
-    }
-    let lets = args.iter().map(|Arg { ident, ty, .. }| {
-        let next = if is_option(ty) { quote!(optional_next) } else { quote!(next) };
-        quote! {
-            let #ident: #ty = match __seq.#next() {
-                ::core::result::Result::Ok(value) => value,
-                ::core::result::Result::Err(__err) => #on_err,
-            };
-        }
-    });
+/// Generates an expression that parses `__params` into a tuple of the arguments.
+fn parse_args(args: &[Arg]) -> TokenStream2 {
+    let tys = args.iter().map(|arg| &arg.ty);
     let names = args.iter().map(|arg| {
         if let Some(rename) = &arg.rename {
             return quote!(&[#rename])
@@ -610,11 +608,10 @@ fn parse_args(args: &[Arg], on_err: &TokenStream2) -> TokenStream2 {
         }
     });
     quote! {
-        let mut __seq = match __params.sequence_named(&[#(#names),*]) {
-            ::core::result::Result::Ok(seq) => seq,
-            ::core::result::Result::Err(__err) => #on_err,
-        };
-        #(#lets)*
+        <(#(#tys,)*) as ::reth_json_rpc::__private::FromParams<'_>>::from_params(
+            &__params,
+            &[#(#names),*],
+        )
     }
 }
 
@@ -633,10 +630,6 @@ fn lower_camel_case(name: &str) -> String {
         }
     }
     out
-}
-
-fn is_option(ty: &Type) -> bool {
-    matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|seg| seg.ident == "Option"))
 }
 
 /// Returns `T` from a `RpcResult<T>` or `Result<T, E>` return type.

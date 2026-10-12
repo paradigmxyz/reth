@@ -271,9 +271,9 @@ where
             return status_response(StatusCode::UNSUPPORTED_MEDIA_TYPE)
         }
 
-        let extensions = req.extensions().clone();
+        let (parts, body) = req.into_parts();
         let max_request_size = config.max_request_body_size as usize;
-        let body = match Limited::new(req.into_body(), max_request_size).collect().await {
+        let body = match Limited::new(body, max_request_size).collect().await {
             Ok(body) => body.to_bytes(),
             Err(err) if err.is::<LengthLimitError>() => {
                 let err = reject_too_big_request(max_request_size);
@@ -285,8 +285,14 @@ where
             Err(_) => return status_response(StatusCode::BAD_REQUEST),
         };
         let max_response_size = config.max_response_body_size as usize;
-        match handle_message(&*self.rpc, body, max_response_size, config.batch_config, &extensions)
-            .await
+        match handle_message(
+            &*self.rpc,
+            body,
+            max_response_size,
+            config.batch_config,
+            parts.extensions,
+        )
+        .await
         {
             Some((json, _)) => json_response(StatusCode::OK, json),
             None => status_response(StatusCode::OK),
@@ -428,7 +434,7 @@ where
     B::Error: Into<BoxError>,
 {
     let service = TowerToHyperService::new(
-        service.map_request(|req: http::Request<Incoming>| req.map(HttpBody::new)),
+        service.map_request(|req: http::Request<Incoming>| req.map(HttpBody::from)),
     );
     let mut builder = auto::Builder::new(TokioExecutor::new());
     builder.http1().keep_alive(keep_alive);

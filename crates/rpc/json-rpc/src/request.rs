@@ -1,7 +1,10 @@
-use crate::{Id, Params};
+use crate::{ErrorCode, Id, Params};
 use bytes::Bytes;
 use http::Extensions;
-use serde::{de::IgnoredAny, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::{IgnoredAny, MapAccess, SeqAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use serde_json::value::RawValue;
 use std::{
     borrow::{Borrow, Cow},
@@ -43,14 +46,6 @@ impl ByteStr {
     /// Returns `s`, which must point into `buf`, as a slice of `buf`.
     pub(crate) fn slice_ref(buf: &Bytes, s: &str) -> Self {
         Self(buf.slice_ref(s.as_bytes()))
-    }
-
-    /// Returns `s` as a slice of `buf` if borrowed, or copies it otherwise.
-    fn from_cow(buf: &Bytes, s: Cow<'_, str>) -> Self {
-        match s {
-            Cow::Borrowed(s) => Self::slice_ref(buf, s),
-            Cow::Owned(s) => s.into(),
-        }
     }
 }
 
@@ -232,91 +227,155 @@ pub(crate) enum Message {
     /// A notification, which gets no response.
     Notification(Notification),
     /// An invalid request, answered with this error and id.
-    Invalid(Id, crate::ErrorCode),
+    Invalid(Id, ErrorCode),
 }
 
-#[derive(Deserialize)]
-struct RawRequest<'a> {
-    #[serde(borrow)]
-    jsonrpc: Cow<'a, str>,
-    #[serde(borrow, default, deserialize_with = "some_raw")]
-    id: Option<&'a RawValue>,
-    #[serde(borrow)]
-    method: Cow<'a, str>,
-    #[serde(borrow, default)]
-    params: Option<&'a RawValue>,
+/// A single message or a batch, borrowing from the received buffer.
+#[derive(Debug)]
+pub(crate) enum Parsed<'a> {
+    /// A single message.
+    Single(Entry<'a>),
+    /// A non-empty batch.
+    Batch(Vec<Entry<'a>>),
 }
 
-#[derive(Deserialize)]
-struct RawId<'a> {
-    #[serde(borrow, default)]
-    id: Option<&'a RawValue>,
-}
-
-/// Keeps an explicit `null` id, unlike `Option`, which maps it to `None`.
-fn some_raw<'de, D: Deserializer<'de>>(d: D) -> Result<Option<&'de RawValue>, D::Error> {
-    <&RawValue>::deserialize(d).map(Some)
-}
-
-/// Splits a buffer into its JSON-RPC messages, or returns `None` if it is not a batch.
-pub(crate) fn split_batch(buf: &Bytes) -> Option<Result<Vec<Bytes>, crate::ErrorCode>> {
-    let first = buf.iter().find(|b| !b.is_ascii_whitespace())?;
-    if *first != b'[' {
-        return None
-    }
-    let Ok(entries) = serde_json::from_slice::<Vec<&RawValue>>(buf) else {
-        return Some(Err(crate::ErrorCode::ParseError))
-    };
-    if entries.is_empty() {
-        return Some(Err(crate::ErrorCode::InvalidRequest))
-    }
-    Some(Ok(entries.into_iter().map(|e| buf.slice_ref(e.get().as_bytes())).collect()))
-}
-
-/// Parses a single JSON-RPC message, borrowing strings from `buf`.
-pub(crate) fn parse_message(buf: &Bytes, extensions: &Extensions) -> Message {
-    match serde_json::from_slice::<RawRequest<'_>>(buf) {
-        Ok(req) => {
-            if req.jsonrpc != "2.0" {
-                let id = req.id.and_then(|id| parse_id(buf, id)).unwrap_or(Id::Null);
-                return Message::Invalid(id, crate::ErrorCode::InvalidRequest)
-            }
-            let method = ByteStr::from_cow(buf, req.method);
-            let params = Params::new(req.params.map(|p| ByteStr::slice_ref(buf, p.get())));
-            let extensions = extensions.clone();
-            let Some(id) = req.id else {
-                return Message::Notification(Notification { method, params, extensions })
-            };
-            let Some(id) = parse_id(buf, id) else {
-                return Message::Invalid(Id::Null, crate::ErrorCode::InvalidRequest)
-            };
-            Message::Call(Request { id, method, params, extensions })
+/// Parses a message or batch in one pass over `buf`.
+///
+/// Returns a parse error if `buf` is not UTF-8 JSON, and an invalid request error for an empty
+/// batch.
+pub(crate) fn parse(buf: &Bytes) -> Result<Parsed<'_>, ErrorCode> {
+    let json = std::str::from_utf8(buf).map_err(|_| ErrorCode::ParseError)?;
+    if json.trim_ascii_start().starts_with('[') {
+        let entries =
+            serde_json::from_str::<Vec<Entry<'_>>>(json).map_err(|_| ErrorCode::ParseError)?;
+        if entries.is_empty() {
+            return Err(ErrorCode::InvalidRequest)
         }
-        Err(_) => match serde_json::from_slice::<RawId<'_>>(buf) {
-            Ok(raw) => Message::Invalid(
-                raw.id.and_then(|id| parse_id(buf, id)).unwrap_or(Id::Null),
-                crate::ErrorCode::InvalidRequest,
-            ),
-            Err(_) if serde_json::from_slice::<IgnoredAny>(buf).is_ok() => {
-                Message::Invalid(Id::Null, crate::ErrorCode::InvalidRequest)
-            }
-            Err(_) => Message::Invalid(Id::Null, crate::ErrorCode::ParseError),
-        },
+        Ok(Parsed::Batch(entries))
+    } else {
+        serde_json::from_str(json).map(Parsed::Single).map_err(|_| ErrorCode::ParseError)
     }
+}
+
+/// The members of a JSON-RPC request object, which are validated by [`Entry::into_message`].
+///
+/// Deserializing only fails on invalid JSON, so a batch is parsed in one pass even if some of its
+/// entries are invalid requests.
+#[derive(Debug, Default)]
+pub(crate) struct Entry<'a> {
+    jsonrpc: Option<&'a RawValue>,
+    id: Option<&'a RawValue>,
+    method: Option<&'a RawValue>,
+    params: Option<&'a RawValue>,
+    /// Whether the entry is not an object or repeats a member.
+    invalid: bool,
+}
+
+impl<'a> Entry<'a> {
+    /// Validates the entry, returning its method and params as slices of `buf`.
+    pub(crate) fn into_message(self, buf: &Bytes, extensions: Extensions) -> Message {
+        let id = match self.id.map(|id| parse_id(buf, id)) {
+            None => None,
+            Some(Some(id)) => Some(id),
+            Some(None) => return Message::Invalid(Id::Null, ErrorCode::InvalidRequest),
+        };
+        let method = self.method.and_then(|method| parse_str(buf, method));
+        let Some(method) = method.filter(|_| !self.invalid && self.jsonrpc.is_some_and(is_v2))
+        else {
+            return Message::Invalid(id.unwrap_or_default(), ErrorCode::InvalidRequest)
+        };
+        let params = self.params.filter(|params| params.get() != "null");
+        let params = Params::new(params.map(|params| ByteStr::slice_ref(buf, params.get())));
+        match id {
+            Some(id) => Message::Call(Request { id, method, params, extensions }),
+            None => Message::Notification(Notification { method, params, extensions }),
+        }
+    }
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for Entry<'a> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(EntryVisitor)
+    }
+}
+
+struct EntryVisitor;
+
+impl<'de> Visitor<'de> for EntryVisitor {
+    type Value = Entry<'de>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON-RPC request")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Entry<'de>, A::Error> {
+        let mut entry = Entry::default();
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            let slot = match &*key {
+                "jsonrpc" => &mut entry.jsonrpc,
+                "id" => &mut entry.id,
+                "method" => &mut entry.method,
+                "params" => &mut entry.params,
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                    continue
+                }
+            };
+            entry.invalid |= slot.replace(map.next_value()?).is_some();
+        }
+        Ok(entry)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Entry<'de>, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+
+    fn visit_unit<E>(self) -> Result<Entry<'de>, E> {
+        Ok(Entry { invalid: true, ..Default::default() })
+    }
+}
+
+/// Returns a JSON string as a slice of `buf`, or unescaped if it contains escapes.
+fn parse_str(buf: &Bytes, raw: &RawValue) -> Option<ByteStr> {
+    let s = raw.get();
+    let inner = s.strip_prefix('"')?.strip_suffix('"')?;
+    if inner.contains('\\') {
+        serde_json::from_str::<String>(s).ok().map(Into::into)
+    } else {
+        Some(ByteStr::slice_ref(buf, inner))
+    }
+}
+
+fn is_v2(raw: &RawValue) -> bool {
+    raw.get() == r#""2.0""# || serde_json::from_str::<String>(raw.get()).is_ok_and(|v| v == "2.0")
 }
 
 fn parse_id(buf: &Bytes, raw: &RawValue) -> Option<Id> {
     let s = raw.get();
     match s.as_bytes().first()? {
         b'n' if s == "null" => Some(Id::Null),
-        b'"' => {
-            let inner = &s[1..s.len() - 1];
-            if inner.contains('\\') {
-                serde_json::from_str::<String>(s).ok().map(|s| Id::Str(s.into()))
-            } else {
-                Some(Id::Str(ByteStr::slice_ref(buf, inner)))
-            }
-        }
+        b'"' => parse_str(buf, raw).map(Id::Str),
         _ => s.parse().ok().map(Id::Number),
     }
 }
@@ -326,14 +385,19 @@ mod tests {
     use super::*;
     use crate::ErrorCode;
 
-    fn parse(s: &'static str) -> Message {
-        parse_message(&Bytes::from_static(s.as_bytes()), &Extensions::new())
+    fn parse_one(s: &'static str) -> Message {
+        let buf = Bytes::from_static(s.as_bytes());
+        match parse(&buf) {
+            Ok(Parsed::Single(entry)) => entry.into_message(&buf, Extensions::new()),
+            Ok(Parsed::Batch(_)) => panic!("unexpected batch"),
+            Err(code) => Message::Invalid(Id::Null, code),
+        }
     }
 
     #[test]
     fn parse_call() {
         let Message::Call(req) =
-            parse(r#"{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[1, "a"]}"#)
+            parse_one(r#"{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[1, "a"]}"#)
         else {
             panic!()
         };
@@ -341,14 +405,14 @@ mod tests {
         assert_eq!(req.method, "eth_call");
         assert_eq!(req.params.as_str(), Some(r#"[1, "a"]"#));
 
-        let Message::Call(req) = parse(r#"{"jsonrpc":"2.0","id":"a\"b","method":"mA"}"#) else {
+        let Message::Call(req) = parse_one(r#"{"jsonrpc":"2.0","id":"a\"b","method":"mA"}"#) else {
             panic!()
         };
         assert_eq!(req.id, Id::Str("a\"b".into()));
         assert_eq!(req.method, "mA");
         assert!(req.params.is_none());
 
-        let Message::Call(req) = parse(r#"{"jsonrpc":"2.0","id":null,"method":"m"}"#) else {
+        let Message::Call(req) = parse_one(r#"{"jsonrpc":"2.0","id":null,"method":"m"}"#) else {
             panic!()
         };
         assert_eq!(req.id, Id::Null);
@@ -356,26 +420,64 @@ mod tests {
 
     #[test]
     fn parse_invalid() {
-        assert!(matches!(parse(r#"{"jsonrpc":"2.0","method":"m"}"#), Message::Notification(_)));
+        assert!(matches!(parse_one(r#"{"jsonrpc":"2.0","method":"m"}"#), Message::Notification(_)));
         assert!(matches!(
-            parse(r#"{"jsonrpc":"2.0","id":5,"method":1}"#),
+            parse_one(r#"{"jsonrpc":"2.0","id":5,"method":1}"#),
             Message::Invalid(Id::Number(5), ErrorCode::InvalidRequest)
         ));
         assert!(matches!(
-            parse(r#"{"jsonrpc":"1.0","id":5,"method":"m"}"#),
+            parse_one(r#"{"jsonrpc":"1.0","id":5,"method":"m"}"#),
             Message::Invalid(Id::Number(5), ErrorCode::InvalidRequest)
         ));
-        assert!(matches!(parse("{"), Message::Invalid(Id::Null, ErrorCode::ParseError)));
-        assert!(matches!(parse("1"), Message::Invalid(Id::Null, ErrorCode::InvalidRequest)));
+        assert!(matches!(parse_one("{"), Message::Invalid(Id::Null, ErrorCode::ParseError)));
+        assert!(matches!(parse_one("1"), Message::Invalid(Id::Null, ErrorCode::InvalidRequest)));
     }
 
     #[test]
-    fn split() {
-        let buf = Bytes::from_static(br#" [{"a":1}, 2]"#);
-        let entries = split_batch(&buf).unwrap().unwrap();
-        assert_eq!(entries, [&br#"{"a":1}"#[..], b"2"]);
-        assert!(split_batch(&Bytes::from_static(b"{}")).is_none());
-        assert_eq!(split_batch(&Bytes::from_static(b"[]")), Some(Err(ErrorCode::InvalidRequest)));
-        assert_eq!(split_batch(&Bytes::from_static(b"[")), Some(Err(ErrorCode::ParseError)));
+    fn batch() {
+        let buf = Bytes::from_static(
+            br#" [{"a":1}, 2, ["2.0", 1, "m"], {"jsonrpc":"2.0","id":1,"method":"m"}]"#,
+        );
+        let Ok(Parsed::Batch(entries)) = parse(&buf) else { panic!() };
+        let messages = entries
+            .into_iter()
+            .map(|entry| entry.into_message(&buf, Extensions::new()))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            messages[..],
+            [
+                Message::Invalid(Id::Null, ErrorCode::InvalidRequest),
+                Message::Invalid(Id::Null, ErrorCode::InvalidRequest),
+                Message::Invalid(Id::Null, ErrorCode::InvalidRequest),
+                Message::Call(_)
+            ]
+        ));
+        assert!(matches!(parse(&Bytes::from_static(b"{}")), Ok(Parsed::Single(_))));
+        assert_eq!(parse(&Bytes::from_static(b"[]")).unwrap_err(), ErrorCode::InvalidRequest);
+        assert_eq!(parse(&Bytes::from_static(b"[")).unwrap_err(), ErrorCode::ParseError);
+        assert_eq!(parse(&Bytes::from_static(b"[{}] 1")).unwrap_err(), ErrorCode::ParseError);
+    }
+
+    #[test]
+    fn members() {
+        let Message::Call(req) =
+            parse_one(r#"{"params":null,"x":[{}],"method":"e\u0074h","id":"1","jsonrpc":"2.0"}"#)
+        else {
+            panic!()
+        };
+        assert_eq!(req.id, Id::Str("1".into()));
+        assert_eq!(req.method, "eth");
+        assert!(req.params.is_none());
+
+        assert!(matches!(
+            parse_one(r#"{"jsonrpc":"2.0","id":1,"method":"m","method":"n"}"#),
+            Message::Invalid(Id::Number(1), ErrorCode::InvalidRequest)
+        ));
+        assert!(matches!(
+            parse_one(r#"{"jsonrpc":"2.0","id":{},"method":"m"}"#),
+            Message::Invalid(Id::Null, ErrorCode::InvalidRequest)
+        ));
+        let buf = Bytes::from_static(b"{\"method\":\"\xff\"}");
+        assert_eq!(parse(&buf).unwrap_err(), ErrorCode::ParseError);
     }
 }

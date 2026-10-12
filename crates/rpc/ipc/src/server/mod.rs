@@ -717,9 +717,9 @@ mod tests {
         assert_eq!(
             responses,
             [
-                r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#,
                 r#"{"jsonrpc":"2.0","id":2,"result":"succeed"}"#,
                 r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32007,"message":"Request is too big","data":"Exceeded max limit of 64"}}"#,
+                r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#,
             ]
         );
     }

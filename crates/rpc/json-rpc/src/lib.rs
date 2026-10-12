@@ -74,5 +74,5 @@ pub type RpcResult<T> = Result<T, ErrorObject>;
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::module::MethodResult;
+    pub use crate::{module::MethodResult, params::FromParams};
 }

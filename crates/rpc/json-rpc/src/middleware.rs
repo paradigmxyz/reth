@@ -121,7 +121,8 @@ impl RpcServiceT for RpcService {
                 match catch_unwind(AssertUnwindSafe(|| {
                     callback(id.clone(), params, extensions, max_size)
                 })) {
-                    Ok(fut) => ResponseFuture(Inner::Future { fut, id }),
+                    Ok(Ok(fut)) => ResponseFuture(Inner::Future { fut, id }),
+                    Ok(Err(response)) => ResponseFuture::ready(response),
                     Err(_) => internal_error(id),
                 }
             }

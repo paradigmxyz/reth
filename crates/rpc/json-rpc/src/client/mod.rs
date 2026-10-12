@@ -102,6 +102,12 @@ impl ToRpcParams for Option<Box<RawValue>> {
     }
 }
 
+impl ToRpcParams for () {
+    fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, serde_json::Error> {
+        Ok(None)
+    }
+}
+
 macro_rules! impl_to_rpc_params_tuple {
     ($($ty:ident),+) => {
         impl<$($ty: Serialize),+> ToRpcParams for ($($ty,)+) {
@@ -118,6 +124,12 @@ impl_to_rpc_params_tuple!(A, B, C);
 impl_to_rpc_params_tuple!(A, B, C, D);
 impl_to_rpc_params_tuple!(A, B, C, D, E);
 impl_to_rpc_params_tuple!(A, B, C, D, E, F);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G, H);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G, H, I);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_to_rpc_params_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 impl<P: Serialize, const N: usize> ToRpcParams for [P; N] {
     fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, serde_json::Error> {

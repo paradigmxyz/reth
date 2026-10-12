@@ -8979,6 +8979,7 @@ name = "reth-json-rpc"
 version = "2.7.0"
 dependencies = [
  "bytes",
+ "codspeed-criterion-compat",
  "futures",
  "futures-util",
  "http",
