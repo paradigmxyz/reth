@@ -129,10 +129,14 @@ const fn is_whitespace(byte: u8) -> bool {
 
 /// Converts the start of a truncated message, which may end inside a UTF-8 sequence.
 ///
-/// Replacement characters are never shorter than the bytes they replace, so the message stays
-/// longer than the limit.
-fn lossy(truncated: &[u8]) -> String {
-    String::from_utf8_lossy(truncated).into_owned()
+/// The reader rejects the message by its length alone, so non-ASCII bytes are replaced with `?`
+/// in place, which keeps the length.
+fn lossy(truncated: BytesMut) -> String {
+    String::from_utf8(truncated.into()).unwrap_or_else(|err| {
+        let mut bytes = err.into_bytes();
+        bytes.iter_mut().filter(|b| !b.is_ascii()).for_each(|b| *b = b'?');
+        String::from_utf8(bytes).expect("ASCII is valid UTF-8")
+    })
 }
 
 impl tokio_util::codec::Decoder for StreamCodec {
@@ -145,7 +149,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 let line = buf.split_to(i);
                 buf.advance(1);
                 if let Some(truncated) = self.truncated.take() {
-                    return Ok(Some(lossy(&truncated)))
+                    return Ok(Some(lossy(truncated)))
                 }
 
                 match str::from_utf8(line.as_ref()) {
@@ -185,7 +189,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 {
                     self.scan = ScanState::new();
                     buf.advance(idx + 1);
-                    return Ok(Some(lossy(&truncated)))
+                    return Ok(Some(lossy(truncated)))
                 }
                 if self.scan.depth == 0 &&
                     idx != self.scan.start_idx &&
@@ -199,22 +203,33 @@ impl tokio_util::codec::Decoder for StreamCodec {
                         buf.advance(start);
                     }
                     let bts = buf.split_to(end - start);
-                    return Ok(String::from_utf8(bts.into()).ok())
+                    // Skip invalid UTF-8 and keep scanning, the rest of the buffer may hold more
+                    // messages.
+                    match String::from_utf8(bts.into()) {
+                        Ok(msg) => return Ok(Some(msg)),
+                        Err(_) => continue,
+                    }
                 }
 
                 self.scan.cursor += 1;
             }
 
+            // Keep at most `max_length` bytes buffered between calls.
             if self.truncated.is_some() {
                 buf.clear();
                 self.scan.cursor = 0;
-            } else if self.scan.depth > 0 && buf.len() - self.scan.start_idx > self.max_length {
-                buf.advance(self.scan.start_idx);
-                self.truncate(buf);
-                self.scan.start_idx = 0;
-                self.scan.cursor = 0;
             } else if buf.len() > self.max_length {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
+                if self.scan.depth <= 0 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
+                }
+                // The bytes before an open value are never part of a message.
+                buf.advance(self.scan.start_idx);
+                self.scan.cursor -= self.scan.start_idx;
+                self.scan.start_idx = 0;
+                if buf.len() > self.max_length {
+                    self.truncate(buf);
+                    self.scan.cursor = 0;
+                }
             }
             Ok(None)
         }
@@ -434,6 +449,8 @@ mod tests {
 
     /// The stateless `Separator::Empty` decode loop that `ScanState` replaced, kept as the
     /// reference implementation for the differential tests below.
+    ///
+    /// Messages with invalid UTF-8 are skipped.
     struct ReferenceDecoder;
 
     impl Decoder for ReferenceDecoder {
@@ -469,7 +486,10 @@ mod tests {
                         buf.advance(start_idx);
                     }
                     let bts = buf.split_to(idx + 1 - start_idx);
-                    return Ok(String::from_utf8(bts.into()).ok())
+                    return match String::from_utf8(bts.into()) {
+                        Ok(msg) => Ok(Some(msg)),
+                        Err(_) => self.decode(buf),
+                    }
                 }
             }
             Ok(None)
@@ -663,7 +683,17 @@ mod tests {
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"d":2}"#);
         assert!(buf.is_empty());
 
+        let mut buf = BytesMut::from(&br#"      {"a":"#[..]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        assert_eq!(buf, br#"{"a":"#[..]);
+        buf.put_slice(b"1}");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
+
         let mut buf = BytesMut::from(&b"          "[..]);
+        assert_eq!(codec.decode(&mut buf).unwrap_err().kind(), io::ErrorKind::InvalidData);
+
+        let mut codec = StreamCodec::stream_incoming().with_max_length(8);
+        let mut buf = BytesMut::from(&b"}aaaaaaaa"[..]);
         assert_eq!(codec.decode(&mut buf).unwrap_err().kind(), io::ErrorKind::InvalidData);
 
         let mut codec = StreamCodec::default().with_max_length(4);
@@ -673,5 +703,45 @@ mod tests {
         buf.put_slice(b"gh\nij\n");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcde");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "ij");
+
+        let mut buf = BytesMut::from(&b"\xff\xffcd\xe2\x82\xacgh"[..]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(b"\n");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "??cd?");
+    }
+
+    /// Random input under random chunk schedules never leaves more than `max_length` bytes
+    /// buffered between calls, in either framing mode.
+    #[test]
+    fn max_length_bounds_buffer() {
+        const MAX_CHUNK: usize = 16;
+
+        let mut rng = StdRng::seed_from_u64(0x00B0_0B5E_C0DE_C0DE);
+        let alphabet: &[u8] = b"{}[]\":,\\ \n\t a1\xff";
+
+        for _ in 0..200 {
+            let max_length = 1 + rng.next_u32() as usize % 16;
+            let mut codec = if rng.next_u32() % 2 == 0 {
+                StreamCodec::stream_incoming()
+            } else {
+                StreamCodec::default()
+            }
+            .with_max_length(max_length);
+            let mut buf = BytesMut::new();
+
+            'input: for _ in 0..rng.next_u32() % 64 {
+                for _ in 0..1 + rng.next_u32() as usize % MAX_CHUNK {
+                    buf.put_u8(alphabet[rng.next_u32() as usize % alphabet.len()]);
+                }
+                loop {
+                    match codec.decode(&mut buf) {
+                        Ok(Some(msg)) => assert!(msg.len() <= max_length + MAX_CHUNK),
+                        Ok(None) => break,
+                        Err(_) => break 'input,
+                    }
+                }
+                assert!(buf.len() <= max_length, "{} bytes buffered", buf.len());
+            }
+        }
     }
 }
