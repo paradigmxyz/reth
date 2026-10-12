@@ -11,8 +11,8 @@ use crate::{
 use imbl::OrdMap;
 use rustc_hash::FxHashMap;
 use std::{
-    cmp::Ordering,
-    collections::{hash_map::Entry, BTreeSet},
+    cmp::{Ordering, Reverse},
+    collections::{hash_map::Entry, BinaryHeap},
     ops::Bound::Unbounded,
     sync::Arc,
 };
@@ -41,6 +41,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
     highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
+    /// Lowest priority in each sender's pending nonce chain.
+    lowest_priorities: FxHashMap<SenderId, Priority<T::PriorityValue>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
     independent_transactions: FxHashMap<SenderId, PendingTransaction<T>>,
@@ -70,6 +72,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             by_id: Default::default(),
             independent_transactions: Default::default(),
             highest_nonces: Default::default(),
+            lowest_priorities: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
         }
@@ -84,6 +87,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     fn clear_transactions(&mut self) -> OrdMap<TransactionId, PendingTransaction<T>> {
         self.independent_transactions.clear();
         self.highest_nonces.clear();
+        self.lowest_priorities.clear();
         self.size_of.reset();
         std::mem::take(&mut self.by_id)
     }
@@ -207,6 +211,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     // first kept transaction of this sender, hence the independent one
                     self.independent_transactions.insert(id.sender, tx.clone());
                 }
+                self.update_lowest_priority(id.sender, &tx.priority);
                 highest = Some(id);
                 self.by_id.insert(id, tx);
             }
@@ -260,6 +265,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     // first kept transaction of this sender, hence the independent one
                     self.independent_transactions.insert(id.sender, tx.clone());
                 }
+                self.update_lowest_priority(id.sender, &tx.priority);
                 highest = Some(id);
                 self.by_id.insert(id, tx);
             }
@@ -314,6 +320,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
+    /// Tracks the lowest priority when a transaction joins a sender's pending chain.
+    fn update_lowest_priority(&mut self, sender: SenderId, priority: &Priority<T::PriorityValue>) {
+        let lowest = self.lowest_priorities.entry(sender).or_insert_with(|| priority.clone());
+        if priority < lowest {
+            *lowest = priority.clone();
+        }
+    }
+
     /// Adds a new transactions to the pending queue.
     ///
     /// # Panics
@@ -340,6 +354,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let tx = PendingTransaction { submission_id, transaction: tx, priority };
 
         self.update_independents_and_highest_nonces(&tx);
+        self.update_lowest_priority(tx_id.sender, &tx.priority);
 
         // send the new transaction to any existing pendingpool static file iterators
         if self.new_transaction_notifier.receiver_count() > 0 {
@@ -369,6 +384,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
         let tx = self.by_id.remove(id)?;
         self.size_of -= tx.transaction.size();
+        if self.lowest_priorities.get(&id.sender) == Some(&tx.priority) {
+            if let Some(priority) = self.eviction_priority(id.sender) {
+                self.lowest_priorities.insert(id.sender, priority);
+            } else {
+                self.lowest_priorities.remove(&id.sender);
+            }
+        }
 
         match self.highest_nonces.entry(id.sender) {
             Entry::Occupied(mut entry) => {
@@ -429,41 +451,49 @@ impl<T: TransactionOrdering> PendingPool<T> {
         remove_locals: bool,
         end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        let mut candidates = BTreeSet::new();
+        let mut candidates = Vec::with_capacity(self.highest_nonces.len());
         for tx in self.highest_nonces.values() {
             if remove_locals || !tx.transaction.is_local() {
-                candidates.insert((
-                    self.eviction_priority(tx.transaction.sender_id()),
+                candidates.push(Reverse((
+                    self.lowest_priorities[&tx.transaction.sender_id()].clone(),
                     0,
-                    tx.clone(),
-                ));
+                    tx.priority.clone(),
+                    Reverse(tx.submission_id),
+                    *tx.transaction.id(),
+                )));
             }
         }
+        let mut candidates = BinaryHeap::from(candidates);
 
         while self.exceeds(limit) {
-            let Some((_, round, tx)) = candidates.pop_first() else { break };
-            let sender = tx.transaction.sender_id();
-            if let Some(removed) = self.remove_transaction(tx.transaction.id()) {
+            let Some(Reverse((_, round, _, _, id))) = candidates.pop() else { break };
+            let sender = id.sender;
+            if let Some(removed) = self.remove_transaction(&id) {
                 end_removed.push(removed);
             }
 
             if let Some(highest) = self.highest_nonces.get(&sender) &&
                 (remove_locals || !highest.transaction.is_local())
             {
-                candidates.insert((self.eviction_priority(sender), round + 1, highest.clone()));
+                candidates.push(Reverse((
+                    self.lowest_priorities[&sender].clone(),
+                    round + 1,
+                    highest.priority.clone(),
+                    Reverse(highest.submission_id),
+                    *highest.transaction.id(),
+                )));
             }
         }
     }
 
     /// Lowest priority of a sender's pending nonce chain.
-    fn eviction_priority(&self, sender: SenderId) -> Priority<T::PriorityValue> {
+    fn eviction_priority(&self, sender: SenderId) -> Option<Priority<T::PriorityValue>> {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(|(id, _)| id.sender == sender)
             .map(|(_, tx)| &tx.priority)
             .min()
-            .expect("sender has a pending transaction")
-            .clone()
+            .cloned()
     }
 
     /// Truncates the pool to the given [`SubPoolLimit`], removing transactions until the subpool
@@ -593,8 +623,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
             senders += 1;
 
             let mut highest = lowest;
+            let mut lowest_priority = &lowest.priority;
             while let Some((_, tx)) = txs.next_if(|(id, _)| id.sender == sender) {
                 highest = tx;
+                if tx.priority < *lowest_priority {
+                    lowest_priority = &tx.priority;
+                }
             }
 
             let independent = self
@@ -613,6 +647,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 tracked_highest, highest,
                 "highest nonce of {sender:?} does not match its highest nonce pool entry"
             );
+            assert_eq!(
+                self.lowest_priorities.get(&sender),
+                Some(lowest_priority),
+                "lowest priority of {sender:?} does not match its pending chain"
+            );
         }
 
         assert_eq!(
@@ -624,6 +663,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
             self.highest_nonces.len(),
             senders,
             "highest_nonces tracks senders without transactions"
+        );
+        assert_eq!(
+            self.lowest_priorities.len(),
+            senders,
+            "lowest_priorities tracks senders without transactions"
         );
         assert_eq!(
             self.size(),
