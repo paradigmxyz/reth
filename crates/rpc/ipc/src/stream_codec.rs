@@ -190,16 +190,22 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 self.scan.cursor += 1;
             }
 
+            // Keep at most `max_length` bytes buffered between calls.
             if self.truncated.is_some() {
                 buf.clear();
                 self.scan.cursor = 0;
-            } else if self.scan.depth > 0 && buf.len() - self.scan.start_idx > self.max_length {
+            } else if buf.len() > self.max_length {
+                if self.scan.depth <= 0 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
+                }
+                // The bytes before an open value are never part of a message.
                 buf.advance(self.scan.start_idx);
-                self.truncate(buf);
+                self.scan.cursor -= self.scan.start_idx;
                 self.scan.start_idx = 0;
-                self.scan.cursor = 0;
-            } else if self.scan.depth <= 0 && buf.len() > self.max_length {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
+                if buf.len() > self.max_length {
+                    self.truncate(buf);
+                    self.scan.cursor = 0;
+                }
             }
             Ok(None)
         }
@@ -649,6 +655,7 @@ mod tests {
 
         let mut buf = BytesMut::from(&br#"      {"a":"#[..]);
         assert!(codec.decode(&mut buf).unwrap().is_none());
+        assert_eq!(buf, br#"{"a":"#[..]);
         buf.put_slice(b"1}");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
 
@@ -666,5 +673,40 @@ mod tests {
         buf.put_slice(b"gh\nij\n");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcde");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "ij");
+    }
+
+    /// Random input under random chunk schedules never leaves more than `max_length` bytes
+    /// buffered between calls, in either framing mode.
+    #[test]
+    fn max_length_bounds_buffer() {
+        const MAX_CHUNK: usize = 16;
+
+        let mut rng = StdRng::seed_from_u64(0x00B0_0B5E_C0DE_C0DE);
+        let alphabet: &[u8] = b"{}[]\":,\\ \n\t a1\xff";
+
+        for _ in 0..2000 {
+            let max_length = 1 + rng.next_u32() as usize % 16;
+            let mut codec = if rng.next_u32() % 2 == 0 {
+                StreamCodec::stream_incoming()
+            } else {
+                StreamCodec::default()
+            }
+            .with_max_length(max_length);
+            let mut buf = BytesMut::new();
+
+            'input: for _ in 0..rng.next_u32() % 64 {
+                for _ in 0..1 + rng.next_u32() as usize % MAX_CHUNK {
+                    buf.put_u8(alphabet[rng.next_u32() as usize % alphabet.len()]);
+                }
+                loop {
+                    match codec.decode(&mut buf) {
+                        Ok(Some(msg)) => assert!(msg.len() <= max_length + MAX_CHUNK),
+                        Ok(None) => break,
+                        Err(_) => break 'input,
+                    }
+                }
+                assert!(buf.len() <= max_length, "{} bytes buffered", buf.len());
+            }
+        }
     }
 }
