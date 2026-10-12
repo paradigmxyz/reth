@@ -198,7 +198,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 self.truncate(buf);
                 self.scan.start_idx = 0;
                 self.scan.cursor = 0;
-            } else if buf.len() > self.max_length {
+            } else if self.scan.depth == 0 && buf.len() > self.max_length {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
             }
             Ok(None)
@@ -646,6 +646,11 @@ mod tests {
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"b":"lon"#);
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"d":2}"#);
         assert!(buf.is_empty());
+
+        let mut buf = BytesMut::from(&br#"      {"a":"#[..]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(b"1}");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
 
         let mut buf = BytesMut::from(&b"          "[..]);
         assert_eq!(codec.decode(&mut buf).unwrap_err().kind(), io::ErrorKind::InvalidData);
