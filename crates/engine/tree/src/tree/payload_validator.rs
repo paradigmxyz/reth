@@ -1009,7 +1009,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
-        state_hook: Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>>,
+        state_hook: Option<Box<dyn FnMut(reth_execution_types::StateUpdate) + Send + 'static>>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,

@@ -21,7 +21,7 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState, HashedPostState};
+use reth_execution_types::{BlockExecutionResult, BundleSource, HashedPostState, StateUpdate};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -344,7 +344,7 @@ pub trait BlockExecutor: Sized {
     /// block changes and transaction changes.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         false
     }
 
@@ -664,7 +664,7 @@ pub trait BlockBuilder: Sized {
     /// Sets a hook for transaction state updates emitted while building a block.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         false
     }
 
@@ -856,7 +856,7 @@ where
         })
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.executor.set_state_hook(hook)
     }
 
@@ -893,7 +893,7 @@ pub trait Executor<DB: Database>: Sized {
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static;
+        F: FnMut(StateUpdate) + Send + 'static;
 
     /// Consumes the type and executes the block.
     fn execute(
@@ -914,7 +914,7 @@ pub trait Executor<DB: Database>: Sized {
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let state = self.into_state();
@@ -1050,7 +1050,7 @@ where
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
-        state_hook: Option<Box<dyn FnMut(EvmState) + Send>>,
+        state_hook: Option<Box<dyn FnMut(StateUpdate) + Send>>,
     ) -> Result<
         (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
@@ -1110,7 +1110,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let (output, block_access_list) = Self::execute_block_with_database_and_state_hook(
             &self.evm_config,
@@ -1143,7 +1143,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         let Self { evm_config, batch_database, batch_state, .. } = self;
         let (output, _) = Self::execute_block_with_database_and_state_hook(
@@ -1212,7 +1212,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
@@ -1223,7 +1223,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(EvmState) + Send + 'static,
+        F: FnMut(StateUpdate) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }

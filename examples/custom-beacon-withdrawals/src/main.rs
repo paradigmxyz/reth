@@ -16,8 +16,8 @@ use reth_ethereum::{
     evm::{
         primitives::{
             BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockExecutorFactory,
-            BundleState, ConfigureEngineEvm, ConfigureEvm, EvmState, ExecutableTxIterator,
-            ExecutorTx, GasOutput, NextBlockEnvAttributes,
+            BundleState, ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, ExecutorTx,
+            GasOutput, NextBlockEnvAttributes, StateUpdate,
         },
         EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
         EthEvmConfig, EthEvmEnv, RethEvmFactory, RethReceiptBuilder,
@@ -261,7 +261,7 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(StateUpdate) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
