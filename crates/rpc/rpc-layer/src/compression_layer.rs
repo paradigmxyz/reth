@@ -5,7 +5,15 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
-use tower_http::compression::{Compression, CompressionLayer as TowerCompressionLayer};
+use tower_http::compression::{
+    predicate::SizeAbove, Compression, CompressionLayer as TowerCompressionLayer, CompressionLevel,
+};
+
+/// Responses smaller than this many bytes are sent uncompressed.
+///
+/// They fit in a single TCP segment anyway, and setting up a compressor costs far more than
+/// sending them as they are.
+const MIN_COMPRESSION_SIZE: u16 = 1024;
 
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
 /// with the RPC server's HTTP types. It automatically compresses responses based on the client's
@@ -13,15 +21,15 @@ use tower_http::compression::{Compression, CompressionLayer as TowerCompressionL
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionLayer {
-    inner_layer: TowerCompressionLayer,
+    inner_layer: TowerCompressionLayer<SizeAbove>,
 }
 
 impl CompressionLayer {
     /// Creates a new compression layer with zstd, gzip, brotli and deflate enabled.
+    ///
+    /// Responses are compressed at the fastest level, and only if they are at least 1 KiB.
     pub fn new() -> Self {
-        Self {
-            inner_layer: TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true),
-        }
+        Self::from_layer(TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true))
     }
 
     /// Creates a compression layer allowing only the listed algorithms.
@@ -44,7 +52,15 @@ impl CompressionLayer {
             }
         }
 
-        Self { inner_layer: layer }
+        Self::from_layer(layer)
+    }
+
+    /// Applies the compression level and the minimum response size to `layer`.
+    fn from_layer(layer: TowerCompressionLayer) -> Self {
+        let inner_layer = layer
+            .quality(CompressionLevel::Fastest)
+            .compress_when(SizeAbove::new(MIN_COMPRESSION_SIZE));
+        Self { inner_layer }
     }
 }
 
@@ -70,7 +86,7 @@ impl<S> Layer<S> for CompressionLayer {
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionService<S> {
-    compression: Compression<S>,
+    compression: Compression<S, SizeAbove>,
 }
 
 impl<S> Service<HttpRequest> for CompressionService<S>
@@ -111,7 +127,7 @@ mod tests {
     const REPEAT_COUNT: usize = 1000;
 
     #[derive(Clone)]
-    struct MockRequestService;
+    struct MockRequestService(String);
 
     impl Service<HttpRequest> for MockRequestService {
         type Response = HttpResponse;
@@ -126,15 +142,16 @@ mod tests {
         }
 
         fn call(&mut self, _: HttpRequest) -> Self::Future {
-            let body = HttpBody::from(TEST_DATA.repeat(REPEAT_COUNT));
+            let body = HttpBody::from(self.0.clone());
             let response = HttpResponse::builder().body(body).unwrap();
             ready(Ok(response))
         }
     }
 
     fn setup_compression_service(
+        body: String,
     ) -> impl Service<HttpRequest, Response = HttpResponse, Error = Infallible> {
-        CompressionLayer::new().layer(MockRequestService)
+        CompressionLayer::new().layer(MockRequestService(body))
     }
 
     async fn get_response_size(response: HttpResponse) -> usize {
@@ -144,7 +161,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gzip_compression() {
-        let mut service = setup_compression_service();
+        let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
         let request =
             HttpRequest::builder().header(ACCEPT_ENCODING, "gzip").body(HttpBody::empty()).unwrap();
 
@@ -171,7 +188,7 @@ mod tests {
     #[tokio::test]
     async fn test_no_compression_when_not_requested() {
         // Create a service with compression
-        let mut service = setup_compression_service();
+        let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
         let request = HttpRequest::builder().body(HttpBody::empty()).unwrap();
 
         let response = service.call(request).await.unwrap();
@@ -188,5 +205,17 @@ mod tests {
             response_size == uncompressed_len,
             "Response size ({response_size}) should equal original size ({uncompressed_len})"
         );
+    }
+
+    #[tokio::test]
+    async fn test_no_compression_for_small_responses() {
+        let body = "a".repeat(MIN_COMPRESSION_SIZE as usize - 1);
+        let mut service = setup_compression_service(body.clone());
+        let request =
+            HttpRequest::builder().header(ACCEPT_ENCODING, "br").body(HttpBody::empty()).unwrap();
+
+        let response = service.call(request).await.unwrap();
+        assert!(response.headers().get(CONTENT_ENCODING).is_none());
+        assert_eq!(get_response_size(response).await, body.len());
     }
 }

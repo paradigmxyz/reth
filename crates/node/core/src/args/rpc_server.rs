@@ -456,7 +456,9 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = DefaultRpcServerArgs::get_global().http_port)]
     pub http_port: u16,
 
-    /// Disable compression for HTTP responses
+    /// Disable compression for HTTP responses.
+    ///
+    /// Servers listening on a loopback address never compress responses.
     #[arg(long = "http.disable-compression", default_value_t = DefaultRpcServerArgs::get_global().http_disable_compression)]
     pub http_disable_compression: bool,
 

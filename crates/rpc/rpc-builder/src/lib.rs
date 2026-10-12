@@ -1359,11 +1359,15 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
     /// based on the client's `Accept-Encoding` header.
+    ///
+    /// Servers listening on a loopback address only serve local clients, which gain nothing from
+    /// compression, so they get no compression layer.
     fn maybe_compression_layer(
+        addr: SocketAddr,
         disable_compression: bool,
         algos: Option<&[String]>,
     ) -> Option<CompressionLayer> {
-        if disable_compression {
+        if disable_compression || addr.ip().to_canonical().is_loopback() {
             None
         } else {
             match algos {
@@ -1466,6 +1470,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 self.http_decompression_algorithms.as_deref(),
                             ))
                             .option_layer(Self::maybe_compression_layer(
+                                http_socket_addr,
                                 self.http_disable_compression,
                                 self.http_compression_algorithms.as_deref(),
                             )),
@@ -1557,6 +1562,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             self.http_decompression_algorithms.as_deref(),
                         ))
                         .option_layer(Self::maybe_compression_layer(
+                            http_socket_addr,
                             self.http_disable_compression,
                             self.http_compression_algorithms.as_deref(),
                         )),
