@@ -1,8 +1,10 @@
 name: Cyclops audit
 
 on:
+  pull_request:
+    types: [synchronize, reopened, ready_for_review]
   pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
-    types: [labeled]
+    types: [labeled, synchronize, reopened, ready_for_review]
   issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
     types: [created]
 
@@ -60,7 +62,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Handle audit command
-        uses: tempoxyz/gh-actions/actions/pr-audit-comment@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        uses: tempoxyz/gh-actions/actions/pr-audit-comment@ff385914926ea9e9d9647597b9cc501fb7b6d69a
         with:
           command-regex: '^(?:@decofe\s+)?(?:cyclops\s+(?:private\s+)?audit|derek\s+audit)\b'
           permission-check-mode: association
@@ -70,3 +72,23 @@ jobs:
           events-cert: ${{ secrets.EVENTS_CERT }}
           events-args: ${{ secrets.EVENTS_ARGS }}
           github-token: ${{ github.token }}
+
+  warden-updates:
+    if: contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name) && github.event.action != 'labeled'
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+      statuses: write
+    uses: tempoxyz/gh-actions/.github/workflows/pr-audit.yml@ff385914926ea9e9d9647597b9cc501fb7b6d69a
+    with:
+      env: prod
+      audit-on-command: true
+      audit-on-push: false
+      required-labels: |
+        cyclops
+        agentic-audit
+    secrets:
+      EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+      EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+      EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
