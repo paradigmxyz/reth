@@ -641,9 +641,11 @@ where
                     .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
+                let codes = ExecutionWitnessRecord::capture_codes(&db);
                 db.commit_source(&reth_execution_types::BundleSource(&output.state));
 
                 Ok(ExecutionWitnessRecord::new(&db)
+                    .with_canonical_codes(codes)
                     .into_execution_witness(
                         &db.db.inner().0 .0,
                         eth_api.provider(),
@@ -1517,18 +1519,22 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
 mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, U256};
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, create_test_provider_factory_with_chain_spec, NoopProvider,
+    };
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
         database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
-        state::AccountInfo as RevmAccountInfo,
+        state::{AccountInfo as RevmAccountInfo, Bytecode},
     };
 
     #[tokio::test]
@@ -1570,12 +1576,7 @@ mod tests {
     }
 
     #[test]
-    fn destroyed_account_witness_includes_parent_storage_proofs() {
-        use alloy_genesis::{Genesis, GenesisAccount};
-        use reth_chainspec::ChainSpecBuilder;
-        use reth_db_common::init::init_genesis;
-        use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
-
+    fn witness_preserves_parent_storage_and_code_reads() {
         let address = Address::with_last_byte(1);
         let slots = [B256::with_last_byte(1), B256::with_last_byte(2)];
         let genesis = Genesis::default().extend_accounts([(
@@ -1594,10 +1595,34 @@ mod tests {
         state.cache.accounts.insert(address, None);
         state.cache.storage.entry(address).or_default().wipe();
 
+        let read_code = Bytecode::new_raw(alloy_primitives::bytes!("600100"));
+        let created_code = Bytecode::new_raw(alloy_primitives::bytes!("600200"));
+        state
+            .cache
+            .contracts
+            .insert(read_code.hash_slow(), reth_execution_types::native_bytecode(&read_code));
+        let codes = ExecutionWitnessRecord::capture_codes(&state);
+        let mut output = BundleState::default();
+        // Recreating code already read from parent state must not remove it from the witness.
+        output.contracts.insert(read_code.hash_slow(), read_code.clone());
+        output.contracts.insert(created_code.hash_slow(), created_code.clone());
+        state.commit_source(&reth_execution_types::BundleSource(&output));
+
         for mode in [ExecutionWitnessMode::Legacy, ExecutionWitnessMode::Canonical] {
             let witness = ExecutionWitnessRecord::new(&state)
+                .with_canonical_codes(codes.clone())
                 .into_execution_witness_without_headers(&provider, mode)
                 .unwrap();
+            // Canonical mode needs only parent code; legacy also includes execution output.
+            let mut expected_codes = vec![read_code.original_bytes()];
+            if !mode.is_canonical() {
+                expected_codes.push(created_code.original_bytes());
+                expected_codes.push(Bytes::new());
+                expected_codes.sort_unstable();
+            }
+            let mut actual_codes = witness.codes;
+            actual_codes.sort_unstable();
+            assert_eq!(actual_codes, expected_codes);
             for storage in &proof.storage_proofs {
                 assert!(!storage.proof.is_empty());
                 assert!(storage.proof.iter().all(|node| witness.state.contains(node)));
