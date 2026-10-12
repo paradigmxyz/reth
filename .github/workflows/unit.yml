@@ -125,7 +125,16 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
+      - name: Prepare tmpfs temp dir
+        run: |
+          df -h /dev/shm
+          mkdir -p /dev/shm/reth-tmp
+      - name: Run ef-tests
+        env:
+          # Every case creates and deletes a fresh test database, thousands of times per run.
+          # tmpfs avoids the disk filesystem cost of those create/delete cycles.
+          TMPDIR: /dev/shm/reth-tmp
+        run: cargo nextest run --no-fail-fast --cargo-profile hivetests -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
     name: doc tests
