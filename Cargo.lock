@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.39.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=frames-all-eips#c7d0c37f0e7058dee99f6e71443b552856fc860b"
+source = "git+https://github.com/Soubhik-10/evm?branch=frames-all-eips#1cf43294b89ce7314c32e98632a93caae9eb2732"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10905,7 +10905,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "43.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10923,7 +10923,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "43.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "bitvec",
  "paste",
@@ -10935,7 +10935,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "43.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-eip8141",
  "bitvec",
@@ -10952,7 +10952,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "43.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10968,7 +10968,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "43.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-eips",
  "derive_more",
@@ -10983,7 +10983,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "43.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "auto_impl",
  "either",
@@ -10996,7 +10996,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "43.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-eip8141",
  "auto_impl",
@@ -11015,7 +11015,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "43.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "auto_impl",
  "either",
@@ -11055,7 +11055,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "43.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11067,7 +11067,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "43.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11093,7 +11093,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "43.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-primitives",
  "once_cell",
@@ -11103,7 +11103,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "43.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#93819b22164fc3997eeacae7731b2b9f36f4c1c4"
+source = "git+https://github.com/Soubhik-10/revm?branch=frames-all-eips#8a9f6fb4c5e018a5908ec8e8cee7300c86f127fb"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.13.2",
@@ -11116,7 +11116,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11136,7 +11136,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "eyre",
  "ruint",
@@ -11145,12 +11145,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11165,7 +11165,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -11196,7 +11196,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11211,7 +11211,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11224,7 +11224,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#4d6bed20466c2015d8c21f05d9f8b205694fac42"
+source = "git+https://github.com/Soubhik-10/revmc?branch=frames-all-eips#d60e5f374f852532ff032231776f85ece6459921"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
