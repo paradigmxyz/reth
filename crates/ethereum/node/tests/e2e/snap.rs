@@ -1,9 +1,9 @@
 //! End-to-end sync scenarios with `--snap.v2`.
 //!
-//! - A fresh node snap-syncs the state at the finalized block of a 100 block Amsterdam chain from a
-//!   serving peer, then executes the blocks above it with the staged pipeline, with persisted state
-//!   and trie nodes matching the head state root.
-//! - A fresh node syncs 100 finalized Prague blocks through the staged pipeline without starting a
+//! - A fresh node snap-syncs the state at the finalized block of a 40 block Amsterdam chain from a
+//!   serving peer, then executes the blocks above it, with persisted state and trie nodes matching
+//!   the head state root.
+//! - A fresh node syncs 40 finalized Prague blocks through the staged pipeline without starting a
 //!   snap attempt.
 //! - A snap-synced node reads downloaded contract code and storage, then executes a new call that
 //!   updates that storage.
@@ -24,13 +24,13 @@ use reth_provider::{
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
 
-// Blocks the serving node builds: more than the backfill threshold, and few enough that it still
-// serves the state of every block, see `SNAPSHOT_STATE_RETENTION`.
-const CHAIN_LENGTH: u64 = 100;
+// Blocks the serving node builds: more than the backfill threshold of 32 blocks, and few enough
+// that it still serves the state of every block, see `SNAPSHOT_STATE_RETENTION`.
+const CHAIN_LENGTH: u64 = 40;
 
-// Finalized block a syncing node anchors its snap pivot to. It is below the head, so the staged
-// pipeline executes the blocks above it on the downloaded state.
-const FINALIZED: u64 = 80;
+// Finalized block a syncing node anchors its snap pivot to. It is below the head, so the blocks
+// above it execute on the downloaded state.
+const FINALIZED: u64 = 32;
 
 // A node on `fork` that serves snap/2 from the storage layout snap writes, and picks its backfill
 // from `--snap.v2` like `reth node` does.
@@ -59,12 +59,22 @@ async fn serving_and_syncing(
     Ok((server, client))
 }
 
-// A fresh node launched from `setup` and connected to `server`.
+// A fresh node launched from `setup` and connected to `server`, which persists every block.
+//
+// The snap backfill starts at the finalized block and only runs the pipeline to the head if a
+// forkchoice update reaches it before it finishes. Otherwise the engine executes the blocks above
+// the pivot in memory, and with the default persistence threshold they never reach the database
+// the tests read.
 async fn syncing_client(
     server: &mut NodeHelperType<EthereumNode>,
     setup: E2ETestSetupBuilder<EthereumNode>,
 ) -> eyre::Result<NodeHelperType<EthereumNode>> {
-    let (mut client, _) = setup.build_single().await?;
+    let (mut client, _) = setup
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build_single()
+        .await?;
     client.connect(server).await;
     Ok(client)
 }
@@ -89,7 +99,7 @@ async fn a_fresh_node_snap_syncs_to_the_head() -> eyre::Result<()> {
     assert!(attempt.is_verified());
     assert_eq!(attempt.pivot(), pivot.num_hash());
     assert_eq!(attempt.state_root(), pivot.state_root);
-    // The staged pipeline executed the blocks above the pivot on that state.
+    // The blocks above the pivot executed on that state.
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
     assert_trie_consistency(&client.inner.provider)?;
     Ok(())
@@ -127,11 +137,8 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
 
-    let setup =
-        snap_setup(EthereumHardfork::Amsterdam, runtime).with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        });
-    let client = syncing_client(&mut server, setup).await?;
+    let client =
+        syncing_client(&mut server, snap_setup(EthereumHardfork::Amsterdam, runtime)).await?;
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
 
