@@ -45,7 +45,9 @@ use reth_trie_common::{
     HashedStorage,
 };
 use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
-use revm_inspectors::tracing::{DebugInspector, TransactionContext};
+use revm_inspectors::tracing::{
+    DebugInspector, DebugInspectorError, TraceLimits, TransactionContext,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -129,7 +131,8 @@ where
                 let block_env = evm_env.block_env.clone();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let inspector = debug_inspector(opts, eth_api.trace_limits())
+                    .map_err(Eth::Error::from_eth_err)?;
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
                 while let Some((index, tx)) = transactions.next() {
@@ -187,7 +190,7 @@ where
 
                 let block_env = evm_env.block_env.clone();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let inspector = match DebugInspector::new(opts) {
+                let inspector = match debug_inspector(opts, eth_api.trace_limits()) {
                     Ok(inspector) => inspector,
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
@@ -336,7 +339,8 @@ where
                     tx_info.index.expect("transaction_and_block only returns block transactions")
                         as usize;
 
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = debug_inspector(opts, eth_api.trace_limits())
+                    .map_err(Eth::Error::from_eth_err)?;
                 let tx_env = eth_api.evm_config().tx_env(&tx);
                 let (res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
@@ -400,8 +404,8 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let mut inspector =
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = debug_inspector(tracing_options, this.eth_api().trace_limits())
+                    .map_err(Eth::Error::from_eth_err)?;
                 let res = this.eth_api().inspect(
                     &mut *db,
                     evm_env.clone(),
@@ -466,8 +470,8 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                let mut inspector =
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let mut inspector = debug_inspector(tracing_options, eth_api.trace_limits())
+                    .map_err(Eth::Error::from_eth_err)?;
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
                 let trace = inspector
@@ -539,8 +543,9 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
-                    .map_err(Eth::Error::from_eth_err)?;
+                let mut inspector =
+                    debug_inspector(tracing_options.clone(), eth_api.trace_limits())
+                        .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
@@ -1522,17 +1527,54 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+/// Builds a [`DebugInspector`] for `opts` and applies `limits` to its [`TracingInspector`].
+///
+/// The four-byte, noop, state-gas, mux, and JS tracers record no [`TracingInspector`] data
+/// reachable from here, so they run unlimited.
+///
+/// [`TracingInspector`]: revm_inspectors::tracing::TracingInspector
+fn debug_inspector(
+    opts: GethDebugTracingOptions,
+    limits: TraceLimits,
+) -> Result<DebugInspector, DebugInspectorError> {
+    Ok(match DebugInspector::new(opts)? {
+        DebugInspector::CallTracer(inspector, config) => {
+            DebugInspector::CallTracer(inspector.with_limits(limits), config)
+        }
+        DebugInspector::PreStateTracer(inspector, config) => {
+            DebugInspector::PreStateTracer(inspector.with_limits(limits), config)
+        }
+        DebugInspector::FlatCallTracer(inspector) => {
+            DebugInspector::FlatCallTracer(inspector.with_limits(limits))
+        }
+        DebugInspector::Erc7562Tracer(inspector, config) => {
+            DebugInspector::Erc7562Tracer(inspector.with_limits(limits), config)
+        }
+        DebugInspector::Default(inspector, config) => {
+            DebugInspector::Default(inspector.with_limits(limits), config)
+        }
+        // Not exhaustive: the JS variant exists whenever any crate enables
+        // `revm-inspectors/js-tracer`, independent of this crate's features.
+        inspector => inspector,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
-    use alloy_primitives::{keccak256, U256};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use alloy_consensus::Header;
+    use alloy_primitives::{bytes, keccak256, U256};
+    use alloy_rpc_types_eth::TransactionRequest;
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_provider::test_utils::{
+        create_test_provider_factory, ExtendedAccount, MockEthProvider, NoopProvider,
+    };
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
@@ -1576,6 +1618,57 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), -32001);
+    }
+
+    #[tokio::test]
+    async fn debug_tracers_halt_past_byte_limit() {
+        let target = Address::with_last_byte(0x42);
+        let provider = MockEthProvider::default();
+        // MSTORE(0, 1) then CALL(0xffff, 0x99, 0, 0, 64, 0, 0): records memory and call input.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(bytes!("600160005260006000604060006000609961fffff100")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target);
+        let tracers = [
+            serde_json::json!({ "tracer": "callTracer" }),
+            serde_json::json!({ "tracer": "flatCallTracer" }),
+            serde_json::json!({ "tracer": "erc7562Tracer" }),
+            serde_json::json!({ "enableMemory": true }),
+        ];
+
+        for (max_trace_bytes, halts) in [(None, false), (Some(1), true)] {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            let debug_api = DebugApi::new(
+                eth_api,
+                BlockingTaskGuard::new(1),
+                &Runtime::test(),
+                futures::stream::empty(),
+            );
+            for tracer in &tracers {
+                let opts = serde_json::from_value(tracer.clone()).unwrap();
+                let result = debug_api.debug_trace_call(call.clone(), None, opts).await;
+                match (halts, result) {
+                    (false, Ok(_)) => {}
+                    (true, Err(err)) => assert_eq!(
+                        err.to_string(),
+                        "Revm error: trace recorded byte limit exceeded",
+                        "{tracer}"
+                    ),
+                    (_, result) => panic!("{tracer} limit {max_trace_bytes:?}: {result:?}"),
+                }
+            }
+        }
     }
 
     #[test]

@@ -32,9 +32,7 @@ use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
-    opcode::OpcodeGasInspector,
-    storage::StorageInspector,
-    tracing::{TracingInspector, TracingInspectorConfig},
+    opcode::OpcodeGasInspector, storage::StorageInspector, tracing::TracingInspectorConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -102,7 +100,7 @@ where
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
-        let mut inspector = TracingInspector::new(config);
+        let mut inspector = self.eth_api().tracing_inspector(config);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
@@ -133,8 +131,8 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |this, mut db| {
-                let mut inspector =
-                    TracingInspector::new(TracingInspectorConfig::from_parity_config(&trace_types));
+                let mut inspector = this
+                    .tracing_inspector(TracingInspectorConfig::from_parity_config(&trace_types));
                 let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
 
                 inspector
@@ -174,7 +172,7 @@ where
                         Default::default(),
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let mut inspector = TracingInspector::new(config);
+                    let mut inspector = eth_api.tracing_inspector(config);
                     let res = eth_api.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
@@ -873,16 +871,18 @@ pub struct BlockStorageAccess {
 mod tests {
     use super::*;
     use crate::EthApiBuilder;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_genesis::Genesis;
-    use alloy_primitives::bytes;
+    use alloy_primitives::{bytes, Signature, TxKind};
     use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chain_state::CanonStateNotification;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives_traits::Block as _;
+    use reth_primitives_traits::{Block as _, RecoveredBlock, SignerRecoverable};
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -890,6 +890,7 @@ mod tests {
         },
         BlockWriter, StageCheckpointWriter,
     };
+    use reth_rpc_eth_types::cache::cache_new_blocks_task;
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
@@ -1179,6 +1180,81 @@ mod tests {
             let block_replay =
                 api.replay_block_transactions(block_hash.into(), types).await.unwrap().unwrap();
             assert_eq!(response["result"], serde_json::to_value(&block_replay[0]).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn parity_traces_halt_past_byte_limit() {
+        let target = Address::with_last_byte(0x42);
+        let provider = MockEthProvider::default();
+        // CALL(0xffff, 0x99, 0, 0, 64, 0, 0): records a 64-byte call input.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(bytes!("60006000604060006000609961fffff100")),
+        );
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy { gas_limit: 200_000, to: TxKind::Call(target), ..Default::default() }.into(),
+            Signature::test_signature(),
+        );
+        let hash = *tx.hash();
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::ZERO));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let types = HashSet::from_iter([TraceType::Trace]);
+        let calls = vec![(TransactionRequest::default().to(target), types.clone())];
+
+        for (max_trace_bytes, halts) in [(None, false), (Some(64), false), (Some(63), true)] {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+            cache_new_blocks_task(
+                eth_api.cache().clone(),
+                futures::stream::iter([CanonStateNotification::Commit {
+                    new: Arc::new(Chain::new(
+                        [RecoveredBlock::new_unhashed(block.clone(), vec![sender])],
+                        ExecutionOutcome {
+                            receipts: vec![vec![]],
+                            first_block: 1,
+                            ..Default::default()
+                        },
+                        Default::default(),
+                    )),
+                }]),
+            )
+            .await;
+            let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+
+            let byte_limit = "Revm error: trace recorded byte limit exceeded";
+            let results = [
+                (api.trace_call_many(calls.clone(), None).await.map(drop), byte_limit),
+                (api.replay_transaction(hash, types.clone()).await.map(drop), byte_limit),
+                (
+                    api.replay_block_transactions(block_hash.into(), types.clone()).await.map(drop),
+                    "Revm error: failed to execute transaction at index 0",
+                ),
+            ];
+            for (result, expected) in results {
+                match (halts, result) {
+                    (false, Ok(())) => {}
+                    (true, Err(err)) => assert_eq!(err.to_string(), expected),
+                    (_, result) => panic!("limit {max_trace_bytes:?}: {result:?}"),
+                }
+            }
         }
     }
 

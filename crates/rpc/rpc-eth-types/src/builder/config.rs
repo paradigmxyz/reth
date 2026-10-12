@@ -109,6 +109,8 @@ pub struct EthConfig {
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub rpc_evm_memory_limit: u64,
+    /// Maximum bytes a single trace may record before the request fails. `None` is unlimited.
+    pub rpc_max_trace_bytes: Option<usize>,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     ///
     /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
@@ -148,6 +150,7 @@ impl Default for EthConfig {
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_max_trace_bytes: None,
             force_blob_sidecar_upcasting: false,
         }
     }
@@ -256,6 +259,12 @@ impl EthConfig {
     /// Configures the maximum memory the EVM can allocate per RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Configures the maximum bytes a single trace may record. `None` is unlimited.
+    pub const fn rpc_max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = max_trace_bytes;
         self
     }
 

@@ -111,6 +111,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
             .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
+            .rpc_max_trace_bytes(self.rpc_max_trace_bytes)
             .force_blob_sidecar_upcasting(self.rpc_force_blob_sidecar_upcasting)
     }
 
@@ -355,6 +356,17 @@ mod tests {
 
         let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn rpc_max_trace_bytes_reaches_eth_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.eth_config().rpc_max_trace_bytes, None);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "4096"])
+                .args;
+        assert_eq!(args.eth_config().rpc_max_trace_bytes, Some(4096));
     }
 
     #[test]

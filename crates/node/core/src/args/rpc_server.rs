@@ -85,6 +85,7 @@ pub struct DefaultRpcServerArgs {
     rpc_max_logs_per_response: ZeroAsNoneU64,
     rpc_gas_cap: u64,
     rpc_evm_memory_limit: u64,
+    rpc_max_trace_bytes: Option<usize>,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
     rpc_compute_state_root_for_eth_simulate: bool,
@@ -319,6 +320,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default trace byte limit
+    pub const fn with_rpc_max_trace_bytes(mut self, v: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = v;
+        self
+    }
+
     /// Set the default tx fee cap
     pub const fn with_rpc_tx_fee_cap(mut self, v: u128) -> Self {
         self.rpc_tx_fee_cap = v;
@@ -424,6 +431,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
             rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_max_trace_bytes: None,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_compute_state_root_for_eth_simulate: false,
@@ -655,6 +663,19 @@ pub struct RpcServerArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_evm_memory_limit
     )]
     pub rpc_evm_memory_limit: u64,
+
+    /// Maximum bytes a single trace may record before the request fails.
+    ///
+    /// Counts call inputs and memory recorded by the call, flat call, ERC-7562, struct log, and
+    /// parity tracers. The mux and JS tracers are not limited. Unlimited by default.
+    #[arg(
+        long = "rpc.max-trace-bytes",
+        alias = "rpc-max-trace-bytes",
+        value_name = "BYTES",
+        value_parser = RangedU64ValueParser::<usize>::new().range(1..),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
+    )]
+    pub rpc_max_trace_bytes: Option<usize>,
 
     /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
     #[arg(
@@ -930,6 +951,7 @@ impl Default for RpcServerArgs {
             rpc_max_logs_per_response,
             rpc_gas_cap,
             rpc_evm_memory_limit,
+            rpc_max_trace_bytes,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_compute_state_root_for_eth_simulate,
@@ -979,6 +1001,7 @@ impl Default for RpcServerArgs {
             rpc_max_logs_per_response,
             rpc_gas_cap,
             rpc_evm_memory_limit,
+            rpc_max_trace_bytes,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_compute_state_root_for_eth_simulate,
@@ -1105,6 +1128,21 @@ mod tests {
         assert_eq!(args.rpc_max_tracing_requests, 1);
         assert_eq!(args.rpc_max_blocking_io_requests, 2);
         assert_eq!(args.rpc_proof_permits, 3);
+    }
+
+    #[test]
+    fn rpc_max_trace_bytes_is_optional_and_nonzero() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.rpc_max_trace_bytes, None);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
+                .args;
+        assert_eq!(args.rpc_max_trace_bytes, Some(1024));
+
+        let result =
+            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.max-trace-bytes", "0"]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1245,6 +1283,7 @@ mod tests {
             rpc_max_logs_per_response: 10000u64.into(),
             rpc_gas_cap: 50_000_000,
             rpc_evm_memory_limit: 256,
+            rpc_max_trace_bytes: Some(1 << 20),
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
             rpc_compute_state_root_for_eth_simulate: false,
@@ -1333,6 +1372,8 @@ mod tests {
             "50000000",
             "--rpc.evm-memory-limit",
             "256",
+            "--rpc.max-trace-bytes",
+            "1048576",
             "--rpc.txfeecap",
             "2.0",
             "--rpc.max-simulate-blocks",

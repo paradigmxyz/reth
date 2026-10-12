@@ -498,6 +498,11 @@ RPC:
 
           [default: 4294967295]
 
+      --rpc.max-trace-bytes <BYTES>
+          Maximum bytes a single trace may record before the request fails.
+
+          Counts call inputs and memory recorded by the call, flat call, ERC-7562, struct log, and parity tracers. The mux and JS tracers are not limited. Unlimited by default.
+
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
