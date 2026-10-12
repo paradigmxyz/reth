@@ -29,9 +29,9 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss'
     timeout-minutes: 45
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
       contents: read
     strategy:
@@ -210,7 +210,7 @@ jobs:
       - prepare-hive
     name: Hive-Amsterdam / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
@@ -248,8 +248,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Soubhik-10/hive
-          ref: feat/eip8141-frames
+          repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -294,6 +294,14 @@ jobs:
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
+          - sim: ethereum/eels/consume-engine
+            name: bogota-all
+            limit: '.*tests/bogota/.*'
+            include: []
+          - sim: ethereum/eels/consume-rlp
+            name: bogota-all
+            limit: '.*tests/bogota/.*'
+            include: []
           # Run EIP-8141 and the additional frames-devnet-1 EIPs separately.
           - sim: ethereum/eels/consume-engine
             name: eip8141-all
@@ -466,7 +474,7 @@ jobs:
       - prepare-hive
     name: Hive-Bogota / ${{ matrix.scenario.name }} / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     # Use larger runners for eels tests to avoid OOM runner crashes
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write
@@ -504,8 +512,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: Soubhik-10/hive
-          ref: feat/eip8141-frames
+          repository: ethereum/hive
+          ref: master
           path: hivetests
           persist-credentials: false
 
@@ -656,7 +664,7 @@ jobs:
 #      - prepare-hive
 #    name: Hive-Osaka / ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
 #    # Use larger runners for eels tests to avoid OOM runner crashes
-#    runs-on: ${{ github.repository == 'paradigmxyz/reth' && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
+#    runs-on: ${{ (github.repository == 'paradigmxyz/reth' || github.repository == 'paradigmxyz/reth-oss') && (contains(matrix.scenario.sim, 'eels') && 'depot-ubuntu-latest-8' || 'depot-ubuntu-latest-4') || 'ubuntu-latest' }}
 #    permissions:
 #      contents: read
 #      issues: write
@@ -692,8 +700,8 @@ jobs:
 #      - name: Checkout hive tests
 #        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 #        with:
-#          repository: Soubhik-10/hive
-#          ref: feat/eip8141-frames
+#          repository: ethereum/hive
+#          ref: master
 #          path: hivetests
 #          persist-credentials: false
 #
