@@ -14,7 +14,6 @@ extern crate alloc;
 #[cfg(feature = "std")]
 use crate::execute::{BasicBlockBuilder, BasicBlockExecutor};
 use alloc::string::String;
-use alloy_consensus::Transaction;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
@@ -46,7 +45,7 @@ pub use execute::{
     BlockValidationError, CommitChanges, Evm, EvmError, ExecutableTxFor, ExecutableTxParts,
     Executor, ExecutorTx, FromRecoveredTx, FromTxWithEncoded, GasOutput,
     InternalBlockExecutionError, IntoTxEnv, InvalidTxError, ReceiptBuilder, ReceiptBuilderCtx,
-    RecoveredTx, WithTxEnv,
+    RecoveredTx, TransactionEnvMut, WithTxEnv,
 };
 pub use reth_execution_types::{EvmState, OnStateHook, StateUpdate};
 pub use revm::database::BundleState;
@@ -214,7 +213,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
         EvmTypes: evm2::EvmTypes<
-            Tx: crate::execute::FromTxWithEncoded<TxTy<Self::Primitives>> + Transaction + Clone,
+            Tx: crate::execute::FromTxWithEncoded<TxTy<Self::Primitives>>
+                    + crate::execute::TransactionEnvMut,
         >,
     >;
 

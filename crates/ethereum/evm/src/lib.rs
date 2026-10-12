@@ -403,10 +403,9 @@ impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks + Hardforks + 'static,
     EvmF: EvmFactory,
-    <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_consensus::Transaction
-        + alloy_eips::eip2718::Typed2718
-        + Clone
-        + reth_evm::FromTxWithEncoded<reth_ethereum_primitives::TransactionSigned>,
+    <EvmF::Types as evm2::EvmTypesHost>::Tx: alloy_eips::eip2718::Typed2718
+        + reth_evm::FromTxWithEncoded<reth_ethereum_primitives::TransactionSigned>
+        + reth_evm::TransactionEnvMut,
 {
     type Primitives = EthPrimitives;
     type Error = Infallible;
