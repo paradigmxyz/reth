@@ -22,7 +22,8 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{
-    engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
+    engine_ssz_witness::{BuiltPayloadWithWitness, PayloadStatusWithWitness},
+    EthereumAddOns, EthereumNode,
 };
 use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_rpc_api::TestingBuildBlockRequestV1;
@@ -236,7 +237,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         capabilities,
         serde_json::json!({
             "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
-            "fork_scoped_endpoints": ["payloads", "forkchoice", "bodies", "payloads/witness"],
+            "fork_scoped_endpoints": ["payloads", "forkchoice", "bodies", "payloads/witness", "payloads/{payloadId}/witness"],
             "independently_versioned": {
                 "blobs": ["v1", "v2", "v3", "v4"],
             },
@@ -711,5 +712,68 @@ async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre
         .await?;
     assert_eq!(response.payload_status.status, PayloadStatusKind::Valid);
     assert!(response.witness.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_ssz_proxy_returns_built_payload_with_witness() -> eyre::Result<()> {
+    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
+    let genesis_hash = chain_spec.genesis_hash();
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let attributes = node.payload.next_attributes();
+    let parent_beacon_block_root = attributes.parent_beacon_block_root.unwrap();
+    let updated = node
+        .engine
+        .forkchoice_updated_with_attributes(node.current_forkchoice_state()?, attributes)
+        .await?;
+    let payload_id = updated.payload_id.expect("forkchoice starts a payload job");
+    node.payload.wait_for_built_payload(payload_id).await;
+
+    let auth = node.auth_server_handle();
+    let client = reqwest::Client::new();
+    let url = format!("{}/engine/v1/payloads/{payload_id}/witness", auth.http_url());
+    let response = client.get(&url).fork("amsterdam").send().await?;
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let response = client.get(&url).jwt(&auth).fork("prague").send().await?;
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(response.problem_type().await?, "/engine-api/errors/unsupported-fork");
+
+    let response = client.get(&url).jwt(&auth).fork("amsterdam").send().await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.headers()[reqwest::header::CACHE_CONTROL], "no-store");
+    let response: BuiltPayloadWithWitness = response.ssz().await?;
+    assert!(!response.witness.state.is_empty());
+    assert!(response.witness.state.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(response.witness.codes.windows(2).all(|pair| pair[0] < pair[1]));
+    let parent: alloy_consensus::Header =
+        alloy_rlp::decode_exact(response.witness.headers.last().unwrap())?;
+    assert_eq!(parent.hash_slow(), genesis_hash);
+
+    // Compare against POST for exactly the returned snapshot, without retrieving the build again.
+    let request = ExecutionPayloadEnvelopeAmsterdam {
+        payload: response.built_payload.payload,
+        parent_beacon_block_root,
+        execution_requests: response.built_payload.execution_requests,
+    };
+    let submitted: PayloadStatusWithWitness = client
+        .post(format!("{}/engine/v1/payloads/witness", auth.http_url()))
+        .jwt(&auth)
+        .fork("amsterdam")
+        .ssz(&request)
+        .send()
+        .await?
+        .ssz()
+        .await?;
+    assert_eq!(submitted.payload_status.status, PayloadStatusKind::Valid);
+    assert_eq!(submitted.witness.into_option(), Some(response.witness));
+
+    let response = client
+        .get(format!("{}/engine/v1/payloads/0xffffffffffffffff/witness", auth.http_url()))
+        .jwt(&auth)
+        .fork("amsterdam")
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(response.problem_type().await?, "/engine-api/errors/unknown-payload");
     Ok(())
 }

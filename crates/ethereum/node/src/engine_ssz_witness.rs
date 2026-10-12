@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ssz_engine_types::{Optional, PayloadStatus, PayloadStatusKind},
+    ssz_engine_types::{BuiltPayloadAmsterdam, Optional, PayloadStatus, PayloadStatusKind},
     ExecutionData,
 };
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -14,12 +14,12 @@ use reth_tasks::Runtime;
 use reth_trie_common::ExecutionWitnessMode;
 use std::{future::Future, pin::Pin};
 
-/// Re-executes validated payloads against their parent state for `/payloads/witness`.
+/// Re-executes submitted or built payloads against their parent state for the witness routes.
 ///
 /// The parent state must be available through the provider (persisted, canonical in-memory,
 /// or pending). Parents present only in the engine tree are reported as
-/// [`EngineSszWitnessError::ParentStateUnavailable`]; the route then answers with the payload
-/// status alone.
+/// [`EngineSszWitnessError::ParentStateUnavailable`]. Submission can return the payload status
+/// alone; built-payload witness retrieval returns an internal error.
 #[derive(Clone, Debug)]
 pub struct EngineSszWitnessGenerator<Provider, Evm> {
     provider: Provider,
@@ -119,7 +119,7 @@ where
 
 /// Generates an execution witness for a valid payload.
 pub trait EngineSszWitness: Send + Sync + 'static {
-    /// Generates a REST-SSZ execution witness after the submitted payload has been validated.
+    /// Generates a REST-SSZ execution witness for a validated submission or selected built payload.
     fn generate_witness(
         &self,
         payload: ExecutionData,
@@ -180,7 +180,7 @@ pub type WitnessCodeV1 = Bytes;
 /// An RLP-encoded header byte list in an [`ExecutionWitnessV1`].
 pub type WitnessHeaderV1 = Bytes;
 
-/// Canonical execution witness for `POST /payloads/witness`.
+/// Canonical execution witness for the SSZ Engine API witness routes.
 ///
 /// `state` and `codes` are produced in lexicographic ascending byte order. `headers` are
 /// RLP-encoded and ordered by ascending block number; consecutive headers must be parent-linked.
@@ -197,7 +197,7 @@ pub struct ExecutionWitnessV1 {
     pub headers: Vec<WitnessHeaderV1>,
 }
 
-/// Canonical execution witness for `POST /payloads/witness`.
+/// Canonical execution witness for the SSZ Engine API witness routes.
 pub type ExecutionWitness = ExecutionWitnessV1;
 
 /// REST-SSZ response for `POST /payloads/witness`.
@@ -250,10 +250,25 @@ impl ssz::Decode for PayloadStatusWithWitness {
     }
 }
 
+/// REST-SSZ response for `GET /payloads/{payloadId}/witness`.
+///
+/// Both fields refer to the same selected payload snapshot. Every successful response includes
+/// the complete witness; a failure to generate it is an HTTP error.
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
+pub struct BuiltPayloadWithWitness {
+    /// The Amsterdam payload returned by ordinary payload retrieval.
+    pub built_payload: BuiltPayloadAmsterdam,
+    /// Execution witness of the selected built payload.
+    pub witness: ExecutionWitnessV1,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_ethereum_engine_primitives::EthBuiltPayload;
+    use reth_ethereum_primitives::Block as EthBlock;
     use ssz::{Decode, Encode};
+    use std::sync::Arc;
 
     fn assert_roundtrip<T>(value: &T)
     where
@@ -291,5 +306,29 @@ mod tests {
 
         assert!(response.witness.is_none());
         assert_roundtrip(&response);
+    }
+
+    #[test]
+    fn built_payload_witness_has_two_offsets_and_requires_witness() {
+        let payload = EthBuiltPayload::new(
+            Arc::new(EthBlock::default().try_into_recovered().unwrap()),
+            Default::default(),
+            Some(Default::default()),
+            Some(Bytes::new()),
+        );
+        let response = BuiltPayloadWithWitness {
+            built_payload: payload.try_into_v6().unwrap().into(),
+            witness: ExecutionWitnessV1 {
+                state: vec![Bytes::from_static(&[1, 2])],
+                codes: vec![Bytes::from_static(&[3])],
+                headers: vec![Bytes::from_static(&[4])],
+            },
+        };
+        let bytes = response.as_ssz_bytes();
+        let witness_offset = 8 + response.built_payload.ssz_bytes_len();
+        assert_eq!(&bytes[..4], &8u32.to_le_bytes());
+        assert_eq!(&bytes[4..8], &(witness_offset as u32).to_le_bytes());
+        assert_roundtrip(&response);
+        assert!(BuiltPayloadWithWitness::from_ssz_bytes(&bytes[..witness_offset]).is_err());
     }
 }

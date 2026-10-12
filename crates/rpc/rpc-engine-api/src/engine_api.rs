@@ -701,6 +701,18 @@ where
         res
     }
 
+    /// Retrieves one Amsterdam payload snapshot with the same validation and resolution as
+    /// `getPayloadV6`, retaining the built block for witness generation.
+    pub async fn get_built_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::BuiltPayload> {
+        let start = Instant::now();
+        let result = self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
+        result
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(
