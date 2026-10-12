@@ -129,10 +129,14 @@ const fn is_whitespace(byte: u8) -> bool {
 
 /// Converts the start of a truncated message, which may end inside a UTF-8 sequence.
 ///
-/// Replacement characters are never shorter than the bytes they replace, so the message stays
-/// longer than the limit.
-fn lossy(truncated: &[u8]) -> String {
-    String::from_utf8_lossy(truncated).into_owned()
+/// The reader rejects the message by its length alone, so non-ASCII bytes are replaced with `?`
+/// in place, which keeps the length.
+fn lossy(truncated: BytesMut) -> String {
+    String::from_utf8(truncated.into()).unwrap_or_else(|err| {
+        let mut bytes = err.into_bytes();
+        bytes.iter_mut().filter(|b| !b.is_ascii()).for_each(|b| *b = b'?');
+        String::from_utf8(bytes).expect("ASCII is valid UTF-8")
+    })
 }
 
 impl tokio_util::codec::Decoder for StreamCodec {
@@ -145,7 +149,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 let line = buf.split_to(i);
                 buf.advance(1);
                 if let Some(truncated) = self.truncated.take() {
-                    return Ok(Some(lossy(&truncated)))
+                    return Ok(Some(lossy(truncated)))
                 }
 
                 match str::from_utf8(line.as_ref()) {
@@ -185,7 +189,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 {
                     self.scan = ScanState::new();
                     buf.advance(idx + 1);
-                    return Ok(Some(lossy(&truncated)))
+                    return Ok(Some(lossy(truncated)))
                 }
                 if self.scan.depth == 0 &&
                     idx != self.scan.start_idx &&
@@ -213,7 +217,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 self.truncate(buf);
                 self.scan.start_idx = 0;
                 self.scan.cursor = 0;
-            } else if buf.len() > self.max_length {
+            } else if self.scan.depth == 0 && buf.len() > self.max_length {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "message too large"))
             }
             Ok(None)
@@ -663,6 +667,11 @@ mod tests {
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"d":2}"#);
         assert!(buf.is_empty());
 
+        let mut buf = BytesMut::from(&br#"      {"a":"#[..]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(b"1}");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), r#"{"a":1}"#);
+
         let mut buf = BytesMut::from(&b"          "[..]);
         assert_eq!(codec.decode(&mut buf).unwrap_err().kind(), io::ErrorKind::InvalidData);
 
@@ -673,5 +682,10 @@ mod tests {
         buf.put_slice(b"gh\nij\n");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "abcde");
         assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "ij");
+
+        let mut buf = BytesMut::from(&b"\xff\xffcd\xe2\x82\xacgh"[..]);
+        assert!(codec.decode(&mut buf).unwrap().is_none());
+        buf.put_slice(b"\n");
+        assert_eq!(codec.decode(&mut buf).unwrap().unwrap(), "??cd?");
     }
 }
