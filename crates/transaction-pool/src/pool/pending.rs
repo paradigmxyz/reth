@@ -18,6 +18,9 @@ use std::{
 };
 use tokio::sync::broadcast;
 
+/// A sender's eviction rank, removal round, highest transaction priority, age, and ID.
+type EvictionCandidate<P> = Reverse<(Priority<P>, usize, Priority<P>, Reverse<u64>, TransactionId)>;
+
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
 ///
@@ -56,8 +59,6 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
-
-type EvictionCandidate<P> = Reverse<(Priority<P>, usize, Priority<P>, Reverse<u64>, TransactionId)>;
 
 // === impl PendingPool ===
 
