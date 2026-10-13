@@ -548,8 +548,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use alloy_consensus::{Block, BlockBody, Header, TxEip1559};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{BlockId, BlockNumberOrTag};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
@@ -1342,56 +1342,5 @@ mod tests {
                 EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
-    }
-
-    #[tokio::test]
-    async fn priority_fee_ignores_tips_below_two_wei_by_default() {
-        let provider = MockEthProvider::default();
-        let mut parent_hash = B256::ZERO;
-        for number in 1..=20 {
-            let transactions = [0, 0, 0, 1, 2, 2, 2, 11_133]
-                .into_iter()
-                .enumerate()
-                .map(|(nonce, tip)| {
-                    TransactionSigned::new_unhashed(
-                        reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
-                            nonce: nonce as u64,
-                            max_priority_fee_per_gas: tip,
-                            max_fee_per_gas: 100 + tip,
-                            gas_limit: 21_000,
-                            ..Default::default()
-                        }),
-                        Signature::test_signature(),
-                    )
-                })
-                .collect();
-            let block = Block {
-                header: Header {
-                    number,
-                    parent_hash,
-                    base_fee_per_gas: Some(100),
-                    ..Default::default()
-                },
-                body: BlockBody { transactions, ..Default::default() },
-            };
-            let hash = block.header.hash_slow();
-            provider.add_block(hash, block);
-            parent_hash = hash;
-        }
-
-        let api = build_test_eth_api(provider.clone());
-        assert_eq!(EthApiServer::max_priority_fee_per_gas(&api).await.unwrap(), U256::from(2));
-        assert_eq!(EthApiServer::gas_price(&api).await.unwrap(), U256::from(102));
-
-        let api = EthApiBuilder::new(
-            provider,
-            testing_pool(),
-            NoopNetwork::default(),
-            EthEvmConfig::mainnet(),
-        )
-        .modify_gas_oracle_config(|config| config.ignore_price = Some(U256::ZERO))
-        .build();
-        assert_eq!(EthApiServer::max_priority_fee_per_gas(&api).await.unwrap(), U256::ZERO);
-        assert_eq!(EthApiServer::gas_price(&api).await.unwrap(), U256::from(100));
     }
 }

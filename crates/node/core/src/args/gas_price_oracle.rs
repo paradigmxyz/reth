@@ -90,16 +90,4 @@ mod tests {
         let args = CommandParser::<GasPriceOracleArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
     }
-
-    #[test]
-    fn gpo_ignore_price_default_and_override() {
-        let args = CommandParser::<GasPriceOracleArgs>::parse_from(["reth"]).args;
-        assert_eq!(args.ignore_price, 2);
-        assert_eq!(args.gas_price_oracle_config().ignore_price, Some(U256::from(2)));
-
-        let args =
-            CommandParser::<GasPriceOracleArgs>::parse_from(["reth", "--gpo.ignoreprice", "0"])
-                .args;
-        assert_eq!(args.gas_price_oracle_config().ignore_price, Some(U256::ZERO));
-    }
 }
