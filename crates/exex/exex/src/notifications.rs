@@ -6,7 +6,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
-use reth_provider::{BlockNumReader, BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockNumReader, BlockReader, Chain, StateProviderFactory};
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
 use std::{
@@ -164,8 +164,8 @@ where
 
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -221,7 +221,7 @@ where
 
 impl<P, E> Stream for ExExNotifications<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
@@ -254,7 +254,7 @@ where
 
 impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
 where
-    E: ConfigureEvm + Debug,
+    E: ConfigureEvm,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
@@ -385,8 +385,8 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -475,8 +475,8 @@ where
 
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
-    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 

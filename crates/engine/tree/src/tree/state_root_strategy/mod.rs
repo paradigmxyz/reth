@@ -853,14 +853,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
-        + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     fn prepare(
@@ -1035,7 +1027,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateRootProvider>,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1076,14 +1067,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
         + 'static,
 {
     fn serial_fallback(
@@ -1182,14 +1165,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
-        + 'static,
 {
     fn name(&self) -> &'static str {
         "sparse-trie"
@@ -1286,12 +1261,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-        Provider: TrieCursorFactory
-                      + HashedCursorFactory
-                      + HashedPostStateProvider
-                      + StateRootProvider,
-    >,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
