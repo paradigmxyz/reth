@@ -200,7 +200,6 @@ where
     );
 
     let cached_db = cached_reads.as_db_mut(state);
-    let cached_db_handle = cached_db.clone();
     let evm_config = evm_config.with_jit_support();
     let stream_state_updates = state_root_handle.is_some() && !skip_state_root;
     let next_block_env_attributes = NextBlockEnvAttributes {
@@ -414,8 +413,9 @@ where
     }
 
     if !is_better_payload(best_payload.as_ref(), total_fees) {
+        // Release db
         drop(builder);
-        cached_db_handle.sync(&mut cached_reads);
+        // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
@@ -452,7 +452,6 @@ where
     } else {
         builder.finish(state_provider.as_ref(), None)?
     };
-    cached_db_handle.sync(&mut cached_reads);
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp())

@@ -24,11 +24,10 @@ use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{
-    cached::CachedReads,
-    database::StateProviderDatabase,
-    execute::{BlockExecutionOutput, Executor},
-    ConfigureEvm, SenderRecoveryCache,
+    cached::CachedReads, database::StateProviderDatabase, execute::Executor, ConfigureEvm,
+    SenderRecoveryCache,
 };
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
@@ -89,7 +88,7 @@ where
             evm_config,
             disallow,
             validation_window,
-            cached_state: RwLock::new(Default::default()),
+            cached_state: Default::default(),
             validated_blobs: Default::default(),
             task_spawner,
             sender_recovery_cache,
@@ -111,7 +110,7 @@ where
         if cache.0 == head {
             cache.1.clone()
         } else {
-            CachedReads::default()
+            Default::default()
         }
     }
 
@@ -121,7 +120,7 @@ where
         if cache.0 == head {
             cache.1.extend(cached_state);
         } else {
-            *cache = (head, cached_state);
+            *cache = (head, cached_state)
         }
     }
 
@@ -233,21 +232,31 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let db = StateProviderDatabase::new(state_provider.as_ref().into_evm_state_provider());
-            let cached_db = request_cache.as_db_mut(db);
-            let cached_db_handle = cached_db.clone();
+            let cached_db = request_cache
+                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
-            let result = executor.execute_one(&block)?;
-            let block_access_list_hash =
-                executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
-            let output = BlockExecutionOutput::new(result, executor.into_state());
-            cached_db_handle.sync(&mut request_cache);
 
+            let result = executor.execute_one(&block)?;
+
+            // The executor rebuilds the block access list whenever the block header contains a
+            // BAL hash. Comparing the rebuilt hash against the header post execution also
+            // commits to the submitted access list, because the header's BAL hash is derived
+            // from the submitted bytes.
+            let block_access_list_hash =
+                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
+
+            let state = executor.into_state();
             if !self.disallow.is_empty() {
-                self.ensure_no_disallowed_accounts(&request_cache, &output)?;
+                // Check whether the submission interacted with any blacklisted account by
+                // scanning the cached reads and the accounts changed during execution.
+                for account in request_cache.accounts.keys().chain(state.state.keys()) {
+                    if self.disallow.contains(account) {
+                        return Err(ValidationApiError::Blacklist(*account))
+                    }
+                }
             }
 
-            (output, block_access_list_hash)
+            (BlockExecutionOutput { state, result }, block_access_list_hash)
         };
 
         // update the cached reads
@@ -304,26 +313,6 @@ where
         } else {
             Ok(())
         }
-    }
-
-    fn ensure_no_disallowed_accounts(
-        &self,
-        request_cache: &CachedReads,
-        output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
-    ) -> Result<(), ValidationApiError> {
-        for account in request_cache.accounts.keys() {
-            if self.disallow.contains(account) {
-                return Err(ValidationApiError::Blacklist(*account))
-            }
-        }
-
-        for account in output.state.state.keys() {
-            if self.disallow.contains(account) {
-                return Err(ValidationApiError::Blacklist(*account))
-            }
-        }
-
-        Ok(())
     }
 
     /// Ensures that the proposer has received [`BidTrace::value`] for this block.
