@@ -50,10 +50,14 @@ pub struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
+    /// Scratch space for eviction candidates, retaining capacity between truncations.
+    eviction_candidates: Vec<EvictionCandidate<T::PriorityValue>>,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
+
+type EvictionCandidate<P> = Reverse<(Priority<P>, usize, Priority<P>, Reverse<u64>, TransactionId)>;
 
 // === impl PendingPool ===
 
@@ -74,6 +78,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             highest_nonces: Default::default(),
             lowest_priorities: Default::default(),
             size_of: Default::default(),
+            eviction_candidates: Default::default(),
             new_transaction_notifier,
         }
     }
@@ -451,8 +456,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         remove_locals: bool,
         end_removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        let mut candidates = Vec::with_capacity(self.highest_nonces.len());
+        // Reuse the candidate allocation when a saturated pool needs to be truncated again.
+        // The heap is built in linear time after collecting one highest-nonce tx per sender.
+        let mut candidates = std::mem::take(&mut self.eviction_candidates);
+        candidates.clear();
+        candidates.reserve(self.highest_nonces.len());
         for tx in self.highest_nonces.values() {
+            // A local highest-nonce transaction protects its sender in the non-local pass.
             if remove_locals || !tx.transaction.is_local() {
                 candidates.push(Reverse((
                     self.lowest_priorities[&tx.transaction.sender_id()].clone(),
@@ -465,6 +475,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
         let mut candidates = BinaryHeap::from(candidates);
 
+        // An empty heap means no eligible sender has a highest-nonce transaction left to remove.
         while self.exceeds(limit) {
             let Some(Reverse((_, round, _, _, id))) = candidates.pop() else { break };
             let sender = id.sender;
@@ -472,6 +483,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 end_removed.push(removed);
             }
 
+            // Re-rank only this sender after removing its highest nonce. The round counter
+            // preserves roughly even removal across senders with the same lowest priority.
             if let Some(highest) = self.highest_nonces.get(&sender) &&
                 (remove_locals || !highest.transaction.is_local())
             {
@@ -484,6 +497,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 )));
             }
         }
+
+        // Keep the allocation for the next truncation, but drop any unused candidates.
+        self.eviction_candidates = candidates.into_vec();
+        self.eviction_candidates.clear();
     }
 
     /// Lowest priority of a sender's pending nonce chain.
