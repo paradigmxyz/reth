@@ -26,7 +26,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, U256};
+use alloy_primitives::{keccak256, B256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -230,12 +230,6 @@ where
         Tx: ExecutableTxFor<Evm>,
     {
         WorkerPool::with_worker_mut(|worker| {
-            let Some(evm) =
-                worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
-            else {
-                return;
-            };
-
             if ctx.should_stop() {
                 return;
             }
@@ -245,13 +239,20 @@ where
                 return;
             }
 
+            let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx());
+            // The pool is shared across blocks, so this thread may still hold the EVM of a
+            // previous block whose prewarming has not finished yet.
+            if state.0 != ctx.env.hash {
+                *state = ctx.evm_for_ctx();
+            }
+            let Some(evm) = state.1.as_mut() else { return };
+
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
             // Prewarming disables nonce and balance checks, so a reusable result must also show
             // that the caller would have passed them.
-            let (nonce, max_balance_spending) =
-                (tx_env.nonce(), tx_env.max_balance_spending().unwrap_or(U256::MAX));
+            let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
             if ctx.prewarm_results.is_some() {
                 evm.db_mut().start_recording();
             }
@@ -286,6 +287,7 @@ where
             if let Some(results) = &ctx.prewarm_results &&
                 let Some(reads) = evm.db_mut().take_reads() &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed) &&
+                let Ok(max_balance_spending) = max_balance_spending &&
                 reads.caller_is_valid(*tx.signer(), nonce, max_balance_spending)
             {
                 results.insert(index, res, reads);
@@ -607,8 +609,10 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> =
-    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, FrameTracker>>;
+type PrewarmEvmState<Evm> = (
+    B256,
+    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, FrameTracker>>,
+);
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -624,7 +628,7 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Creates a per-thread EVM for prewarming.
+    /// Creates a per-thread EVM for prewarming, tagged with the hash of the block it executes.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
@@ -635,7 +639,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return None
+                return (self.env.hash, None)
             }
         };
 
@@ -688,7 +692,7 @@ where
             });
         }
 
-        Some(evm)
+        (self.env.hash, Some(evm))
     }
 
     /// Returns `true` if prewarming should stop.
@@ -887,7 +891,7 @@ mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{Address, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};

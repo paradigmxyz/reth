@@ -25,7 +25,7 @@ use alloy_evm::{
 };
 #[cfg(feature = "jit")]
 use core::any::Any;
-use core::{convert::Infallible, fmt::Debug};
+use core::{any::TypeId, convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -272,7 +272,10 @@ where
     }
 
     fn reuses_prewarm_results(&self) -> bool {
-        true
+        // Custom factories may change transaction validation or read state outside the database.
+        let factory = TypeId::of::<EvmF>();
+        factory == TypeId::of::<EthEvmFactory>() ||
+            factory == TypeId::of::<factory::RethEvmFactory>()
     }
 
     fn prewarm_tx_result(
