@@ -234,7 +234,6 @@ where
             }
         }
         drop(evm);
-        db.sync(&mut self.cache);
         end
     }
 
