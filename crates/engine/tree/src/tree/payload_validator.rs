@@ -152,7 +152,7 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -308,7 +308,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -1797,7 +1796,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader

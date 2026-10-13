@@ -462,9 +462,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: BlockHashReader
-        + DBProvider
-        + Sized
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -787,7 +785,6 @@ where
     Provider: Deref,
     Provider::Target: DBProvider
         + HistoryReader
-        + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader

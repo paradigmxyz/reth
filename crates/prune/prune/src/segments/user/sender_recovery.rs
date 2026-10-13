@@ -6,7 +6,7 @@ use crate::{
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{
     BlockReader, DBProvider, EitherWriterDestination, StaticFileProviderFactory,
-    StorageSettingsCache, TransactionsProvider,
+    StorageSettingsCache,
 };
 use reth_prune_types::{
     PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -27,11 +27,8 @@ impl SenderRecovery {
 
 impl<Provider> Segment<Provider> for SenderRecovery
 where
-    Provider: DBProvider<Tx: DbTxMut>
-        + TransactionsProvider
-        + BlockReader
-        + StorageSettingsCache
-        + StaticFileProviderFactory,
+    Provider:
+        DBProvider<Tx: DbTxMut> + BlockReader + StorageSettingsCache + StaticFileProviderFactory,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::SenderRecovery
