@@ -209,11 +209,7 @@ where
 
 impl<Eth> EthFilter<Eth>
 where
-    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader>
-        + RpcNodeCoreExt
-        + LoadReceipt
-        + EthBlocks
-        + 'static,
+    Eth: FullEthApiTypes<Provider: BlockReader + BlockIdReader> + LoadReceipt + EthBlocks + 'static,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -354,7 +350,7 @@ where
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>
     for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt + LoadReceipt + EthBlocks + 'static,
+    Eth: FullEthApiTypes + LoadReceipt + EthBlocks + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -1094,7 +1090,7 @@ impl From<logs_utils::FilterBlockRangeError> for EthFilterError {
 /// a match for the filter.
 struct ReceiptBlockResult<P>
 where
-    P: ReceiptProvider + BlockReader,
+    P: BlockReader,
 {
     /// We always need the entire receipts for the matching block.
     receipts: Arc<Vec<ProviderReceipt<P>>>,
@@ -1107,7 +1103,6 @@ where
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -1120,7 +1115,6 @@ enum RangeMode<
 
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
             + LoadReceipt
             + EthBlocks
             + 'static,
@@ -1201,7 +1195,6 @@ impl<
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -1212,7 +1205,6 @@ struct CachedMode<
 
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
             + LoadReceipt
             + EthBlocks
             + 'static,
@@ -1239,7 +1231,6 @@ type ReceiptFetchFuture<P> =
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes
         + LoadReceipt
         + EthBlocks
         + 'static,
@@ -1257,7 +1248,6 @@ struct RangeBlockMode<
 
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-            + EthApiTypes
             + LoadReceipt
             + EthBlocks
             + 'static,
