@@ -16,8 +16,8 @@ use alloy_primitives::{
 };
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
-    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, GetReceipts70,
-    NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
+    GetReceipts70, NetworkPrimitives, NewBlockHashes, NewBlockPayload, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
@@ -169,7 +169,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             peer_id: peer,
             best_hash: status.blockhash,
             best_number: block_number,
-            capabilities: Arc::clone(&capabilities),
+            capabilities,
             timeout,
             range_info,
             supports_snap,
@@ -179,7 +179,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             peer,
             ActivePeer {
                 best_hash: status.blockhash,
-                capabilities,
+                version: status.version,
                 request_tx,
                 pending_response: None,
                 blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
@@ -424,7 +424,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     (request, response)
                 }
                 BlockRequest::GetReceipts(request) => {
-                    if peer.capabilities.supports_eth_v70() {
+                    if peer.version >= EthVersion::Eth70 {
                         let (response, rx) = oneshot::channel();
                         let request = PeerRequest::GetReceipts70 {
                             request: GetReceipts70 {
@@ -435,7 +435,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         };
                         let response = PeerResponse::Receipts70 { response: rx };
                         (request, response)
-                    } else if peer.capabilities.supports_eth_v69() {
+                    } else if peer.version >= EthVersion::Eth69 {
                         let (response, rx) = oneshot::channel();
                         let request = PeerRequest::GetReceipts69 { request, response };
                         let response = PeerResponse::Receipts69 { response: rx };
@@ -605,8 +605,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
-    /// The capabilities of the remote peer.
-    pub(crate) capabilities: Arc<Capabilities>,
+    /// The negotiated `eth` version of the session.
+    pub(crate) version: EthVersion,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
     /// The response receiver for a currently active request to that peer.
@@ -685,10 +685,14 @@ mod tests {
     };
     use alloy_consensus::Header;
     use alloy_primitives::B256;
-    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_eth_wire::{
+        BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion, UnifiedStatus,
+    };
     use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
-    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_p2p::{
+        bodies::client::BodiesClient, error::RequestError, receipts::client::ReceiptsClient,
+    };
     use reth_network_peers::PeerId;
     use reth_storage_api::noop::NoopProvider;
     use std::{
@@ -773,5 +777,43 @@ mod tests {
         let resp = client.get_block_bodies(vec![B256::random()]).await;
         assert!(resp.is_err());
         assert_eq!(resp.unwrap_err(), RequestError::ConnectionDropped);
+    }
+
+    // The receipts request variant must follow the negotiated eth version, since the session maps
+    // `GetReceipts` to the eth/70 wire format and matches the response type against the request.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn receipts_request_follows_negotiated_version() {
+        for (announced, negotiated) in [
+            (vec![EthVersion::Eth69, EthVersion::Eth71], EthVersion::Eth71),
+            (vec![EthVersion::Eth69, EthVersion::Eth70], EthVersion::Eth69),
+        ] {
+            let mut state = state();
+            let client = state.fetch_client();
+            let peer_id = PeerId::random();
+            let (tx, mut session_rx) = mpsc::channel(1);
+            let capabilities = announced.into_iter().map(Capability::from).collect::<Vec<_>>();
+            state.on_session_activated(SessionActivation {
+                peer: peer_id,
+                capabilities: Arc::new(capabilities.into()),
+                status: Arc::new(UnifiedStatus { version: negotiated, ..Default::default() }),
+                request_tx: PeerRequestSender::new(peer_id, tx),
+                timeout: Arc::new(AtomicU64::new(1)),
+                range_info: None,
+                supports_snap: false,
+            });
+            tokio::task::spawn(async move {
+                loop {
+                    poll_fn(|cx| state.poll(cx)).await;
+                }
+            });
+            tokio::task::spawn(async move { client.get_receipts(vec![B256::random()]).await });
+
+            let request = session_rx.recv().await.unwrap();
+            if negotiated >= EthVersion::Eth70 {
+                assert!(matches!(request, PeerRequest::GetReceipts70 { .. }), "{negotiated}");
+            } else {
+                assert!(matches!(request, PeerRequest::GetReceipts69 { .. }), "{negotiated}");
+            }
+        }
     }
 }
