@@ -31,7 +31,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{database::State, primitives::hardfork::SpecId};
+use revm::{context::result::ResultAndState, database::State, primitives::hardfork::SpecId};
 
 pub mod either;
 /// EVM environment configuration.
@@ -487,6 +487,33 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         db: DB,
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
+    }
+
+    /// Returns whether engine validation may commit transaction results from speculative prewarm
+    /// execution instead of executing the transactions again.
+    ///
+    /// Return `true` only if the block executor executes a transaction by checking that its gas
+    /// limit, capped by the transaction gas limit cap, fits into the block gas limit minus the
+    /// last receipt's cumulative gas used, and then running [`Evm::transact`] with the transaction
+    /// environment, and if [`Evm::transact`] performs the standard caller nonce and balance
+    /// validation. See [`Self::prewarm_tx_result`].
+    ///
+    /// [`Evm::transact`]: alloy_evm::Evm::transact
+    fn reuses_prewarm_results(&self) -> bool {
+        false
+    }
+
+    /// Wraps a speculative prewarm execution result of `tx` into the result consumed by
+    /// [`BlockExecutor::commit_transaction`](alloy_evm::block::BlockExecutor::commit_transaction).
+    ///
+    /// Only called if [`Self::reuses_prewarm_results`] returns `true`.
+    fn prewarm_tx_result(
+        &self,
+        tx: &TxTy<Self::Primitives>,
+        result: ResultAndState<HaltReasonFor<Self>>,
+    ) -> Option<TxExecutionResultFor<Self>> {
+        let _ = (tx, result);
+        None
     }
 }
 

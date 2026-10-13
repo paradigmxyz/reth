@@ -10,8 +10,14 @@
 //!    and one for actual execution (executed sequentially)
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
+//! 4. Block execution commits prewarm results whose reads are still valid instead of executing the
+//!    transactions again, see [`super::reuse`]
 
-use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
+use super::{
+    bal_prewarm_pool::BalPrewarmPool,
+    reuse::{FrameTracker, PrewarmResults, RecordingDb},
+    StateRootHintStream, StateRootUpdateStream,
+};
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
@@ -20,10 +26,12 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, U256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, HaltReasonFor, RecoveredTx, SpecFor,
+};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -36,6 +44,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
+use revm::context::{Block as _, Transaction as _};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -239,6 +248,13 @@ where
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
+            // Prewarming disables nonce and balance checks, so a reusable result must also show
+            // that the caller would have passed them.
+            let (nonce, max_balance_spending) =
+                (tx_env.nonce(), tx_env.max_balance_spending().unwrap_or(U256::MAX));
+            if ctx.prewarm_results.is_some() {
+                evm.db_mut().start_recording();
+            }
             let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
@@ -260,11 +276,19 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+                let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
                 }
+            }
+
+            if let Some(results) = &ctx.prewarm_results &&
+                let Some(reads) = evm.db_mut().take_reads() &&
+                index >= ctx.executed_tx_index.load(Ordering::Relaxed) &&
+                reads.caller_is_valid(*tx.signer(), nonce, max_balance_spending)
+            {
+                results.insert(index, res, reads);
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
@@ -577,11 +601,14 @@ where
     pub disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
+    /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
+    pub prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
+type PrewarmEvmState<Evm> =
+    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, FrameTracker>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -635,7 +662,19 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
+        let frames_done = Arc::new(AtomicBool::new(false));
+        let state_provider = RecordingDb::new(
+            state_provider,
+            evm_env.block_env.beneficiary(),
+            Arc::clone(&frames_done),
+        );
+        let mut evm = self.evm_config.evm_with_env_and_inspector(
+            state_provider,
+            evm_env,
+            FrameTracker::new(frames_done),
+        );
+        // The frame tracker is only needed to record reads for result reuse.
+        evm.set_inspector_enabled(self.prewarm_results.is_some());
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -877,6 +916,7 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -920,6 +960,7 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
         }
     }
 
@@ -1086,10 +1127,11 @@ mod tests {
         let (task, actions_tx) =
             PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
         let mut payload = PayloadHandle {
-            prewarm_handle: CacheTaskHandle {
+            prewarm_handle: CacheTaskHandle::<_, ()> {
                 saved_cache: task.ctx.saved_cache.clone(),
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
+                prewarm_results: None,
                 cache_metrics: None,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
