@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(
             accounts,
             vec![
-                (Address::with_last_byte(1), U256::from(1)),
+                (Address::with_last_byte(1), U256::ONE),
                 (Address::with_last_byte(2), U256::from(2))
             ]
         );
@@ -1584,7 +1584,7 @@ mod tests {
                 alloc: BTreeMap::from([
                     (
                         address_with_balance,
-                        GenesisAccount { balance: U256::from(1), ..Default::default() },
+                        GenesisAccount { balance: U256::ONE, ..Default::default() },
                     ),
                     (
                         address_with_storage,

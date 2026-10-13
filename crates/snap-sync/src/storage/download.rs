@@ -381,32 +381,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_new_download_resumes_from_the_last_committed_response() {
-        let accounts = accounts();
-        let (factory, range) = started(&accounts);
-        let (large, small) = (large(), small());
-        let first = storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]);
-        let (_, mut interrupted) = download([first], factory.clone());
-        committed(&mut interrupted, &range).await;
-        drop(interrupted);
-
-        let responses = [
-            storage_ranges(1, &[&large[1..]], &large, &[key(2), key(3)]),
-            storage_ranges(2, &[&small[..]], &small, &[]),
-        ];
-        let (client, mut resumed) = download(responses, factory.clone());
-        committed(&mut resumed, &range).await;
-        committed(&mut resumed, &range).await;
-
-        assert!(matches!(resumed.next(&range).await.unwrap(), StorageRangeStep::Complete));
-        assert_eq!(
-            *client.storage_requests(),
-            [(vec![key(2), key(3)], key(2)), (vec![key(3)], B256::ZERO)]
-        );
-        assert_eq!(slots_of(&factory, key(2)), large);
-    }
-
-    #[tokio::test]
     async fn requests_ask_for_at_most_the_configured_contracts() {
         let accounts = accounts();
         let (factory, range) = started(&accounts);

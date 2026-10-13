@@ -1050,7 +1050,7 @@ mod tests {
         db_tx
             .put::<tables::PlainAccountState>(acc2, Account { balance, ..Default::default() })
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1189,7 +1189,7 @@ mod tests {
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info.clone()).unwrap();
         db_tx.put::<tables::PlainAccountState>(acc2, acc2_info.clone()).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into())).unwrap();
         provider.commit().unwrap();
 
         // execute
@@ -1379,7 +1379,7 @@ mod tests {
             .unwrap();
         provider
             .tx_ref()
-            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into()))
             .unwrap();
         // set storage to check when account gets destroyed.
         provider
@@ -1393,7 +1393,7 @@ mod tests {
             .tx_ref()
             .put::<tables::PlainStorageState>(
                 destroyed_address,
-                StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) },
+                StorageEntry { key: B256::with_last_byte(1), value: U256::ONE },
             )
             .unwrap();
 
@@ -1464,7 +1464,7 @@ mod tests {
                 ),
                 (
                     (block.number, destroyed_address).into(),
-                    StorageEntry { key: B256::with_last_byte(1), value: U256::from(1u64) }
+                    StorageEntry { key: B256::with_last_byte(1), value: U256::ONE }
                 )
             ]
         );

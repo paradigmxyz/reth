@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -766,7 +766,7 @@ where
         EthApiError: From<DB::Error>,
     {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
-        let code = if account.code_hash == KECCAK_EMPTY {
+        let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
@@ -1057,7 +1057,7 @@ where
                     break
                 }
 
-                let block_id = BlockId::Number(number.into());
+                let block_id = BlockId::number(number);
                 let block = match this.eth_api().recovered_block(block_id).await {
                     Ok(Some(block)) => block,
                     Ok(None) => {
@@ -1582,7 +1582,7 @@ mod tests {
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
         let factory = create_test_provider_factory();
         let address = Address::with_last_byte(1);
-        let old_slot = U256::from(1);
+        let old_slot = U256::ONE;
         let new_slot = U256::from(2);
         let old_value = U256::from(10);
         let new_value = U256::from(20);

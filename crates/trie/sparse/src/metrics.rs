@@ -44,7 +44,4 @@ pub(crate) struct SparseStateTrieInnerMetrics {
     pub(crate) multiproof_total_account_nodes: Histogram,
     /// Histogram of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: Histogram,
-    /// Time spent taking and collecting account and storage trie updates in `root_with_updates`,
-    /// including sorting and deduplication, but excluding root calculation.
-    pub(crate) take_updates_duration_seconds: Histogram,
 }

@@ -56,7 +56,7 @@ impl MockHashedCursorFactory {
                 let storage_map: BTreeMap<B256, U256> = hashed_storage
                     .storage
                     .into_iter()
-                    .filter_map(|(slot, value)| (value != U256::ZERO).then_some((slot, value)))
+                    .filter_map(|(slot, value)| (!value.is_zero()).then_some((slot, value)))
                     .collect();
                 (addr, storage_map)
             })

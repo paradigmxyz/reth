@@ -575,7 +575,7 @@ where
                     continue;
                 }
 
-                if rpc_latest_header.inner.difficulty != alloy_primitives::U256::ZERO {
+                if !rpc_latest_header.inner.difficulty.is_zero() {
                     debug!(
                         "Client {}: difficulty != 0: {:?}",
                         idx, rpc_latest_header.inner.difficulty

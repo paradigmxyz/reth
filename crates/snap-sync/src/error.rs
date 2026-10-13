@@ -216,6 +216,16 @@ impl SnapSyncError {
         }
     }
 
+    /// Whether retrying can't help: storage failed, the node's storage layout or on-disk records
+    /// don't support snap, or the network is gone.
+    pub const fn is_fatal(&self) -> bool {
+        match self {
+            Self::Provider(_) | Self::UnsupportedStorage | Self::UnsupportedRecord { .. } => true,
+            Self::Request(error) => error.is_channel_closed(),
+            _ => false,
+        }
+    }
+
     /// Whether a block the attempt builds on left the canonical chain, so its downloaded state
     /// belongs to another fork.
     pub const fn is_reorg(&self) -> bool {

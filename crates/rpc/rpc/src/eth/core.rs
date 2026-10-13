@@ -1332,7 +1332,7 @@ mod tests {
         provider.add_block(hash, block);
 
         let api = build_test_eth_api(provider);
-        for block_id in [BlockId::Number(BlockNumberOrTag::Number(1)), BlockId::Hash(hash.into())] {
+        for block_id in [BlockId::number(1), BlockId::hash(hash)] {
             let header = EthBlocks::rpc_block_header(&api, block_id).await.unwrap().unwrap();
             let response = serde_json::to_value(&header).unwrap();
             assert!(response.get("size").is_none());
@@ -1340,10 +1340,7 @@ mod tests {
 
         for full in [false, true] {
             let block =
-                EthBlocks::rpc_block(&api, BlockId::Number(BlockNumberOrTag::Number(1)), full)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
     }

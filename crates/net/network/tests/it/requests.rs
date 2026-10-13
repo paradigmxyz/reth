@@ -5,9 +5,7 @@ use alloy_consensus::{Header, Sealed};
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use rand::Rng;
-use reth_eth_wire::{
-    BlockAccessLists, EthVersion, GetBlockAccessLists, GetReceipts, HeadersDirection,
-};
+use reth_eth_wire::{BlockAccessLists, EthVersion, GetBlockAccessLists, GetReceipts};
 use reth_ethereum_primitives::{Block, Receipt};
 use reth_network::{
     eth_requests::{MAX_BLOCK_ACCESS_LISTS_SERVE, SOFT_RESPONSE_LIMIT},
@@ -109,8 +107,7 @@ async fn test_get_header(version: Option<EthVersion>) {
 
         provider.add_header(hash, header.clone());
 
-        let req =
-            HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Falling };
+        let req = HeadersRequest::falling(hash.into(), 1);
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");
@@ -131,11 +128,7 @@ async fn test_get_header_range() {
     for idx in 0..100 {
         let count = 100 - idx;
         let header = &all_headers[idx];
-        let req = HeadersRequest {
-            start: header.hash().into(),
-            limit: count as u64,
-            direction: HeadersDirection::Rising,
-        };
+        let req = HeadersRequest::rising(header.hash().into(), count as u64);
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");
@@ -161,11 +154,7 @@ async fn test_get_header_range_falling() {
         // Can't fetch more than idx+1 headers when going backwards
         let count = idx + 1;
         let header = &all_headers[idx];
-        let req = HeadersRequest {
-            start: header.hash().into(),
-            limit: count as u64,
-            direction: HeadersDirection::Falling,
-        };
+        let req = HeadersRequest::falling(header.hash().into(), count as u64);
 
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");

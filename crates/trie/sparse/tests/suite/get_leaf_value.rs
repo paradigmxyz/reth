@@ -8,7 +8,7 @@ pub(super) fn test_get_leaf_value_after_update<T: SparseTrie>(new_trie: fn() -> 
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -48,7 +48,7 @@ pub(super) fn test_get_leaf_value_after_removal<T: SparseTrie>(new_trie: fn() ->
     let key3 = B256::with_last_byte(0x30);
 
     let base_storage: BTreeMap<B256, U256> =
-        [(key1, U256::from(1)), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
+        [(key1, U256::ONE), (key2, U256::from(2)), (key3, U256::from(3))].into_iter().collect();
 
     let harness = SuiteTestHarness::new(base_storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);

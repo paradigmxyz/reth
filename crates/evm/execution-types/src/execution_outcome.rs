@@ -573,8 +573,8 @@ mod tests {
     fn test_initialization() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-            vec![vec![(Address::new([2; 20]), None, vec![])]],
+            vec![(Address::repeat_byte(2), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![vec![(Address::repeat_byte(2), None, vec![])]],
             vec![],
         );
 
@@ -610,11 +610,11 @@ mod tests {
         // Create a BundleStateInit object and insert initial data
         let mut state_init: BundleStateInit = AddressMap::default();
         state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
+            .insert(Address::repeat_byte(2), (None, Some(Account::default()), B256Map::default()));
 
         // Create an AddressMap for account reverts and insert initial data
         let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
-        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
+        revert_inner.insert(Address::repeat_byte(2), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
         let mut revert_init: RevertsInit = HashMap::default();

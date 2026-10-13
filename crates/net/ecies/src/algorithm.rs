@@ -741,7 +741,7 @@ impl ECIES {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{b256, hex};
+    use alloy_primitives::{b256, b512, hex};
 
     #[test]
     fn ecdh() {
@@ -749,7 +749,7 @@ mod tests {
             "202a36e24c3eb39513335ec99a7619bad0e7dc68d69401b016253c7d26dc92f8"
         ))
         .unwrap();
-        let remote_public_key = id2pk(hex!("d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666").into()).unwrap();
+        let remote_public_key = id2pk(b512!("d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666")).unwrap();
 
         assert_eq!(
             ecdh_x(&remote_public_key, &our_secret_key),

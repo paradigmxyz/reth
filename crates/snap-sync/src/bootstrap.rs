@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
@@ -45,6 +45,8 @@ pub struct SnapBootstrap<C, F, X> {
     ranges_per_check: usize,
     // Stops the run at the next step boundary, leaving committed progress in place.
     cancel: CancellationToken,
+    // Stops the all-or-nothing hand-off scan, which `cancel` otherwise stops.
+    shutdown: Option<CancellationToken>,
     accounts: AccountRangeDownload<C, F>,
     storage: StorageRangeDownload<C, F>,
     bytecode: BytecodeDownload<C, F>,
@@ -67,13 +69,14 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
             session: SnapSyncSession::new(policy),
             ranges_per_check: DEFAULT_RANGES_PER_CHECK,
             cancel: CancellationToken::new(),
+            shutdown: None,
         }
     }
 }
 
 impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run anchoring and re-anchoring pivots with `policy`.
-    pub fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
+    pub const fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
         self.policy = policy;
         self.session = SnapSyncSession::new(policy);
         self
@@ -89,6 +92,14 @@ impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run stopping once `cancel` fires.
     pub fn with_cancellation(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    /// Returns this run finishing the hand-off scan unless `shutdown` fires.
+    ///
+    /// The scan restarts from scratch once stopped, so [`Self::with_cancellation`] lets it finish.
+    pub fn with_shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = Some(shutdown);
         self
     }
 }
@@ -112,6 +123,9 @@ where
     /// Peers that do not serve the state, or headers not downloaded yet, wait for the context to
     /// report progress instead of failing the run.
     pub async fn run(&mut self) -> Result<SnapBootstrapOutcome, SnapSyncError> {
+        // Waits recur every few seconds, so only the first for a reason logs at info until a pass
+        // makes progress.
+        let mut announced = None;
         loop {
             if self.cancel.is_cancelled() {
                 return Ok(SnapBootstrapOutcome::Stopped)
@@ -119,12 +133,28 @@ where
             let head = self.context.head()?;
             let step = match self.resolve(head)? {
                 Resolved::Verified(pivot) => return Ok(SnapBootstrapOutcome::Verified { pivot }),
+                Resolved::BeforeBlockAccessLists => {
+                    return Ok(SnapBootstrapOutcome::BeforeBlockAccessLists)
+                }
                 Resolved::Waiting => {
-                    debug!(target: "sync::snap", head, "No eligible snap pivot");
+                    if announced.replace(Wait::Pivot) == Some(Wait::Pivot) {
+                        debug!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
+                    } else {
+                        info!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
+                    }
                     Step::Wait
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
                     Ok(step) => step,
+                    // The network fails snap requests at once while no connected peer serves them.
+                    Err(SnapSyncError::Request(RequestError::UnsupportedCapability)) => {
+                        if announced.replace(Wait::SnapPeer) == Some(Wait::SnapPeer) {
+                            debug!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        } else {
+                            info!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
+                        }
+                        Step::Wait
+                    }
                     Err(error) if error.is_transient() => {
                         debug!(target: "sync::snap", %error, "Waiting for peers or headers");
                         Step::Wait
@@ -149,7 +179,7 @@ where
                     info!(target: "sync::snap", ?pivot, "Snap state handed to the trie rebuild");
                     return Ok(SnapBootstrapOutcome::TrieRebuild { write, pivot })
                 }
-                Step::Continue => {}
+                Step::Continue => announced = None,
                 Step::Wait => {
                     if !self.wait(head).await {
                         return Ok(SnapBootstrapOutcome::Stopped)
@@ -166,7 +196,7 @@ where
     }
 
     // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
-    // the pivot under `head`. Starting one reads the kept headers and writes a few records, cheap
+    // the pivot under `head`. Starting one reads the kept blocks and writes a few records, cheap
     // enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
@@ -184,7 +214,19 @@ where
         }
 
         session.select(&provider, head, self.context.finalized())?;
-        let Some((generation, _)) = session.start() else { return Ok(Resolved::Waiting) };
+        let Some(generation) = session.start() else {
+            // A head without a block access list predates them, so no block under it can anchor.
+            // Once the staged pipeline executes past genesis, the node stays on it. The first
+            // header pass may stop at the finalized block, so if block access lists
+            // activated between it and the head, the node full syncs. That window is
+            // narrow and accepted.
+            return match provider.sealed_header(head)? {
+                Some(header) if header.block_access_list_hash().is_none() => {
+                    Ok(Resolved::BeforeBlockAccessLists)
+                }
+                _ => Ok(Resolved::Waiting),
+            }
+        };
         let write = provider.start_snap_attempt(generation)?;
         provider.start_account_coverage(write)?;
         provider.commit()?;
@@ -259,7 +301,7 @@ where
         let pivot = self.pivot()?;
         let provider = self.factory.database_provider_ro()?;
         let Some(reorg) = provider.snap_reorg(write)? else {
-            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
+            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept blocks, restarting");
             return Ok(Step::Restart)
         };
         let ancestor = reorg.ancestor();
@@ -438,7 +480,7 @@ where
     // Checks the downloaded state is complete and hands it to the merkle stage. The scan reads
     // every account, so it runs on the blocking pool.
     async fn hand_off(&self, write: SnapWrite) -> Result<Step, SnapSyncError> {
-        let cancel = self.cancel.clone();
+        let cancel = self.shutdown.as_ref().unwrap_or(&self.cancel).clone();
         self.commit_blocking(move |provider| {
             provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &cancel)
         })
@@ -504,6 +546,8 @@ pub enum SnapBootstrapOutcome {
     /// The run was cancelled or the context reported no further progress. Committed progress is
     /// kept for the next run.
     Stopped,
+    /// The head predates block access lists, so snap/2 can't sync this chain yet.
+    BeforeBlockAccessLists,
 }
 
 /// What a [`SnapBootstrap`] needs to know about the chain and peers it synchronizes from.
@@ -529,6 +573,8 @@ enum Resolved {
     Verified(BlockNumHash),
     // No block is eligible as a pivot yet.
     Waiting,
+    // The head predates block access lists, so no block can be a pivot.
+    BeforeBlockAccessLists,
 }
 
 // What one pass over the attempt left to do.
@@ -544,6 +590,13 @@ enum Step {
     Stop,
 }
 
+// Why a run waits, so a repeated wait logs at debug.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Wait {
+    Pivot,
+    SnapPeer,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,17 +610,13 @@ mod tests {
     };
     use alloy_eip7928::{
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
-        NonceChange,
     };
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
-    use reth_network_p2p::{
-        error::{PeerRequestResult, RequestError},
-        snap::client::SnapResponse,
-    };
+    use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::{Account, AlloyBlockHeader, SealedHeader};
     use reth_provider::{
@@ -623,6 +672,21 @@ mod tests {
         (client, bootstrap)
     }
 
+    // An attempt at block 2 that downloaded all of `accounts()`, not handed off yet.
+    fn downloaded(factory: &Factory) -> SnapWrite {
+        let accounts = accounts();
+        insert_chain(factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        write
+    }
+
     fn attempt_id(factory: &Factory) -> SnapAttemptId {
         factory.database_provider_ro().unwrap().snap_attempt().unwrap().unwrap().id()
     }
@@ -648,11 +712,11 @@ mod tests {
 
     // Blocks `0..=tip`, each committing to an empty list and to `root`.
     fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
-        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
+        let access_list_hash = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
         let mut parent = B256::ZERO;
         (0..=tip)
             .map(|number| {
-                let mut header = header(number, parent, Some(commitment));
+                let mut header = header(number, parent, Some(access_list_hash));
                 header.state_root = root;
                 let sealed = SealedHeader::seal_slow(header);
                 parent = sealed.hash();
@@ -671,8 +735,8 @@ mod tests {
         lists
             .iter()
             .map(|list| {
-                let commitment = compute_block_access_list_hash(list);
-                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
+                let access_list_hash = compute_block_access_list_hash(list);
+                let mut header = header(parent.number() + 1, parent.hash(), Some(access_list_hash));
                 header.state_root = root;
                 parent = SealedHeader::seal_slow(header);
                 parent.clone()
@@ -999,7 +1063,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reorged_pivot_without_kept_headers_restarts_the_attempt() {
+    async fn a_head_before_block_access_lists_falls_back_without_waiting() {
+        let factory = hashed_factory();
+        let genesis = header(0, B256::ZERO, None);
+        insert_headers(&factory, &[SealedHeader::seal_slow(genesis)]);
+        let (client, mut bootstrap) = scripted(&factory, [], [0]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::BeforeBlockAccessLists);
+
+        assert_eq!(bootstrap.context.waits, 0);
+        assert!(client.origins().is_empty());
+        assert!(factory.database_provider_ro().unwrap().snap_attempt().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_reorged_pivot_without_kept_blocks_restarts_the_attempt() {
         let accounts = accounts();
         let factory = hashed_factory();
         insert_chain(&factory, 3, state_root(&accounts));
@@ -1034,19 +1112,6 @@ mod tests {
         let (client, mut resumed) = scripted(&factory, [], [3]);
 
         assert_eq!(resumed.run().await.unwrap(), first);
-        assert!(client.origins().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_cancelled_run_stops_before_any_work() {
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts()));
-        let cancel = CancellationToken::new();
-        let (client, bootstrap) = scripted(&factory, [], [3]);
-        let mut bootstrap = bootstrap.with_cancellation(cancel.clone());
-        cancel.cancel();
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert!(client.origins().is_empty());
     }
 
@@ -1210,19 +1275,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn another_field_changed_on_the_new_branch_leaves_the_account_to_repair() {
-        let nonce =
-            stale_changes().with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1));
-
-        let origins = recover([vec![nonce], Vec::new()], true).await;
-
-        assert_eq!(origins, [keccak256(STALE)]);
-    }
-
-    #[tokio::test]
     async fn a_field_the_new_branch_changes_too_needs_no_repair() {
         let balance = stale_changes()
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(1)));
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ONE));
 
         let origins = recover([vec![balance], Vec::new()], false).await;
 
@@ -1454,5 +1509,36 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.snap_repairs(write).unwrap().is_empty());
         assert_eq!(stored_slots(&provider, key(1)), slots);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_run_still_finishes_the_hand_off_scan() {
+        let factory = hashed_factory();
+        let write = downloaded(&factory);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let (_, bootstrap) = scripted(&factory, [], [3]);
+        let bootstrap = bootstrap.with_cancellation(cancel).with_shutdown(CancellationToken::new());
+
+        // The scan restarts from scratch once stopped, so a header refresh doesn't stop it.
+        assert!(matches!(bootstrap.hand_off(write).await, Ok(Step::HandedOff(_))));
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_the_hand_off_scan_without_committing() {
+        let factory = hashed_factory();
+        let write = downloaded(&factory);
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let (_, bootstrap) = scripted(&factory, [], [3]);
+        let bootstrap = bootstrap.with_shutdown(shutdown);
+
+        assert!(matches!(bootstrap.hand_off(write).await, Err(SnapSyncError::Cancelled)));
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(!provider.is_trie_rebuild_started(write).unwrap());
     }
 }

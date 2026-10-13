@@ -373,7 +373,6 @@ where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N> + 'static,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
-    DefaultDebugBlockProvider<N>: PayloadProvider<ExecutionData = PayloadDataTy<N::Types>> + Clone,
 {
     type Node = NodeHandle<N, AddOns>;
     type Future = DebugNodeLauncherFuture<L, Target, N>;

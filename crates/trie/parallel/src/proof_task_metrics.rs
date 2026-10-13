@@ -5,7 +5,10 @@ use reth_trie::{
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
-use std::time::Duration;
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 /// Metrics for the proof task.
 #[derive(Clone, Metrics)]
@@ -77,7 +80,7 @@ impl ProofTaskCursorMetrics {
     ///
     /// This method adds the current counter values from the cache to the Prometheus metrics
     /// and then resets all cache counters to zero.
-    pub fn record(&mut self, cache: &mut ProofTaskCursorMetricsCache) {
+    pub fn record(&self, cache: &mut ProofTaskCursorMetricsCache) {
         self.account_trie_cursor.record(&mut cache.account_trie_cursor);
         self.account_hashed_cursor.record(&mut cache.account_hashed_cursor);
         self.storage_trie_cursor.record(&mut cache.storage_trie_cursor);
@@ -130,5 +133,27 @@ impl ProofTaskCursorMetricsCache {
         self.account_hashed_cursor.record_span("account_hashed_cursor");
         self.storage_trie_cursor.record_span("storage_trie_cursor");
         self.storage_hashed_cursor.record_span("storage_hashed_cursor");
+    }
+}
+
+/// Metrics shared by all proof workers.
+///
+/// Every worker records into the same metric series, so the handles are registered once and
+/// shared instead of being registered again by each worker.
+#[derive(Clone, Debug, Default)]
+pub struct ProofWorkerMetrics {
+    /// Worker idle time and value encoder metrics.
+    pub trie: ProofTaskTrieMetrics,
+    /// Trie and hashed cursor operation metrics.
+    pub cursor: ProofTaskCursorMetrics,
+}
+
+impl ProofWorkerMetrics {
+    /// Returns the process-wide instance, registering the metrics on first use.
+    ///
+    /// The handles stay bound to the recorder that was installed when this is first called.
+    pub fn shared() -> Arc<Self> {
+        static METRICS: OnceLock<Arc<ProofWorkerMetrics>> = OnceLock::new();
+        METRICS.get_or_init(Default::default).clone()
     }
 }

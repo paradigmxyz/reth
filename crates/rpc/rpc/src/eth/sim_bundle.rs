@@ -577,7 +577,6 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::Bytes;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
 
@@ -659,7 +658,7 @@ mod tests {
             (SimBundleOverrides::default(), 1, 112, 875_000_000, coinbase),
             (
                 SimBundleOverrides {
-                    parent_block: Some(BlockNumberOrTag::Number(0).into()),
+                    parent_block: Some(BlockId::number(0)),
                     block_overrides: BlockOverrides {
                         number: Some(U256::from(2)),
                         time: Some(200),

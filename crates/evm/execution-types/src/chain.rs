@@ -13,7 +13,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
     RecoveredBlock, SealedHeader,
 };
-use reth_trie_common::BlockTrieData;
+use reth_trie_common::LazyTrieData;
 
 /// A chain of blocks and their final state.
 ///
@@ -37,10 +37,10 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// Hashed state and trie updates for each block, keyed by block number.
+    /// Lazy trie data for each block in the chain, keyed by block number.
     ///
-    /// Hashed state may still be pending; sorted trie updates are available immediately.
-    trie_data: BTreeMap<BlockNumber, BlockTrieData>,
+    /// Contains handles to lazily-initialized sorted trie updates and hashed state.
+    trie_data: BTreeMap<BlockNumber, LazyTrieData>,
     /// Block access lists prepared during block validation, keyed by block number.
     ///
     /// A missing entry means the BAL was not available for that block, not that the block has
@@ -79,7 +79,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item: Into<Arc<RecoveredBlock<N::Block>>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BTreeMap<BlockNumber, BlockTrieData>,
+        trie_data: BTreeMap<BlockNumber, LazyTrieData>,
     ) -> Self {
         let blocks = blocks
             .into_iter()
@@ -97,7 +97,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BlockTrieData,
+        trie_data: LazyTrieData,
     ) -> Self {
         let block = block.into();
         let block_number = block.header().number();
@@ -120,12 +120,12 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all trie data for this chain.
-    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, BlockTrieData> {
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData> {
         &self.trie_data
     }
 
     /// Get trie data for a specific block number.
-    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&BlockTrieData> {
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&LazyTrieData> {
         self.trie_data.get(&block_number)
     }
 
@@ -211,7 +211,7 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, BlockTrieData>,
+        BTreeMap<BlockNumber, LazyTrieData>,
     ) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
     }
@@ -382,7 +382,7 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: impl Into<Arc<RecoveredBlock<N::Block>>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_data: BlockTrieData,
+        trie_data: LazyTrieData,
     ) {
         let block = block.into();
         let block_number = block.header().number();
@@ -559,7 +559,7 @@ pub(super) mod serde_bincode_compat {
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::{BlockTrieData, LazyHashedPostStateSorted};
+    use reth_trie_common::SortedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -626,12 +626,12 @@ pub(super) mod serde_bincode_compat {
                 trie_updates: value
                     .trie_data
                     .iter()
-                    .map(|(number, data)| (*number, data.trie_updates.as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().trie_updates.as_ref().into()))
                     .collect(),
                 hashed_state: value
                     .trie_data
                     .iter()
-                    .map(|(number, data)| (*number, data.hashed_state.get().as_ref().into()))
+                    .map(|(k, v)| (*k, v.get().hashed_state.as_ref().into()))
                     .collect(),
             }
         }
@@ -643,22 +643,17 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: Chain<'a, N>) -> Self {
             use reth_primitives_traits::RecoveredBlock;
+            use reth_trie_common::LazyTrieData;
 
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
-            let trie_data = value
+            let trie_data: BTreeMap<BlockNumber, LazyTrieData> = value
                 .trie_updates
                 .into_iter()
                 .map(|(k, v)| {
                     let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
-                    (
-                        k,
-                        BlockTrieData {
-                            hashed_state: LazyHashedPostStateSorted::ready(hashed_state),
-                            trie_updates: Arc::new(v.into()),
-                        },
-                    )
+                    (k, LazyTrieData::ready(SortedTrieData::new(hashed_state, Arc::new(v.into()))))
                 })
                 .collect();
 
@@ -757,10 +752,10 @@ mod tests {
     #[test]
     fn chain_append() {
         let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block1_hash = B256::new([0x01; 32]);
-        let block2_hash = B256::new([0x02; 32]);
-        let block3_hash = B256::new([0x03; 32]);
-        let block4_hash = B256::new([0x04; 32]);
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
+        let block3_hash = B256::repeat_byte(0x03);
+        let block4_hash = B256::repeat_byte(0x04);
 
         let mut block1 = block.clone();
         let mut block2 = block.clone();
@@ -795,12 +790,12 @@ mod tests {
         let execution_outcome1: ExecutionOutcome = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
-                    Address::new([2; 20]),
+                    Address::repeat_byte(2),
                     None,
                     Some(AccountInfo::default()),
                     HashMap::default(),
                 )],
-                vec![vec![(Address::new([2; 20]), None, vec![])]],
+                vec![vec![(Address::repeat_byte(2), None, vec![])]],
                 vec![],
             ),
             vec![vec![]],
@@ -811,12 +806,12 @@ mod tests {
         let execution_outcome2 = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
-                    Address::new([3; 20]),
+                    Address::repeat_byte(3),
                     None,
                     Some(AccountInfo::default()),
                     HashMap::default(),
                 )],
-                vec![vec![(Address::new([3; 20]), None, vec![])]],
+                vec![vec![(Address::repeat_byte(3), None, vec![])]],
                 vec![],
             ),
             vec![vec![]],
@@ -825,16 +820,16 @@ mod tests {
         );
 
         let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block1_hash = B256::new([15; 32]);
+        let block1_hash = B256::repeat_byte(15);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
-        block1.push_sender(Address::new([4; 20]));
+        block1.push_sender(Address::repeat_byte(4));
 
         let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
-        let block2_hash = B256::new([16; 32]);
+        let block2_hash = B256::repeat_byte(16);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
-        block2.push_sender(Address::new([4; 20]));
+        block2.push_sender(Address::repeat_byte(4));
 
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
@@ -857,8 +852,8 @@ mod tests {
         let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
 
         // Define block hashes for block1 and block2
-        let block1_hash = B256::new([0x01; 32]);
-        let block2_hash = B256::new([0x02; 32]);
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
 
         // Clone the default block into block1 and block2
         let mut block1 = block.clone();

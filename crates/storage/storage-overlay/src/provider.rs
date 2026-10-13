@@ -1048,6 +1048,7 @@ mod tests {
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
         updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        SortedTrieData,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1075,8 +1076,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            Arc::new(hashed_state),
-            Arc::new(trie_updates),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 

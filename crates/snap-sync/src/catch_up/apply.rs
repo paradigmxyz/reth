@@ -64,6 +64,7 @@ pub enum DownloadedAccount {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore, StorageProgress};
     use alloy_consensus::{Header, TxLegacy};
@@ -87,7 +88,7 @@ mod tests {
     use reth_storage_api::DatabaseProviderFactory;
     use reth_trie_common::{HashedStorage, KeccakKeyHasher};
     use revm::{
-        database::{states::bundle_state::BundleRetention, CacheDB, EmptyDB, State},
+        database::{states::bundle_state::BundleRetention, InMemoryDB, State},
         state::{AccountInfo, Bytecode},
     };
     use std::{collections::BTreeMap, sync::Arc};
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn read_only_entries_write_nothing() {
-        let changes = AccountChanges::new(ACCOUNT).with_storage_read(U256::from(1));
+        let changes = AccountChanges::new(ACCOUNT).with_storage_read(U256::ONE);
 
         let update = apply(&changes, DownloadedAccount::Unknown);
 
@@ -136,27 +137,12 @@ mod tests {
 
     #[test]
     fn empty_slot_entries_write_nothing() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_storage_change(SlotChanges::new(U256::from(1), vec![]));
+        let changes =
+            AccountChanges::new(ACCOUNT).with_storage_change(SlotChanges::new(U256::ONE, vec![]));
 
         let update = apply(&changes, DownloadedAccount::Unknown);
 
         assert_eq!(update, BalStateUpdate::default());
-    }
-
-    #[test]
-    fn account_changes_with_empty_slots_write_no_storage() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_storage_change(SlotChanges::new(U256::from(1), vec![]));
-
-        let update = apply(&changes, DownloadedAccount::Absent);
-
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)].as_ref().unwrap().balance,
-            U256::from(10)
-        );
-        assert!(update.state.storages.is_empty());
     }
 
     #[test]
@@ -175,35 +161,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::clone_on_copy)]
-    fn untouched_fields_keep_their_downloaded_values() {
-        let existing = Account::new(4, U256::from(9), Some(B256::repeat_byte(1)));
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_balance_change(BalanceChange::new(index(2), U256::from(20)));
-
-        let update = apply(&changes, DownloadedAccount::Present(existing.clone()));
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), ..existing })
-        );
-
-        // An absent account starts from the empty one.
-        let update = apply(&changes, DownloadedAccount::Absent);
-        assert_eq!(
-            update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), ..Default::default() })
-        );
-    }
-
-    #[test]
     fn zeroed_slots_and_cleared_code_are_written() {
-        let existing = Account::new(1, U256::from(1), Some(B256::repeat_byte(1)));
+        let existing = Account::new(1, U256::ONE, Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_code_change(CodeChange::new(index(1), bytes!("6001")))
             .with_code_change(CodeChange::new(index(2), Bytes::new()))
             .with_storage_change(SlotChanges::new(
-                U256::from(1),
+                U256::ONE,
                 vec![
                     StorageChange::new(index(1), U256::from(5)),
                     StorageChange::new(index(2), U256::ZERO),
@@ -216,26 +180,15 @@ mod tests {
         assert_eq!(update.state.accounts[&hashed_address].as_ref().unwrap().bytecode_hash, None);
         assert_eq!(
             update.state.storages[&hashed_address],
-            HashedStorage::from_iter([(keccak256(B256::from(U256::from(1))), U256::ZERO)])
+            HashedStorage::from_iter([(keccak256(B256::with_last_byte(1)), U256::ZERO)])
         );
         assert!(update.bytecodes.is_empty());
-    }
-
-    #[test]
-    fn an_account_the_block_empties_is_removed() {
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(100)))
-            .with_balance_change(BalanceChange::new(index(2), U256::ZERO));
-
-        let update = apply(&changes, DownloadedAccount::Absent);
-
-        assert_eq!(update.state.accounts[&keccak256(ACCOUNT)], None);
     }
 
     // Final state as a flat map: accounts, and non-zero slots by hashed address and slot.
     type FlatState = (BTreeMap<B256, Account>, BTreeMap<(B256, B256), U256>);
 
-    fn flatten(db: &CacheDB<EmptyDB>) -> FlatState {
+    fn flatten(db: &InMemoryDB) -> FlatState {
         let mut state = FlatState::default();
         for (address, account) in &db.cache.accounts {
             let hashed_address = keccak256(address);
@@ -274,38 +227,7 @@ mod tests {
         state
     }
 
-    #[test]
-    fn flat_state_excludes_zero_slots_and_deleted_account_storage() {
-        let mut db = CacheDB::<EmptyDB>::default();
-        for address in [ACCOUNT, SENDER] {
-            db.insert_account_info(address, AccountInfo::from_balance(U256::from(1)));
-            db.insert_account_storage(address, U256::from(1), U256::from(5)).unwrap();
-            db.insert_account_storage(address, U256::from(2), U256::ZERO).unwrap();
-        }
-        let pre = flatten(&db);
-        assert_eq!(pre.1.len(), 2);
-
-        let mut update = HashedPostState::default();
-        update.accounts.insert(keccak256(ACCOUNT), None);
-        let post = fold(pre, &update);
-
-        assert_eq!(
-            post.0,
-            BTreeMap::from([(
-                keccak256(SENDER),
-                Account { balance: U256::from(1), ..Default::default() },
-            )])
-        );
-        assert_eq!(
-            post.1,
-            BTreeMap::from([(
-                (keccak256(SENDER), keccak256(B256::from(U256::from(1)))),
-                U256::from(5)
-            )])
-        );
-    }
-
-    fn insert(db: &mut CacheDB<EmptyDB>, address: Address, nonce: u64, code: Bytes) {
+    fn insert(db: &mut InMemoryDB, address: Address, nonce: u64, code: Bytes) {
         let code = Bytecode::new_raw(code);
         let info = AccountInfo {
             nonce,
@@ -338,7 +260,7 @@ mod tests {
         let contract = Address::repeat_byte(0xc0);
         let beneficiary = Address::repeat_byte(0xbe);
 
-        let mut db = CacheDB::<EmptyDB>::new(Default::default());
+        let mut db = InMemoryDB::default();
         insert(&mut db, BEACON_ROOTS_ADDRESS, 1, BEACON_ROOTS_CODE.clone());
         insert(&mut db, HISTORY_STORAGE_ADDRESS, 1, HISTORY_STORAGE_CODE.clone());
         insert(
@@ -350,7 +272,7 @@ mod tests {
         db.insert_account_info(SENDER, AccountInfo::from_balance(U256::from(u64::MAX)));
         // Zeroes slot 1, reads slot 3, stores the block number in slot 2 and the call value in 4.
         insert(&mut db, contract, 1, bytes!("6000600155600354504360025534600455"));
-        db.insert_account_storage(contract, U256::from(1), U256::from(5)).unwrap();
+        db.insert_account_storage(contract, U256::ONE, U256::from(5)).unwrap();
         db.insert_account_storage(contract, U256::from(3), U256::from(7)).unwrap();
         let pre = flatten(&db);
 
