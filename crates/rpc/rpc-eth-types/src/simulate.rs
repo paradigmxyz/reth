@@ -344,9 +344,14 @@ where
     let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
-            block_gas_limit
-                .saturating_sub(block_regular_gas_used)
-                .min(block_gas_limit.saturating_sub(block_state_gas_used))
+            let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
+            let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+            // Gas above the tx gas cap goes to the state gas reservoir and only needs state gas.
+            if regular_available_gas >= tx_gas_limit_cap {
+                state_available_gas
+            } else {
+                regular_available_gas.min(state_available_gas)
+            }
         } else {
             block_gas_limit.saturating_sub(cumulative_tx_gas_used)
         };
