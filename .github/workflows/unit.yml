@@ -28,7 +28,7 @@ permissions: {}
 jobs:
   test:
     name: test / ${{ matrix.type }}
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
     permissions:
       id-token: write
       contents: read
