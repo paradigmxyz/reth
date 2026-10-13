@@ -238,7 +238,7 @@ where
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
-            &parent_header,
+            parent_header,
             NextBlockEnvAttributes {
                 timestamp: attributes.timestamp(),
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
