@@ -38,7 +38,7 @@ pub struct PrewarmResults<H> {
 }
 
 /// Slot of a [`PrewarmResults`] transaction, empty until prewarming finishes it.
-type ResultSlot<H> = Mutex<Option<Box<PrewarmedTx<H>>>>;
+type ResultSlot<H> = Mutex<Option<Result<Box<PrewarmedTx<H>>, ReuseMiss>>>;
 
 impl<H> PrewarmResults<H> {
     /// Creates empty result slots for `transaction_count` transactions.
@@ -49,7 +49,14 @@ impl<H> PrewarmResults<H> {
     /// Stores the prewarm result of the transaction at `index`.
     pub(super) fn insert(&self, index: usize, result: ResultAndState<H>, reads: ReadSet) {
         if let Some(slot) = self.slots.get(index) {
-            *slot.lock() = Some(Box::new(PrewarmedTx { result, reads }));
+            *slot.lock() = Some(Ok(Box::new(PrewarmedTx { result, reads })));
+        }
+    }
+
+    /// Marks the transaction at `index` as finished by prewarming without a usable result.
+    pub(super) fn reject(&self, index: usize, reason: ReuseMiss) {
+        if let Some(slot) = self.slots.get(index) {
+            *slot.lock() = Some(Err(reason));
         }
     }
 
@@ -64,11 +71,9 @@ impl<H> PrewarmResults<H> {
         db: &mut DB,
     ) -> Result<ResultAndState<H>, ReuseMiss> {
         let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
-        let tx = slot.as_mut().ok_or(ReuseMiss::Missing)?;
-        if !tx.validate(db) {
-            return Err(ReuseMiss::Stale)
-        }
-        Ok(slot.take().expect("validated result").result)
+        let tx = slot.as_mut().ok_or(ReuseMiss::Missing)?.as_mut().map_err(|reason| *reason)?;
+        tx.validate(db)?;
+        Ok(slot.take().expect("validated result").expect("validated result").result)
     }
 }
 
@@ -77,8 +82,32 @@ impl<H> PrewarmResults<H> {
 pub enum ReuseMiss {
     /// Prewarming had not finished the transaction.
     Missing,
-    /// The transaction read state that changed before it in the block.
+    /// Stale.
     Stale,
+    /// Caller nonce mismatch at prewarm.
+    CallerNonce,
+    /// Caller balance insufficient at prewarm.
+    CallerBalance,
+    /// Caller not read.
+    CallerMissing,
+    /// Prewarm transact error.
+    TxError,
+    /// Existence differs.
+    Existence,
+    /// Nonce/code differ.
+    Fields,
+    /// Exact balance differs.
+    BalanceExact,
+    /// At-least balance lower.
+    BalanceLower,
+    /// Zero or too large balance.
+    BalanceBound,
+    /// Storage differs.
+    Storage,
+    /// Gas check failed.
+    Gas,
+    /// DB error.
+    Db,
 }
 
 /// A speculative transaction result and the database reads it depends on.
@@ -93,45 +122,44 @@ impl<H> PrewarmedTx<H> {
     /// balances of accounts whose balance differs.
     ///
     /// The result must not be used if this returns `false`.
-    fn validate<DB: Database>(&mut self, db: &mut DB) -> bool {
+    fn validate<DB: Database>(&mut self, db: &mut DB) -> Result<(), ReuseMiss> {
         for read in &self.reads.accounts {
-            let Ok(current) = db.basic(read.address) else { return false };
+            let Ok(current) = db.basic(read.address) else { return Err(ReuseMiss::Db) };
             let (speculative, current) = match (&read.info, current) {
                 (Some(speculative), Some(current)) => (speculative, current),
                 (None, None) => continue,
-                _ => return false,
+                _ => return Err(ReuseMiss::Existence),
             };
             let balance = current.balance;
             if (AccountInfo { balance: speculative.balance, ..current }) != *speculative {
-                return false
+                return Err(ReuseMiss::Fields)
             }
             if balance == speculative.balance {
                 continue
             }
 
-            let allowed = match read.balance {
-                BalanceDependency::None => true,
-                BalanceDependency::AtLeast => balance > speculative.balance,
-                BalanceDependency::Exact => false,
+            match read.balance {
+                BalanceDependency::None => {}
+                BalanceDependency::AtLeast => {
+                    if balance <= speculative.balance {
+                        return Err(ReuseMiss::BalanceLower)
+                    }
+                }
+                BalanceDependency::Exact => return Err(ReuseMiss::BalanceExact),
             };
-            // A zero balance can make the account empty, which changes gas costs and EIP-161
-            // state clearing.
-            if !allowed ||
-                speculative.balance.is_zero() ||
-                balance.is_zero() ||
-                balance > MAX_REBASED_BALANCE
-            {
-                return false
+            if speculative.balance.is_zero() || balance.is_zero() || balance > MAX_REBASED_BALANCE {
+                return Err(ReuseMiss::BalanceBound)
             }
             if let Some(account) = self.result.state.get_mut(&read.address) {
-                // All balances are bounded, so this cannot overflow.
                 account.info.balance = account.info.balance + balance - speculative.balance;
             }
         }
-        self.reads
-            .storage
-            .iter()
-            .all(|(address, slot, expected)| db.storage(*address, *slot).ok() == Some(*expected))
+        for (address, slot, expected) in &self.reads.storage {
+            if db.storage(*address, *slot).ok() != Some(*expected) {
+                return Err(ReuseMiss::Storage)
+            }
+        }
+        Ok(())
     }
 }
 
@@ -174,17 +202,23 @@ impl ReadSet {
         caller: Address,
         nonce: u64,
         max_balance_spending: U256,
-    ) -> Option<Self> {
+    ) -> Result<Self, ReuseMiss> {
         // Balance changes are applied once per account.
         self.accounts.sort_unstable_by_key(|read| read.address);
         self.accounts.dedup_by_key(|read| read.address);
 
-        let caller_index = self.accounts.binary_search_by_key(&caller, |read| read.address).ok()?;
+        let caller_index = self
+            .accounts
+            .binary_search_by_key(&caller, |read| read.address)
+            .map_err(|_| ReuseMiss::CallerMissing)?;
         let caller_info = &self.accounts[caller_index].info;
         let (caller_nonce, caller_balance) =
             caller_info.as_ref().map_or((0, U256::ZERO), |info| (info.nonce, info.balance));
-        if caller_nonce != nonce || nonce == u64::MAX || caller_balance < max_balance_spending {
-            return None
+        if caller_nonce != nonce || nonce == u64::MAX {
+            return Err(ReuseMiss::CallerNonce)
+        }
+        if caller_balance < max_balance_spending {
+            return Err(ReuseMiss::CallerBalance)
         }
 
         // Rebasing only bounded balances keeps every balance during execution far from overflow,
@@ -202,7 +236,7 @@ impl ReadSet {
                 BalanceDependency::None
             };
         }
-        Some(self)
+        Ok(self)
     }
 }
 
@@ -446,7 +480,7 @@ mod tests {
             evm.inspector_mut().clear();
             let result = evm.transact(tx_env).unwrap();
             let reads = evm.db_mut().take_reads().unwrap();
-            if let Some(reads) =
+            if let Ok(reads) =
                 reads.finish(evm.inspector(), tx.signer(), nonce, max_balance_spending)
             {
                 results.insert(index, result, reads);

@@ -1311,6 +1311,7 @@ where
 
             let tx_start = Instant::now();
             let mut reused = false;
+            let mut last_miss = None;
             if let Some(results) = prewarm_results {
                 let outcome = self.commit_prewarm_result(
                     &mut executor,
@@ -1319,10 +1320,11 @@ where
                     <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
                 );
                 reused = outcome.is_ok();
+                last_miss = outcome.err();
                 reuse_stats.record(outcome);
             }
             if !reused {
-                executor.execute_transaction(tx)?;
+                diag_execute(last_miss, || executor.execute_transaction(tx))?;
             }
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
@@ -1375,7 +1377,7 @@ where
         let block = executor.evm().block();
         let block_gas_used = executor.receipts().last().map_or(0, |r| r.cumulative_gas_used());
         if tx.gas_limit() > block.gas_limit().saturating_sub(block_gas_used) {
-            return Err(ReuseMiss::Stale)
+            return Err(ReuseMiss::Gas)
         }
 
         let result = results.take_valid(index, executor.evm_mut().db_mut())?;
@@ -2172,4 +2174,44 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
+}
+
+macro_rules! diag_fns {
+    ($($name:ident => $variant:pat),* $(,)?) => {
+        $(
+            #[inline(never)]
+            fn $name<R>(f: impl FnOnce() -> R) -> R {
+                std::hint::black_box(f())
+            }
+        )*
+
+        fn diag_execute<R>(miss: Option<ReuseMiss>, f: impl FnOnce() -> R) -> R {
+            match miss {
+                $(Some($variant) => $name(f),)*
+                None => diag_execute_disabled(f),
+            }
+        }
+    };
+}
+
+diag_fns! {
+    diag_execute_missing => ReuseMiss::Missing,
+    diag_execute_stale => ReuseMiss::Stale,
+    diag_execute_caller_nonce => ReuseMiss::CallerNonce,
+    diag_execute_caller_balance => ReuseMiss::CallerBalance,
+    diag_execute_caller_missing => ReuseMiss::CallerMissing,
+    diag_execute_tx_error => ReuseMiss::TxError,
+    diag_execute_existence => ReuseMiss::Existence,
+    diag_execute_fields => ReuseMiss::Fields,
+    diag_execute_balance_exact => ReuseMiss::BalanceExact,
+    diag_execute_balance_lower => ReuseMiss::BalanceLower,
+    diag_execute_balance_bound => ReuseMiss::BalanceBound,
+    diag_execute_storage => ReuseMiss::Storage,
+    diag_execute_gas => ReuseMiss::Gas,
+    diag_execute_db => ReuseMiss::Db,
+}
+
+#[inline(never)]
+fn diag_execute_disabled<R>(f: impl FnOnce() -> R) -> R {
+    std::hint::black_box(f())
 }

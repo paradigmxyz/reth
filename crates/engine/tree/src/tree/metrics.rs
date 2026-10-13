@@ -151,7 +151,7 @@ impl PrewarmReuseStats {
         match outcome {
             Ok(()) => self.reused += 1,
             Err(ReuseMiss::Missing) => self.missing += 1,
-            Err(ReuseMiss::Stale) => self.stale += 1,
+            Err(_) => self.stale += 1,
         }
     }
 }

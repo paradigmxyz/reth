@@ -15,7 +15,7 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{BalanceTracker, PrewarmResults, RecordingDb},
+    reuse::{BalanceTracker, PrewarmResults, RecordingDb, ReuseMiss},
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -270,6 +270,9 @@ where
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
+                    if let Some(results) = &ctx.prewarm_results {
+                        results.reject(index, ReuseMiss::TxError);
+                    }
                     return;
                 }
             };
@@ -289,12 +292,16 @@ where
 
             if let Some(results) = &ctx.prewarm_results &&
                 let Some(reads) = evm.db_mut().take_reads() &&
-                index >= ctx.executed_tx_index.load(Ordering::Relaxed) &&
-                let Ok(max_balance_spending) = max_balance_spending &&
-                let Some(reads) =
-                    reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending)
+                index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                results.insert(index, res, reads);
+                match max_balance_spending.map_err(|_| ReuseMiss::CallerBalance).and_then(
+                    |max_balance_spending| {
+                        reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending)
+                    },
+                ) {
+                    Ok(reads) => results.insert(index, res, reads),
+                    Err(reason) => results.reject(index, reason),
+                }
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
