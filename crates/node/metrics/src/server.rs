@@ -136,7 +136,7 @@ impl MetricServer {
         Ok(())
     }
 
-    async fn start_endpoint<F: Hook + 'static>(
+    async fn start_endpoint<F: Hook>(
         &self,
         listen_addr: SocketAddr,
         hook: Arc<F>,
@@ -427,6 +427,15 @@ fn handle_pprof_heap(pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
     }
 }
 
+#[cfg(not(all(feature = "jemalloc-prof", unix)))]
+fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
 /// Equivalent to [`jemalloc_pprof::JemallocProfCtl::dump`], but accepts a directory that the
 /// temporary pprof file will be written to. The file is deleted when the function exits.
 #[cfg(all(feature = "jemalloc-prof", unix))]
@@ -451,15 +460,6 @@ fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
     let pprof = profile.to_pprof(("inuse_space", "bytes"), ("space", "bytes"), None);
 
     Ok(pprof)
-}
-
-#[cfg(not(all(feature = "jemalloc-prof", unix)))]
-fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
-    let mut response = Response::new(Full::new(Bytes::from_static(
-        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
-    )));
-    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
-    response
 }
 
 #[cfg(tokio_unstable)]

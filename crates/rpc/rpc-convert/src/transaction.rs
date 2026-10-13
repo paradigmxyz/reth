@@ -707,8 +707,7 @@ where
         > + Send
         + Sync
         + Unpin
-        + Clone
-        + Debug,
+        + Clone,
     Header: HeaderConverter<HeaderTy<N>, RpcHeader<Network>>,
     Map: TxInfoMapper<TxTy<N>> + Clone + Debug + Unpin + Send + Sync + 'static,
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,

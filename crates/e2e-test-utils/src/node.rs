@@ -179,19 +179,22 @@ where
     ///
     /// Returns an error if the transaction is not included in the block, see
     /// [`Self::assert_new_block`].
-    pub async fn inject_and_advance(
+    pub fn inject_and_advance(
         &mut self,
         raw_tx: Bytes,
-    ) -> eyre::Result<(B256, Payload::BuiltPayload)>
+    ) -> BoxFuture<'_, eyre::Result<(B256, Payload::BuiltPayload)>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
             + TraceExt,
     {
-        let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-        let payload = self.advance_block().await?;
-        self.assert_new_block(tx_hash, payload.block().hash(), payload.block().number()).await?;
-        Ok((tx_hash, payload))
+        Box::pin(async move {
+            let tx_hash = self.rpc.inject_tx(raw_tx).await?;
+            let payload = self.advance_block().await?;
+            self.assert_new_block(tx_hash, payload.block().hash(), payload.block().number())
+                .await?;
+            Ok((tx_hash, payload))
+        })
     }
 
     /// Returns the current forkchoice state of the node.
@@ -411,10 +414,10 @@ where
     ///
     /// Returns the receipt without advancing if the transaction is already included. Returns an
     /// error if the transaction is not included within [`WAIT_TIMEOUT`].
-    pub async fn advance_until_receipt(
+    pub fn advance_until_receipt(
         &mut self,
         hash: B256,
-    ) -> eyre::Result<RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>>
+    ) -> BoxFuture<'_, eyre::Result<RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>>>
     where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
@@ -422,17 +425,19 @@ where
             + LoadReceipt
             + 'static,
     {
-        let wait = async {
-            loop {
-                if let Some(receipt) = self.rpc.transaction_receipt(hash).await? {
-                    return Ok(receipt)
+        Box::pin(async move {
+            let wait = async {
+                loop {
+                    if let Some(receipt) = self.rpc.transaction_receipt(hash).await? {
+                        return Ok(receipt)
+                    }
+                    self.advance_block().await?;
                 }
-                self.advance_block().await?;
-            }
-        };
-        tokio::time::timeout(WAIT_TIMEOUT, wait)
-            .await
-            .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
+            };
+            tokio::time::timeout(WAIT_TIMEOUT, wait)
+                .await
+                .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
+        })
     }
 
     /// Advances the chain one block at a time until the transaction pool has no pending
@@ -539,14 +544,17 @@ where
     /// Use [`Self::mine_pooled`] for transactions that are already in the pool, e.g. sent through
     /// [`Self::rpc_provider_with_wallet`] or added with the pool API, and [`Self::mine_signed`]
     /// for signed transactions that should all succeed.
-    pub async fn mine(
+    ///
+    /// The helpers that drive the eth API return boxed futures: with the new trait solver,
+    /// awaiting the unboxed future makes every caller borrow-check its whole state machine, which
+    /// dominates compile time for nodes with large eth API impls.
+    pub fn mine(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         // Implied by `NodeTypes`, but not derived by the compiler through the `Payload` parameter.
@@ -557,21 +565,21 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_txs(txs, true).await
+        let txs: Vec<Bytes> = txs.into_iter().collect();
+        Box::pin(async move { self.mine_txs(txs, true).await })
     }
 
     /// Mines the raw transactions like [`Self::mine`], but the block may also include other
     /// transactions of the pool, e.g. transactions that peers gossiped to the node.
     ///
     /// Only the receipts of the given transactions are returned.
-    pub async fn mine_including(
+    pub fn mine_including(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
@@ -581,7 +589,8 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_txs(txs, false).await
+        let txs: Vec<Bytes> = txs.into_iter().collect();
+        Box::pin(async move { self.mine_txs(txs, false).await })
     }
 
     /// Mines the signed transactions like [`Self::mine`] and returns an error if one of them
@@ -590,14 +599,13 @@ where
     /// The transactions are EIP-2718 encoded before they are sent to the pool, so signed
     /// transactions or envelopes, e.g. of a custom transaction type, can be passed without
     /// encoding them first.
-    pub async fn mine_signed<T: Encodable2718>(
+    pub fn mine_signed<T: Encodable2718>(
         &mut self,
         txs: impl IntoIterator<Item = T>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
@@ -607,9 +615,9 @@ where
             + LoadReceipt
             + 'static,
     {
-        // Encoded up front, so the returned future does not hold `T` across await points.
+        // Encoded up front, so the returned future does not hold `T`.
         let txs: Vec<Bytes> = txs.into_iter().map(|tx| tx.encoded_2718().into()).collect();
-        self.mine(txs).await?.ensure_success()
+        Box::pin(async move { self.mine(txs).await?.ensure_success() })
     }
 
     /// Mines the transactions with the given hashes like [`Self::mine`], for transactions that are
@@ -624,14 +632,13 @@ where
     /// next block, which can lag behind the block that is built. A transaction the block can not
     /// include, e.g. one queued behind a nonce gap, is reported as missing like with
     /// [`Self::mine`].
-    pub async fn mine_pooled(
+    pub fn mine_pooled(
         &mut self,
         hashes: impl IntoIterator<Item = B256>,
-    ) -> eyre::Result<
-        MinedBlock<
-            Payload::BuiltPayload,
-            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
-        >,
+    ) -> MinedBlockFuture<
+        '_,
+        Payload::BuiltPayload,
+        RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
     >
     where
         Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
@@ -641,7 +648,8 @@ where
             + LoadReceipt
             + 'static,
     {
-        self.mine_pooled_txs(hashes.into_iter().collect(), true).await
+        let hashes: Vec<B256> = hashes.into_iter().collect();
+        Box::pin(async move { self.mine_pooled_txs(hashes, true).await })
     }
 
     /// Mines the raw transactions, see [`Self::mine`]. Unless `exclusive` is set, the block may
@@ -1604,6 +1612,10 @@ fn describe_pending_transactions<P: TransactionPool>(pool: &P) -> String {
         listed.join(", ")
     )
 }
+
+/// The future returned by [`NodeTestContext::mine`] and the related mining helpers.
+pub type MinedBlockFuture<'a, Payload, Receipt> =
+    BoxFuture<'a, eyre::Result<MinedBlock<Payload, Receipt>>>;
 
 /// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`],
 /// [`NodeTestContext::mine_signed`] or [`NodeTestContext::mine_pooled`].

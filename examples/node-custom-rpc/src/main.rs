@@ -92,7 +92,7 @@ pub struct TxpoolExt<Pool> {
 #[cfg(not(test))]
 impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
@@ -149,7 +149,7 @@ mod tests {
     #[cfg(test)]
     impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
     where
-        Pool: TransactionPool + Clone + 'static,
+        Pool: TransactionPool + 'static,
     {
         fn transaction_count(&self) -> RpcResult<usize> {
             Ok(self.pool.pool_size().total)

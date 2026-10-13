@@ -35,7 +35,6 @@ pub trait FullEthApiServer:
         RpcHeader<Self::NetworkTypes>,
         TxTy<Self::Primitives>,
     > + FullEthApi
-    + Clone
 {
 }
 
@@ -48,7 +47,6 @@ impl<T> FullEthApiServer for T where
             RpcHeader<T::NetworkTypes>,
             TxTy<T::Primitives>,
         > + FullEthApi
-        + Clone
 {
 }
 
