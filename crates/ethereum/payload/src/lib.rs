@@ -146,9 +146,9 @@ where
 /// a result indicating success with the payload or an error in case of failure.
 ///
 /// Unwinding transaction panics discard the entire build attempt and retry from the parent,
-/// excluding the panicking transactions and their descendants. The transaction iterator factory
-/// must return a fresh iterator on each call. Recovery does not apply to `panic = "abort"` builds
-/// or to block validation. At most eight rebuilds are attempted per call.
+/// evicting the panicking transactions and their descendants from the pool. The transaction
+/// iterator factory must return a fresh iterator on each call. Recovery does not apply to `panic =
+/// "abort"` builds or to block validation. At most eight rebuilds are attempted per call.
 #[inline]
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
@@ -164,7 +164,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnMut(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    recovery::rebuild_after_panic(|excluded, retry| {
+    recovery::rebuild_after_panic(&pool, |excluded, retry| {
         if retry {
             // Cached reads and the trie pipeline may have observed partial commits. Start fresh.
             args.cached_reads = Default::default();

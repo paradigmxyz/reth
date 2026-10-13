@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_transaction_pool::error::PoolTransactionError;
+use reth_transaction_pool::{error::PoolTransactionError, TransactionPool};
 use std::{
     collections::HashSet,
     fmt,
@@ -62,6 +62,7 @@ pub(super) fn catch_transaction_panic<T>(
 }
 
 pub(super) fn rebuild_after_panic<T>(
+    pool: &impl TransactionPool,
     mut attempt: impl FnMut(&HashSet<B256>, bool) -> Result<T, PayloadBuilderError>,
 ) -> Result<T, PayloadBuilderError> {
     let mut excluded = HashSet::new();
@@ -69,12 +70,16 @@ pub(super) fn rebuild_after_panic<T>(
         let result = attempt(&excluded, !excluded.is_empty());
         let Err(PayloadBuilderError::Other(error)) = &result else { return result };
         let Some(panic) = error.downcast_ref::<TransactionPanic>() else { return result };
+        // Evict before checking the retry budget: even the final failing transaction must
+        // not remain available to a later build. Descendants cannot execute without its nonce.
+        let removed = pool.remove_transactions_and_descendants(vec![panic.hash]);
         error!(
             target: "payload_builder",
             tx_hash = %panic.hash,
             panic_message = %panic.message,
             rebuilds = excluded.len(),
-            "transaction execution panicked; discarding build attempt and excluding transaction"
+            removed_transactions = removed.len(),
+            "transaction execution panicked; evicting transaction and descendants and discarding build attempt"
         );
         if excluded.len() == MAX_REBUILDS || !excluded.insert(panic.hash) {
             return result
@@ -89,8 +94,16 @@ pub(super) fn excluded_transaction(hash: B256) -> TransactionPanic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, Log, TxKind, U256};
+    use alloy_consensus::{Signed, TxEip1559};
+    use alloy_primitives::{Address, Log, Signature, TxKind, U256};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{eth::EthEvmFactory, precompiles::DynPrecompile, Evm, EvmEnv, EvmFactory};
+    use reth_primitives_traits::Recovered;
+    use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore,
+        noop::{MockTransactionValidator, NoopTransactionPool},
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
+    };
     use revm::{
         context::{BlockEnv, CfgEnv, TxEnv},
         database::InMemoryDB,
@@ -98,7 +111,13 @@ mod tests {
         primitives::hardfork::SpecId,
         state::AccountInfo,
     };
-    use std::{io, panic::panic_any};
+    use std::{
+        future::Future,
+        io,
+        panic::panic_any,
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
 
     #[test]
     fn rebuild_discards_panicking_precompile_writes_and_logs() {
@@ -114,45 +133,46 @@ mod tests {
         );
         let env = EvmEnv::new(CfgEnv::new_with_spec(SpecId::BERLIN), BlockEnv::default());
         let mut attempts = 0;
-        let (db, results) = rebuild_after_panic(|excluded, retry| {
-            attempts += 1;
-            assert_eq!(retry, attempts > 1);
-            let mut evm = EthEvmFactory::default().create_evm(parent_db.clone(), env.clone());
-            evm.precompiles_mut().apply_precompile(&precompile, |_| {
-                Some(DynPrecompile::new_stateful(
-                    PrecompileId::Custom("panic-test".into()),
-                    move |mut input| {
-                        input.internals.sstore(precompile, U256::ZERO, U256::from(42)).unwrap();
-                        input.internals.log(Log::new_unchecked(
-                            precompile,
-                            vec![],
-                            Default::default(),
-                        ));
-                        panic!("injected panic after storage write and log")
-                    },
-                ))
-            });
-            let mut results = vec![];
-            for (hash, nonce, target) in [(good, 0, recipient), (bad, 1, precompile)] {
-                if excluded.contains(&hash) {
-                    continue
+        let (db, results) =
+            rebuild_after_panic(&NoopTransactionPool::default(), |excluded, retry| {
+                attempts += 1;
+                assert_eq!(retry, attempts > 1);
+                let mut evm = EthEvmFactory::default().create_evm(parent_db.clone(), env.clone());
+                evm.precompiles_mut().apply_precompile(&precompile, |_| {
+                    Some(DynPrecompile::new_stateful(
+                        PrecompileId::Custom("panic-test".into()),
+                        move |mut input| {
+                            input.internals.sstore(precompile, U256::ZERO, U256::from(42)).unwrap();
+                            input.internals.log(Log::new_unchecked(
+                                precompile,
+                                vec![],
+                                Default::default(),
+                            ));
+                            panic!("injected panic after storage write and log")
+                        },
+                    ))
+                });
+                let mut results = vec![];
+                for (hash, nonce, target) in [(good, 0, recipient), (bad, 1, precompile)] {
+                    if excluded.contains(&hash) {
+                        continue
+                    }
+                    let result = catch_transaction_panic(hash, || {
+                        evm.transact_commit(TxEnv {
+                            caller,
+                            nonce,
+                            kind: TxKind::Call(target),
+                            value: U256::from(1),
+                            gas_limit: 100_000,
+                            ..Default::default()
+                        })
+                    })?
+                    .unwrap();
+                    results.push(result);
                 }
-                let result = catch_transaction_panic(hash, || {
-                    evm.transact_commit(TxEnv {
-                        caller,
-                        nonce,
-                        kind: TxKind::Call(target),
-                        value: U256::from(1),
-                        gas_limit: 100_000,
-                        ..Default::default()
-                    })
-                })?
-                .unwrap();
-                results.push(result);
-            }
-            Ok((evm.into_db(), results))
-        })
-        .unwrap();
+                Ok((evm.into_db(), results))
+            })
+            .unwrap();
         assert_eq!(attempts, 2);
         assert_eq!(db.cache.accounts[&caller].info.nonce, 1);
         assert_eq!(db.cache.accounts[&caller].info.balance, U256::from(999_999));
@@ -167,7 +187,7 @@ mod tests {
     #[test]
     fn ordinary_errors_are_not_retried() {
         let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(|_, _| {
+        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
             attempts += 1;
             Err(PayloadBuilderError::MissingPayload)
         });
@@ -178,7 +198,7 @@ mod tests {
     #[test]
     fn unrelated_internal_errors_are_not_retried() {
         let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(|_, _| {
+        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
             attempts += 1;
             Err(PayloadBuilderError::other(io::Error::other("provider failure")))
         });
@@ -195,7 +215,7 @@ mod tests {
     #[test]
     fn multiple_panics_are_bounded() {
         let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(|excluded, _| {
+        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |excluded, _| {
             attempts += 1;
             let hash = B256::repeat_byte(excluded.len() as u8);
             catch_transaction_panic(hash, || panic!("injected panic"))
@@ -207,7 +227,7 @@ mod tests {
     #[test]
     fn repeated_panicking_hash_is_not_retried_forever() {
         let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(|_, _| {
+        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
             attempts += 1;
             catch_transaction_panic(B256::ZERO, || panic!("injected panic"))
         });
@@ -234,5 +254,96 @@ mod tests {
     #[test]
     fn exclusions_do_not_blame_peers() {
         assert!(!excluded_transaction(B256::ZERO).is_bad_transaction());
+    }
+
+    #[test]
+    fn eviction_keeps_panicking_transactions_out_of_later_builds() {
+        let pool = test_pool();
+        let sender = Address::repeat_byte(1);
+        let bad = add_transaction(&pool, sender, 0);
+        let descendant = add_transaction(&pool, sender, 1);
+        let good = add_transaction(&pool, Address::repeat_byte(2), 0);
+        let mut attempts = 0;
+        rebuild_after_panic(&pool, |_, retry| {
+            attempts += 1;
+            if !retry {
+                return catch_transaction_panic(bad, || panic!("injected panic"))
+            }
+            assert!(pool.get(&bad).is_none());
+            assert!(pool.get(&descendant).is_none());
+            assert_eq!(
+                pool.best_transactions().map(|tx| *tx.hash()).collect::<Vec<_>>(),
+                vec![good]
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+
+        // An independent build starts with no exclusions and still cannot select the evicted tx.
+        let later = rebuild_after_panic(&pool, |excluded, retry| {
+            assert!(excluded.is_empty());
+            assert!(!retry);
+            Ok(pool.best_transactions().map(|tx| *tx.hash()).collect::<Vec<_>>())
+        })
+        .unwrap();
+        assert_eq!(later, vec![good]);
+    }
+
+    #[test]
+    fn retry_budget_exhaustion_still_evicts_the_last_panicking_transaction() {
+        let pool = test_pool();
+        for sender in 0..=MAX_REBUILDS {
+            add_transaction(&pool, Address::repeat_byte(sender as u8), 0);
+        }
+        let mut attempts = 0;
+        let result = rebuild_after_panic::<()>(&pool, |_, _| {
+            attempts += 1;
+            let tx = pool.best_transactions().next().unwrap();
+            catch_transaction_panic(*tx.hash(), || panic!("injected panic"))
+        });
+        assert!(result.is_err());
+        assert_eq!(attempts, MAX_REBUILDS + 1);
+        assert!(pool.is_empty());
+        assert!(pool.best_transactions().next().is_none());
+    }
+
+    fn test_pool() -> Pool<
+        MockTransactionValidator<EthPooledTransaction>,
+        CoinbaseTipOrdering<EthPooledTransaction>,
+        InMemoryBlobStore,
+    > {
+        Pool::new(
+            MockTransactionValidator::default(),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        )
+    }
+
+    fn add_transaction(
+        pool: &impl TransactionPool<Transaction = EthPooledTransaction>,
+        sender: Address,
+        nonce: u64,
+    ) -> B256 {
+        let tx = TransactionSigned::from(Signed::new_unhashed(
+            TxEip1559 {
+                nonce,
+                to: TxKind::Call(sender),
+                gas_limit: 21_000,
+                max_fee_per_gas: 1_000,
+                max_priority_fee_per_gas: 1,
+                ..Default::default()
+            },
+            Signature::new(U256::from(1), U256::from(1), false),
+        ));
+        let tx =
+            EthPooledTransaction::try_from_consensus(Recovered::new_unchecked(tx, sender)).unwrap();
+        // The mock validator completes synchronously and requires no runtime or I/O.
+        let future = pool.add_transaction(TransactionOrigin::External, tx);
+        let Poll::Ready(result) = pin!(future).poll(&mut Context::from_waker(Waker::noop())) else {
+            panic!("mock validation unexpectedly yielded")
+        };
+        result.unwrap().hash
     }
 }
