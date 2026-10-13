@@ -15,7 +15,7 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{FrameTracker, PrewarmResults, RecordingDb},
+    reuse::{BalanceTracker, PrewarmResults, RecordingDb},
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -44,7 +44,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use revm::context::{Block as _, Transaction as _};
+use revm::context::Transaction as _;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -255,6 +255,7 @@ where
             let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
             if ctx.prewarm_results.is_some() {
                 evm.db_mut().start_recording();
+                evm.inspector_mut().clear();
             }
             let res = match evm.transact(tx_env) {
                 Ok(res) => res,
@@ -288,7 +289,8 @@ where
                 let Some(reads) = evm.db_mut().take_reads() &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed) &&
                 let Ok(max_balance_spending) = max_balance_spending &&
-                reads.caller_is_valid(*tx.signer(), nonce, max_balance_spending)
+                let Some(reads) =
+                    reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending)
             {
                 results.insert(index, res, reads);
             }
@@ -611,7 +613,7 @@ where
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> = (
     B256,
-    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, FrameTracker>>,
+    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>,
 );
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -666,18 +668,12 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let frames_done = Arc::new(AtomicBool::new(false));
-        let state_provider = RecordingDb::new(
-            state_provider,
-            evm_env.block_env.beneficiary(),
-            Arc::clone(&frames_done),
-        );
         let mut evm = self.evm_config.evm_with_env_and_inspector(
-            state_provider,
+            RecordingDb::new(state_provider),
             evm_env,
-            FrameTracker::new(frames_done),
+            BalanceTracker::default(),
         );
-        // The frame tracker is only needed to record reads for result reuse.
+        // Balances only need to be tracked to record reads for result reuse.
         evm.set_inspector_enabled(self.prewarm_results.is_some());
 
         if !self.precompile_cache_disabled {

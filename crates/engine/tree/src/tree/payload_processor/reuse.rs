@@ -6,25 +6,30 @@
 //! the prewarm result instead of executing the transaction again. Missing or stale results fall
 //! back to normal execution, which never waits for prewarming.
 //!
-//! Nearly every transaction credits fees to the block beneficiary, so requiring its balance to
-//! match would reject most results. If a transaction first loaded the beneficiary after its
-//! outermost call frame ended, only the fee credit touched the account, and the credit is added
-//! to the current beneficiary balance instead.
+//! Most conflicts between transactions are balance changes, such as fee credits to the block
+//! beneficiary or value transfers to popular contracts. A transaction that never observes an
+//! account's balance produces the same result for any balance, apart from the balance itself, so
+//! such balances may differ and the transaction's balance change is applied to the current balance
+//! instead. Balances are observed by `BALANCE`, `SELFBALANCE`, `SELFDESTRUCT` and failed value
+//! transfers. Successful value transfers and gas payments only require the balance to be at least
+//! as large as during speculation.
 
 use alloy_primitives::{Address, B256, U256};
 use parking_lot::Mutex;
 use revm::{
+    bytecode::opcode,
     context::result::ResultAndState,
-    handler::FrameResult,
-    interpreter::{FrameInput, InterpreterTypes},
+    interpreter::{
+        instructions::utility::IntoAddress, interpreter_types::Jumps, CallInputs, CallOutcome,
+        CreateInputs, CreateOutcome, InstructionResult, Interpreter,
+    },
     primitives::{StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
     Database, Inspector,
 };
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+
+/// Balances above this are compared exactly, so that applying balance changes cannot overflow.
+const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
 
 /// Speculative prewarm results of a block's transactions, indexed by their position in the block.
 #[derive(Debug)]
@@ -51,27 +56,19 @@ impl<H> PrewarmResults<H> {
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
     /// `db`.
     ///
-    /// The returned result has its beneficiary fee credit applied to the current beneficiary
-    /// balance. Stale results stay in their slot and are freed with `self`.
+    /// The returned result has its balance changes applied to the current balances. Stale results
+    /// stay in their slot and are freed with `self`.
     pub fn take_valid<DB: Database>(
         &self,
         index: usize,
         db: &mut DB,
-        beneficiary: Address,
     ) -> Result<ResultAndState<H>, ReuseMiss> {
         let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
-        let rebased_beneficiary = slot
-            .as_ref()
-            .ok_or(ReuseMiss::Missing)?
-            .validate(db, beneficiary)
-            .ok_or(ReuseMiss::Stale)?;
-        let mut result = slot.take().ok_or(ReuseMiss::Missing)?.result;
-        if let Some(info) = rebased_beneficiary &&
-            let Some(account) = result.state.get_mut(&beneficiary)
-        {
-            account.info = info;
+        let tx = slot.as_mut().ok_or(ReuseMiss::Missing)?;
+        if !tx.validate(db) {
+            return Err(ReuseMiss::Stale)
         }
-        Ok(result)
+        Ok(slot.take().expect("validated result").result)
     }
 }
 
@@ -92,74 +89,120 @@ struct PrewarmedTx<H> {
 }
 
 impl<H> PrewarmedTx<H> {
-    /// Returns whether all reads match `db`, with the beneficiary account to commit if its fee
-    /// credit must be applied to its current balance.
-    fn validate<DB: Database>(
-        &self,
-        db: &mut DB,
-        beneficiary: Address,
-    ) -> Option<Option<AccountInfo>> {
-        for (address, expected) in &self.reads.accounts {
-            if db.basic(*address).ok()? != *expected {
-                return None
+    /// Returns whether all reads match `db`, applying the result's balance changes to the current
+    /// balances of accounts whose balance differs.
+    ///
+    /// The result must not be used if this returns `false`.
+    fn validate<DB: Database>(&mut self, db: &mut DB) -> bool {
+        for read in &self.reads.accounts {
+            let Ok(current) = db.basic(read.address) else { return false };
+            let (speculative, current) = match (&read.info, current) {
+                (Some(speculative), Some(current)) => (speculative, current),
+                (None, None) => continue,
+                _ => return false,
+            };
+            let balance = current.balance;
+            if (AccountInfo { balance: speculative.balance, ..current }) != *speculative {
+                return false
+            }
+            if balance == speculative.balance {
+                continue
+            }
+
+            let allowed = match read.balance {
+                BalanceDependency::None => true,
+                BalanceDependency::AtLeast => balance > speculative.balance,
+                BalanceDependency::Exact => false,
+            };
+            // A zero balance can make the account empty, which changes gas costs and EIP-161
+            // state clearing.
+            if !allowed ||
+                speculative.balance.is_zero() ||
+                balance.is_zero() ||
+                balance > MAX_REBASED_BALANCE
+            {
+                return false
+            }
+            if let Some(account) = self.result.state.get_mut(&read.address) {
+                // All balances are bounded, so this cannot overflow.
+                account.info.balance = account.info.balance + balance - speculative.balance;
             }
         }
-        for (address, slot, expected) in &self.reads.storage {
-            if db.storage(*address, *slot).ok()? != *expected {
-                return None
-            }
-        }
-
-        let Some((expected, observed)) = &self.reads.beneficiary else { return Some(None) };
-        let current = db.basic(beneficiary).ok()?;
-        if *observed {
-            return (current == *expected).then_some(None)
-        }
-
-        // Only the fee credit touched the beneficiary. Both states must be non-empty, so touching
-        // the account cannot clear it in one execution but not the other.
-        let (Some(expected), Some(mut current)) = (expected, current) else { return None };
-        if expected.is_empty() || current.is_empty() {
-            return None
-        }
-        let credit =
-            self.result.state.get(&beneficiary)?.info.balance.checked_sub(expected.balance)?;
-        current.balance = current.balance.checked_add(credit)?;
-        Some(Some(current))
+        self.reads
+            .storage
+            .iter()
+            .all(|(address, slot, expected)| db.storage(*address, *slot).ok() == Some(*expected))
     }
+}
+
+/// How a speculative execution depends on an account's balance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BalanceDependency {
+    /// The balance was only credited or debited, so it may differ.
+    None,
+    /// The account paid for gas or sent value, so the balance must not be lower.
+    AtLeast,
+    /// The balance was observed, so it must match.
+    Exact,
+}
+
+/// An account a speculative execution read from the database.
+#[derive(Debug)]
+struct AccountRead {
+    address: Address,
+    /// The account without its bytecode, `None` if it did not exist.
+    info: Option<AccountInfo>,
+    balance: BalanceDependency,
 }
 
 /// Database reads of a speculative transaction execution.
 #[derive(Debug, Default)]
 pub(super) struct ReadSet {
-    /// Accounts other than the beneficiary, without their bytecode.
-    accounts: Vec<(Address, Option<AccountInfo>)>,
-    /// Storage slots.
+    accounts: Vec<AccountRead>,
     storage: Vec<(Address, StorageKey, StorageValue)>,
-    /// The beneficiary, and whether it was loaded before the outermost call frame ended.
-    beneficiary: Option<(Option<AccountInfo>, bool)>,
 }
 
 impl ReadSet {
-    /// Returns whether `caller` had the given nonce and could pay `max_balance_spending`, i.e.
-    /// whether execution with nonce and balance checks enabled would have accepted the
-    /// transaction.
-    pub(super) fn caller_is_valid(
-        &self,
+    /// Classifies how the execution depends on the balance of each account it read.
+    ///
+    /// Speculation disables nonce and balance checks, so this returns `None` unless `caller` had
+    /// the transaction's `nonce` and could pay `max_balance_spending`, i.e. unless execution with
+    /// these checks enabled would have accepted the transaction.
+    pub(super) fn finish(
+        mut self,
+        balances: &BalanceTracker,
         caller: Address,
         nonce: u64,
         max_balance_spending: U256,
-    ) -> bool {
-        let Some(account) = self
+    ) -> Option<Self> {
+        // Balance changes are applied once per account.
+        self.accounts.sort_unstable_by_key(|read| read.address);
+        self.accounts.dedup_by_key(|read| read.address);
+
+        let caller_index = self.accounts.binary_search_by_key(&caller, |read| read.address).ok()?;
+        let caller_info = &self.accounts[caller_index].info;
+        let (caller_nonce, caller_balance) =
+            caller_info.as_ref().map_or((0, U256::ZERO), |info| (info.nonce, info.balance));
+        if caller_nonce != nonce || nonce == u64::MAX || caller_balance < max_balance_spending {
+            return None
+        }
+
+        // Rebasing only bounded balances keeps every balance during execution far from overflow,
+        // so no value transfer can overflow in one execution but not the other.
+        let bounded = self
             .accounts
             .iter()
-            .find_map(|(address, account)| (*address == caller).then_some(account))
-        else {
-            return false
-        };
-        let (account_nonce, balance) =
-            account.as_ref().map_or((0, U256::ZERO), |account| (account.nonce, account.balance));
-        account_nonce == nonce && nonce != u64::MAX && balance >= max_balance_spending
+            .all(|read| read.info.as_ref().is_none_or(|info| info.balance <= MAX_REBASED_BALANCE));
+        for read in &mut self.accounts {
+            read.balance = if !bounded || balances.observed.contains(&read.address) {
+                BalanceDependency::Exact
+            } else if read.address == caller || balances.senders.contains(&read.address) {
+                BalanceDependency::AtLeast
+            } else {
+                BalanceDependency::None
+            };
+        }
+        Some(self)
     }
 }
 
@@ -167,22 +210,18 @@ impl ReadSet {
 #[derive(Debug)]
 pub(super) struct RecordingDb<DB> {
     inner: DB,
-    beneficiary: Address,
-    /// Set by [`FrameTracker`] when the outermost call frame ends.
-    frames_done: Arc<AtomicBool>,
     /// Reads of the current transaction, `None` if recording is disabled.
     reads: Option<ReadSet>,
 }
 
 impl<DB> RecordingDb<DB> {
-    /// Wraps `inner`, sharing `frames_done` with the [`FrameTracker`] of the same EVM.
-    pub(super) const fn new(inner: DB, beneficiary: Address, frames_done: Arc<AtomicBool>) -> Self {
-        Self { inner, beneficiary, frames_done, reads: None }
+    /// Wraps `inner` without recording.
+    pub(super) const fn new(inner: DB) -> Self {
+        Self { inner, reads: None }
     }
 
     /// Starts recording the reads of a new transaction.
     pub(super) fn start_recording(&mut self) {
-        self.frames_done.store(false, Ordering::Relaxed);
         self.reads = Some(ReadSet::default());
     }
 
@@ -198,12 +237,11 @@ impl<DB: Database> Database for RecordingDb<DB> {
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let account = self.inner.basic(address)?;
         if let Some(reads) = &mut self.reads {
-            let read = account.as_ref().map(AccountInfo::copy_without_code);
-            if address == self.beneficiary {
-                reads.beneficiary = Some((read, !self.frames_done.load(Ordering::Relaxed)));
-            } else {
-                reads.accounts.push((address, read));
-            }
+            reads.accounts.push(AccountRead {
+                address,
+                info: account.as_ref().map(AccountInfo::copy_without_code),
+                balance: BalanceDependency::None,
+            });
         }
         Ok(account)
     }
@@ -229,30 +267,67 @@ impl<DB: Database> Database for RecordingDb<DB> {
     }
 }
 
-/// Inspector that signals [`RecordingDb`] when a transaction's outermost call frame ends.
-#[derive(Debug)]
-pub(super) struct FrameTracker {
-    depth: usize,
-    frames_done: Arc<AtomicBool>,
+/// Inspector that tracks which balances a transaction observes and which accounts send value.
+#[derive(Debug, Default)]
+pub(super) struct BalanceTracker {
+    /// Accounts whose balance was observed.
+    observed: Vec<Address>,
+    /// Accounts that sent value.
+    senders: Vec<Address>,
 }
 
-impl FrameTracker {
-    /// Creates a tracker that sets `frames_done` when the outermost frame ends.
-    pub(super) const fn new(frames_done: Arc<AtomicBool>) -> Self {
-        Self { depth: 0, frames_done }
+impl BalanceTracker {
+    /// Clears the tracked accounts for a new transaction.
+    pub(super) fn clear(&mut self) {
+        self.observed.clear();
+        self.senders.clear();
     }
 }
 
-impl<CTX, INTR: InterpreterTypes> Inspector<CTX, INTR> for FrameTracker {
-    fn frame_start(&mut self, _context: &mut CTX, _input: &mut FrameInput) -> Option<FrameResult> {
-        self.depth += 1;
+impl<CTX> Inspector<CTX> for BalanceTracker {
+    fn step(&mut self, interp: &mut Interpreter, _context: &mut CTX) {
+        let address = match interp.bytecode.opcode() {
+            opcode::BALANCE => {
+                let Ok(word) = interp.stack.peek(0) else { return };
+                word.into_address()
+            }
+            opcode::SELFBALANCE | opcode::SELFDESTRUCT => interp.input.target_address,
+            _ => return,
+        };
+        // Skip repeated observations, such as in a loop.
+        if self.observed.last() != Some(&address) {
+            self.observed.push(address);
+        }
+    }
+
+    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if inputs.transfers_value() {
+            self.senders.push(inputs.transfer_from());
+        }
         None
     }
 
-    fn frame_end(&mut self, _context: &mut CTX, _input: &FrameInput, _result: &mut FrameResult) {
-        self.depth = self.depth.saturating_sub(1);
-        if self.depth == 0 {
-            self.frames_done.store(true, Ordering::Relaxed);
+    fn call_end(&mut self, _context: &mut CTX, inputs: &CallInputs, outcome: &mut CallOutcome) {
+        if *outcome.instruction_result() == InstructionResult::OutOfFunds {
+            self.observed.push(inputs.transfer_from());
+        }
+    }
+
+    fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        if !inputs.value().is_zero() {
+            self.senders.push(inputs.caller());
+        }
+        None
+    }
+
+    fn create_end(
+        &mut self,
+        _context: &mut CTX,
+        inputs: &CreateInputs,
+        outcome: &mut CreateOutcome,
+    ) {
+        if *outcome.instruction_result() == InstructionResult::OutOfFunds {
+            self.observed.push(inputs.caller());
         }
     }
 }
@@ -270,12 +345,19 @@ mod tests {
         context::{BlockEnv, CfgEnv, Transaction as _},
         database::{states::bundle_state::BundleRetention, BundleState, CacheDB, EmptyDB, State},
         primitives::hardfork::SpecId,
-        state::Bytecode,
     };
 
     const BENEFICIARY: Address = Address::repeat_byte(0xbe);
-    const COUNTER: Address = Address::repeat_byte(0xc0);
-    const BENEFICIARY_BALANCE_READER: Address = Address::repeat_byte(0xc1);
+    /// Does nothing.
+    const NOOP: Address = Address::repeat_byte(0xc0);
+    /// Increments slot 0.
+    const COUNTER: Address = Address::repeat_byte(0xc1);
+    /// Stores the beneficiary balance in slot 0.
+    const BENEFICIARY_BALANCE_READER: Address = Address::repeat_byte(0xc2);
+    /// Stores its own balance in slot 0.
+    const SELF_BALANCE_READER: Address = Address::repeat_byte(0xc3);
+    /// Sends 1 wei to [`NOOP`].
+    const FORWARDER: Address = Address::repeat_byte(0xc4);
     const GAS_PRICE: u128 = 2;
 
     type Results = PrewarmResults<HaltReasonFor<EthEvmConfig>>;
@@ -298,14 +380,14 @@ mod tests {
         Address::repeat_byte(i)
     }
 
-    fn tx(from: u8, nonce: u64, to: Address) -> Recovered<TransactionSigned> {
+    fn tx(from: u8, nonce: u64, to: Address, value: u64) -> Recovered<TransactionSigned> {
         let tx = Transaction::Legacy(TxLegacy {
             chain_id: Some(1),
             nonce,
             gas_price: GAS_PRICE,
             gas_limit: 100_000,
             to: TxKind::Call(to),
-            value: U256::from(1),
+            value: U256::from(value),
             input: Bytes::new(),
         });
         Recovered::new_unchecked(
@@ -326,14 +408,22 @@ mod tests {
             BENEFICIARY,
             AccountInfo { balance: U256::from(1), ..Default::default() },
         );
-        // Increments slot 0.
-        let counter = Bytecode::new_raw(bytes!("5f546001015f5500"));
-        // Stores the beneficiary balance in slot 0.
-        let balance_reader = Bytecode::new_raw(bytes!("41315f5500"));
-        for (address, code) in [(COUNTER, counter), (BENEFICIARY_BALANCE_READER, balance_reader)] {
+        for (address, code) in [
+            (NOOP, bytes!("00")),
+            (COUNTER, bytes!("5f546001015f5500")),
+            (BENEFICIARY_BALANCE_READER, bytes!("41315f5500")),
+            (SELF_BALANCE_READER, bytes!("475f5500")),
+            (FORWARDER, bytes!("5f5f5f5f600173c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c05af100")),
+        ] {
+            let code = Bytecode::new_raw(code);
             db.insert_account_info(
                 address,
-                AccountInfo { code_hash: code.hash_slow(), code: Some(code), ..Default::default() },
+                AccountInfo {
+                    balance: U256::from(10),
+                    code_hash: code.hash_slow(),
+                    code: Some(code),
+                    ..Default::default()
+                },
             );
         }
         db
@@ -343,18 +433,22 @@ mod tests {
     fn prewarm(txs: &[Recovered<TransactionSigned>]) -> Results {
         let config = EthEvmConfig::mainnet();
         let results = Results::new(txs.len());
-        let frames_done = Arc::new(AtomicBool::new(false));
-        let db = RecordingDb::new(parent_state(), BENEFICIARY, Arc::clone(&frames_done));
-        let mut evm =
-            config.evm_with_env_and_inspector(db, evm_env(true), FrameTracker::new(frames_done));
+        let mut evm = config.evm_with_env_and_inspector(
+            RecordingDb::new(parent_state()),
+            evm_env(true),
+            BalanceTracker::default(),
+        );
         for (index, tx) in txs.iter().enumerate() {
             let tx_env = config.tx_env(tx);
             let (nonce, max_balance_spending) =
                 (tx_env.nonce, tx_env.max_balance_spending().unwrap());
             evm.db_mut().start_recording();
+            evm.inspector_mut().clear();
             let result = evm.transact(tx_env).unwrap();
             let reads = evm.db_mut().take_reads().unwrap();
-            if reads.caller_is_valid(tx.signer(), nonce, max_balance_spending) {
+            if let Some(reads) =
+                reads.finish(evm.inspector(), tx.signer(), nonce, max_balance_spending)
+            {
                 results.insert(index, result, reads);
             }
         }
@@ -382,7 +476,7 @@ mod tests {
         let mut outcomes = Vec::new();
         for (index, tx) in txs.iter().enumerate() {
             let outcome = results.map_or(Err(ReuseMiss::Missing), |results| {
-                let result = results.take_valid(index, executor.evm_mut().db_mut(), BENEFICIARY)?;
+                let result = results.take_valid(index, executor.evm_mut().db_mut())?;
                 executor.commit_transaction(config.prewarm_tx_result(tx.inner(), result).unwrap());
                 Ok(())
             });
@@ -409,25 +503,36 @@ mod tests {
 
     #[test]
     fn reuses_independent_transactions() {
-        let txs = [tx(1, 0, sender(2)), tx(3, 0, Address::repeat_byte(0xaa))];
+        let txs = [tx(1, 0, sender(2), 1), tx(3, 0, Address::repeat_byte(0xaa), 1)];
         assert_eq!(reuse(&txs), [Ok(()), Ok(())]);
     }
 
     #[test]
+    fn rebases_unobserved_balances() {
+        // The second transaction's caller and recipient were credited by the first.
+        let txs = [tx(1, 0, NOOP, 1), tx(1, 1, sender(2), 1), tx(2, 0, NOOP, 1)];
+        assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Missing), Ok(())]);
+    }
+
+    #[test]
     fn rejects_conflicting_storage() {
-        let txs = [tx(1, 0, COUNTER), tx(2, 0, COUNTER)];
+        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
         assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Stale)]);
     }
 
     #[test]
-    fn rejects_transactions_after_caller_changes() {
-        let txs = [tx(1, 0, sender(2)), tx(2, 0, sender(3)), tx(1, 1, sender(3))];
-        assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Stale), Err(ReuseMiss::Missing)]);
+    fn rejects_observed_balances() {
+        let txs = [
+            tx(1, 0, SELF_BALANCE_READER, 1),
+            tx(2, 0, SELF_BALANCE_READER, 1),
+            tx(3, 0, BENEFICIARY_BALANCE_READER, 1),
+        ];
+        assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]);
     }
 
     #[test]
-    fn rejects_observed_beneficiary_balance() {
-        let txs = [tx(1, 0, sender(2)), tx(3, 0, BENEFICIARY_BALANCE_READER)];
-        assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Stale)]);
+    fn rejects_lower_sender_balances() {
+        let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 2)];
+        assert_eq!(reuse(&txs), [Ok(()), Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]);
     }
 }

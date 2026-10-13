@@ -1378,8 +1378,7 @@ where
             return Err(ReuseMiss::Stale)
         }
 
-        let beneficiary = block.beneficiary();
-        let result = results.take_valid(index, executor.evm_mut().db_mut(), beneficiary)?;
+        let result = results.take_valid(index, executor.evm_mut().db_mut())?;
         let result = self.evm_config.prewarm_tx_result(tx, result).ok_or(ReuseMiss::Stale)?;
         executor.commit_transaction(result);
         Ok(())
