@@ -253,6 +253,8 @@ where
             // Prewarming disables nonce and balance checks, so a reusable result must also show
             // that the caller would have passed them.
             let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
+            // Balances only need to be tracked to record reads for result reuse.
+            evm.set_inspector_enabled(ctx.prewarm_results.is_some());
             if ctx.prewarm_results.is_some() {
                 evm.db_mut().start_recording();
                 evm.inspector_mut().clear();
@@ -668,13 +670,13 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env_and_inspector(
-            RecordingDb::new(state_provider),
-            evm_env,
-            BalanceTracker::default(),
-        );
-        // Balances only need to be tracked to record reads for result reuse.
-        evm.set_inspector_enabled(self.prewarm_results.is_some());
+        // JIT-compiled code would skip the inspector hooks that track observed balances.
+        let mut evm =
+            self.evm_config.clone().with_jit_support_enabled(false).evm_with_env_and_inspector(
+                RecordingDb::new(state_provider),
+                evm_env,
+                BalanceTracker::default(),
+            );
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles

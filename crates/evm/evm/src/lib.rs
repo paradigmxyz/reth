@@ -495,8 +495,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Return `true` only if the block executor executes a transaction by checking that its gas
     /// limit, capped by the transaction gas limit cap, fits into the block gas limit minus the
     /// last receipt's cumulative gas used, and then running [`Evm::transact`] with the transaction
-    /// environment, and if [`Evm::transact`] performs the standard caller nonce and balance
-    /// validation. See [`Self::prewarm_tx_result`].
+    /// environment, if [`Evm::transact`] performs the standard caller nonce and balance
+    /// validation, and if EVMs created by this configuration call inspector hooks for every
+    /// executed instruction. See [`Self::prewarm_tx_result`].
     ///
     /// [`Evm::transact`]: alloy_evm::Evm::transact
     fn reuses_prewarm_results(&self) -> bool {
