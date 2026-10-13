@@ -577,6 +577,7 @@ mod tests {
     use reth_rpc_eth_types::RpcInvalidTransactionError;
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        StateRangeProviderFactory,
     };
     use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
@@ -602,6 +603,7 @@ mod tests {
             + StageCheckpointReader
             + PruneCheckpointReader
             + BalProvider
+            + StateRangeProviderFactory
             + Unpin
             + Clone
             + 'static,

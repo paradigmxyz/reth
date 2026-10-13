@@ -219,11 +219,17 @@ Computes the state root that results from applying the given `HashedPostState` o
 
 ## `debug_storageRangeAt`
 
-Returns the storage at the given block height and transaction index. The result can be paged by providing a `maxResult` to cap the number of storage slots returned as well as specifying the offset via `keyStart`.
+Returns a page of an account's storage as of the state the transaction at `tx_index` runs on, i.e. after the block's pre-execution system calls and its first `tx_index` transactions; withdrawals and post-block system calls are not applied. Passing the block's transaction count selects the state after its last transaction.
 
-| Client | Method invocation                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------------- |
-| RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
+Slots are keyed and ordered by the keccak256 hash of their storage key. `key_start` is the hashed key, or a prefix of it, to start from: pass `0x` for the first page and the returned `nextKey` for the following ones. At most `limit` slots are returned, capped at 4096, and `nextKey` is `null` once the storage is exhausted.
+
+Reth stores no storage key preimages, so `key` is `null` unless the replay accessed the slot.
+
+The parent block's state must still be in memory or among the most recent 128 persisted blocks; otherwise the call returns an error.
+
+| Client | Method invocation                                                                            |
+| ------ | -------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_storageRangeAt", "params": [block, tx_index, address, key_start, limit]}` |
 
 ## `debug_chainConfig`
 
