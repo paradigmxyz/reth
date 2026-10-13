@@ -1,13 +1,12 @@
-//! Utilities for end-to-end tests.
+#![doc = include_str!("../README.md")]
 
-use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter, PayloadTypes,
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use std::sync::Arc;
@@ -44,6 +43,8 @@ pub mod receipt;
 
 pub mod wait;
 
+pub mod engine;
+
 mod chain_spec;
 pub use chain_spec::{
     eth_payload_attributes, test_chain_spec, test_chain_spec_builder, test_genesis,
@@ -51,7 +52,7 @@ pub use chain_spec::{
 
 /// Builder for configuring test node setups
 mod setup_builder;
-pub use setup_builder::{E2ETestSetupBuilder, E2ETestSetupExt};
+pub use setup_builder::{E2ETestSetupBuilder, E2ETestSetupExt, TestNodeBuilder};
 
 // Type aliases
 
@@ -76,7 +77,7 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + NodeTypesForProvider
         + Node<
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
@@ -90,7 +91,7 @@ where
 
 impl<T> NodeBuilderHelper for T where
     Self: Default
-        + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
+        + NodeTypesForProvider
         + Node<
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<

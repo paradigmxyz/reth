@@ -31,10 +31,11 @@ pub fn attach_bal_before_tx<DB: Database>(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::{address, Bytes, U256};
+    use alloy_primitives::{Address, Bytes, U256};
     use revm::{
-        database::{CacheDB, EmptyDB},
+        database::InMemoryDB,
         state::{
             bal::{AccountBal, Bal, BalWrites, BlockAccessIndex},
             AccountInfo,
@@ -43,13 +44,13 @@ mod tests {
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
-        let covered = address!("0x0000000000000000000000000000000000000001");
-        let uncovered = address!("0x0000000000000000000000000000000000000002");
-        let written_slot = U256::from(1);
+        let covered = Address::with_last_byte(1);
+        let uncovered = Address::with_last_byte(2);
+        let written_slot = U256::ONE;
         let read_slot = U256::from(2);
 
         // pre-block state
-        let mut db = CacheDB::new(EmptyDB::default());
+        let mut db = InMemoryDB::default();
         db.insert_account_info(
             covered,
             AccountInfo { balance: U256::from(7), nonce: 5, ..Default::default() },

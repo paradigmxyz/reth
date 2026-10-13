@@ -476,9 +476,10 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use alloy_consensus::{constants::ETH_TO_WEI, Header};
-    use alloy_primitives::{hex, TxKind};
+    use alloy_primitives::{bytes, TxKind};
     use alloy_rpc_types_trace::parity::TransactionTrace;
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
@@ -821,7 +822,7 @@ mod tests {
     #[test]
     fn selfdestruct_preserves_enclosing_call_and_beneficiary() {
         for spec in [SpecId::SHANGHAI, SpecId::CANCUN] {
-            let (result, traces) = execute(hex!("6022ff").into(), spec);
+            let (result, traces) = execute(bytes!("6022ff"), spec);
             assert!(result.is_success());
             assert_eq!(traces.len(), 2);
             assert_eq!(traces[0].r#type, "CALL");
@@ -840,7 +841,7 @@ mod tests {
         // Call another account, then destroy the root contract. The destruction is a sibling
         // of that call, not its child.
         let (result, traces) =
-            execute(hex!("60006000600060006000603361fffff1506022ff").into(), SpecId::CANCUN);
+            execute(bytes!("60006000600060006000603361fffff1506022ff"), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 3);
         assert_eq!(traces[1].r#type, "CALL");
@@ -896,7 +897,7 @@ mod tests {
     #[test]
     fn precompile_calls_remain_in_transaction_traces() {
         let (result, traces) =
-            execute(hex!("60006000600060006000600461fffff15000").into(), SpecId::CANCUN);
+            execute(bytes!("60006000600060006000600461fffff15000"), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 2);
         assert_eq!(traces[1].to, Address::with_last_byte(4));
@@ -957,7 +958,7 @@ mod tests {
     fn static_and_delegate_calls_have_no_value() {
         // STATICCALL, DELEGATECALL and CALLCODE to 0x22 do not transfer ETH.
         let (result, traces) = execute(
-            hex!("6000600060006000602261fffffa506000600060006000602261fffff45060006000600060006001602261fffff25000").into(),
+            bytes!("6000600060006000602261fffffa506000600060006000602261fffff45060006000600060006001602261fffff25000"),
             SpecId::CANCUN,
         );
         assert!(result.is_success());
@@ -967,6 +968,6 @@ mod tests {
         assert_eq!(traces[2].r#type, "DELEGATECALL");
         assert_eq!(traces[2].value, None);
         assert_eq!(traces[3].r#type, "CALLCODE");
-        assert_eq!(traces[3].value, Some(U256::from(1)));
+        assert_eq!(traces[3].value, Some(U256::ONE));
     }
 }

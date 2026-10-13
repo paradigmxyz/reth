@@ -60,7 +60,7 @@ use tokio::sync::watch;
 type TestProviderFactory =
     reth_provider::ProviderFactory<reth_provider::test_utils::MockNodeTypesWithDB>;
 
-const TEST_SELFDESTRUCT_BENEFICIARY: Address = Address::new([0x77; 20]);
+const TEST_SELFDESTRUCT_BENEFICIARY: Address = Address::repeat_byte(0x77);
 const TEST_CREATE2_SALT: B256 = B256::with_last_byte(0x42);
 
 /// Scenario coverage:
@@ -405,7 +405,7 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let selfdestruct_contract = Address::new([0x66; 20]);
+    let selfdestruct_contract = Address::repeat_byte(0x66);
     let chain_spec = build_selfdestruct_chain_spec(signer_address, selfdestruct_contract);
     let blocks = {
         // Build blocks via direct execution first, so each header has a valid state root.
@@ -445,7 +445,7 @@ fn setup_selfdestruct_scenario() -> eyre::Result<SelfdestructScenario> {
                 Bytes::new(),
                 TxKind::Call(TEST_SELFDESTRUCT_BENEFICIARY),
                 21_000_u64,
-                U256::from(1),
+                U256::ONE,
             ),
         ] {
             // Block behavior by timestamp:
@@ -494,7 +494,7 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
     let chain_spec = Arc::new(
@@ -614,7 +614,7 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let selfdestruct_contract = Address::new([0x33; 20]);
+    let selfdestruct_contract = Address::repeat_byte(0x33);
     let slot = B256::with_last_byte(0x03);
     let original_value = B256::with_last_byte(0x07);
 
@@ -659,7 +659,7 @@ fn setup_reverted_slot_selfdestruct_scenario() -> eyre::Result<RevertedSlotSelfd
 
         for (block_num, timestamp, nonce, value) in [
             (1_u64, 12_u64, 0_u64, U256::ZERO),
-            (2_u64, 18_u64, 1_u64, U256::from(1_u64)),
+            (2_u64, 18_u64, 1_u64, U256::ONE),
             (3_u64, 24_u64, 2_u64, U256::from(2_u64)),
         ] {
             let tx = sign_tx_with_key_pair(
@@ -704,7 +704,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
@@ -800,7 +800,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let factory_contract = Address::new([0xaa; 20]);
+    let factory_contract = Address::repeat_byte(0xaa);
     let child_init = init_code_for_runtime(&WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE);
     let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
@@ -887,7 +887,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
             parent_hash,
             3,
             12,
-            vec![mk_tx(2, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+            vec![mk_tx(2, TxKind::Call(child_contract), U256::ONE, Bytes::new())],
         )?;
         parent_hash = block3.hash();
 
@@ -913,7 +913,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
             parent_hash,
             5,
             20,
-            vec![mk_tx(5, TxKind::Call(child_contract), U256::from(1), Bytes::new())],
+            vec![mk_tx(5, TxKind::Call(child_contract), U256::ONE, Bytes::new())],
         )?;
 
         vec![block1, block2, block3, block4, block5]
@@ -945,8 +945,8 @@ fn setup_intra_block_and_intra_tx_selfdestruct_scenario(
     let mut rng = generators::rng();
     let key_pair = generate_key(&mut rng);
     let signer_address = public_key_to_address(key_pair.public_key());
-    let multi_tx_contract = Address::new([0x44; 20]);
-    let intra_tx_contract = Address::new([0x55; 20]);
+    let multi_tx_contract = Address::repeat_byte(0x44);
+    let intra_tx_contract = Address::repeat_byte(0x55);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()

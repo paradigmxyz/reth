@@ -42,8 +42,9 @@ reth-primitives-traits.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 reth-transaction-pool.workspace = true
+reth-prune-types.workspace = true
+reth-fs-util.workspace = true
 
-revm.workspace = true
 tempfile.workspace = true
 
 # rpc
@@ -72,7 +73,7 @@ tracing.workspace = true
 derive_more.workspace = true
 
 [dev-dependencies]
-reth-prune-types.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
 name = "e2e_testsuite"

@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn single_checkout_blocks_second() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn checkout_available_after_drop() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([2u8; 32]);
+        let hash = B256::repeat_byte(2u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
         let cache = PayloadExecutionCache::default();
-        let hash = B256::from([3u8; 32]);
+        let hash = B256::repeat_byte(3u8);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash, ExecutionCache::new(1_000)))
@@ -229,8 +229,8 @@ mod tests {
     #[test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
-        let hash_a = B256::from([0xAA; 32]);
-        let hash_b = B256::from([0xBB; 32]);
+        let hash_a = B256::repeat_byte(0xAA);
+        let hash_b = B256::repeat_byte(0xBB);
 
         cache.update_with_guard(|slot| {
             *slot = Some(SavedCache::new(hash_a, ExecutionCache::new(1_000)))

@@ -69,7 +69,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let mut hashed_storage_cursor =
         tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
     let data = inputs.iter().map(|x| B256::from_str(x).unwrap());
-    let value = U256::from(0);
+    let value = U256::ZERO;
     for key in data {
         hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value }).unwrap();
     }
@@ -83,7 +83,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
 
         // 1. Some state transition happens, update the hashed storage to the new value
         let modified_key = B256::from_str(modified).unwrap();
-        let value = U256::from(1);
+        let value = U256::ONE;
         if hashed_storage_cursor.seek_by_key_subkey(hashed_address, modified_key).unwrap().is_some()
         {
             hashed_storage_cursor.delete_current().unwrap();
@@ -163,13 +163,13 @@ fn test_empty_account() {
         (
             Address::random(),
             (
-                Account { balance: U256::from(0), ..Default::default() },
+                Account { balance: U256::ZERO, ..Default::default() },
                 BTreeMap::from([(B256::with_last_byte(0x4), U256::from(12))]),
             ),
         ),
         (
             Address::random(),
-            (Account { balance: U256::from(0), ..Default::default() }, BTreeMap::default()),
+            (Account { balance: U256::ZERO, ..Default::default() }, BTreeMap::default()),
         ),
         (
             Address::random(),
@@ -180,10 +180,7 @@ fn test_empty_account() {
                     bytecode_hash: Some(keccak256("test")),
                     ..Default::default()
                 },
-                BTreeMap::from([
-                    (B256::ZERO, U256::from(3)),
-                    (B256::with_last_byte(2), U256::from(1)),
-                ]),
+                BTreeMap::from([(B256::ZERO, U256::from(3)), (B256::with_last_byte(2), U256::ONE)]),
             ),
         ),
     ]);
@@ -368,7 +365,7 @@ fn test_storage_root() {
 
     let address = Address::random();
     let storage =
-        BTreeMap::from([(B256::ZERO, U256::from(3)), (B256::with_last_byte(2), U256::from(1))]);
+        BTreeMap::from([(B256::ZERO, U256::from(3)), (B256::with_last_byte(2), U256::ONE)]);
 
     let code = "el buen fla";
     let account = Account {
@@ -581,7 +578,7 @@ fn account_and_storage_trie() {
     hash_builder.add_leaf(Nibbles::unpack(key5), &encode_account(&account5, None));
 
     let key6 = b256!("0xB340000000000000000000000000000000000000000000000000000000000000");
-    let account6 = Account { balance: U256::from(1).mul(ether), ..Default::default() };
+    let account6 = Account { balance: U256::ONE.mul(ether), ..Default::default() };
     hashed_account_cursor.upsert(key6, &account6).unwrap();
     hash_builder.add_leaf(Nibbles::unpack(key6), &encode_account(&account6, None));
 
@@ -892,7 +889,7 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
     hashed_address: B256,
 ) -> (B256, StorageTrieUpdates) {
-    let value = U256::from(1);
+    let value = U256::ONE;
 
     let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
 
@@ -921,11 +918,8 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
 fn extension_node_trie<N: ProviderNodeTypes>(
     tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>, N>,
 ) -> B256 {
-    let a = Account {
-        balance: U256::from(1u64),
-        bytecode_hash: Some(B256::random()),
-        ..Default::default()
-    };
+    let a =
+        Account { balance: U256::ONE, bytecode_hash: Some(B256::random()), ..Default::default() };
     let val = encode_account(&a, None);
 
     let mut hashed_accounts = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();

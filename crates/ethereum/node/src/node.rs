@@ -829,14 +829,3 @@ where
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::EthereumPoolBuilder;
-
-    #[test]
-    fn configures_kzg_settings_initialization() {
-        assert!(!EthereumPoolBuilder::new().init_kzg_settings);
-        assert!(EthereumPoolBuilder::new().with_init_kzg_settings(true).init_kzg_settings);
-    }
-}

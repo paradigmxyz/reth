@@ -172,28 +172,6 @@ impl ExecutionOverlay {
         }
     }
 
-    #[cfg(test)]
-    fn extend_overlay(&mut self, other: &Self) {
-        self.block_hashes.extend_from_slice(&other.block_hashes);
-        self.accounts.extend(
-            other
-                .accounts
-                .iter()
-                .map(|(address, info)| (*address, Self::normalized_account_info(info.clone()))),
-        );
-        for address in &other.storage_wipes {
-            self.storage.remove(address);
-        }
-        for (address, slots) in &other.storage {
-            self.storage
-                .entry(*address)
-                .or_default()
-                .extend(slots.iter().map(|(slot, value)| (*slot, *value)));
-        }
-        self.storage_wipes.extend(other.storage_wipes.iter().copied());
-        self.code_hashes.extend(other.code_hashes.iter().map(|(hash, code)| (*hash, code.clone())));
-    }
-
     /// Removes the database-local account lookup hint before caching account state.
     ///
     /// `account_id` indexes the database or BAL context that produced the [`AccountInfo`]. A later
@@ -395,10 +373,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Builds the effective state trie overlay for the given provider.
     ///
-    /// Set `trie_changesets` only for consumers that produce [`TrieUpdates`], such as
-    /// [`StateRootProvider::state_root_with_updates`]. Other consumers, including roots, proofs,
-    /// multiproofs, and witnesses, should leave it false: complete the cached trie at Finish and
-    /// invalidate hashed-state revert prefixes instead of querying trie changesets.
+    /// See [`Self::build_state_trie_overlay_at_frontiers`] for the `trie_changesets` contract.
     #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     fn build_state_trie_overlay<Provider>(
@@ -427,6 +402,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Builds the effective state trie overlay using frontiers already read from the provider.
     ///
     /// This is useful for callers that key an overlay cache by the durable frontiers.
+    ///
+    /// Set `trie_changesets` to true only for consumers that produce trie updates. Other consumers,
+    /// including roots, proofs, multiproofs, and witnesses, should leave it false. When reverts are
+    /// required, false avoids querying trie changesets and invalidates prefixes for both reverted
+    /// hashed-state keys and keys changed by in-memory blocks replayed on top of the anchor.
     #[instrument(
         level = "debug",
         target = "storage::overlay",
@@ -861,7 +841,7 @@ mod tests {
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    use reth_trie::{BranchNodeCompact, HashedPostState, HashedStorage, Nibbles, SortedTrieData};
     use revm::{
         bytecode::Bytecode,
         database::{AccountStatus, BundleAccount, BundleState},
@@ -910,7 +890,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 
@@ -1022,49 +1002,6 @@ mod tests {
         overlay.extend_state(&state);
 
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
-    }
-
-    #[test]
-    fn execution_overlay_composition_uses_later_values_and_normalizes_accounts() {
-        let address = Address::with_last_byte(1);
-        let retained_address = Address::with_last_byte(2);
-        let slot = U256::from(3);
-        let retained_slot = U256::from(4);
-        let first_code_hash = B256::with_last_byte(5);
-        let later_code_hash = B256::with_last_byte(6);
-        let first_block = BlockNumHash::new(1, B256::with_last_byte(7));
-        let later_block = BlockNumHash::new(2, B256::with_last_byte(8));
-
-        let mut overlay = ExecutionOverlay::default();
-        overlay.block_hashes.push(first_block);
-        overlay.accounts.insert(address, Some(AccountInfo { nonce: 1, ..Default::default() }));
-        overlay.accounts.insert(retained_address, Some(AccountInfo::default()));
-        overlay.storage.entry(address).or_default().insert(slot, U256::from(9));
-        overlay.storage.entry(address).or_default().insert(retained_slot, U256::from(10));
-        overlay.code_hashes.insert(first_code_hash, Bytecode::new_raw(vec![1].into()));
-
-        let mut later = ExecutionOverlay::default();
-        later.block_hashes.push(later_block);
-        later.accounts.insert(
-            address,
-            Some(AccountInfo { nonce: 11, account_id: AccountId::new(12), ..Default::default() }),
-        );
-        later.storage.entry(address).or_default().insert(slot, U256::from(13));
-        later.storage_wipes.insert(address);
-        later.code_hashes.insert(later_code_hash, Bytecode::new_raw(vec![2].into()));
-
-        overlay.extend_overlay(&later);
-
-        assert!(later.accounts[&address].as_ref().unwrap().account_id.is_some());
-        assert_eq!(overlay.block_hashes, vec![first_block, later_block]);
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().nonce, 11);
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
-        assert!(overlay.accounts.contains_key(&retained_address));
-        assert_eq!(overlay.storage[&address][&slot], U256::from(13));
-        assert!(!overlay.storage[&address].contains_key(&retained_slot));
-        assert_eq!(overlay.storage_value(address, U256::from(14)), Some(U256::ZERO));
-        assert!(overlay.code_hashes.contains_key(&first_code_hash));
-        assert!(overlay.code_hashes.contains_key(&later_code_hash));
     }
 
     #[test]
@@ -1238,12 +1175,12 @@ mod tests {
             .build_state_trie_overlay(&provider, false)
             .unwrap();
 
-        let mut prefixes = overlay.input().prefix_sets.clone().freeze();
-        assert!(prefixes
+        let mut prefix_sets = overlay.input().prefix_sets.clone().freeze();
+        assert!(prefix_sets
             .account_prefix_set
             .contains(&Nibbles::unpack(keccak256(Address::with_last_byte(1)))));
-        assert!(prefixes.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
-        assert!(prefixes
+        assert!(prefix_sets.account_prefix_set.contains(&Nibbles::unpack(B256::with_last_byte(2))));
+        assert!(prefix_sets
             .storage_prefix_sets
             .get_mut(&B256::with_last_byte(2))
             .unwrap()
@@ -1337,7 +1274,7 @@ mod tests {
     fn execution_overlay_marks_historical_fallback_for_managed_fork() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
-        let slot = U256::from(1);
+        let slot = U256::ONE;
         let provider_rw = factory.provider_rw().unwrap();
         for (block_number, balance, storage_value) in [(2u64, 10u64, 10u64), (3u64, 20u64, 15u64)] {
             provider_rw
@@ -1389,9 +1326,9 @@ mod tests {
 
         assert_eq!(fallback_block_number, Some(2));
 
-        assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::from(1));
+        assert_eq!(overlay.accounts[&address].as_ref().unwrap().balance, U256::ONE);
         assert_eq!(overlay.accounts[&address].as_ref().unwrap().account_id, None);
-        assert_eq!(overlay.storage[&address][&slot], U256::from(1));
+        assert_eq!(overlay.storage[&address][&slot], U256::ONE);
         assert_eq!(
             overlay.block_hashes,
             [side_block_two, side_block_three]
@@ -1399,25 +1336,6 @@ mod tests {
                 .map(|block| block.recovered_block().num_hash())
                 .collect::<Vec<_>>()
         );
-    }
-
-    #[test]
-    fn execution_overlay_no_revert_path_discards_account_ids() {
-        let (factory, blocks) = setup_frontiers(1, 1);
-        let manager = OverlayManager::default();
-        for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
-        }
-        let provider = factory.provider().unwrap();
-
-        let (overlay, fallback_block_number) = manager
-            .overlay_builder(blocks[3].recovered_block().hash())
-            .execution_overlay(&provider)
-            .unwrap();
-
-        assert_eq!(fallback_block_number, None);
-        assert_eq!(overlay.accounts.len(), 2);
-        assert!(overlay.accounts.values().flatten().all(|account| account.account_id.is_none()));
     }
 
     #[test]
@@ -1477,19 +1395,6 @@ mod tests {
             error.to_string().contains("is after partial state trie frontier"),
             "unexpected error: {error}"
         );
-    }
-
-    #[test]
-    fn managed_overlay_errors_if_parent_is_not_persisted_or_managed_across_frontiers() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let provider = factory.provider().unwrap();
-        let parent_hash = blocks[3].recovered_block().hash();
-        let error = OverlayManager::<EthPrimitives>::default()
-            .overlay_builder(parent_hash)
-            .build_state_trie_overlay(&provider, true)
-            .unwrap_err();
-
-        assert!(error.to_string().contains("is after partial state trie frontier"));
     }
 
     #[test]

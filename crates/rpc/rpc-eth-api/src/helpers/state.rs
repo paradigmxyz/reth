@@ -97,12 +97,11 @@ pub trait EthState: LoadState + SpawnBlocking {
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
-            Ok(B256::new(
+            Ok(B256::from(
                 state
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
-                    .unwrap_or_default()
-                    .to_be_bytes(),
+                    .unwrap_or_default(),
             ))
         })
     }
@@ -140,7 +139,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                             .storage(address, slot.as_b256())
                             .map_err(Self::Error::from_eth_err)?
                             .unwrap_or_default();
-                        values.push(B256::new(value.to_be_bytes()));
+                        values.push(B256::from(value));
                     }
                     result.insert(address, values);
                 }

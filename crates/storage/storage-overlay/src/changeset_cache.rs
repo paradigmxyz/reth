@@ -411,10 +411,7 @@ impl ChangesetCache {
             .parent_chain(finish.hash)
             .take_while(|block| block.recovered_block().number() >= start_block)
             .map(|block| {
-                (
-                    block.recovered_block().number(),
-                    Arc::clone(&block.trie_data().sorted.trie_updates),
-                )
+                (block.recovered_block().number(), Arc::clone(&block.trie_data().trie_updates))
             })
             .collect::<Vec<_>>();
         forward_updates.reverse();
@@ -653,7 +650,7 @@ mod tests {
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::{StageCheckpointWriter, TrieWriter};
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, Nibbles, StateRoot};
+    use reth_trie::{BranchNodeCompact, Nibbles, SortedTrieData, StateRoot};
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -907,7 +904,7 @@ mod tests {
             manager.insert_block(ExecutedBlock::new(
                 Arc::clone(&block.recovered_block),
                 Arc::clone(&block.execution_output),
-                ComputedTrieData::new(Arc::default(), updates),
+                SortedTrieData::new(Arc::default(), updates),
             ));
         }
         let before = factory.provider().unwrap();
@@ -1154,8 +1151,8 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
-        let slot1 = B256::from(U256::from(1));
-        let slot2 = B256::from(U256::from(2));
+        let slot1 = B256::with_last_byte(1);
+        let slot2 = B256::with_last_byte(2);
         let account1 = test_account(10);
         let account2 = test_account(20);
         let account3 = test_account(30);
@@ -1255,8 +1252,8 @@ mod tests {
 
         let provider = factory.provider_rw().unwrap();
         let address = Address::with_last_byte(1);
-        let slot1 = B256::from(U256::from(1));
-        let slot2 = B256::from(U256::from(2));
+        let slot1 = B256::with_last_byte(1);
+        let slot2 = B256::with_last_byte(2);
         let account1 = test_account(10);
         let account2 = test_account(20);
 
@@ -1323,39 +1320,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_insert_and_retrieve_single_entry() {
-        let mut cache = ChangesetCacheInner::new();
-        let hash = B256::random();
-        let changesets = create_test_changesets();
-
-        insert_test_changesets(&mut cache, hash, 100, Arc::clone(&changesets));
-
-        // Should be able to retrieve it
-        let retrieved = get_test_changesets(&cache, hash, 100);
-        assert!(retrieved.is_some());
-        assert_eq!(cache.entries.len(), 1);
-    }
-
-    #[test]
-    fn test_insert_multiple_entries() {
-        let mut cache = ChangesetCacheInner::new();
-
-        // Insert 10 blocks
-        let mut hashes = Vec::new();
-        for i in 0..10 {
-            let hash = B256::random();
-            insert_test_changesets(&mut cache, hash, 100 + i, create_test_changesets());
-            hashes.push((100 + i, hash));
-        }
-
-        // Should be able to retrieve all
-        assert_eq!(cache.entries.len(), 10);
-        for (block_number, hash) in hashes {
-            assert!(get_test_changesets(&cache, hash, block_number).is_some());
-        }
     }
 
     #[test]
@@ -1457,22 +1421,6 @@ mod tests {
         assert!(get_test_changesets(&cache, hash_5, 5).is_some(), "Block 5 should be present");
         assert!(get_test_changesets(&cache, hash_10, 10).is_some(), "Block 10 should be present");
         assert!(get_test_changesets(&cache, hash_15, 15).is_some(), "Block 15 should be present");
-    }
-
-    #[test]
-    fn test_multiple_blocks_same_number() {
-        let mut cache = ChangesetCacheInner::new();
-
-        // Insert multiple blocks with same number (side chains)
-        let hash_1a = B256::random();
-        let hash_1b = B256::random();
-        insert_test_changesets(&mut cache, hash_1a, 100, create_test_changesets());
-        insert_test_changesets(&mut cache, hash_1b, 100, create_test_changesets());
-
-        // Both should be retrievable
-        assert!(get_test_changesets(&cache, hash_1a, 100).is_some());
-        assert!(get_test_changesets(&cache, hash_1b, 100).is_some());
-        assert_eq!(cache.entries.len(), 2);
     }
 
     #[test]

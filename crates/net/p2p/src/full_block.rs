@@ -14,9 +14,7 @@ use alloy_primitives::{Bytes, Sealable, B256};
 use core::marker::PhantomData;
 use futures::FutureExt;
 use reth_consensus::Consensus;
-use reth_eth_wire_types::{
-    BlockAccessLists, EthNetworkPrimitives, HeadersDirection, NetworkPrimitives,
-};
+use reth_eth_wire_types::{BlockAccessLists, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{Block, SealedBlock, SealedBlockWith, SealedHeader};
 use std::{
@@ -903,11 +901,9 @@ where
 
                     if this.headers.is_none() {
                         // did not receive a correct response yet, retry
-                        this.request.headers = Some(this.client.get_headers(HeadersRequest {
-                            start: this.start_hash.into(),
-                            limit: this.count,
-                            direction: HeadersDirection::Falling,
-                        }));
+                        this.request.headers = Some(this.client.get_headers(
+                            HeadersRequest::falling(this.start_hash.into(), this.count),
+                        ));
                     }
                 }
                 // This branch handles block body responses from peers - it first inserts the

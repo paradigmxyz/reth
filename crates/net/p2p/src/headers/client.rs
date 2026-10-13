@@ -28,7 +28,7 @@ impl HeadersRequest {
     /// # Arguments
     /// * `start` - The block hash or number to start from
     pub const fn one(start: BlockHashOrNumber) -> Self {
-        Self { direction: HeadersDirection::Rising, limit: 1, start }
+        Self::rising(start, 1)
     }
 
     /// Creates a request for headers in rising direction (ascending block numbers).

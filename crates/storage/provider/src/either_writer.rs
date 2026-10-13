@@ -1179,8 +1179,8 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 
@@ -1221,7 +1221,7 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
         let tx_num = 100u64;
 
         // First, write a value directly to RocksDB
@@ -1250,8 +1250,8 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_transaction_hash_numbers() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 
@@ -1267,7 +1267,7 @@ mod rocksdb_tests {
         assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
 
         // Test missing key
-        let missing_hash = B256::from([99u8; 32]);
+        let missing_hash = B256::repeat_byte(99u8);
         assert_eq!(tx.get::<tables::TransactionHashNumbers>(missing_hash).unwrap(), None);
     }
 
@@ -1276,7 +1276,7 @@ mod rocksdb_tests {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
         let address = Address::random();
-        let storage_key = B256::from([1u8; 32]);
+        let storage_key = B256::repeat_byte(1u8);
         let key = StorageShardedKey::new(address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10, 50]).unwrap();
 
@@ -1322,7 +1322,7 @@ mod rocksdb_tests {
     fn test_rocksdb_batch_delete_transaction_hash_number() {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
         let tx_num = 100u64;
 
         // First write
@@ -1343,7 +1343,7 @@ mod rocksdb_tests {
         let (_temp_dir, provider) = create_rocksdb_provider();
 
         let address = Address::random();
-        let storage_key = B256::from([1u8; 32]);
+        let storage_key = B256::repeat_byte(1u8);
         let key = StorageShardedKey::new(address, storage_key, 1000);
         let value = IntegerList::new([1, 5, 10]).unwrap();
 
@@ -1601,7 +1601,7 @@ mod rocksdb_tests {
     /// 4. Pruning boundary - `lowest_available` boundary behavior (block at/after boundary)
     #[test]
     fn test_account_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
 
         // Scenario 1: Single shard with blocks [100, 200, 300]
         run_account_history_scenario(
@@ -1673,7 +1673,7 @@ mod rocksdb_tests {
         );
 
         // Scenario 3: No history for address
-        let address_without_history = Address::from([0x43; 20]);
+        let address_without_history = Address::repeat_byte(0x43);
         run_account_history_scenario(
             "no_history",
             address_without_history,
@@ -1714,9 +1714,9 @@ mod rocksdb_tests {
     /// Tests storage history lookups across both MDBX and `RocksDB` backends.
     #[test]
     fn test_storage_history_info_both_backends() {
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x01; 32]);
-        let other_storage_key = B256::from([0x02; 32]);
+        let address = Address::repeat_byte(0x42);
+        let storage_key = B256::repeat_byte(0x01);
+        let other_storage_key = B256::repeat_byte(0x02);
 
         // Single shard with blocks [100, 200, 300]
         run_storage_history_scenario(
@@ -1769,8 +1769,8 @@ mod rocksdb_tests {
         // Enable RocksDB for transaction hash numbers
         factory.set_storage_settings_cache(StorageSettings::v2());
 
-        let hash1 = B256::from([1u8; 32]);
-        let hash2 = B256::from([2u8; 32]);
+        let hash1 = B256::repeat_byte(1u8);
+        let hash2 = B256::repeat_byte(2u8);
         let tx_num1 = 100u64;
         let tx_num2 = 200u64;
 

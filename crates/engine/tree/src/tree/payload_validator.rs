@@ -153,17 +153,13 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
 use revm::state::{bal::Bal as RevmBal, AccountInfo};
 use std::{
     sync::{
@@ -325,15 +321,6 @@ where
         + StateProviderFactory
         + StateReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -1571,10 +1558,10 @@ where
             // Record sizes of the computed trie data
             block_validation_metrics
                 .hashed_post_state_size
-                .record(computed.sorted.hashed_state.total_len() as f64);
+                .record(computed.hashed_state.total_len() as f64);
             block_validation_metrics
                 .trie_updates_sorted_size
-                .record(computed.sorted.trie_updates.total_len() as f64);
+                .record(computed.trie_updates.total_len() as f64);
         };
 
         // Spawn task that computes trie data asynchronously.
@@ -1660,8 +1647,7 @@ where
                     .original_info
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
-                    .map(|bytecode| bytecode.is_eip7702())
-                    .unwrap_or(false);
+                    .is_some_and(|bytecode| bytecode.is_eip7702());
 
                 // Check if current code is empty (delegation cleared)
                 let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);
@@ -1824,15 +1810,6 @@ where
         + StateReader
         + ChangeSetReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,

@@ -325,7 +325,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn pending_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
+        self.sealed_header_by_id(BlockId::pending())
     }
 
     /// Returns the latest block header if available
@@ -333,7 +333,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn latest_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Latest.into())
+        self.sealed_header_by_id(BlockId::latest())
     }
 
     /// Returns the safe block header if available
@@ -341,7 +341,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn safe_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Safe.into())
+        self.sealed_header_by_id(BlockId::safe())
     }
 
     /// Returns the finalized block header if available
@@ -349,7 +349,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn finalized_header(&self) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())
+        self.sealed_header_by_id(BlockId::finalized())
     }
 
     /// Returns the block with the matching [`BlockId`] from the database.

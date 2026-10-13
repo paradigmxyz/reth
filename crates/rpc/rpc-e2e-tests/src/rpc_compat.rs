@@ -3,7 +3,10 @@
 use eyre::{eyre, Result};
 use futures_util::future::BoxFuture;
 use jsonrpsee::core::client::ClientT;
-use reth_e2e_test_utils::testsuite::{actions::Action, BlockInfo, Environment};
+use reth_e2e_test_utils::testsuite::{
+    actions::{expect_fcu_valid, Action},
+    BlockInfo, Environment,
+};
 use reth_node_api::EngineTypes;
 use serde_json::Value;
 use std::path::Path;
@@ -377,52 +380,20 @@ where
                 fcu_state.finalized_block_hash
             );
 
-            // Apply forkchoice update to each node
+            // Apply forkchoice update to each node. The import setup only returns once the nodes
+            // accepted the imported head, so the update does not need to wait for syncing.
             for (idx, client) in env.node_clients.iter().enumerate() {
                 debug!("Applying forkchoice update to node {}", idx);
 
-                // Wait for the node to finish syncing imported blocks
-                let mut retries = 0;
-                const MAX_RETRIES: u32 = 10;
-                const RETRY_DELAY_MS: u64 = 500;
-
-                loop {
-                    let response =
-                        reth_rpc_api::clients::EngineApiClient::<Engine>::fork_choice_updated_v3(
-                            &client.engine.http_client(),
-                            fcu_state,
-                            None,
-                        )
-                        .await
-                        .map_err(|e| eyre!("Failed to update forkchoice on node {}: {}", idx, e))?;
-
-                    match response.payload_status.status {
-                        alloy_rpc_types_engine::PayloadStatusEnum::Valid => {
-                            debug!("Forkchoice update successful on node {}", idx);
-                            break;
-                        }
-                        alloy_rpc_types_engine::PayloadStatusEnum::Syncing => {
-                            if retries >= MAX_RETRIES {
-                                return Err(eyre!(
-                                    "Node {} still syncing after {} retries",
-                                    idx,
-                                    MAX_RETRIES
-                                ));
-                            }
-                            debug!("Node {} is syncing, retrying in {}ms...", idx, RETRY_DELAY_MS);
-                            tokio::time::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS))
-                                .await;
-                            retries += 1;
-                        }
-                        _ => {
-                            return Err(eyre!(
-                                "Invalid forkchoice state on node {}: {:?}",
-                                idx,
-                                response.payload_status
-                            ));
-                        }
-                    }
-                }
+                let response =
+                    reth_rpc_api::clients::EngineApiClient::<Engine>::fork_choice_updated_v3(
+                        &client.engine.http_client(),
+                        fcu_state,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| eyre!("Failed to update forkchoice on node {}: {}", idx, e))?;
+                expect_fcu_valid(&response, &format!("Forkchoice update on node {idx}"))?;
             }
 
             // Update environment state
