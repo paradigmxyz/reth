@@ -551,7 +551,7 @@ mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_eips::{eip7702::Authorization, BlockId, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
@@ -569,6 +569,7 @@ mod tests {
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::crypto::secp256k1::sign_message;
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
@@ -1533,5 +1534,60 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(repeated, result);
+    }
+
+    #[tokio::test]
+    async fn create_access_list_excludes_authorization_authorities() {
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().prague_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let sender = Address::repeat_byte(0x11);
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+
+        let authorization = Authorization {
+            chain_id: U256::from(1),
+            address: Address::repeat_byte(0xbb),
+            nonce: 0,
+        };
+        let signature =
+            sign_message(B256::repeat_byte(0x22), authorization.signature_hash()).unwrap();
+        let authorization = authorization.into_signed(signature);
+        let authority = authorization.recover_authority().unwrap();
+
+        let contract = Address::repeat_byte(0xaa);
+        let state_override = StateOverride::from_iter([(
+            contract,
+            AccountOverride {
+                // PUSH20 authority; BALANCE; STOP.
+                code: Some([&[0x73][..], authority.as_slice(), &[0x31, 0x00]].concat().into()),
+                ..Default::default()
+            },
+        )]);
+        let api = build_test_eth_api(provider);
+        let request = TransactionRequest {
+            authorization_list: Some(vec![authorization]),
+            ..TransactionRequest::default()
+                .with_from(sender)
+                .with_to(contract)
+                .with_gas_limit(100_000)
+        };
+        let result = EthCall::create_access_list_at(
+            &api,
+            request,
+            Some(BlockId::latest()),
+            Some(state_override),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.error, None);
+        // The authority is warmed by authorization processing, so listing it only adds cost.
+        assert!(result.access_list.0.is_empty(), "{:?}", result.access_list);
     }
 }
