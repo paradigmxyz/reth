@@ -2315,7 +2315,7 @@ mod tests {
                 let harness = TrieTestHarness::new(before);
                 let hashed_factory = MockHashedCursorFactory::new(
                     BTreeMap::new(),
-                    [(harness.hashed_address(), after)].into_iter().collect(),
+                    BTreeMap::from([(harness.hashed_address(), after)]),
                 );
                 let trie_cursor = harness.trie_cursor_factory()
                     .storage_trie_cursor(harness.hashed_address()).unwrap();
@@ -2898,7 +2898,7 @@ mod tests {
         updated_storage.extend(changes.clone());
         let hashed_factory = MockHashedCursorFactory::new(
             BTreeMap::new(),
-            [(harness.hashed_address(), updated_storage)].into_iter().collect(),
+            BTreeMap::from([(harness.hashed_address(), updated_storage)]),
         );
         let prefix_set = PrefixSetMut::from(changes.keys().map(Nibbles::unpack)).freeze();
         let trie_cursor =
@@ -2938,7 +2938,7 @@ mod tests {
         );
         let hashed_factory = MockHashedCursorFactory::new(
             BTreeMap::new(),
-            [(harness.hashed_address(), after)].into_iter().collect(),
+            BTreeMap::from([(harness.hashed_address(), after)]),
         );
         let trie_cursor =
             harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
