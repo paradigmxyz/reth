@@ -32,12 +32,14 @@ jobs:
   test:
     name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
-    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
       id-token: write
       contents: read
     env:
       RUST_BACKTRACE: 1
+      # Test builds don't need debuginfo; dropping it shrinks link output ~3.5x.
+      CARGO_PROFILE_DEV_DEBUG: 0
     strategy:
       matrix:
         network: ["ethereum"]
