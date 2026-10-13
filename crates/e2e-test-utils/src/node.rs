@@ -16,8 +16,7 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadStatus, PayloadStatusEnum,
+    ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::{bail, ensure, eyre, Ok, WrapErr};
@@ -46,7 +45,7 @@ use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader, StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
@@ -1399,11 +1398,11 @@ where
     pub async fn testing_build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> eyre::Result<ExecutionPayloadEnvelopeV5> {
+    ) -> eyre::Result<TestingBuildBlockResponseV1> {
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: ExecutionPayloadEnvelopeV5 =
+        let res: TestingBuildBlockResponseV1 =
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }

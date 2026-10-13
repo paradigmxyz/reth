@@ -33,6 +33,40 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn testing_rpc_build_block_returns_amsterdam_payload_fields() -> eyre::Result<()> {
+    for (fork, is_amsterdam) in
+        [(EthereumHardfork::Cancun, false), (EthereumHardfork::Amsterdam, true)]
+    {
+        let chain_spec = test_chain_spec(fork);
+        let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
+            .with_rpc_modifier(|rpc| {
+                rpc.with_http_api(RpcModuleSelection::from_iter([RethRpcModule::Testing]))
+            })
+            .build_single()
+            .await?;
+        let client = node.rpc_client().expect("HTTP RPC server is enabled");
+
+        let timestamp = chain_spec.genesis().timestamp + 1;
+        let payload_attributes = eth_payload_attributes(&chain_spec, timestamp);
+        let response: Value = client
+            .request(
+                "testing_buildBlockV1",
+                (chain_spec.genesis_hash(), payload_attributes, Vec::<Bytes>::new(), None::<Bytes>),
+            )
+            .await?;
+        let payload = &response["executionPayload"];
+
+        assert_eq!(payload.get("blockAccessList").is_some(), is_amsterdam);
+        assert_eq!(payload.get("slotNumber").is_some(), is_amsterdam);
+        if is_amsterdam {
+            assert_eq!(payload["slotNumber"], format!("{timestamp:#x}"));
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
     let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
