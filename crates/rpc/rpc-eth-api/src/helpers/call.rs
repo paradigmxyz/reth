@@ -494,8 +494,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .block_executor_factory()
                 .evm_with_database(&mut db, evm_env.clone());
 
+            // EIP-7702 authorities are warmed during authorization processing, so listing them
+            // would only add access list cost.
+            let inspector = AccessListInspector::new(initial)
+                .with_excluded_from_tx(tx_env.inner(), evm_env.chain_id());
             let (inspector, result) = evm
-                .transact_with_inspector(&tx_env, AccessListInspector::new(initial))
+                .transact_with_inspector(&tx_env, inspector)
                 .map_err(Self::Error::from_evm_err)?;
             let access_list = inspector.into_access_list();
             let gas_used = result.result.tx_gas_used();
