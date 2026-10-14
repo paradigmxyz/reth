@@ -221,6 +221,14 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
+    /// Diagnostics: when each account key was first hinted.
+    diag_hinted_accounts: B256Map<Instant>,
+    /// Diagnostics: when each storage key was first hinted.
+    diag_hinted_storage: B256Map<B256Map<Instant>>,
+    /// Diagnostics: accounts with authoritative updates.
+    diag_updated_accounts: B256Map<Instant>,
+    /// Diagnostics: storage slots with authoritative updates, and whether the last one deleted.
+    diag_updated_storage: B256Map<B256Map<(Instant, bool)>>,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -288,6 +296,10 @@ where
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
             metrics,
+            diag_hinted_accounts: Default::default(),
+            diag_hinted_storage: Default::default(),
+            diag_updated_accounts: Default::default(),
+            diag_updated_storage: Default::default(),
         }
     }
 
@@ -532,6 +544,7 @@ where
         message: ProofResultMessage,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
+        let _span = debug_span!("diag_proof_results").entered();
         let mut result = self.on_proof_result_message(message)?;
         while let Ok(next) = self.proof_result_rx.try_recv() {
             let res = self.on_proof_result_message(next)?;
@@ -618,6 +631,7 @@ where
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                let _span = debug_span!("diag_finished").entered();
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -632,6 +646,23 @@ where
         skip_all
     )]
     fn on_prewarm_targets(&mut self, targets: MultiProofTargetsV2) {
+        let now = Instant::now();
+        let _span = debug_span!(
+            "diag_hint",
+            accounts = targets.account_targets.len(),
+            slots = targets.storage_targets.values().map(Vec::len).sum::<usize>(),
+        )
+        .entered();
+        for target in &targets.account_targets {
+            self.diag_hinted_accounts.entry(target.key()).or_insert(now);
+        }
+        for (address, slots) in &targets.storage_targets {
+            self.diag_hinted_accounts.entry(*address).or_insert(now);
+            let hinted = self.diag_hinted_storage.entry(*address).or_default();
+            for slot in slots {
+                hinted.entry(slot.key()).or_insert(now);
+            }
+        }
         for target in targets.account_targets {
             // Only touch accounts that are not yet present in the updates set.
             self.new_account_updates.entry(target.key()).or_insert(LeafUpdate::Touched);
@@ -679,6 +710,29 @@ where
     )]
     #[allow(clippy::clone_on_copy)]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
+        let now = Instant::now();
+        let _span = debug_span!(
+            "diag_update",
+            accounts = hashed_state_update.accounts.len(),
+            slots = hashed_state_update.storages.values().map(|s| s.storage.len()).sum::<usize>(),
+            deleted_slots = hashed_state_update
+                .storages
+                .values()
+                .flat_map(|s| s.storage.values())
+                .filter(|v| v.is_zero())
+                .count(),
+        )
+        .entered();
+        for &address in hashed_state_update.accounts.keys() {
+            self.diag_updated_accounts.entry(address).or_insert(now);
+        }
+        for (&address, storage) in &hashed_state_update.storages {
+            self.diag_updated_accounts.entry(address).or_insert(now);
+            let updated = self.diag_updated_storage.entry(address).or_default();
+            for (&slot, value) in &storage.storage {
+                updated.insert(slot, (now, value.is_zero()));
+            }
+        }
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
                 // Look up the outer map once per address instead of once per slot.
@@ -1153,8 +1207,62 @@ where
             return Ok(())
         }
 
-        let _span = trace_span!("dispatch_pending_targets").entered();
         let (targets, chunking_length) = self.pending_targets.take();
+        let now = Instant::now();
+        // Classification: hinted (and how long ago), updated without hint, deleted slot,
+        // neither (siblings or broader parents).
+        let (mut a_hint_old, mut a_hint_new, mut a_upd_only, mut a_other) = (0, 0, 0, 0);
+        for target in &targets.account_targets {
+            let key = target.key();
+            if let Some(t) = self.diag_hinted_accounts.get(&key) {
+                if now.duration_since(*t).as_micros() > 1000 {
+                    a_hint_old += 1
+                } else {
+                    a_hint_new += 1
+                }
+            } else if self.diag_updated_accounts.contains_key(&key) {
+                a_upd_only += 1
+            } else {
+                a_other += 1
+            }
+        }
+        let (mut s_hint_old, mut s_hint_new, mut s_upd_only, mut s_deleted, mut s_other) =
+            (0, 0, 0, 0, 0);
+        for (address, slots) in &targets.storage_targets {
+            let hinted = self.diag_hinted_storage.get(address);
+            let updated = self.diag_updated_storage.get(address);
+            for target in slots {
+                let key = target.key();
+                if let Some((_, true)) = updated.and_then(|u| u.get(&key)) {
+                    s_deleted += 1;
+                }
+                if let Some(t) = hinted.and_then(|h| h.get(&key)) {
+                    if now.duration_since(*t).as_micros() > 1000 {
+                        s_hint_old += 1
+                    } else {
+                        s_hint_new += 1
+                    }
+                } else if updated.is_some_and(|u| u.contains_key(&key)) {
+                    s_upd_only += 1
+                } else {
+                    s_other += 1
+                }
+            }
+        }
+        let _span = debug_span!(
+            "diag_dispatch",
+            finished = self.finished_state_updates,
+            a_hint_old,
+            a_hint_new,
+            a_upd_only,
+            a_other,
+            s_hint_old,
+            s_hint_new,
+            s_upd_only,
+            s_deleted,
+            s_other,
+        )
+        .entered();
         let mut dispatch_error = None;
         dispatch_with_chunking(
             targets,
