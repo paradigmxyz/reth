@@ -147,7 +147,7 @@ where
                 .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
-            reuse_prewarm_results: !config.disable_prewarm_reuse(),
+            reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
         }
     }
