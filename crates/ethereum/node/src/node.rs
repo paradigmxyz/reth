@@ -693,7 +693,7 @@ where
         Primitives: NodePrimitives<SignedTx = TransactionSigned>,
     >,
     Node: FullNodeTypes<Types = Types>,
-    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + Clone + 'static,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + 'static,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
@@ -816,7 +816,7 @@ pub struct EthereumEngineValidatorBuilder;
 impl<Node, Types> PayloadValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypes<
-        ChainSpec: Hardforks + EthereumHardforks + Clone + 'static,
+        ChainSpec: Hardforks + EthereumHardforks + 'static,
         Payload: EngineTypes<ExecutionData = ExecutionData>
                      + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
         Primitives = EthPrimitives,

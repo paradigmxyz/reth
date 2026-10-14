@@ -99,7 +99,7 @@ pub trait IntoRlpxSubProtocol {
 
 impl<T> IntoRlpxSubProtocol for T
 where
-    T: ProtocolHandler + Send + Sync + 'static,
+    T: ProtocolHandler,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
         RlpxSubProtocol(Box::new(self))
