@@ -604,7 +604,8 @@ where
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive `BundleState`.
+/// caching task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
 pub struct PayloadHandle<Tx, Err, R, H> {
     prewarm_handle: CacheTaskHandle<R, H>,
@@ -673,7 +674,8 @@ impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive `BundleState`.
+/// prewarm task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
 pub struct CacheTaskHandle<R, H> {
     /// The shared cache the task operates with.
