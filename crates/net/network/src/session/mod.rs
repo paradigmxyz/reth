@@ -1257,9 +1257,26 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     } else {
         // Multiplex the stream with the extra protocols
-        let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
+        let multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
 
-        // install additional handlers
+        let (mut multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
+                }
+            }
+        };
+
+        // Install the extra handlers only once the eth `Status` handshake has succeeded, so a peer
+        // that withholds `Status` cannot use them. The multiplexer drops their messages that
+        // arrive before this point.
         for handler in extra_handlers.into_iter() {
             let protocol = handler.protocol();
             let limits = handler.inbound_limits();
@@ -1274,21 +1291,6 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 })
                 .expect("remaining handler capability was negotiated");
         }
-
-        let (multiplex_stream, their_status) = match multiplex_stream
-            .into_eth_satellite_stream(status, fork_filter, handshake, eth_max_message_size)
-            .await
-        {
-            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-            Err(err) => {
-                return PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: Some(PendingSessionHandshakeError::Eth(err)),
-                }
-            }
-        };
 
         (multiplex_stream.into(), their_status)
     };

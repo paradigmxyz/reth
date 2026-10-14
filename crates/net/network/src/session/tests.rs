@@ -5,8 +5,8 @@ use crate::{
     error::SessionError,
     protocol::{ConnectionHandler, DynConnectionHandler},
 };
-use alloy_primitives::bytes::BytesMut;
-use futures::{stream::Pending, StreamExt};
+use alloy_primitives::bytes::{Bytes, BytesMut};
+use futures::{stream::Pending, SinkExt, StreamExt};
 use reth_chainspec::MAINNET;
 use reth_eth_wire::{
     capability::SharedCapabilities, handshake::EthHandshake, multiplex::ProtocolConnection,
@@ -287,4 +287,65 @@ async fn matching_identity_establishes_session() {
     let _ = keep_alive_tx.send(());
     remote.await.unwrap();
     session.abort();
+}
+
+/// A remote that completes `Hello` but never sends `Status` must not reach an extra protocol,
+/// even if it already sends messages of that protocol.
+#[tokio::test(flavor = "multi_thread")]
+async fn extra_protocol_waits_for_status_handshake() {
+    let (local_key, local_id) = new_peer();
+    let (remote_key, remote_id) = new_peer();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+    let spy = ProtocolSpy::default();
+    let handlers = spy_handlers(&spy);
+
+    let (events_tx, mut events_rx) = mpsc::channel(1);
+    let (_disconnect_tx, disconnect_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (incoming, remote_addr) = listener.accept().await.unwrap();
+        start_pending_incoming_session::<EthNetworkPrimitives>(
+            Arc::new(EthHandshake::default()),
+            MAX_MESSAGE_SIZE,
+            disconnect_rx,
+            SessionId(0),
+            incoming,
+            events_tx,
+            remote_addr,
+            local_key,
+            HelloMessageWithProtocols::builder(local_id).build(),
+            status(),
+            fork_filter(),
+            handlers,
+        )
+        .await
+    });
+
+    let remote = tokio::spawn(async move {
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let ecies = ECIESStream::connect(outgoing, remote_key, local_id).await.unwrap();
+        let (mut p2p_stream, _) =
+            UnauthedP2PStream::new(ecies).handshake(remote_hello(remote_id)).await.unwrap();
+
+        let offset = p2p_stream
+            .shared_capabilities()
+            .find(&spy_protocol().cap)
+            .unwrap()
+            .relative_message_id_offset();
+        p2p_stream.send(Bytes::from(vec![offset, 0x80])).await.unwrap();
+        p2p_stream.disconnect(DisconnectReason::ClientQuitting).await.unwrap();
+    });
+
+    let event = events_rx.recv().await.unwrap();
+    let PendingSessionEvent::Disconnected {
+        error: Some(PendingSessionHandshakeError::Eth(_)), ..
+    } = event
+    else {
+        panic!("unexpected event {event:?}")
+    };
+    remote.await.unwrap();
+
+    assert!(spy.connected().is_empty(), "the extra protocol must wait for the status handshake");
 }

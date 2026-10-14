@@ -66,7 +66,11 @@ pub trait ConnectionHandler: Send + Sync + 'static {
         peer_id: PeerId,
     ) -> OnNotSupported;
 
-    /// Invoked when the `RLPx` connection was established.
+    /// Invoked when the `RLPx` connection was established and the eth `Status` handshake
+    /// succeeded.
+    ///
+    /// Messages of this protocol that the peer sends before the `Status` handshake completes are
+    /// dropped.
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
