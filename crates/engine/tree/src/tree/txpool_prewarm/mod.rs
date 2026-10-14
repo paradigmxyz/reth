@@ -191,7 +191,7 @@ fn env_differences<Spec: Clone + PartialEq, B: Block>(
 /// iterator can yield transactions that become pending later.
 pub type Transactions<N> = Box<dyn Iterator<Item = Transaction<N>> + Send>;
 
-/// A transaction selected from the txpool for cache-only prewarming.
+/// A transaction selected from the txpool for prewarming.
 #[derive(Debug, Clone)]
 pub struct Transaction<N: NodePrimitives> {
     /// Transaction hash.
@@ -202,7 +202,7 @@ pub struct Transaction<N: NodePrimitives> {
     pub transaction: Recovered<TxTy<N>>,
 }
 
-/// Source of txpool transactions for best-effort cache prewarming.
+/// Source of txpool transactions for best-effort prewarming.
 pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
     /// Opens a live best-transactions iterator for `parent_hash`.
     ///

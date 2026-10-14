@@ -36,7 +36,8 @@ const HEAD_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// A long-lived loop that speculatively executes the pool's best transactions on top of the
 /// current canonical state, recording every state read in a [`CachedReads`]. Roughly every
 /// [`REFRESH_INTERVAL`] it publishes an immutable snapshot of that cache, which block validation
-/// and payload building use to seed their own caches.
+/// and payload building use to seed their own caches. If the job records results, it also stores
+/// each transaction's result and reads, which block prewarming may reuse.
 ///
 /// The worker is driven by [`Command`]s: `Start` points it at a new parent state, and
 /// `Pause`/`Resume` bracket cache-sensitive work elsewhere. Commands are only applied between
