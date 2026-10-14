@@ -20,8 +20,8 @@ use tracing::trace;
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
 pub enum StateRootMessage {
-    /// Prefetch proof targets
-    PrefetchProofs(MultiProofTargetsV2),
+    /// Prefetch proofs for a best-effort access hint.
+    PrefetchProofs(StateAccessHint),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
@@ -325,6 +325,9 @@ pub struct StateAccessHint {
     pub accounts: Vec<B256>,
     /// Hashed storage keys keyed by hashed account.
     pub storages: B256Map<Vec<B256>>,
+    /// Hashed storage keys keyed by hashed account that may be removed later in the block. A task
+    /// may prefetch the proofs that removing them would need.
+    pub storage_removals: B256Map<Vec<B256>>,
 }
 
 impl From<MultiProofTargetsV2> for StateAccessHint {
@@ -338,6 +341,7 @@ impl From<MultiProofTargetsV2> for StateAccessHint {
                     (account, slots.into_iter().map(|target| target.key()).collect())
                 })
                 .collect(),
+            storage_removals: Default::default(),
         }
     }
 }
@@ -501,7 +505,7 @@ impl SparseTrieStateRootSink {
 // Cancellation abandons the result. Ignoring send errors here does not report a successful root.
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
-        let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+        let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint));
     }
 
     fn on_state_update(&self, state: EvmState) {
@@ -822,7 +826,7 @@ mod tests {
 
         let mut storages = B256Map::default();
         storages.insert(storage_account, vec![storage_slot]);
-        let hint = StateAccessHint { accounts: vec![account], storages };
+        let hint = StateAccessHint { accounts: vec![account], storages, ..Default::default() };
 
         let targets = MultiProofTargetsV2::from(hint);
         assert_eq!(targets.account_targets.len(), 1);
