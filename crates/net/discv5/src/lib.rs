@@ -363,8 +363,8 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
-        // Ignore the advertised UDP socket and normalize IPv4-mapped session addresses.
-        let address = socket.ip().to_canonical();
+        // Use the sender's address as received so discovery IP bans match source sockets.
+        let address = socket.ip();
         let udp_port = socket.port();
 
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
@@ -373,7 +373,8 @@ impl Discv5 {
         // ENR field by the socket's address family, not by the local node's
         // RLPx listen family: an IPv4 session dials the `tcp` port, an IPv6
         // session the `tcp6` port (falling back to `tcp`).
-        let tcp_port = (match address {
+        // Mapped IPv4 sessions use `tcp`, while the record retains the original socket address.
+        let tcp_port = (match address.to_canonical() {
             IpAddr::V4(_) => enr.tcp4(),
             IpAddr::V6(_) => enr.tcp6().or_else(|| enr.tcp4()),
         })
@@ -954,7 +955,6 @@ mod test {
         let remote_key = CombinedKey::generate_secp256k1();
         let remote_enr = Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
         let mapped_socket: SocketAddr = "[::ffff:104.28.44.25]:9000".parse().unwrap();
-        let ipv4_address: IpAddr = "104.28.44.25".parse().unwrap();
 
         for local_mode in [IpMode::Ip4, IpMode::Ip6] {
             let mut discv5 = discv5_noop();
@@ -962,7 +962,7 @@ mod test {
 
             let record = discv5.try_into_reachable(&remote_enr, mapped_socket).unwrap();
             assert_eq!(record.tcp_port, TCP4_PORT);
-            assert_eq!(record.address, ipv4_address);
+            assert_eq!(record.address, mapped_socket.ip());
             assert_eq!(record.udp_port, mapped_socket.port());
 
             let peer = discv5.on_discovered_peer(&remote_enr, mapped_socket).unwrap();
