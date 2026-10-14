@@ -26,7 +26,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -44,7 +44,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use revm::context::Transaction as _;
+use revm::{context::Transaction as _, state::EvmState};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -375,6 +375,10 @@ where
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
+                    let removals = storage_removals(&res.state);
+                    if !removals.is_empty() {
+                        state_root_hint_stream.on_removal_hint(removals);
+                    }
                 }
             }
 
@@ -912,6 +916,29 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
         account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
         ..Default::default()
     }
+}
+
+/// Returns the hashed storage slots, keyed by hashed account, that existed before and that `state`
+/// removes.
+fn storage_removals(state: &EvmState) -> B256Map<Vec<B256>> {
+    let mut removals = B256Map::default();
+    for (address, account) in state {
+        // Storage of selfdestructed accounts is wiped as a whole, see `MultiProofTargetsV2`.
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let slots = account
+            .storage
+            .iter()
+            .filter(|(_, slot)| slot.present_value.is_zero() && !slot.original_value.is_zero())
+            .map(|(key, _)| keccak256(B256::from(*key)))
+            .collect::<Vec<_>>();
+        if !slots.is_empty() {
+            removals.insert(keccak256(address), slots);
+        }
+    }
+    removals
 }
 
 /// The events the pre-warm task can handle.

@@ -50,8 +50,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// 1. **Execution and prewarming:** [`Self::run_hashing_task`] receives [`StateRootMessage`]s,
 ///    hashes raw state updates, and forwards [`SparseTrieTaskMessage`]s to [`Self::updates`] in
 ///    receive order. `HashedState` supplies changed values; `PrefetchProofs` supplies
-///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
-///    leaf updates before applying them in batches.
+///    [`LeafUpdate::Touched`] hints and `PrefetchRemovals` supplies [`LeafUpdate::MaybeRemoved`]
+///    hints, neither of which may overwrite changed values. The task buffers these leaf updates
+///    before applying them in batches.
 /// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
 ///    [`ProofWorkerHandle`]. Each request carries a [`ProofResultContext`] with a sender for
 ///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
@@ -88,7 +89,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// keeps it in `Idle`. In `InFlight`, the task holds only [`InFlightStorage`] buffers for new
 /// arrivals; the job owns the trie, earlier pending leaves, proofs, and fetched-target cache.
 /// When `Done` arrives, newer changed values and deletions override older pending values, while
-/// touch hints preserve them. Buffered work can then trigger another pass.
+/// touch and removal hints preserve them. Buffered work can then trigger another pass.
 ///
 /// `Idle` describes ownership, not completion: a payload can still have leaves blocked on a proof.
 /// Blocked leaves alone do not trigger another pass; new updates or that address' own proof nodes
@@ -306,6 +307,9 @@ where
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
+                }
+                StateRootMessage::PrefetchRemovals(removals) => {
+                    SparseTrieTaskMessage::PrefetchRemovals(removals)
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
@@ -605,6 +609,10 @@ where
                 self.on_prewarm_targets(targets);
                 None
             }
+            SparseTrieTaskMessage::PrefetchRemovals(removals) => {
+                self.on_prewarm_removals(removals);
+                None
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state);
                 None
@@ -641,6 +649,34 @@ where
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
             // storage root update.
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+        }
+    }
+
+    /// Queues probes for storage slots that prewarming removed, so the siblings their removal
+    /// would need are fetched before the removal is known.
+    #[instrument(
+        level = "trace",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn on_prewarm_removals(&mut self, removals: B256Map<Vec<B256>>) {
+        for (address, slots) in removals {
+            let new_updates = self.new_storage_updates.entry(address).or_default();
+            for slot in slots {
+                // A changed value is authoritative, so only replace a touch.
+                match new_updates.entry(slot) {
+                    Entry::Occupied(mut entry) => {
+                        if entry.get().is_touched() {
+                            entry.insert(LeafUpdate::MaybeRemoved);
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(LeafUpdate::MaybeRemoved);
+                    }
+                }
+            }
+
             self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
         }
     }
@@ -1076,7 +1112,7 @@ where
                         Some(encoded).filter(|encoded| !encoded.is_empty())
                     }
                     // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return true,
+                    Some(LeafUpdate::Touched | LeafUpdate::MaybeRemoved) => return true,
                     None => self.trie.get_account_value(addr),
                 };
 
@@ -1475,7 +1511,8 @@ impl Default for StorageWorkOutput {
     }
 }
 
-/// Merges leaf updates into a queue, letting a newly known value win over a queued one.
+/// Merges leaf updates into a queue, letting a newly known value win over a queued one, and any
+/// update win over a queued touch.
 fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpdate>) {
     if queued.is_empty() {
         // Take the whole map at once, no per-slot loop.
@@ -1486,7 +1523,7 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
     for (slot, update) in updates {
         match queued.entry(slot) {
             Entry::Occupied(mut entry) => {
-                if update.is_changed() {
+                if update.is_changed() || entry.get().is_touched() {
                     entry.insert(update);
                 }
             }
@@ -1661,6 +1698,8 @@ enum SparseTrieTaskMessage {
     HashedState(HashedPostState),
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
+    /// Storage slots that may be removed (passed through directly).
+    PrefetchRemovals(B256Map<Vec<B256>>),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
 }

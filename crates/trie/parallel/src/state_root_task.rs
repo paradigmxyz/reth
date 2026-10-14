@@ -22,6 +22,9 @@ use tracing::trace;
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
+    /// Hashed storage slots, keyed by hashed account, that may be removed. Prefetches the proofs
+    /// that removing them would need.
+    PrefetchRemovals(B256Map<Vec<B256>>),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
@@ -365,6 +368,9 @@ trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
+    /// Best-effort hint of storage slots that transaction prewarming removed.
+    fn on_removal_hint(&self, _removals: B256Map<Vec<B256>>) {}
+
     /// Authoritative state update from normal block execution.
     fn on_state_update(&self, state: EvmState);
 
@@ -396,6 +402,12 @@ impl StateRootHintStream {
     /// Emits a best-effort access hint.
     pub fn on_access_hint(&self, hint: StateAccessHint) {
         self.inner.on_access_hint(hint);
+    }
+
+    /// Emits a best-effort hint of hashed storage slots, keyed by hashed account, that may be
+    /// removed later in the block.
+    pub fn on_removal_hint(&self, removals: B256Map<Vec<B256>>) {
+        self.inner.on_removal_hint(removals);
     }
 }
 
@@ -502,6 +514,12 @@ impl SparseTrieStateRootSink {
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+    }
+
+    fn on_removal_hint(&self, removals: B256Map<Vec<B256>>) {
+        if self.sender.send(StateRootMessage::PrefetchRemovals(removals)).is_err() {
+            trace!(target: "trie::parallel::sparse", "State root task stopped, dropping removal hint");
+        }
     }
 
     fn on_state_update(&self, state: EvmState) {
