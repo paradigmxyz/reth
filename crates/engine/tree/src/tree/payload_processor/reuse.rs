@@ -226,19 +226,31 @@ impl<H> PrewarmedTx<H> {
                         else {
                             return Ok(None)
                         };
-                        rebased.push((read.address, balance));
+                        rebased.push(Rebase { address: read.address, balance, original: current });
                     }
                 }
                 AccountMatch::Differs => return Ok(None),
             }
         }
-        for (address, balance) in &rebased {
-            if let Some(account) = self.result.state.get_mut(address) {
-                account.info.balance = *balance;
+        for rebase in &rebased {
+            if let Some(account) = self.result.state.get_mut(&rebase.address) {
+                account.info.balance = rebase.balance;
+                // The state root task only streams accounts whose info differs from the original.
+                account.original_info_mut().balance = rebase.original;
             }
         }
         Ok(Some(!rebased.is_empty()))
     }
+}
+
+/// A balance of a speculative result applied to the current balance.
+#[derive(Debug)]
+struct Rebase {
+    address: Address,
+    /// The balance after the transaction.
+    balance: U256,
+    /// The balance before the transaction.
+    original: U256,
 }
 
 /// How a speculative execution depends on an account's balance.
@@ -951,7 +963,7 @@ mod tests {
         txs: &[Recovered<TransactionSigned>],
         mut prewarm: Option<&mut Prewarm<'_>>,
         publish: bool,
-    ) -> (Vec<Receipt>, BundleState, Vec<Result<(), ReuseMiss>>) {
+    ) -> Execution {
         let config = EthEvmConfig::mainnet();
         let mut state = State::builder().with_database(parent_state()).with_bundle_update().build();
         let evm = config.evm_with_env(&mut state, evm_env(false));
@@ -966,31 +978,38 @@ mod tests {
         };
         let mut executor = config.create_executor(evm, ctx);
         let mut outcomes = Vec::new();
+        let mut changes = Vec::new();
         for (index, tx) in txs.iter().enumerate() {
             let Some(prewarm) = prewarm.as_deref_mut() else {
-                executor.execute_transaction(tx).unwrap();
+                executor
+                    .execute_transaction_with_result_closure(tx, |result| {
+                        changes.push(changed_accounts(&result.result().state))
+                    })
+                    .unwrap();
                 outcomes.push(Err(ReuseMiss::Missing));
                 continue
             };
             let outcome =
                 match prewarm.results.take_valid(index, executor.evm_mut().db_mut()).unwrap() {
                     Ok(result) => {
+                        changes.push(changed_accounts(&result.state));
                         executor.commit_transaction(
                             config.prewarm_tx_result(tx.inner(), result).unwrap(),
                         );
                         Ok(())
                     }
-                    Err(miss) if publish => {
+                    Err(miss) => {
                         executor
                             .execute_transaction_with_result_closure(tx, |result| {
-                                prewarm.results.publish_executed(index, &result.result().state)
+                                changes.push(changed_accounts(&result.result().state));
+                                if publish {
+                                    prewarm.results.publish_executed(index, &result.result().state)
+                                }
                             })
                             .unwrap();
-                        prewarm.refresh_after(index);
-                        Err(miss)
-                    }
-                    Err(miss) => {
-                        executor.execute_transaction(tx).unwrap();
+                        if publish {
+                            prewarm.refresh_after(index);
+                        }
                         Err(miss)
                     }
                 };
@@ -999,7 +1018,28 @@ mod tests {
         let receipts = executor.receipts().to_vec();
         drop(executor);
         state.merge_transitions(BundleRetention::Reverts);
-        (receipts, state.take_bundle(), outcomes)
+        Execution { receipts, bundle: state.take_bundle(), changes, outcomes }
+    }
+
+    /// Output of [`execute`].
+    struct Execution {
+        receipts: Vec<Receipt>,
+        bundle: BundleState,
+        /// Accounts each transaction changed, as the state root task sees them.
+        changes: Vec<Vec<(Address, AccountInfo)>>,
+        outcomes: Vec<Result<(), ReuseMiss>>,
+    }
+
+    /// Returns the accounts in `state` whose info differs from their original info, which the
+    /// state root task streams as updates.
+    fn changed_accounts(state: &EvmState) -> Vec<(Address, AccountInfo)> {
+        let mut changed = state
+            .iter()
+            .filter(|(_, account)| account.is_touched() && account.info != account.original_info())
+            .map(|(address, account)| (*address, account.info.copy_without_code()))
+            .collect::<Vec<_>>();
+        changed.sort_unstable_by_key(|(address, _)| *address);
+        changed
     }
 
     /// Database that fails every read.
@@ -1050,12 +1090,12 @@ mod tests {
         order: &[usize],
         publish: bool,
     ) -> Vec<Result<(), ReuseMiss>> {
-        let (receipts, bundle, outcomes) =
-            execute(txs, Some(&mut Prewarm::new(txs, order)), publish);
-        let (expected_receipts, expected_bundle, _) = execute(txs, None, false);
-        assert_eq!(receipts, expected_receipts);
-        assert_eq!(bundle, expected_bundle);
-        outcomes
+        let reused = execute(txs, Some(&mut Prewarm::new(txs, order)), publish);
+        let expected = execute(txs, None, false);
+        assert_eq!(reused.receipts, expected.receipts);
+        assert_eq!(reused.bundle, expected.bundle);
+        assert_eq!(reused.changes, expected.changes);
+        reused.outcomes
     }
 
     #[test]
@@ -1083,6 +1123,14 @@ mod tests {
     fn refreshes_against_executed_writes() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
         assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
+    }
+
+    #[test]
+    fn rebases_original_balances() {
+        // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei, so
+        // its rebased balance equals its speculative balance before the second transaction.
+        let txs = [tx(1, 0, FORWARDER, 10), tx(2, 0, FORWARDER, 0)];
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
     }
 
     #[test]
