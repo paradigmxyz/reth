@@ -273,7 +273,7 @@ where
             debug!(target: "sync::snap", %target, "Forkchoice target is not above the local headers, skipping the header pass");
             return Ok(Pass::Done)
         }
-        // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
+        // Snap needs canonical headers and their BAL hashes, but nothing below the pivot may
         // execute, so only the header stage runs. Finish the pass before retargeting: dropping it
         // retains partially downloaded headers in the stage's ETL collectors.
         let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
@@ -646,7 +646,7 @@ pub(crate) mod tests {
         let (tip, _) = watch::channel(B256::ZERO);
         let mut pipeline_tip = tip.subscribe();
         let (pipeline, factory) = pipeline_with(headers, tip);
-        // Headers with block access list commitments, so a bootstrap can anchor a pivot.
+        // Headers with block access list hashes, so a bootstrap can anchor a pivot.
         let mut parent = B256::ZERO;
         let stored: Vec<_> = (0..=64)
             .map(|number| {

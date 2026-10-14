@@ -1,6 +1,6 @@
 use crate::{
-    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, ReceiptProvider,
-    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider,
+    BlockBodyIndicesProvider, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
+    TransactionVariant, TransactionsProvider,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -49,12 +49,7 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
 pub trait BlockReader:
-    BlockNumReader
-    + HeaderProvider
-    + BlockBodyIndicesProvider
-    + TransactionsProvider
-    + ReceiptProvider
-    + Send
+    HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
 {
     /// The block type this provider reads.
     type Block: reth_primitives_traits::Block<
@@ -166,7 +161,7 @@ pub trait BlockReader:
     fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
 }
 
-impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
+impl<T: BlockReader + Sync> BlockReader for Arc<T> {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -234,7 +229,7 @@ impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     }
 }
 
-impl<T: BlockReader + Send + Sync> BlockReader for &T {
+impl<T: BlockReader + Sync> BlockReader for &T {
     type Block = T::Block;
 
     fn find_block_by_hash(

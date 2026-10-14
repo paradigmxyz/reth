@@ -21,8 +21,8 @@ use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_storage_api::{
-    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
-    StateProviderFactory, StateRangeProviderFactory,
+    noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, StateProviderFactory,
+    StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
 use secp256k1::SECP256K1;
@@ -167,7 +167,6 @@ where
         + StateProviderFactory
         + StateRangeProviderFactory
         + BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
-        + HeaderProvider
         + Clone
         + Unpin
         + 'static,

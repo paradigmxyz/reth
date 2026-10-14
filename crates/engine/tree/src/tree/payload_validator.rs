@@ -152,18 +152,14 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
 use revm::state::{bal::Bal as RevmBal, AccountInfo};
 use std::{
     sync::{
@@ -312,7 +308,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -325,15 +320,6 @@ where
         + StateProviderFactory
         + StateReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -1810,7 +1796,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -1823,15 +1808,6 @@ where
         + StateReader
         + ChangeSetReader
         + Clone
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + StateProvider
-                          + Send,
-        > + Clone
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block> + Clone,

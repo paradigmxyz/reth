@@ -78,7 +78,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'a,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
@@ -121,7 +120,6 @@ where
     Err: core::error::Error + Send + Sync + 'static,
     DB: Database + Send + 'scope,
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
-    ReceiptTy<Evm::Primitives>: Clone,
 {
     let bal = input_bal.as_bal();
     let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
