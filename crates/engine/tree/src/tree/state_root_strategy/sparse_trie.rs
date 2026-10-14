@@ -4,6 +4,7 @@ use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
     sync::Arc,
+    time::Duration,
 };
 
 use super::{
@@ -214,6 +215,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     pending_updates: usize,
     /// Whether the first buffered leaf batch has been applied.
     initial_updates_applied: bool,
+    /// When account subtries were last hashed ahead of the final root.
+    last_subtrie_hashing: Instant,
     /// Combined final hashed state.
     ///
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
@@ -288,6 +291,7 @@ where
             storage_done_rx,
             pending_updates: Default::default(),
             initial_updates_applied: false,
+            last_subtrie_hashing: Instant::now(),
             final_hashed_state: Default::default(),
             metrics,
         }
@@ -583,9 +587,14 @@ where
             self.ensure_not_stalled(updates_queued)?;
 
             // If there's still no pending updates spend some time pre-computing the account
-            // trie upper hashes
-            if self.proof_result_rx.is_empty() {
+            // trie upper hashes. While updates stream in, hash at most once per interval, so that
+            // subtries changed repeatedly are hashed once and incoming messages wait less.
+            if self.proof_result_rx.is_empty() &&
+                (self.finished_state_updates ||
+                    self.last_subtrie_hashing.elapsed() >= SUBTRIE_HASHING_INTERVAL)
+            {
                 self.trie.calculate_subtries(self.new_epoch);
+                self.last_subtrie_hashing = Instant::now();
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -1607,6 +1616,9 @@ pub(super) struct SparseTrieTaskMetrics {
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
+/// Minimum time between account subtrie hashing passes while state updates still arrive.
+const SUBTRIE_HASHING_INTERVAL: Duration = Duration::from_micros(500);
 
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
