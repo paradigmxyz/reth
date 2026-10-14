@@ -19,10 +19,12 @@ extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{Header, Transaction};
+use alloy_eips::merge::SLOT_DURATION_SECS;
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory, EthTxResult},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
+use alloy_primitives::{Address, B256};
 #[cfg(feature = "jit")]
 use core::any::Any;
 use core::{any::TypeId, convert::Infallible, fmt::Debug};
@@ -288,6 +290,27 @@ where
             blob_gas_used: tx.blob_gas_used().unwrap_or_default(),
             tx_type: tx.tx_type(),
         })
+    }
+
+    fn speculative_next_evm_env(
+        &self,
+        parent: &SealedHeader,
+        beneficiary: Address,
+    ) -> Option<EvmEnv> {
+        let Ok(evm_env) = self.next_evm_env(
+            parent,
+            &NextBlockEnvAttributes {
+                timestamp: parent.timestamp + SLOT_DURATION_SECS,
+                suggested_fee_recipient: beneficiary,
+                prev_randao: B256::ZERO,
+                gas_limit: parent.gas_limit,
+                parent_beacon_block_root: None,
+                withdrawals: None,
+                extra_data: Bytes::new(),
+                slot_number: None,
+            },
+        );
+        Some(evm_env)
     }
 }
 

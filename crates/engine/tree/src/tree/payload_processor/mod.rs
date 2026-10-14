@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
-        reuse::PrewarmResults,
+        reuse::{cfg_reuses_prewarm_results, PrewarmResults},
     },
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
     ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
@@ -453,7 +453,7 @@ where
         let prewarm_results = (self.reuse_prewarm_results &&
             matches!(mode, PrewarmMode::Transactions { .. }) &&
             env.decoded_bal.is_none() &&
-            !env.evm_env.cfg_env.enable_amsterdam_eip8037 &&
+            cfg_reuses_prewarm_results(&env.evm_env.cfg_env) &&
             self.evm_config.reuses_prewarm_results())
         .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
 
