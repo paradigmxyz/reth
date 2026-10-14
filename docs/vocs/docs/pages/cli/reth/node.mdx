@@ -333,7 +333,9 @@ RPC:
           [default: 8545]
 
       --http.disable-compression
-          Disable compression for HTTP responses
+          Disable compression for HTTP responses.
+
+          Servers listening on a loopback address never compress responses.
 
       --http.compression <ALGOS>
           Comma-separated list of allowed compression algorithms for HTTP responses.
@@ -1192,6 +1194,9 @@ Engine:
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
+
+      --engine.prewarm-reuse
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
 
 ERA:
       --era.enable

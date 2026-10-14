@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::marker::PhantomData;
 use tracing::debug;
@@ -63,7 +63,7 @@ where
 
 impl<Engine> Action<Engine> for SendNewPayload<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -276,7 +276,7 @@ where
 
 impl<Engine> Action<Engine> for SendNewPayloads<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
