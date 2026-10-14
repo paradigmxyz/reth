@@ -9,14 +9,19 @@ use crate::{
 use bytes::Bytes;
 use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reqwest::Client;
 use reth_metrics::metrics::Unit;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tower::Service;
 use tower_http::compression::Compression;
+
+/// Bound rendering and compression work across all metrics connections.
+const MAX_CONCURRENT_METRICS_REQUESTS: usize = 4;
 
 /// Configuration for the [`MetricServer`]
 #[derive(Debug)]
@@ -151,6 +156,7 @@ impl MetricServer {
         tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
 
         let executor = task_executor.clone();
+        let requests = Arc::new(Semaphore::new(MAX_CONCURRENT_METRICS_REQUESTS));
         task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
             let io = tokio::select! {
                 _ = &mut signal => break,
@@ -169,6 +175,7 @@ impl MetricServer {
             let hook = hook.clone();
             let pprof_dump_dir = pprof_dump_dir.clone();
             let executor = executor.clone();
+            let compression_executor = executor.clone();
             let service = tower::service_fn(move |req: Request<_>| {
                 let hook = hook.clone();
                 let pprof_dump_dir = pprof_dump_dir.clone();
@@ -182,6 +189,46 @@ impl MetricServer {
             });
 
             let service = Compression::new(service).gzip(true).no_br().no_deflate().no_zstd();
+            let requests = requests.clone();
+            let service = tower::service_fn(move |req| {
+                let mut service = service.clone();
+                let executor = compression_executor.clone();
+                let permit = requests.clone().try_acquire_owned();
+                async move {
+                    let Ok(permit) = permit else {
+                        return Ok::<_, Infallible>(metrics_error_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Metrics collection is busy. Try again later.",
+                        ))
+                    };
+                    let response = service.call(req).await?;
+                    // CompressionBody performs CPU work when polled. Fully collect it on a
+                    // blocking worker so Hyper only polls the completed bytes on Tokio workers.
+                    let result = executor
+                        .spawn_blocking(move || {
+                            // Keep the concurrency slot even if the client disconnects.
+                            let _permit = permit;
+                            tokio::runtime::Handle::current().block_on(async move {
+                                let (parts, body) = response.into_parts();
+                                body.collect().await.map(|body| {
+                                    Response::from_parts(parts, Full::new(body.to_bytes()))
+                                })
+                            })
+                        })
+                        .await;
+                    let response = match result {
+                        Ok(Ok(response)) => response,
+                        error => {
+                            tracing::warn!(?error, "Failed to encode metrics response");
+                            metrics_error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to encode metrics response.",
+                            )
+                        }
+                    };
+                    Ok(response)
+                }
+            });
 
             let mut shutdown = signal.clone().ignore_guard();
             tokio::task::spawn(async move {
@@ -248,6 +295,12 @@ impl MetricServer {
         });
         Ok(())
     }
+}
+
+fn metrics_error_response(status: StatusCode, message: &'static str) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(message.as_bytes())));
+    *response.status_mut() = status;
+    response
 }
 
 fn describe_db_metrics() {
@@ -552,7 +605,8 @@ mod tests {
         )
         .with_storage_settings_info(storage_settings_info);
 
-        MetricServer::new(config).serve().await.unwrap();
+        let server = MetricServer::new(config);
+        server.serve().await.unwrap();
 
         // Send request to the metrics endpoint
         let url = format!("http://{listen_addr}");
@@ -604,6 +658,60 @@ mod tests {
                 Some(storage_metric)
             );
         }
+
+        // Fill all request slots with blocked collectors on separate connections. Excess
+        // scrapes must fail promptly without starting more blocking work.
+        let busy_addr = get_random_available_addr();
+        let started = Arc::new(Semaphore::new(0));
+        let (release, wait_for_release) = mpsc::channel::<()>();
+        let wait_for_release = Mutex::new(wait_for_release);
+        let hook = {
+            let started = started.clone();
+            Arc::new(move || {
+                started.add_permits(1);
+                let _ = wait_for_release.lock().unwrap().recv();
+            })
+        };
+        server
+            .start_endpoint(busy_addr, hook, runtime.clone(), std::env::temp_dir())
+            .await
+            .unwrap();
+        let busy_url = format!("http://{busy_addr}");
+        let mut scrapes = tokio::task::JoinSet::new();
+        for _ in 0..MAX_CONCURRENT_METRICS_REQUESTS {
+            let client = client.clone();
+            let url = busy_url.clone();
+            scrapes.spawn(async move {
+                let response =
+                    client.get(url).header(ACCEPT_ENCODING, "gzip").send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.headers()[CONTENT_ENCODING], "gzip");
+                response.bytes().await.unwrap();
+            });
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            started.acquire_many(MAX_CONCURRENT_METRICS_REQUESTS as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+        let response = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.get(&busy_url).header(ACCEPT_ENCODING, "gzip").send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(started.available_permits(), 0);
+        // Closing the channel releases every collector, including during panic unwinding.
+        drop(release);
+        while let Some(result) = scrapes.join_next().await {
+            result.unwrap();
+        }
+        assert_eq!(client.get(&busy_url).send().await.unwrap().status(), StatusCode::OK);
 
         // Make sure the runtime is dropped after the test runs.
         drop(runtime);
