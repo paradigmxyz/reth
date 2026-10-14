@@ -599,7 +599,11 @@ pub struct EngineArgs {
 
     /// Reuse transaction prewarming results during block execution instead of executing
     /// transactions again when their prewarm reads are still valid.
-    #[arg(long = "engine.prewarm-reuse", default_value_t = false)]
+    #[arg(
+        long = "engine.prewarm-reuse",
+        env = "RETH_ENGINE_PREWARM_REUSE",
+        default_value_t = false
+    )]
     pub prewarm_reuse: bool,
 
     /// Add random jitter before each proof computation (trie-debug only).
