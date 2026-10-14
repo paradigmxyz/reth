@@ -30,6 +30,15 @@ use revm::{
 };
 use std::sync::Arc;
 
+std::thread_local! {
+    /// Diagnostic miss reason.
+    pub static DIAG: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+fn diag(reason: u8) {
+    DIAG.with(|d| d.set(reason));
+}
+
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
 const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
 
@@ -50,6 +59,8 @@ enum ResultSlot<H> {
     Ready(Box<PrewarmedTx<H>>),
     /// A result that cannot be reused, with the reads it depends on.
     Unusable(ReadSet),
+    /// Prewarm is executing.
+    InFlight,
 }
 
 impl<H> PrewarmResults<H> {
@@ -58,6 +69,16 @@ impl<H> PrewarmResults<H> {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             predicted: Arc::default(),
+        }
+    }
+
+    /// Marks the transaction at `index` in flight.
+    pub fn start(&self, index: usize) {
+        if let Some(slot) = self.slots.get(index) {
+            let mut slot = slot.lock();
+            if matches!(*slot, ResultSlot::Empty) {
+                *slot = ResultSlot::InFlight;
+            }
         }
     }
 
@@ -100,7 +121,7 @@ impl<H> PrewarmResults<H> {
         let Some(slot) = self.slots.get(index) else { return false };
         let slot = slot.lock();
         let reads = match &*slot {
-            ResultSlot::Empty => return true,
+            ResultSlot::Empty | ResultSlot::InFlight => return true,
             ResultSlot::Ready(tx) => &tx.reads,
             ResultSlot::Unusable(reads) => reads,
         };
@@ -119,9 +140,19 @@ impl<H> PrewarmResults<H> {
     ) -> Result<ResultAndState<H>, ReuseMiss> {
         let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
         let tx = match &mut *slot {
-            ResultSlot::Empty => return Err(ReuseMiss::Missing),
+            ResultSlot::Empty => {
+                diag(7);
+                return Err(ReuseMiss::Missing)
+            }
+            ResultSlot::InFlight => {
+                diag(8);
+                return Err(ReuseMiss::Missing)
+            }
             ResultSlot::Ready(tx) => tx,
-            ResultSlot::Unusable(_) => return Err(ReuseMiss::Stale),
+            ResultSlot::Unusable(_) => {
+                diag(6);
+                return Err(ReuseMiss::Stale)
+            }
         };
         if !tx.validate(db) {
             return Err(ReuseMiss::Stale)
@@ -158,7 +189,24 @@ impl<H> PrewarmedTx<H> {
     fn validate<DB: Database>(&mut self, db: &mut DB) -> bool {
         for read in &self.reads.accounts {
             let Ok(current) = db.basic(read.address) else { return false };
-            let Some(rebase) = read.compare(current.as_ref()) else { return false };
+            let Some(rebase) = read.compare(current.as_ref()) else {
+                let base = if read.predicted { 20 } else { 10 };
+                let kind = match (&read.info, current.as_ref()) {
+                    (Some(a), Some(b)) if a.balance == b.balance => 1,
+                    (Some(_), Some(b)) => match read.balance {
+                        BalanceDependency::Exact => 2,
+                        BalanceDependency::AtLeast
+                            if b.balance <= read.info.as_ref().unwrap().balance =>
+                        {
+                            3
+                        }
+                        _ => 4,
+                    },
+                    _ => 0,
+                };
+                diag(base + kind);
+                return false
+            };
             if let Some((speculative, current)) = rebase &&
                 let Some(account) = self.result.state.get_mut(&read.address)
             {
@@ -166,10 +214,13 @@ impl<H> PrewarmedTx<H> {
                 account.info.balance = account.info.balance + current - speculative;
             }
         }
-        self.reads
-            .storage
-            .iter()
-            .all(|read| db.storage(read.address, read.slot).ok() == Some(read.value))
+        for read in &self.reads.storage {
+            if db.storage(read.address, read.slot).ok() != Some(read.value) {
+                diag(if read.predicted { 25 } else { 15 });
+                return false
+            }
+        }
+        true
     }
 }
 

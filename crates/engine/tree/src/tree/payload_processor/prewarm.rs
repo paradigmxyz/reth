@@ -309,6 +309,7 @@ where
             // Balances only need to be tracked to record reads for result reuse.
             evm.set_inspector_enabled(ctx.prewarm_results.is_some());
             if let Some(results) = &ctx.prewarm_results {
+                results.start(index);
                 evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
                 evm.inspector_mut().clear();
             }
