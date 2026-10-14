@@ -577,8 +577,9 @@ where
             self.ensure_not_stalled(updates_queued)?;
 
             // If there's still no pending updates spend some time pre-computing the account
-            // trie upper hashes
-            if self.proof_result_rx.is_empty() {
+            // trie upper hashes. Once all updates are known, the final root hashes the trie once
+            // instead, so that arriving proofs do not wait for hashing that later reveals redo.
+            if !self.finished_state_updates && self.proof_result_rx.is_empty() {
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
