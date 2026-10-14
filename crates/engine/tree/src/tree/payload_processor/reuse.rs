@@ -19,7 +19,7 @@ use dashmap::DashMap;
 use parking_lot::Mutex;
 use revm::{
     bytecode::opcode,
-    context::result::ResultAndState,
+    context::{result::ResultAndState, ContextTr, JournalTr},
     interpreter::{
         instructions::utility::IntoAddress, interpreter_types::Jumps, CallInputs, CallOutcome,
         CreateInputs, CreateOutcome, InstructionResult, Interpreter,
@@ -53,7 +53,8 @@ enum ResultSlot<H> {
     Ready(Box<PrewarmedTx<H>>),
     /// A result that cannot be reused, with the reads it depends on.
     Unusable(ReadSet),
-    /// Block execution executed the transaction and published its actual writes.
+    /// Block execution executed the transaction or reused its result, which are published as
+    /// its actual writes.
     Executed,
 }
 
@@ -144,11 +145,13 @@ impl<H> PrewarmResults<H> {
             ResultSlot::Ready(tx) => tx,
             ResultSlot::Unusable(_) => return Err(ReuseMiss::Stale),
         };
-        if !tx.validate(db) {
-            return Err(ReuseMiss::Stale)
+        let Some(rebased) = tx.validate(db) else { return Err(ReuseMiss::Stale) };
+        if rebased {
+            // Later transactions read the rebased balances.
+            self.predicted.publish_accounts(index, &tx.result.state);
         }
         // The result stays published as the prediction of this transaction's writes.
-        let ResultSlot::Ready(tx) = core::mem::replace(&mut *slot, ResultSlot::Empty) else {
+        let ResultSlot::Ready(tx) = core::mem::replace(&mut *slot, ResultSlot::Executed) else {
             unreachable!("validated result")
         };
         Ok(tx.result)
@@ -173,24 +176,28 @@ struct PrewarmedTx<H> {
 
 impl<H> PrewarmedTx<H> {
     /// Returns whether all reads match `db`, applying the result's balance changes to the current
-    /// balances of accounts whose balance differs.
+    /// balances of accounts whose balance differs, and whether there were any.
     ///
-    /// The result must not be used if this returns `false`.
-    fn validate<DB: Database>(&mut self, db: &mut DB) -> bool {
+    /// The result must not be used if this returns `None`.
+    fn validate<DB: Database>(&mut self, db: &mut DB) -> Option<bool> {
+        let mut rebased = false;
         for read in &self.reads.accounts {
-            let Ok(current) = db.basic(read.address) else { return false };
-            let Some(rebase) = read.compare(current.as_ref()) else { return false };
-            if let Some((speculative, current)) = rebase &&
+            let current = db.basic(read.address).ok()?;
+            if let Some((speculative, current)) = read.compare(current.as_ref())? &&
                 let Some(account) = self.result.state.get_mut(&read.address)
             {
-                // All balances are bounded, so this cannot overflow.
-                account.info.balance = account.info.balance + current - speculative;
+                // All balances are bounded, and the execution never leaves less than the
+                // difference, so this neither overflows nor underflows.
+                account.info.balance =
+                    account.info.balance.checked_add(current)?.checked_sub(speculative)?;
+                rebased = true;
             }
         }
         self.reads
             .storage
             .iter()
             .all(|read| db.storage(read.address, read.slot).ok() == Some(read.value))
+            .then_some(rebased)
     }
 }
 
@@ -199,8 +206,8 @@ impl<H> PrewarmedTx<H> {
 enum BalanceDependency {
     /// The balance was only credited or debited, so it may differ.
     None,
-    /// The account paid for gas or sent value, so the balance must not be lower.
-    AtLeast,
+    /// The account paid for gas or sent value, so the balance must be at least this large.
+    AtLeast(U256),
     /// The balance was observed, so it must match.
     Exact,
 }
@@ -234,7 +241,7 @@ impl AccountRead {
 
         let allowed = match self.balance {
             BalanceDependency::None => true,
-            BalanceDependency::AtLeast => current.balance > speculative.balance,
+            BalanceDependency::AtLeast(min) => current.balance >= min,
             BalanceDependency::Exact => false,
         };
         // A zero balance can make the account empty, which changes gas costs and EIP-161 state
@@ -309,11 +316,22 @@ impl ReadSet {
             .accounts
             .iter()
             .all(|read| read.info.as_ref().is_none_or(|info| info.balance <= MAX_REBASED_BALANCE));
+        let paid = caller_balance - max_balance_spending.unwrap_or_default();
         for read in &mut self.accounts {
+            // A sender needs enough balance to leave the same smallest balance, which is the
+            // balance after paying for gas for the caller.
+            let left = balances
+                .senders
+                .iter()
+                .filter(|(address, _)| *address == read.address)
+                .map(|(_, left)| *left)
+                .chain((read.address == caller).then_some(paid))
+                .min();
             read.balance = if !bounded || balances.observed.contains(&read.address) {
                 BalanceDependency::Exact
-            } else if read.address == caller || balances.senders.contains(&read.address) {
-                BalanceDependency::AtLeast
+            } else if let Some(left) = left {
+                let balance = read.info.as_ref().map_or(U256::ZERO, |info| info.balance);
+                BalanceDependency::AtLeast(balance.saturating_sub(left))
             } else {
                 BalanceDependency::None
             };
@@ -393,6 +411,19 @@ impl PredictedState {
                 let Some(code) = &account.info.code
             {
                 self.code.insert(account.info.code_hash, code.clone());
+            }
+        }
+    }
+
+    /// Publishes the account writes of the transaction at `index`.
+    fn publish_accounts(&self, index: usize, state: &EvmState) {
+        for (address, account) in state {
+            if account.is_touched() && !account.is_selfdestructed() && !account.info.is_empty() {
+                write(
+                    &mut self.accounts.entry(*address).or_default(),
+                    index,
+                    Some(Some(account.info.copy_without_code())),
+                );
             }
         }
     }
@@ -582,8 +613,8 @@ impl<DB: Database> Database for RecordingDb<DB> {
 pub(super) struct BalanceTracker {
     /// Accounts whose balance was observed.
     observed: Vec<Address>,
-    /// Accounts that sent value.
-    senders: Vec<Address>,
+    /// Accounts that sent value, with the balance they had left after each send.
+    senders: Vec<(Address, U256)>,
 }
 
 impl BalanceTracker {
@@ -592,9 +623,23 @@ impl BalanceTracker {
         self.observed.clear();
         self.senders.clear();
     }
+
+    /// Records that `sender` sends `value`, or observes its balance if it cannot.
+    fn send<CTX: ContextTr>(&mut self, context: &mut CTX, sender: Address, value: U256) {
+        // The sender of a frame is always loaded, so this does not read the database.
+        let left = context
+            .journal_mut()
+            .load_account(sender)
+            .ok()
+            .and_then(|account| account.data.info.balance.checked_sub(value));
+        match left {
+            Some(left) => self.senders.push((sender, left)),
+            None => self.observed.push(sender),
+        }
+    }
 }
 
-impl<CTX> Inspector<CTX> for BalanceTracker {
+impl<CTX: ContextTr> Inspector<CTX> for BalanceTracker {
     fn step(&mut self, interp: &mut Interpreter, _context: &mut CTX) {
         let address = match interp.bytecode.opcode() {
             opcode::BALANCE => {
@@ -610,9 +655,9 @@ impl<CTX> Inspector<CTX> for BalanceTracker {
         }
     }
 
-    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
-        if inputs.transfers_value() {
-            self.senders.push(inputs.transfer_from());
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if let Some(value) = inputs.transfer_value().filter(|value| !value.is_zero()) {
+            self.send(context, inputs.transfer_from(), value);
         }
         None
     }
@@ -623,9 +668,9 @@ impl<CTX> Inspector<CTX> for BalanceTracker {
         }
     }
 
-    fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         if !inputs.value().is_zero() {
-            self.senders.push(inputs.caller());
+            self.send(context, inputs.caller(), inputs.value());
         }
         None
     }
@@ -670,7 +715,7 @@ mod tests {
     const BENEFICIARY_BALANCE_READER: Address = Address::repeat_byte(0xc2);
     /// Stores its own balance in slot 0.
     const SELF_BALANCE_READER: Address = Address::repeat_byte(0xc3);
-    /// Sends 1 wei to [`NOOP`].
+    /// Sends 5 wei to [`NOOP`].
     const FORWARDER: Address = Address::repeat_byte(0xc4);
     const GAS_PRICE: u128 = 2;
 
@@ -727,13 +772,13 @@ mod tests {
             (COUNTER, bytes!("5f546001015f5500")),
             (BENEFICIARY_BALANCE_READER, bytes!("41315f5500")),
             (SELF_BALANCE_READER, bytes!("475f5500")),
-            (FORWARDER, bytes!("5f5f5f5f600173c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c05af100")),
+            (FORWARDER, bytes!("5f5f5f5f600573c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c05af100")),
         ] {
             let code = Bytecode::new_raw(code);
             db.insert_account_info(
                 address,
                 AccountInfo {
-                    balance: U256::from(10),
+                    balance: U256::from(12),
                     code_hash: code.hash_slow(),
                     code: Some(code),
                     ..Default::default()
@@ -929,7 +974,11 @@ mod tests {
 
     #[test]
     fn rejects_lower_sender_balances() {
-        let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 2)];
-        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 0)];
+        // The forwarder can send twice from its speculative balance, but not three times.
+        assert_eq!(
+            reuse_in(&txs, &[1, 2], false),
+            [Err(ReuseMiss::Missing), Ok(()), Err(ReuseMiss::Stale)]
+        );
     }
 }
