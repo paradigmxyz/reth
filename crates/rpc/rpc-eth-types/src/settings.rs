@@ -39,6 +39,8 @@ pub struct EthApiSettings {
     pub send_raw_transaction_sync_timeout: Duration,
     /// Maximum memory the EVM can allocate per RPC request.
     pub evm_memory_limit: u64,
+    /// Maximum bytes a single trace may record before the request fails. `None` is unlimited.
+    pub max_trace_bytes: Option<usize>,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     pub force_blob_sidecar_upcasting: bool,
 }
@@ -58,6 +60,7 @@ impl Default for EthApiSettings {
             pending_block_kind: PendingBlockKind::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
             evm_memory_limit: (1 << 32) - 1,
+            max_trace_bytes: None,
             force_blob_sidecar_upcasting: false,
         }
     }

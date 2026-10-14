@@ -730,10 +730,11 @@ mod tests {
     #[tokio::test]
     async fn test_eth_api_settings() {
         use reth_rpc_eth_api::{
-            helpers::{Call, EthState, EthTransactions, LoadPendingBlock},
+            helpers::{Call, EthState, EthTransactions, LoadPendingBlock, Trace},
             EthApiTypes,
         };
         use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiSettings};
+        use revm_inspectors::tracing::{TraceLimitBehavior, TraceLimits};
         use std::time::Duration;
 
         fn settings(api: &impl EthApiTypes) -> &EthApiSettings {
@@ -758,6 +759,7 @@ mod tests {
                 expected.send_raw_transaction_sync_timeout
             );
             assert_eq!(actual.evm_memory_limit, expected.evm_memory_limit);
+            assert_eq!(actual.max_trace_bytes, expected.max_trace_bytes);
             assert_eq!(actual.force_blob_sidecar_upcasting, expected.force_blob_sidecar_upcasting);
             assert_eq!(
                 actual.sender_recovery_cache.is_some(),
@@ -781,6 +783,7 @@ mod tests {
             pending_block_kind: PendingBlockKind::Empty,
             send_raw_transaction_sync_timeout: Duration::from_secs(9),
             evm_memory_limit: 1 << 20,
+            max_trace_bytes: Some(4096),
             force_blob_sidecar_upcasting: true,
         };
         let api = EthApiBuilder::new(
@@ -804,6 +807,7 @@ mod tests {
         .pending_block_kind(expected.pending_block_kind)
         .send_raw_transaction_sync_timeout(expected.send_raw_transaction_sync_timeout)
         .evm_memory_limit(expected.evm_memory_limit)
+        .max_trace_bytes(expected.max_trace_bytes)
         .force_blob_sidecar_upcasting(expected.force_blob_sidecar_upcasting)
         .build();
 
@@ -819,6 +823,12 @@ mod tests {
             expected.compute_state_root_for_eth_simulate
         );
         assert_eq!(Call::evm_memory_limit(&api), expected.evm_memory_limit);
+        assert_eq!(
+            Trace::trace_limits(&api),
+            TraceLimits::default()
+                .set_max_recorded_bytes(expected.max_trace_bytes)
+                .set_behavior(TraceLimitBehavior::Halt)
+        );
         assert_eq!(EthState::max_proof_window(&api), expected.eth_proof_window);
         assert_eq!(LoadPendingBlock::pending_block_kind(&api), expected.pending_block_kind);
         assert_eq!(

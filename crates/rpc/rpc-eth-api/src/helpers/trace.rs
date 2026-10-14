@@ -20,7 +20,9 @@ use reth_rpc_eth_types::{
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use reth_tasks::cancel::is_cancelled;
 use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use revm_inspectors::tracing::{
+    TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
+};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
@@ -70,7 +72,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+        self.spawn_trace_transaction_in_block_with_inspector(
+            hash,
+            self.tracing_inspector(config),
+            f,
+        )
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -238,11 +244,12 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
+        let inspector = self.tracing_inspector(config);
         self.trace_block_until_with_inspector(
             block_id,
             block,
             highest_index,
-            move || TracingInspector::new(config),
+            move || inspector.clone(),
             f,
         )
     }
@@ -337,7 +344,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
                         f(tx_info, ctx)
                     })
-                    .collect::<Result<_, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // The tracer stops without an error when a transaction fails to execute.
+                if results.len() < max_transactions.min(block.body().transaction_count()) {
+                    return Err(EthApiError::EvmCustom(format!(
+                        "failed to execute transaction at index {}",
+                        results.len()
+                    ))
+                    .into())
+                }
 
                 Ok(Some(results))
             })
@@ -440,5 +456,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .apply_pre_execution_changes()
             .map_err(Self::Error::from_eth_err)?;
         Ok(())
+    }
+
+    /// Returns the recorded-byte limits for tracers built by this API.
+    ///
+    /// A trace that exceeds the configured byte budget halts execution with an error.
+    fn trace_limits(&self) -> TraceLimits {
+        TraceLimits::default()
+            .set_max_recorded_bytes(self.eth_api_settings().max_trace_bytes)
+            .set_behavior(TraceLimitBehavior::Halt)
+    }
+
+    /// Returns a [`TracingInspector`] for `config`, capped by [`Self::trace_limits`].
+    fn tracing_inspector(&self, config: TracingInspectorConfig) -> TracingInspector {
+        TracingInspector::new(config).with_limits(self.trace_limits())
     }
 }
