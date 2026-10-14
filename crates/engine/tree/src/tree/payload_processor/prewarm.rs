@@ -418,7 +418,7 @@ where
                 let Some(reads) = reads &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                results.store(index, res, reads, evm.inspector(), speculative);
+                results.store(index, res, reads, evm.inspector_mut(), speculative);
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());

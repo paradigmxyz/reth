@@ -19,9 +19,10 @@
 //! predicted, so they must not depend on fields that turn out to differ, and their fee credit to
 //! the beneficiary is applied to the actual beneficiary when the result is reused.
 
+use alloy_consensus::InMemorySize;
 use alloy_primitives::{
     address,
-    map::{B256Map, DefaultHashBuilder},
+    map::{B256Map, DefaultHashBuilder, Entry},
     Address, B256, U256,
 };
 use dashmap::DashMap;
@@ -29,16 +30,16 @@ use parking_lot::{Mutex, RwLock};
 use revm::{
     bytecode::opcode,
     context::{
-        result::{InvalidTransaction, ResultAndState},
-        Block, ContextTr, JournalTr,
+        result::{HaltReason, InvalidTransaction, ResultAndState},
+        Block, CfgEnv, ContextTr, JournalTr,
     },
     inspector::JournalExt,
     interpreter::{
         instructions::utility::IntoAddress, interpreter_types::Jumps, CallInputs, CallOutcome,
-        CreateInputs, CreateOutcome, InstructionResult, Interpreter,
+        CreateInputs, CreateOutcome, InstructionResult, Interpreter, SuccessOrHalt,
     },
     primitives::{StorageKey, StorageValue, KECCAK_EMPTY},
-    state::{Account, AccountInfo, Bytecode, EvmState},
+    state::{Account, AccountInfo, Bytecode, EvmState, EvmStorageSlot},
     Database, Inspector,
 };
 use std::sync::{
@@ -54,8 +55,14 @@ const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
 /// Results of transactions that access it are discarded, so its value only affects how many are.
 pub(crate) const POOL_BENEFICIARY: Address = address!("0x00000000000000000000000000000000000beef0");
 
-/// Maximum number of reads and writes held by [`PoolResults`].
-const MAX_POOL_RESULT_ENTRIES: usize = 1 << 18;
+/// Maximum estimated number of bytes held by [`PoolResults`].
+const MAX_POOL_RESULT_BYTES: usize = 64 << 20;
+
+/// Returns whether blocks executed with `cfg_env` may reuse prewarm results, which excludes
+/// EIP-8037 multidimensional block gas.
+pub(crate) const fn cfg_reuses_prewarm_results<Spec>(cfg_env: &CfgEnv<Spec>) -> bool {
+    !cfg_env.enable_amsterdam_eip8037
+}
 
 /// Speculative prewarm results of a block's transactions, indexed by their position in the block.
 #[derive(Debug)]
@@ -100,7 +107,7 @@ impl<H> PrewarmResults<H> {
         index: usize,
         result: ResultAndState<H>,
         reads: ReadSet,
-        balances: &BalanceTracker,
+        balances: &mut BalanceTracker,
         tx: SpeculativeTx,
     ) {
         match reads.finish(balances, tx) {
@@ -428,7 +435,7 @@ impl ReadSet {
     /// Speculation disables nonce and balance checks, so this fails unless `caller` had the
     /// transaction's `nonce` and could pay `max_balance_spending`, i.e. unless execution with
     /// these checks enabled would have accepted the transaction.
-    fn finish(mut self, balances: &BalanceTracker, tx: SpeculativeTx) -> Result<Self, Self> {
+    fn finish(mut self, balances: &mut BalanceTracker, tx: SpeculativeTx) -> Result<Self, Self> {
         let SpeculativeTx { caller, nonce, max_balance_spending } = tx;
         // Balance changes are applied once per account.
         self.accounts.sort_unstable_by_key(|read| read.address);
@@ -455,17 +462,20 @@ impl ReadSet {
             .iter()
             .all(|read| read.info.as_ref().is_none_or(|info| info.balance <= MAX_REBASED_BALANCE));
         let paid = caller_balance - max_balance_spending;
+        // Sorted, so that each account is looked up in logarithmic time and the smallest balance
+        // a sender had left comes first.
+        let BalanceTracker { observed, senders, .. } = balances;
+        observed.sort_unstable();
+        senders.sort_unstable();
         for read in &mut self.accounts {
             // A sender needs enough balance to leave the same smallest balance, which is the
             // balance after paying for gas for the caller.
-            let left = balances
-                .senders
-                .iter()
+            let sent = senders
+                .get(senders.partition_point(|(address, _)| *address < read.address))
                 .filter(|(address, _)| *address == read.address)
-                .map(|(_, left)| *left)
-                .chain((read.address == caller).then_some(paid))
-                .min();
-            read.balance = if !bounded || balances.observed.contains(&read.address) {
+                .map(|(_, left)| *left);
+            let left = sent.into_iter().chain((read.address == caller).then_some(paid)).min();
+            read.balance = if !bounded || observed.binary_search(&read.address).is_ok() {
                 BalanceDependency::Exact
             } else if let Some(left) = left {
                 let balance = read.info.as_ref().map_or(U256::ZERO, |info| info.balance);
@@ -674,7 +684,8 @@ fn latest<T>(writes: &[(usize, T)], index: usize) -> Option<&(usize, T)> {
 /// actual block environment.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BlockEnvFields {
-    /// The beneficiary, observed by `COINBASE` or by accessing its account.
+    /// The beneficiary, observed by `COINBASE`, by accessing its account, or possibly by running
+    /// out of gas.
     pub(crate) beneficiary: bool,
     /// The timestamp, observed by `TIMESTAMP`.
     pub(crate) timestamp: bool,
@@ -699,20 +710,20 @@ impl BlockEnvFields {
 #[derive(Debug)]
 pub(crate) struct PoolResults<H> {
     txs: RwLock<B256Map<Arc<PoolTx<H>>>>,
-    /// Number of reads and writes of the stored results.
-    entries: AtomicUsize,
+    /// Estimated number of bytes held by the stored results.
+    bytes: AtomicUsize,
 }
 
 impl<H> Default for PoolResults<H> {
     fn default() -> Self {
-        Self { txs: RwLock::default(), entries: AtomicUsize::default() }
+        Self { txs: RwLock::default(), bytes: AtomicUsize::default() }
     }
 }
 
 impl<H> PoolResults<H> {
     /// Stores the result of the pool transaction with `hash` if [`ReadSet::finish`] accepts its
-    /// reads, unless it accessed the beneficiary or the stored results would hold more than
-    /// [`MAX_POOL_RESULT_ENTRIES`] reads and writes.
+    /// reads, unless it may have accessed the beneficiary, a result is already stored for `hash`,
+    /// or the stored results would hold more than [`MAX_POOL_RESULT_BYTES`].
     ///
     /// Returns whether the result was stored.
     pub(crate) fn store(
@@ -720,7 +731,7 @@ impl<H> PoolResults<H> {
         hash: B256,
         mut result: ResultAndState<H>,
         reads: ReadSet,
-        balances: &BalanceTracker,
+        balances: &mut BalanceTracker,
         tx: SpeculativeTx,
     ) -> bool {
         if balances.block_env.beneficiary {
@@ -733,18 +744,21 @@ impl<H> PoolResults<H> {
         let Some(beneficiary) = result.state.remove(&POOL_BENEFICIARY) else { return false };
         let Some(index) = reads.position(POOL_BENEFICIARY) else { return false };
         let speculative = reads.accounts.remove(index).info.map_or(U256::ZERO, |info| info.balance);
-        let Some(credit) = beneficiary.info.balance.checked_sub(speculative) else { return false };
-
-        let entries = reads.accounts.len() +
-            reads.storage.len() +
-            result.state.values().map(|account| 1 + account.storage.len()).sum::<usize>();
-        let mut txs = self.txs.write();
-        let total = self.entries.load(Ordering::Relaxed) + entries;
-        if total > MAX_POOL_RESULT_ENTRIES {
+        // A bounded balance cannot overflow when credited, which would leave it unchanged.
+        if speculative > MAX_REBASED_BALANCE {
             return false
         }
-        txs.insert(hash, Arc::new(PoolTx { result, reads, credit }));
-        self.entries.store(total, Ordering::Relaxed);
+        let Some(credit) = beneficiary.info.balance.checked_sub(speculative) else { return false };
+
+        let bytes = retained_bytes(&result, &reads);
+        let mut txs = self.txs.write();
+        let total = self.bytes.load(Ordering::Relaxed) + bytes;
+        let Entry::Vacant(entry) = txs.entry(hash) else { return false };
+        if total > MAX_POOL_RESULT_BYTES {
+            return false
+        }
+        entry.insert(Arc::new(PoolTx { result, reads, credit }));
+        self.bytes.store(total, Ordering::Relaxed);
         true
     }
 
@@ -752,6 +766,22 @@ impl<H> PoolResults<H> {
     pub(crate) fn get(&self, hash: &B256) -> Option<Arc<PoolTx<H>>> {
         self.txs.read().get(hash).cloned()
     }
+}
+
+/// Returns the estimated number of bytes that storing `result` and `reads` holds.
+fn retained_bytes<H>(result: &ResultAndState<H>, reads: &ReadSet) -> usize {
+    let accounts = result.state.values().map(|account| {
+        // Other bytecode is shared with the database.
+        let code = account.info.code.as_ref().filter(|_| account.is_created());
+        size_of::<(Address, Account)>() +
+            account.storage.len() * size_of::<(StorageKey, EvmStorageSlot)>() +
+            code.map_or(0, Bytecode::len)
+    });
+    reads.accounts.len() * size_of::<AccountRead>() +
+        reads.storage.len() * size_of::<StorageRead>() +
+        result.result.output().map_or(0, |output| output.len()) +
+        result.result.logs().iter().map(InMemorySize::size).sum::<usize>() +
+        accounts.sum::<usize>()
 }
 
 /// A speculative result of a pool transaction without its fee credit to the beneficiary.
@@ -928,16 +958,25 @@ impl BalanceTracker {
         self.block_env = BlockEnvFields::default();
     }
 
-    /// Records whether the transaction accessed the beneficiary when its outermost frame ends.
+    /// Records whether the transaction may have accessed the beneficiary when a frame ends.
     ///
-    /// Otherwise, the beneficiary is only loaded afterwards to credit fees. Loaded accounts stay
-    /// loaded when frames revert.
-    fn frame_end<CTX: ContextTr<Journal: JournalExt>>(&mut self, context: &CTX) {
+    /// The beneficiary is only loaded after all frames ended to credit fees, unless the
+    /// transaction accessed it. Loaded accounts stay loaded when frames revert. A frame that ran
+    /// out of gas may have skipped loading a cold account, such as an actual beneficiary that is
+    /// warm in the block.
+    fn frame_end<CTX: ContextTr<Journal: JournalExt>>(
+        &mut self,
+        context: &CTX,
+        result: InstructionResult,
+    ) {
+        let out_of_gas = matches!(
+            SuccessOrHalt::<HaltReason>::from(result),
+            SuccessOrHalt::Halt(HaltReason::OutOfGas(_))
+        );
         let journal = context.journal_ref();
-        if journal.depth() == 0 && journal.evm_state().contains_key(&context.block().beneficiary())
-        {
-            self.block_env.beneficiary = true;
-        }
+        self.block_env.beneficiary |= out_of_gas ||
+            (journal.depth() == 0 &&
+                journal.evm_state().contains_key(&context.block().beneficiary()));
     }
 
     /// Records that `sender` sends `value`, or observes its balance if it cannot.
@@ -1005,7 +1044,7 @@ impl<CTX: ContextTr<Journal: JournalExt> + ContextTr<Journal: JournalTr<State = 
         if *outcome.instruction_result() == InstructionResult::OutOfFunds {
             self.observed.push(inputs.transfer_from());
         }
-        self.frame_end(context);
+        self.frame_end(context, *outcome.instruction_result());
     }
 
     fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
@@ -1024,7 +1063,7 @@ impl<CTX: ContextTr<Journal: JournalExt> + ContextTr<Journal: JournalTr<State = 
         if *outcome.instruction_result() == InstructionResult::OutOfFunds {
             self.observed.push(inputs.caller());
         }
-        self.frame_end(context);
+        self.frame_end(context, *outcome.instruction_result());
     }
 }
 
@@ -1046,7 +1085,6 @@ mod tests {
         context::{BlockEnv, CfgEnv, Transaction as _},
         database::{states::bundle_state::BundleRetention, BundleState, CacheDB, EmptyDB, State},
         primitives::hardfork::SpecId,
-        state::EvmStorageSlot,
     };
 
     const BENEFICIARY: Address = Address::repeat_byte(0xbe);
@@ -1074,6 +1112,8 @@ mod tests {
     const BENEFICIARY_READER: Address = Address::repeat_byte(0xca);
     /// Calls [`POOL_BENEFICIARY`].
     const POOL_BENEFICIARY_CALLER: Address = Address::repeat_byte(0xcb);
+    /// Reads the balance of [`BENEFICIARY`] by its address.
+    const BENEFICIARY_BALANCE_BY_ADDRESS: Address = Address::repeat_byte(0xcc);
     /// Index of a sender with the largest nonce.
     const EXHAUSTED_SENDER: u8 = 5;
     const GAS_PRICE: u128 = 2;
@@ -1164,6 +1204,10 @@ mod tests {
                 POOL_BENEFICIARY_CALLER,
                 bytes!("5f5f5f5f5f7300000000000000000000000000000000000beef05af100"),
             ),
+            (
+                BENEFICIARY_BALANCE_BY_ADDRESS,
+                bytes!("73bebebebebebebebebebebebebebebebebebebebe3100"),
+            ),
         ] {
             let code = Bytecode::new_raw(code);
             db.insert_account_info(
@@ -1223,7 +1267,7 @@ mod tests {
             let reads = self.evm.db_mut().take_reads().unwrap();
             match result {
                 Ok(result) => {
-                    self.results.store(index, result, reads, self.evm.inspector(), speculative)
+                    self.results.store(index, result, reads, self.evm.inspector_mut(), speculative)
                 }
                 Err(_) => self.results.reject(index, reads),
             }
@@ -1412,7 +1456,7 @@ mod tests {
             evm.inspector_mut().clear();
             let result = evm.transact(tx_env).unwrap();
             let reads = evm.db_mut().take_reads().unwrap();
-            results.store(*tx.tx_hash(), result, reads, evm.inspector(), speculative);
+            results.store(*tx.tx_hash(), result, reads, evm.inspector_mut(), speculative);
         }
         results
     }
@@ -1542,32 +1586,74 @@ mod tests {
         assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing); 5]);
     }
 
-    #[test]
-    fn bounds_pool_results() {
-        let txs = [tx(1, 0, COUNTER, 1)];
-        let results = pool_results(&txs);
-        let tx = results.get(txs[0].tx_hash()).unwrap();
-        let mut result = tx.result.clone();
-        result.state.get_mut(&COUNTER).unwrap().storage.extend(
-            (0..MAX_POOL_RESULT_ENTRIES as u64)
-                .map(|slot| (U256::from(slot), EvmStorageSlot::default())),
-        );
-        let mut reads = tx.reads.clone();
-        reads.accounts.push(AccountRead {
+    /// Stores the recorded result of `tx` in `results` again under `hash`, after `modify` changed
+    /// it and the read of the pool beneficiary.
+    fn store_again(
+        results: &PoolResults<HaltReasonFor<EthEvmConfig>>,
+        tx: &Recovered<TransactionSigned>,
+        hash: B256,
+        modify: impl FnOnce(&mut ResultAndState<HaltReasonFor<EthEvmConfig>>, &mut AccountRead),
+    ) -> bool {
+        let recorded = results.get(tx.tx_hash()).unwrap();
+        let mut result = recorded.result.clone();
+        result.state.insert(POOL_BENEFICIARY, Account::default());
+        let mut beneficiary = AccountRead {
             address: POOL_BENEFICIARY,
             info: None,
             balance: BalanceDependency::None,
             predicted: false,
-        });
-        result.state.insert(POOL_BENEFICIARY, Account::default());
-        let tx_env = EthEvmConfig::mainnet().tx_env(&txs[0]);
+        };
+        modify(&mut result, &mut beneficiary);
+        let mut reads = recorded.reads.clone();
+        reads.accounts.push(beneficiary);
+        let tx_env = EthEvmConfig::mainnet().tx_env(tx);
         let speculative = SpeculativeTx {
-            caller: sender(1),
-            nonce: 0,
+            caller: tx.signer(),
+            nonce: tx_env.nonce,
             max_balance_spending: tx_env.max_balance_spending(),
         };
-        assert!(!results.store(B256::ZERO, result, reads, &BalanceTracker::default(), speculative));
-        assert!(results.get(&B256::ZERO).is_none());
+        results.store(hash, result, reads, &mut BalanceTracker::default(), speculative)
+    }
+
+    #[test]
+    fn bounds_pool_results() {
+        let txs = [tx(1, 0, COUNTER, 1)];
+        let results = pool_results(&txs);
+        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+        // Deployed code counts towards the bound.
+        assert!(!store_again(&results, &txs[0], B256::with_last_byte(1), |result, _| {
+            let account = result.state.get_mut(&COUNTER).unwrap();
+            account.mark_created();
+            account.info.code = Some(Bytecode::new_raw(vec![0; MAX_POOL_RESULT_BYTES].into()));
+        }));
+    }
+
+    #[test]
+    fn rejects_recorded_pool_hashes() {
+        let txs = [tx(1, 0, COUNTER, 1)];
+        let results = pool_results(&txs);
+        assert!(!store_again(&results, &txs[0], *txs[0].tx_hash(), |_, _| {}));
+        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+    }
+
+    #[test]
+    fn rejects_saturated_pool_beneficiaries() {
+        let txs = [tx(1, 0, COUNTER, 1)];
+        let results = pool_results(&txs);
+        // Crediting a saturated balance leaves it unchanged.
+        assert!(!store_again(&results, &txs[0], B256::ZERO, |result, beneficiary| {
+            beneficiary.info = Some(AccountInfo { balance: U256::MAX, ..Default::default() });
+            result.state.get_mut(&POOL_BENEFICIARY).unwrap().info.balance = U256::MAX;
+        }));
+        assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
+    }
+
+    #[test]
+    fn rejects_pool_results_running_out_of_gas() {
+        // Enough gas to read the balance of the warm beneficiary in the block, but not of the cold
+        // one during speculation.
+        let txs = [tx_with_gas_limit(1, 0, BENEFICIARY_BALANCE_BY_ADDRESS, 0, 21_500)];
+        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing)]);
     }
 
     #[test]

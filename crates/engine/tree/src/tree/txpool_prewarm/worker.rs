@@ -253,7 +253,7 @@ where
                         let Some(speculative) = speculative &&
                         let Some(reads) = evm.db_mut().take_reads()
                     {
-                        results.store(hash, result, reads, evm.inspector(), speculative);
+                        results.store(hash, result, reads, evm.inspector_mut(), speculative);
                     }
                 }
                 Err(err) => {

@@ -9,7 +9,9 @@ mod worker;
 
 use self::control::Control;
 use crate::tree::{
-    payload_processor::reuse::{BlockEnvFields, PoolResults, PoolSeeds, POOL_BENEFICIARY},
+    payload_processor::reuse::{
+        cfg_reuses_prewarm_results, BlockEnvFields, PoolResults, PoolSeeds, POOL_BENEFICIARY,
+    },
     TxPoolPrewarmCacheSnapshot,
 };
 use alloy_consensus::transaction::Recovered;
@@ -106,29 +108,36 @@ where
 
     /// Starts continuous warming for the latest canonical head `parent`.
     ///
-    /// Results are recorded in the predicted environment of the next block if it is available,
-    /// otherwise warming uses the head block's own environment `evm_env`.
+    /// Results are recorded in the predicted environment of the next block if it is available and
+    /// the block may reuse them, otherwise warming uses the head block's own environment
+    /// `evm_env`.
     pub(crate) fn start(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
         evm_env: EvmEnvFor<Evm>,
         state_provider_factory: OverlayStateProviderFactory<P, N>,
     ) {
-        let speculation = self
-            .record_results
-            .then(|| self.evm_config.speculative_next_evm_env(parent, POOL_BENEFICIARY))
-            .flatten()
-            .map(|evm_env| Speculation {
-                parent_hash: parent.hash(),
-                evm_env,
-                results: Arc::default(),
-            });
+        let mut speculation = self.speculation.write();
+        // The worker keeps executed transactions of the same head, so it would not record them
+        // again.
+        if speculation.as_ref().is_none_or(|s| s.parent_hash != parent.hash()) {
+            *speculation = self
+                .record_results
+                .then(|| self.evm_config.speculative_next_evm_env(parent, POOL_BENEFICIARY))
+                .flatten()
+                .filter(|evm_env| cfg_reuses_prewarm_results(&evm_env.cfg_env))
+                .map(|evm_env| Speculation {
+                    parent_hash: parent.hash(),
+                    evm_env,
+                    results: Arc::default(),
+                });
+        }
         let job = Job {
             evm_env: speculation.as_ref().map_or(evm_env, |s| s.evm_env.clone()),
             state_provider_factory,
             results: speculation.as_ref().map(|s| Arc::clone(&s.results)),
         };
-        *self.speculation.write() = speculation;
+        drop(speculation);
         self.control.start(parent.hash(), job);
     }
 
@@ -226,7 +235,60 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::U256;
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_storage_overlay::OverlayManager;
+    use reth_tasks::Runtime;
+    use revm::context::result::HaltReason;
+
+    type TestHandle = Handle<EthPrimitives, MockEthProvider, EthEvmConfig>;
+
+    /// A pool that never tracks the head.
+    #[derive(Debug)]
+    struct NoPool;
+
+    impl Source<EthPrimitives> for NoPool {
+        fn best_transactions(&self, _parent_hash: B256) -> Option<Transactions<EthPrimitives>> {
+            None
+        }
+    }
+
+    fn start(handle: &TestHandle, parent: &SealedHeader) {
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            MockEthProvider::default(),
+            OverlayManager::default().overlay_builder(parent.hash()),
+        );
+        handle.start(parent, Default::default(), state_provider_factory);
+    }
+
+    fn recorded(handle: &TestHandle) -> Option<Arc<PoolResults<HaltReason>>> {
+        handle.speculation.read().as_ref().map(|s| Arc::clone(&s.results))
+    }
+
+    #[test]
+    fn keeps_results_of_the_same_head() {
+        let handle =
+            TestHandle::spawn(&Runtime::test(), Arc::new(NoPool), EthEvmConfig::mainnet(), true);
+        let parent = SealedHeader::seal_slow(Header::default());
+        start(&handle, &parent);
+        let results = recorded(&handle).unwrap();
+        start(&handle, &parent);
+        assert!(Arc::ptr_eq(&results, &recorded(&handle).unwrap()));
+
+        start(&handle, &SealedHeader::seal_slow(Header { number: 1, ..Default::default() }));
+        assert!(!Arc::ptr_eq(&results, &recorded(&handle).unwrap()));
+    }
+
+    #[test]
+    fn records_no_results_with_eip8037() {
+        let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+        let handle = TestHandle::spawn(&Runtime::test(), Arc::new(NoPool), evm_config, true);
+        start(&handle, &SealedHeader::seal_slow(Header::default()));
+        assert!(recorded(&handle).is_none());
+    }
 
     #[test]
     fn predicted_env_differs_in_unobserved_fields() {
