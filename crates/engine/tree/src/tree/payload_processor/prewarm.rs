@@ -183,7 +183,10 @@ where
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(|_| {
+                        raise_prewarm_priority();
+                        ctx.evm_for_ctx()
+                    });
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -1357,5 +1360,22 @@ mod tests {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
         }
+    }
+}
+
+/// Raises the priority of the current prewarm thread above other worker pools, once per thread.
+fn raise_prewarm_priority() {
+    std::thread_local! {
+        static RAISED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    }
+    if RAISED.with(|raised| raised.replace(true)) {
+        return
+    }
+    use reth_tasks::utils::{ThreadPriority, ThreadPriorityValue};
+    let priority = ThreadPriority::Crossplatform(
+        ThreadPriorityValue::try_from(62u8).expect("62 is within the valid 0..100 range"),
+    );
+    if let Err(err) = priority.set_for_current() {
+        debug!(target: "engine::tree::payload_processor::prewarm", ?err, "failed to raise prewarm thread priority");
     }
 }
