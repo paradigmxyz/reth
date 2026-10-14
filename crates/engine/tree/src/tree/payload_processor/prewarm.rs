@@ -255,7 +255,8 @@ where
             let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
             // Balances only need to be tracked to record reads for result reuse.
             evm.set_inspector_enabled(ctx.prewarm_results.is_some());
-            if ctx.prewarm_results.is_some() {
+            if let Some(results) = &ctx.prewarm_results {
+                results.reject(index, ReuseMiss::InFlight);
                 evm.db_mut().start_recording();
                 evm.inspector_mut().clear();
             }

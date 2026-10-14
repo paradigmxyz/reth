@@ -82,6 +82,8 @@ impl<H> PrewarmResults<H> {
 pub enum ReuseMiss {
     /// Prewarming had not finished the transaction.
     Missing,
+    /// Prewarming was executing the transaction.
+    InFlight,
     /// Stale.
     Stale,
     /// Caller nonce mismatch at prewarm.

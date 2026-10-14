@@ -2181,6 +2181,8 @@ macro_rules! diag_fns {
         $(
             #[inline(never)]
             fn $name<R>(f: impl FnOnce() -> R) -> R {
+                // Distinct bodies keep the linker from folding the functions together.
+                std::hint::black_box(stringify!($name));
                 std::hint::black_box(f())
             }
         )*
@@ -2196,6 +2198,7 @@ macro_rules! diag_fns {
 
 diag_fns! {
     diag_execute_missing => ReuseMiss::Missing,
+    diag_execute_in_flight => ReuseMiss::InFlight,
     diag_execute_stale => ReuseMiss::Stale,
     diag_execute_caller_nonce => ReuseMiss::CallerNonce,
     diag_execute_caller_balance => ReuseMiss::CallerBalance,
@@ -2213,5 +2216,6 @@ diag_fns! {
 
 #[inline(never)]
 fn diag_execute_disabled<R>(f: impl FnOnce() -> R) -> R {
+    std::hint::black_box("diag_execute_disabled");
     std::hint::black_box(f())
 }
