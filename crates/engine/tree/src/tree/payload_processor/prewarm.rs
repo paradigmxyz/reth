@@ -16,17 +16,21 @@
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
     reuse::{BalanceTracker, PrewarmResults, RecordingDb},
-    StateRootHintStream, StateRootUpdateStream,
+    StateAccessHint, StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{transaction::TxHashRef, Transaction as _};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressSet, B256Map},
+    B256,
+};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -179,6 +183,8 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
+            // Senders and recipients are known before prewarming reaches their transactions.
+            let mut tx_accounts = AddressSet::default();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
@@ -201,6 +207,12 @@ where
                     }
 
                     tx_count += 1;
+                    if state_root_hint_stream.is_some() {
+                        tx_accounts.insert(*tx.signer());
+                        if let Some(to) = tx.tx().to() {
+                            tx_accounts.insert(to);
+                        }
+                    }
                     if ctx.prewarm_results.is_some() {
                         refresh_txs.push((index, tx.clone()));
                     }
@@ -214,6 +226,15 @@ where
                         )
                         .entered();
                         Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                    });
+                }
+
+                if let Some(state_root_hint_stream) = state_root_hint_stream &&
+                    !tx_accounts.is_empty()
+                {
+                    state_root_hint_stream.on_access_hint(StateAccessHint {
+                        accounts: tx_accounts.iter().map(keccak256).collect(),
+                        storages: Default::default(),
                     });
                 }
 
