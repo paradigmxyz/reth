@@ -1,7 +1,9 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, SimulateV1Request,
 };
 use alloy_dyn_abi::TypedData;
@@ -755,8 +757,9 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        let payload = payload.into_inner(Call::max_simulate_blocks(self) as usize)?;
         let _permit = self.tracing_task_guard().clone().acquire_owned().await;
-        Ok(EthCall::simulate_v1(self, payload.into_inner(), block_number).await?)
+        Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
     /// Handler for: `eth_call`
