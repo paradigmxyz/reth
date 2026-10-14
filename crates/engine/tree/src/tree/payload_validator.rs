@@ -1102,6 +1102,10 @@ where
             .map(|(evm, result)| (evm.into_db(), result))?;
         self.metrics.record_post_execution(post_exec_start.elapsed());
 
+        // All state changes reached the hook, so finish the state root update stream before the
+        // bundle is built.
+        db.set_state_hook(None);
+
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
