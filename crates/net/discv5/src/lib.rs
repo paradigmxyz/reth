@@ -363,8 +363,8 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
-        // ignore UDP socket advertised in ENR, use sender socket instead
-        let address = socket.ip();
+        // Ignore the advertised UDP socket and normalize IPv4-mapped session addresses.
+        let address = socket.ip().to_canonical();
         let udp_port = socket.port();
 
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
@@ -944,6 +944,29 @@ mod test {
             );
             assert_eq!(record.address, v6_socket.ip());
             assert_eq!(record.udp_port, v6_socket.port());
+        }
+    }
+
+    #[test]
+    fn reachable_ipv4_mapped_session_uses_tcp4() {
+        const TCP4_PORT: u16 = 30304;
+        const TCP6_PORT: u16 = 30306;
+        let remote_key = CombinedKey::generate_secp256k1();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
+        let mapped_socket: SocketAddr = "[::ffff:104.28.44.25]:9000".parse().unwrap();
+        let ipv4_address: IpAddr = "104.28.44.25".parse().unwrap();
+
+        for local_mode in [IpMode::Ip4, IpMode::Ip6] {
+            let mut discv5 = discv5_noop();
+            discv5.rlpx_ip_mode = local_mode;
+
+            let record = discv5.try_into_reachable(&remote_enr, mapped_socket).unwrap();
+            assert_eq!(record.tcp_port, TCP4_PORT);
+            assert_eq!(record.address, ipv4_address);
+            assert_eq!(record.udp_port, mapped_socket.port());
+
+            let peer = discv5.on_discovered_peer(&remote_enr, mapped_socket).unwrap();
+            assert_eq!(peer.node_record, record);
         }
     }
 
