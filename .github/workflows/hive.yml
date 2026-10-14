@@ -49,14 +49,21 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: Soubhik-10/hive
+          ref: feat/eip8141-frames
           path: hivetests
           persist-credentials: false
 
       - name: Get hive commit hash
         id: hive-commit
         run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Get EELS mapper commit hash
+        if: matrix.variant == 'bogota'
+        id: eels-commit
+        run: |
+          eels_ref=$(git ls-remote --exit-code https://github.com/Soubhik-10/execution-specs.git refs/heads/fix/reth-frames-devnet-1-hive-error-mapping)
+          echo "hash=${eels_ref%%[[:space:]]*}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -68,7 +75,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ./hive_assets
-          key: hive-assets-${{ matrix.variant }}-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
+          key: hive-assets-${{ matrix.variant }}-${{ steps.hive-commit.outputs.hash }}-${{ steps.eels-commit.outputs.hash }}-${{ hashFiles('.github/scripts/hive/build_simulators.sh') }}
 
       - name: Build hive assets
         if: steps.cache-hive.outputs.cache-hit != 'true'
@@ -248,8 +255,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: Soubhik-10/hive
+          ref: feat/eip8141-frames
           path: hivetests
           persist-credentials: false
 
@@ -512,8 +519,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ethereum/hive
-          ref: master
+          repository: Soubhik-10/hive
+          ref: feat/eip8141-frames
           path: hivetests
           persist-credentials: false
 
@@ -700,8 +707,8 @@ jobs:
 #      - name: Checkout hive tests
 #        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 #        with:
-#          repository: ethereum/hive
-#          ref: master
+#          repository: Soubhik-10/hive
+#          ref: feat/eip8141-frames
 #          path: hivetests
 #          persist-credentials: false
 #
