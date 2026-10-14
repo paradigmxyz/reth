@@ -223,6 +223,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
+    /// Diagnostics: storage trie updates taken before the root.
+    diag_storage_updates: Option<B256Map<reth_trie::updates::StorageTrieUpdates>>,
 }
 
 impl<A, S> SparseTrieCacheTask<A, S>
@@ -290,6 +292,7 @@ where
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
             metrics,
+            diag_storage_updates: None,
         }
     }
 
@@ -487,8 +490,36 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
+        {
+            // Diagnostics: storage tries with updates that this block did not check out.
+            let touched =
+                self.storage_to_drop.keys().copied().collect::<alloy_primitives::map::B256Set>();
+            let updates = self.trie.storage_trie_updates();
+            let untouched = updates
+                .iter()
+                .filter(|(address, _)| !touched.contains(*address))
+                .collect::<Vec<_>>();
+            let untouched_nodes: usize =
+                untouched.iter().map(|(_, u)| u.storage_nodes.len() + u.removed_nodes.len()).sum();
+            let _span = debug_span!(
+                "diag_storage_updates",
+                touched = touched.len(),
+                with_updates = updates.len(),
+                untouched = untouched.len(),
+                untouched_nodes,
+                retained = self.trie.retained_storage_tries_count(),
+            )
+            .entered();
+            drop(_span);
+            // Put the updates back by re-inserting nothing: they were taken, so carry them in the
+            // outcome below instead.
+            self.diag_storage_updates = Some(updates);
+        }
         let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
-            Ok(result) => result,
+            Ok((root, mut updates)) => {
+                updates.storage_tries = self.diag_storage_updates.take().unwrap_or_default();
+                (root, updates)
+            }
             Err(err)
                 if matches!(
                     err.kind(),
