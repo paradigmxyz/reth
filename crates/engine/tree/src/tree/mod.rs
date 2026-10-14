@@ -323,11 +323,11 @@ where
     runtime: reth_tasks::Runtime,
 }
 
-impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
+impl<N, P: Debug, T: PayloadTypes, V: Debug, C> std::fmt::Debug
     for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
-    C: Debug + ConfigureEvm<Primitives = N>,
+    C: ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")

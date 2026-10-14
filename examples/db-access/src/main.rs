@@ -7,8 +7,8 @@ use reth_ethereum::{
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::{BlockchainProvider, ReadOnlyConfig},
-        AccountReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
-        StateProvider, StateProviderFactory, TransactionVariant, TransactionsProvider,
+        BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider, StateProvider,
+        StateProviderFactory, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -217,7 +217,7 @@ fn receipts_provider_example<
 }
 
 /// The `StateProvider` allows querying the state tables.
-fn state_provider_example<T: StateProvider + AccountReader, H: HeaderProvider>(
+fn state_provider_example<T: StateProvider, H: HeaderProvider>(
     provider: T,
     headers: &H,
     number: u64,

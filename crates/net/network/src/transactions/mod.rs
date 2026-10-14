@@ -802,9 +802,9 @@ impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
     N: NetworkPrimitives<
-            BroadcastedTransaction: SignedTransaction,
-            PooledTransaction: SignedTransaction,
-        > + Unpin,
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1559,9 +1559,9 @@ where
 impl<
         Pool: TransactionPool + Unpin + 'static,
         N: NetworkPrimitives<
-                BroadcastedTransaction: SignedTransaction,
-                PooledTransaction: SignedTransaction,
-            > + Unpin,
+            BroadcastedTransaction: SignedTransaction,
+            PooledTransaction: SignedTransaction,
+        >,
     > Future for TransactionsManager<Pool, N>
 where
     Pool::Transaction:
