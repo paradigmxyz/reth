@@ -68,9 +68,12 @@ impl WorkerThread {
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
             metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
-            let _decrement_pending = DecrementPendingOnDrop(pending);
-            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
-            let _ = result_tx.send(f());
+            let result = {
+                let _decrement_pending = DecrementPendingOnDrop(pending);
+                let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                f()
+            };
+            let _ = result_tx.send(result);
         });
 
         if self.tx.send(task).is_err() {
@@ -96,9 +99,12 @@ impl WorkerThread {
         let task: BoxedTask = Box::new(move || {
             let started_at = Instant::now();
             metrics.record_queue_wait(started_at.saturating_duration_since(queued_at));
-            let _decrement_pending = DecrementPendingOnDrop(pending);
-            let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
-            let _ = result_tx.send(f());
+            let result = {
+                let _decrement_pending = DecrementPendingOnDrop(pending);
+                let _record_task_duration = RecordTaskDurationOnDrop::new(metrics, started_at);
+                f()
+            };
+            let _ = result_tx.send(result);
         });
 
         if self.tx.send(task).is_err() {
@@ -213,6 +219,12 @@ impl std::fmt::Debug for WorkerMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        future::Future,
+        pin::Pin,
+        task::{Context, Wake, Waker},
+        time::Duration,
+    };
 
     #[tokio::test]
     async fn worker_map_basic() {
@@ -314,5 +326,44 @@ mod tests {
         drop(map);
         release_tx.send(()).unwrap();
         done.blocking_recv().expect("dropping the map on its own worker should not panic");
+    }
+
+    #[test]
+    fn worker_results_observe_idle_worker() {
+        for try_spawn in [false, true] {
+            let worker = WorkerThread::new("result-wake");
+            let wake = Arc::new(PendingOnWake {
+                pending: Arc::clone(&worker.pending),
+                observed: AtomicUsize::new(usize::MAX),
+            });
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let task = move || {
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                42
+            };
+            let mut result =
+                if try_spawn { worker.try_spawn(task).unwrap() } else { worker.spawn(task) };
+            let waker = Waker::from(Arc::clone(&wake));
+            assert!(Pin::new(&mut result).poll(&mut Context::from_waker(&waker)).is_pending());
+
+            release_tx.send(()).unwrap();
+            drop(worker.tx);
+            worker.handle.unwrap().join().unwrap();
+
+            assert_eq!(wake.observed.load(Ordering::Acquire), 0);
+            assert_eq!(result.blocking_recv().unwrap(), 42);
+        }
+    }
+
+    /// Records the pending count synchronously when a result wakes its receiver.
+    struct PendingOnWake {
+        pending: Arc<AtomicUsize>,
+        observed: AtomicUsize,
+    }
+
+    impl Wake for PendingOnWake {
+        fn wake(self: Arc<Self>) {
+            self.observed.store(self.pending.load(Ordering::Acquire), Ordering::Release);
+        }
     }
 }
