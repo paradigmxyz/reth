@@ -1324,7 +1324,7 @@ where
                         results,
                         index,
                         <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
-                    );
+                    )?;
                     if outcome.is_err() {
                         // Later prewarm results are refreshed against the actual writes.
                         executor.execute_transaction_with_result_closure(tx, |result| {
@@ -1374,7 +1374,7 @@ where
         results: &PrewarmResults<HaltReasonFor<Evm>>,
         index: usize,
         tx: &TxTy<N>,
-    ) -> Result<(), ReuseMiss>
+    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError>
     where
         E: BlockExecutor<
             Receipt = N::Receipt,
@@ -1388,13 +1388,21 @@ where
         let block = executor.evm().block();
         let block_gas_used = executor.receipts().last().map_or(0, |r| r.cumulative_gas_used());
         if tx.gas_limit() > block.gas_limit().saturating_sub(block_gas_used) {
-            return Err(ReuseMiss::Stale)
+            return Ok(Err(ReuseMiss::Stale))
         }
 
-        let result = results.take_valid(index, executor.evm_mut().db_mut())?;
-        let result = self.evm_config.prewarm_tx_result(tx, result).ok_or(ReuseMiss::Stale)?;
+        let result = match results
+            .take_valid(index, executor.evm_mut().db_mut())
+            .map_err(BlockExecutionError::other)?
+        {
+            Ok(result) => result,
+            Err(miss) => return Ok(Err(miss)),
+        };
+        let Some(result) = self.evm_config.prewarm_tx_result(tx, result) else {
+            return Ok(Err(ReuseMiss::Stale))
+        };
         executor.commit_transaction(result);
-        Ok(())
+        Ok(Ok(()))
     }
 
     /// Validates the block after execution.

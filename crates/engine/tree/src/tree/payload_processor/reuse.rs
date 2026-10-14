@@ -19,7 +19,10 @@ use dashmap::DashMap;
 use parking_lot::Mutex;
 use revm::{
     bytecode::opcode,
-    context::{result::ResultAndState, ContextTr, JournalTr},
+    context::{
+        result::{InvalidTransaction, ResultAndState},
+        ContextTr, JournalTr,
+    },
     interpreter::{
         instructions::utility::IntoAddress, interpreter_types::Jumps, CallInputs, CallOutcome,
         CreateInputs, CreateOutcome, InstructionResult, Interpreter,
@@ -60,7 +63,7 @@ enum ResultSlot<H> {
 
 impl<H> PrewarmResults<H> {
     /// Creates empty result slots for `transaction_count` transactions.
-    pub fn new(transaction_count: usize) -> Self {
+    pub(crate) fn new(transaction_count: usize) -> Self {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             predicted: Arc::default(),
@@ -72,12 +75,23 @@ impl<H> PrewarmResults<H> {
         &self.predicted
     }
 
-    /// Stores the prewarm result of the transaction at `index` and publishes its writes.
-    pub(super) fn insert(&self, index: usize, result: ResultAndState<H>, reads: ReadSet) {
-        self.set(index, |predicted| {
-            predicted.publish(index, &result.state);
-            ResultSlot::Ready(Box::new(PrewarmedTx { result, reads }))
-        });
+    /// Stores the prewarm result of the transaction at `index` and publishes its writes if
+    /// [`ReadSet::finish`] accepts its reads, otherwise marks it as unusable.
+    pub(super) fn store(
+        &self,
+        index: usize,
+        result: ResultAndState<H>,
+        reads: ReadSet,
+        balances: &BalanceTracker,
+        tx: SpeculativeTx,
+    ) {
+        match reads.finish(balances, tx) {
+            Ok(reads) => self.set(index, |predicted| {
+                predicted.publish(index, &result.state);
+                ResultSlot::Ready(Box::new(PrewarmedTx { result, reads }))
+            }),
+            Err(reads) => self.reject(index, reads),
+        }
     }
 
     /// Marks the result of the transaction at `index` as unusable.
@@ -91,7 +105,7 @@ impl<H> PrewarmResults<H> {
 
     /// Replaces the predicted writes of the transaction at `index` with the writes of its actual
     /// execution by block execution.
-    pub fn publish_executed(&self, index: usize, state: &EvmState) {
+    pub(crate) fn publish_executed(&self, index: usize, state: &EvmState) {
         let Some(slot) = self.slots.get(index) else { return };
         let mut slot = slot.lock();
         // Overwrite the predicted writes in place, then retract those the execution did not make.
@@ -132,35 +146,45 @@ impl<H> PrewarmResults<H> {
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
     /// `db`.
     ///
-    /// The returned result has its balance changes applied to the current balances. Stale results
-    /// stay in their slot and are freed with `self`.
-    pub fn take_valid<DB: Database>(
+    /// The returned result has its balance changes applied to the current balances. Stale results,
+    /// and results whose reads fail, stay in their slot unchanged and are freed with `self`.
+    pub(crate) fn take_valid<DB: Database>(
         &self,
         index: usize,
         db: &mut DB,
-    ) -> Result<ResultAndState<H>, ReuseMiss> {
-        let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
-        let tx = match &mut *slot {
-            ResultSlot::Empty | ResultSlot::Executed => return Err(ReuseMiss::Missing),
+    ) -> Result<Result<ResultAndState<H>, ReuseMiss>, DB::Error> {
+        let Some(slot) = self.slots.get(index) else { return Ok(Err(ReuseMiss::Missing)) };
+        let mut slot = slot.lock();
+        let mut tx = match core::mem::replace(&mut *slot, ResultSlot::Executed) {
             ResultSlot::Ready(tx) => tx,
-            ResultSlot::Unusable(_) => return Err(ReuseMiss::Stale),
+            ResultSlot::Unusable(reads) => {
+                *slot = ResultSlot::Unusable(reads);
+                return Ok(Err(ReuseMiss::Stale))
+            }
+            previous @ (ResultSlot::Empty | ResultSlot::Executed) => {
+                *slot = previous;
+                return Ok(Err(ReuseMiss::Missing))
+            }
         };
-        let Some(rebased) = tx.validate(db) else { return Err(ReuseMiss::Stale) };
+        let rebased = match tx.validate(db) {
+            Ok(Some(rebased)) => rebased,
+            result => {
+                *slot = ResultSlot::Ready(tx);
+                return result.map(|_| Err(ReuseMiss::Stale))
+            }
+        };
+        // The result stays published as the prediction of this transaction's writes.
         if rebased {
             // Later transactions read the rebased balances.
             self.predicted.publish_accounts(index, &tx.result.state);
         }
-        // The result stays published as the prediction of this transaction's writes.
-        let ResultSlot::Ready(tx) = core::mem::replace(&mut *slot, ResultSlot::Executed) else {
-            unreachable!("validated result")
-        };
-        Ok(tx.result)
+        Ok(Ok(tx.result))
     }
 }
 
 /// Reason a prewarm result could not be reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReuseMiss {
+pub(crate) enum ReuseMiss {
     /// Prewarming had not finished the transaction.
     Missing,
     /// The transaction read state that changed before it in the block.
@@ -178,27 +202,55 @@ impl<H> PrewarmedTx<H> {
     /// Returns whether all reads match `db`, applying the result's balance changes to the current
     /// balances of accounts whose balance differs, and whether there were any.
     ///
-    /// The result must not be used if this returns `None`.
-    fn validate<DB: Database>(&mut self, db: &mut DB) -> Option<bool> {
-        let mut rebased = false;
-        for read in &self.reads.accounts {
-            let current = db.basic(read.address).ok()?;
-            if let Some((speculative, current)) = read.compare(current.as_ref())? &&
-                let Some(account) = self.result.state.get_mut(&read.address)
-            {
-                // All balances are bounded, and the execution never leaves less than the
-                // difference, so this neither overflows nor underflows.
-                account.info.balance =
-                    account.info.balance.checked_add(current)?.checked_sub(speculative)?;
-                rebased = true;
+    /// The result is left unchanged unless this returns `Some`, so that it can be validated again.
+    fn validate<DB: Database>(&mut self, db: &mut DB) -> Result<Option<bool>, DB::Error> {
+        for read in &self.reads.storage {
+            if db.storage(read.address, read.slot)? != read.value {
+                return Ok(None)
             }
         }
-        self.reads
-            .storage
-            .iter()
-            .all(|read| db.storage(read.address, read.slot).ok() == Some(read.value))
-            .then_some(rebased)
+        let mut rebased = Vec::new();
+        for read in &self.reads.accounts {
+            let current = db.basic(read.address)?;
+            match read.compare(current.as_ref()) {
+                AccountMatch::Same => {}
+                AccountMatch::Rebase { speculative, current } => {
+                    if let Some(account) = self.result.state.get(&read.address) {
+                        // All balances are bounded, and the execution never leaves less than the
+                        // difference, so this neither overflows nor underflows.
+                        let Some(balance) = account
+                            .info
+                            .balance
+                            .checked_add(current)
+                            .and_then(|balance| balance.checked_sub(speculative))
+                        else {
+                            return Ok(None)
+                        };
+                        rebased.push(Rebase { address: read.address, balance, original: current });
+                    }
+                }
+                AccountMatch::Differs => return Ok(None),
+            }
+        }
+        for rebase in &rebased {
+            if let Some(account) = self.result.state.get_mut(&rebase.address) {
+                account.info.balance = rebase.balance;
+                // The state root task only streams accounts whose info differs from the original.
+                account.original_info_mut().balance = rebase.original;
+            }
+        }
+        Ok(Some(!rebased.is_empty()))
     }
+}
+
+/// A balance of a speculative result applied to the current balance.
+#[derive(Debug)]
+struct Rebase {
+    address: Address,
+    /// The balance after the transaction.
+    balance: U256,
+    /// The balance before the transaction.
+    original: U256,
 }
 
 /// How a speculative execution depends on an account's balance.
@@ -225,18 +277,14 @@ struct AccountRead {
 
 impl AccountRead {
     /// Compares the read account with `current`.
-    ///
-    /// Returns `None` if they differ in a way the execution may depend on, otherwise the
-    /// `(speculative, current)` balances if the result's balance change must be applied to the
-    /// current balance.
-    fn compare(&self, current: Option<&AccountInfo>) -> Option<Option<(U256, U256)>> {
+    fn compare(&self, current: Option<&AccountInfo>) -> AccountMatch {
         let (speculative, current) = match (&self.info, current) {
             (Some(speculative), Some(current)) => (speculative, current),
-            (None, None) => return Some(None),
-            _ => return None,
+            (None, None) => return AccountMatch::Same,
+            _ => return AccountMatch::Differs,
         };
         if speculative.balance == current.balance {
-            return (speculative == current).then_some(None)
+            return if speculative == current { AccountMatch::Same } else { AccountMatch::Differs }
         }
 
         let allowed = match self.balance {
@@ -253,10 +301,22 @@ impl AccountRead {
             (AccountInfo { balance: speculative.balance, ..current.copy_without_code() }) !=
                 *speculative
         {
-            return None
+            return AccountMatch::Differs
         }
-        Some(Some((speculative.balance, current.balance)))
+        AccountMatch::Rebase { speculative: speculative.balance, current: current.balance }
     }
+}
+
+/// How a read account compares with its current state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccountMatch {
+    /// The account is unchanged.
+    Same,
+    /// Only the balance changed, so the result's balance change must be applied to the current
+    /// balance.
+    Rebase { speculative: U256, current: U256 },
+    /// The account differs in a way the execution may depend on.
+    Differs,
 }
 
 /// A storage slot a speculative execution read.
@@ -284,13 +344,8 @@ impl ReadSet {
     /// Speculation disables nonce and balance checks, so this fails unless `caller` had the
     /// transaction's `nonce` and could pay `max_balance_spending`, i.e. unless execution with
     /// these checks enabled would have accepted the transaction.
-    pub(super) fn finish(
-        mut self,
-        balances: &BalanceTracker,
-        caller: Address,
-        nonce: u64,
-        max_balance_spending: Option<U256>,
-    ) -> Result<Self, Self> {
+    fn finish(mut self, balances: &BalanceTracker, tx: SpeculativeTx) -> Result<Self, Self> {
+        let SpeculativeTx { caller, nonce, max_balance_spending } = tx;
         // Balance changes are applied once per account.
         self.accounts.sort_unstable_by_key(|read| read.address);
         self.accounts.dedup_by_key(|read| read.address);
@@ -302,11 +357,9 @@ impl ReadSet {
         let caller_info = &self.accounts[caller_index].info;
         let (caller_nonce, caller_balance) =
             caller_info.as_ref().map_or((0, U256::ZERO), |info| (info.nonce, info.balance));
-        if self.unknown_code ||
-            caller_nonce != nonce ||
-            nonce == u64::MAX ||
-            max_balance_spending.is_none_or(|max| caller_balance < max)
-        {
+        let Ok(max_balance_spending) = max_balance_spending else { return Err(self) };
+        // Speculation still rejects transactions with the largest nonce, in revm's `validate_env`.
+        if self.unknown_code || caller_nonce != nonce || caller_balance < max_balance_spending {
             return Err(self)
         }
 
@@ -316,7 +369,7 @@ impl ReadSet {
             .accounts
             .iter()
             .all(|read| read.info.as_ref().is_none_or(|info| info.balance <= MAX_REBASED_BALANCE));
-        let paid = caller_balance - max_balance_spending.unwrap_or_default();
+        let paid = caller_balance - max_balance_spending;
         for read in &mut self.accounts {
             // A sender needs enough balance to leave the same smallest balance, which is the
             // balance after paying for gas for the caller.
@@ -343,7 +396,7 @@ impl ReadSet {
     /// same values, as far as the execution depends on them.
     fn matches(&self, predicted: &PredictedState, index: usize) -> bool {
         self.accounts.iter().all(|read| match predicted.account(read.address, index) {
-            Some(account) => read.compare(account.as_ref()).is_some(),
+            Some(account) => read.compare(account.as_ref()) != AccountMatch::Differs,
             None => !read.predicted,
         }) && self.storage.iter().all(|read| {
             match predicted.storage(read.address, read.slot, index) {
@@ -352,6 +405,17 @@ impl ReadSet {
             }
         })
     }
+}
+
+/// The fields of a speculatively executed transaction that its validity checks depend on.
+#[derive(Debug)]
+pub(super) struct SpeculativeTx {
+    /// The transaction's sender.
+    pub(super) caller: Address,
+    /// The transaction's nonce.
+    pub(super) nonce: u64,
+    /// The most the caller may spend, or an error if it overflows.
+    pub(super) max_balance_spending: Result<U256, InvalidTransaction>,
 }
 
 /// Writes of a key, sorted by the index of the transaction that made them.
@@ -441,7 +505,7 @@ impl PredictedState {
                 continue
             }
             let Some(written) = state.get(address).filter(|account| account.is_touched()) else {
-                self.retract(index, &core::iter::once((*address, account.clone())).collect());
+                self.update(index, [(address, account)], false);
                 continue
             };
             let clears = |account: &Account| {
@@ -466,7 +530,12 @@ impl PredictedState {
 
     /// Publishes or retracts the writes of the transaction at `index` to every key that `state`
     /// writes.
-    fn update(&self, index: usize, state: &EvmState, publish: bool) {
+    fn update<'a>(
+        &self,
+        index: usize,
+        state: impl IntoIterator<Item = (&'a Address, &'a Account)>,
+        publish: bool,
+    ) {
         for (address, account) in state {
             if !account.is_touched() {
                 continue
@@ -625,13 +694,18 @@ impl BalanceTracker {
     }
 
     /// Records that `sender` sends `value`, or observes its balance if it cannot.
-    fn send<CTX: ContextTr>(&mut self, context: &mut CTX, sender: Address, value: U256) {
-        // The sender of a frame is always loaded, so this does not read the database.
+    fn send<CTX: ContextTr<Journal: JournalTr<State = EvmState>>>(
+        &mut self,
+        context: &CTX,
+        sender: Address,
+        value: U256,
+    ) {
+        // The sender of a frame is always loaded.
         let left = context
-            .journal_mut()
-            .load_account(sender)
-            .ok()
-            .and_then(|account| account.data.info.balance.checked_sub(value));
+            .journal_ref()
+            .evm_state()
+            .get(&sender)
+            .and_then(|account| account.info.balance.checked_sub(value));
         match left {
             Some(left) => self.senders.push((sender, left)),
             None => self.observed.push(sender),
@@ -639,7 +713,7 @@ impl BalanceTracker {
     }
 }
 
-impl<CTX: ContextTr> Inspector<CTX> for BalanceTracker {
+impl<CTX: ContextTr<Journal: JournalTr<State = EvmState>>> Inspector<CTX> for BalanceTracker {
     fn step(&mut self, interp: &mut Interpreter, _context: &mut CTX) {
         let address = match interp.bytecode.opcode() {
             opcode::BALANCE => {
@@ -690,13 +764,14 @@ impl<CTX: ContextTr> Inspector<CTX> for BalanceTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::Recovered, TxLegacy};
+    use alloy_consensus::{transaction::Recovered, TxEip1559, TxLegacy};
     use alloy_evm::{
         block::{BlockExecutor, TxResult},
         eth::EthBlockExecutionCtx,
         Evm, EvmEnv,
     };
     use alloy_primitives::{bytes, Bytes, Signature, TxKind};
+    use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned};
     use reth_evm::{ConfigureEvm, EvmFor, HaltReasonFor};
     use reth_evm_ethereum::EthEvmConfig;
@@ -717,6 +792,14 @@ mod tests {
     const SELF_BALANCE_READER: Address = Address::repeat_byte(0xc3);
     /// Sends 5 wei to [`NOOP`].
     const FORWARDER: Address = Address::repeat_byte(0xc4);
+    /// Has a balance above [`MAX_REBASED_BALANCE`].
+    const RICH: Address = Address::repeat_byte(0xc5);
+    /// Exists with a zero balance.
+    const ZERO_BALANCE: Address = Address::repeat_byte(0xc6);
+    /// Has a code hash whose bytecode the database does not know.
+    const UNKNOWN_CODE: Address = Address::repeat_byte(0xc7);
+    /// Index of a sender with the largest nonce.
+    const EXHAUSTED_SENDER: u8 = 5;
     const GAS_PRICE: u128 = 2;
 
     type Results = PrewarmResults<HaltReasonFor<EthEvmConfig>>;
@@ -740,11 +823,21 @@ mod tests {
     }
 
     fn tx(from: u8, nonce: u64, to: Address, value: u64) -> Recovered<TransactionSigned> {
+        tx_with_gas_limit(from, nonce, to, value, 100_000)
+    }
+
+    fn tx_with_gas_limit(
+        from: u8,
+        nonce: u64,
+        to: Address,
+        value: u64,
+        gas_limit: u64,
+    ) -> Recovered<TransactionSigned> {
         let tx = Transaction::Legacy(TxLegacy {
             chain_id: Some(1),
             nonce,
             gas_price: GAS_PRICE,
-            gas_limit: 100_000,
+            gas_limit,
             to: TxKind::Call(to),
             value: U256::from(value),
             input: Bytes::new(),
@@ -764,8 +857,22 @@ mod tests {
             );
         }
         db.insert_account_info(
+            sender(EXHAUSTED_SENDER),
+            AccountInfo {
+                balance: U256::from(10u64.pow(18)),
+                nonce: u64::MAX,
+                ..Default::default()
+            },
+        );
+        db.insert_account_info(
             BENEFICIARY,
             AccountInfo { balance: U256::from(1), ..Default::default() },
+        );
+        db.insert_account_info(RICH, AccountInfo { balance: U256::MAX >> 1, ..Default::default() });
+        db.insert_account_info(ZERO_BALANCE, AccountInfo { nonce: 1, ..Default::default() });
+        db.insert_account_info(
+            UNKNOWN_CODE,
+            AccountInfo { code_hash: B256::repeat_byte(0xab), code: None, ..Default::default() },
         );
         for (address, code) in [
             (NOOP, bytes!("00")),
@@ -821,14 +928,20 @@ mod tests {
         fn run(&mut self, index: usize) {
             let tx = &self.txs[index];
             let tx_env = EthEvmConfig::mainnet().tx_env(tx);
-            let (nonce, max_balance_spending) = (tx_env.nonce, tx_env.max_balance_spending().ok());
+            let speculative = SpeculativeTx {
+                caller: tx.signer(),
+                nonce: tx_env.nonce,
+                max_balance_spending: tx_env.max_balance_spending(),
+            };
             self.evm.db_mut().start_recording(Arc::clone(self.results.predicted()), index);
             self.evm.inspector_mut().clear();
-            let result = self.evm.transact(tx_env).unwrap();
+            let result = self.evm.transact(tx_env);
             let reads = self.evm.db_mut().take_reads().unwrap();
-            match reads.finish(self.evm.inspector(), tx.signer(), nonce, max_balance_spending) {
-                Ok(reads) => self.results.insert(index, result, reads),
-                Err(reads) => self.results.reject(index, reads),
+            match result {
+                Ok(result) => {
+                    self.results.store(index, result, reads, self.evm.inspector(), speculative)
+                }
+                Err(_) => self.results.reject(index, reads),
             }
         }
 
@@ -850,7 +963,7 @@ mod tests {
         txs: &[Recovered<TransactionSigned>],
         mut prewarm: Option<&mut Prewarm<'_>>,
         publish: bool,
-    ) -> (Vec<Receipt>, BundleState, Vec<Result<(), ReuseMiss>>) {
+    ) -> Execution {
         let config = EthEvmConfig::mainnet();
         let mut state = State::builder().with_database(parent_state()).with_bundle_update().build();
         let evm = config.evm_with_env(&mut state, evm_env(false));
@@ -865,38 +978,103 @@ mod tests {
         };
         let mut executor = config.create_executor(evm, ctx);
         let mut outcomes = Vec::new();
+        let mut changes = Vec::new();
         for (index, tx) in txs.iter().enumerate() {
             let Some(prewarm) = prewarm.as_deref_mut() else {
-                executor.execute_transaction(tx).unwrap();
+                executor
+                    .execute_transaction_with_result_closure(tx, |result| {
+                        changes.push(changed_accounts(&result.result().state))
+                    })
+                    .unwrap();
                 outcomes.push(Err(ReuseMiss::Missing));
                 continue
             };
-            let outcome = match prewarm.results.take_valid(index, executor.evm_mut().db_mut()) {
-                Ok(result) => {
-                    executor
-                        .commit_transaction(config.prewarm_tx_result(tx.inner(), result).unwrap());
-                    Ok(())
-                }
-                Err(miss) if publish => {
-                    executor
-                        .execute_transaction_with_result_closure(tx, |result| {
-                            prewarm.results.publish_executed(index, &result.result().state)
-                        })
-                        .unwrap();
-                    prewarm.refresh_after(index);
-                    Err(miss)
-                }
-                Err(miss) => {
-                    executor.execute_transaction(tx).unwrap();
-                    Err(miss)
-                }
-            };
+            let outcome =
+                match prewarm.results.take_valid(index, executor.evm_mut().db_mut()).unwrap() {
+                    Ok(result) => {
+                        changes.push(changed_accounts(&result.state));
+                        executor.commit_transaction(
+                            config.prewarm_tx_result(tx.inner(), result).unwrap(),
+                        );
+                        Ok(())
+                    }
+                    Err(miss) => {
+                        executor
+                            .execute_transaction_with_result_closure(tx, |result| {
+                                changes.push(changed_accounts(&result.result().state));
+                                if publish {
+                                    prewarm.results.publish_executed(index, &result.result().state)
+                                }
+                            })
+                            .unwrap();
+                        if publish {
+                            prewarm.refresh_after(index);
+                        }
+                        Err(miss)
+                    }
+                };
             outcomes.push(outcome);
         }
         let receipts = executor.receipts().to_vec();
         drop(executor);
         state.merge_transitions(BundleRetention::Reverts);
-        (receipts, state.take_bundle(), outcomes)
+        Execution { receipts, bundle: state.take_bundle(), changes, outcomes }
+    }
+
+    /// Output of [`execute`].
+    struct Execution {
+        receipts: Vec<Receipt>,
+        bundle: BundleState,
+        /// Accounts each transaction changed, as the state root task sees them.
+        changes: Vec<Vec<(Address, AccountInfo)>>,
+        outcomes: Vec<Result<(), ReuseMiss>>,
+    }
+
+    /// Returns the accounts in `state` whose info differs from their original info, which the
+    /// state root task streams as updates.
+    fn changed_accounts(state: &EvmState) -> Vec<(Address, AccountInfo)> {
+        let mut changed = state
+            .iter()
+            .filter(|(_, account)| account.is_touched() && account.info != account.original_info())
+            .map(|(address, account)| (*address, account.info.copy_without_code()))
+            .collect::<Vec<_>>();
+        changed.sort_unstable_by_key(|(address, _)| *address);
+        changed
+    }
+
+    /// Database that fails every read.
+    struct FailingDb;
+
+    impl Database for FailingDb {
+        type Error = ProviderError;
+
+        fn basic(&mut self, _address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn code_by_hash(&mut self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn storage(
+            &mut self,
+            _address: Address,
+            _index: StorageKey,
+        ) -> Result<StorageValue, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+    }
+
+    /// Returns whether the prewarm result of the first transaction can be reused, for
+    /// transactions that block execution would reject.
+    fn reusable(txs: &[Recovered<TransactionSigned>]) -> Result<(), ReuseMiss> {
+        let prewarm = Prewarm::new(txs, &[0]);
+        let mut state = State::builder().with_database(parent_state()).build();
+        prewarm.results.take_valid(0, &mut state).unwrap().map(drop)
     }
 
     /// Asserts that reusing prewarm results produces the same output as executing every
@@ -912,12 +1090,12 @@ mod tests {
         order: &[usize],
         publish: bool,
     ) -> Vec<Result<(), ReuseMiss>> {
-        let (receipts, bundle, outcomes) =
-            execute(txs, Some(&mut Prewarm::new(txs, order)), publish);
-        let (expected_receipts, expected_bundle, _) = execute(txs, None, false);
-        assert_eq!(receipts, expected_receipts);
-        assert_eq!(bundle, expected_bundle);
-        outcomes
+        let reused = execute(txs, Some(&mut Prewarm::new(txs, order)), publish);
+        let expected = execute(txs, None, false);
+        assert_eq!(reused.receipts, expected.receipts);
+        assert_eq!(reused.bundle, expected.bundle);
+        assert_eq!(reused.changes, expected.changes);
+        reused.outcomes
     }
 
     #[test]
@@ -945,6 +1123,14 @@ mod tests {
     fn refreshes_against_executed_writes() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
         assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
+    }
+
+    #[test]
+    fn rebases_original_balances() {
+        // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei, so
+        // its rebased balance equals its speculative balance before the second transaction.
+        let txs = [tx(1, 0, FORWARDER, 10), tx(2, 0, FORWARDER, 0)];
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
     }
 
     #[test]
@@ -980,5 +1166,93 @@ mod tests {
             reuse_in(&txs, &[1, 2], false),
             [Err(ReuseMiss::Missing), Ok(()), Err(ReuseMiss::Stale)]
         );
+    }
+
+    #[test]
+    fn rejects_invalid_transactions() {
+        assert_eq!(reusable(&[tx(1, 0, NOOP, 0)]), Ok(()));
+        // The caller cannot pay for the value.
+        assert_eq!(reusable(&[tx(1, 0, NOOP, 10u64.pow(19))]), Err(ReuseMiss::Stale));
+        // The caller's nonce differs.
+        assert_eq!(reusable(&[tx(1, 1, NOOP, 0)]), Err(ReuseMiss::Stale));
+        // The caller's nonce cannot be incremented.
+        assert_eq!(reusable(&[tx(EXHAUSTED_SENDER, u64::MAX, NOOP, 0)]), Err(ReuseMiss::Stale));
+        // Speculative execution fails.
+        assert_eq!(
+            reusable(&[tx_with_gas_limit(1, 0, NOOP, 0, 40_000_000)]),
+            Err(ReuseMiss::Stale)
+        );
+        // The most the caller may spend overflows, though the effective fee does not.
+        let overflowing = Transaction::Eip1559(TxEip1559 {
+            chain_id: 1,
+            max_fee_per_gas: u128::MAX,
+            gas_limit: 100_000,
+            to: TxKind::Call(NOOP),
+            ..Default::default()
+        });
+        let overflowing = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(overflowing, Signature::test_signature()),
+            sender(1),
+        );
+        assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
+    }
+
+    #[test]
+    fn keeps_stale_results_unchanged() {
+        let txs = [tx(1, 0, NOOP, 0)];
+        let prewarm = Prewarm::new(&txs, &[0]);
+        // The caller's balance can be rebased, but the callee changed.
+        let mut db = parent_state();
+        db.insert_account_info(
+            sender(1),
+            AccountInfo { balance: U256::from(2 * 10u64.pow(18)), ..Default::default() },
+        );
+        let mut noop = db.basic(NOOP).unwrap().unwrap();
+        noop.nonce = 1;
+        db.insert_account_info(NOOP, noop);
+        let mut stale = State::builder().with_database(db).build();
+        assert_eq!(
+            prewarm.results.take_valid(0, &mut stale).unwrap().map(drop),
+            Err(ReuseMiss::Stale)
+        );
+
+        let mut state = State::builder().with_database(parent_state()).build();
+        let result = prewarm.results.take_valid(0, &mut state).unwrap().unwrap();
+        let fee = U256::from(21_000 * GAS_PRICE);
+        assert_eq!(result.state[&sender(1)].info.balance, U256::from(10u64.pow(18)) - fee);
+    }
+
+    #[test]
+    fn keeps_results_on_database_errors() {
+        let txs = [tx(1, 0, NOOP, 0)];
+        let prewarm = Prewarm::new(&txs, &[0]);
+        assert!(matches!(
+            prewarm.results.take_valid(0, &mut FailingDb),
+            Err(ProviderError::BestBlockNotFound)
+        ));
+        let mut state = State::builder().with_database(parent_state()).build();
+        assert_eq!(prewarm.results.take_valid(0, &mut state).unwrap().map(drop), Ok(()));
+    }
+
+    #[test]
+    fn rejects_unknown_code() {
+        assert_eq!(reuse_in(&[tx(1, 0, UNKNOWN_CODE, 0)], &[0], false), [Err(ReuseMiss::Stale)]);
+    }
+
+    #[test]
+    fn rejects_rebasing_unbounded_or_zero_balances() {
+        let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
+        assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
+        for txs in [
+            [tx(1, 0, RICH, 1), tx(2, 0, RICH, 1)],
+            [tx(1, 0, ZERO_BALANCE, 1), tx(2, 0, ZERO_BALANCE, 1)],
+            // Any unbounded balance read makes every balance exact.
+            [tx(1, 0, sender(4), 1), tx(4, 0, RICH, 1)],
+        ] {
+            assert_eq!(
+                reuse_in(&txs, &[1], false),
+                [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]
+            );
+        }
     }
 }

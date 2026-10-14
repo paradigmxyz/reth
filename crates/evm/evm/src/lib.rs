@@ -492,12 +492,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Returns whether engine validation may commit transaction results from speculative prewarm
     /// execution instead of executing the transactions again.
     ///
-    /// Return `true` only if the block executor executes a transaction by checking that its gas
-    /// limit, capped by the transaction gas limit cap, fits into the block gas limit minus the
-    /// last receipt's cumulative gas used, and then running [`Evm::transact`] with the transaction
-    /// environment, if [`Evm::transact`] performs the standard caller nonce and balance
-    /// validation, and if EVMs created by this configuration call inspector hooks for every
-    /// executed instruction. See [`Self::prewarm_tx_result`].
+    /// Return `true` only if all of these hold, see also [`Self::prewarm_tx_result`]:
+    /// - the block executor executes a transaction by checking that its gas limit, capped by the
+    ///   transaction gas limit cap, fits into the block gas limit minus the last receipt's
+    ///   cumulative gas used, and then running [`Evm::transact`] with the transaction environment;
+    /// - [`Evm::transact`] performs the standard caller nonce and balance validation, and rejects
+    ///   transactions with the largest nonce even if nonce checks are disabled;
+    /// - EVMs created by this configuration with JIT support disabled call inspector hooks for
+    ///   every executed instruction.
     ///
     /// [`Evm::transact`]: alloy_evm::Evm::transact
     fn reuses_prewarm_results(&self) -> bool {
