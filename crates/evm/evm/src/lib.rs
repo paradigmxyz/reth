@@ -499,7 +499,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// - [`Evm::transact`] performs the standard caller nonce and balance validation, and rejects
     ///   transactions with the largest nonce even if nonce checks are disabled;
     /// - EVMs created by this configuration with JIT support disabled call inspector hooks for
-    ///   every executed instruction.
+    ///   every executed instruction;
+    /// - execution depends only on recorded database reads and the transaction and block
+    ///   environments reproduced during prewarming, with no unrecorded external state.
     ///
     /// [`Evm::transact`]: alloy_evm::Evm::transact
     fn reuses_prewarm_results(&self) -> bool {
@@ -510,6 +512,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// [`BlockExecutor::commit_transaction`](alloy_evm::block::BlockExecutor::commit_transaction).
     ///
     /// Only called if [`Self::reuses_prewarm_results`] returns `true`.
+    /// Returning `None` rejects and consumes this speculative result; the engine executes the
+    /// transaction normally instead.
     fn prewarm_tx_result(
         &self,
         tx: &TxTy<Self::Primitives>,
