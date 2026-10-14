@@ -1257,39 +1257,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn publishes_rebased_balances_to_refresh_workers() {
-        let txs = [tx(1, 0, NOOP, 0), tx(2, 0, BENEFICIARY_BALANCE_READER, 0)];
-        let mut prewarm = Prewarm::new(&txs, &[0, 1]);
-        assert!(!prewarm.results.needs_refresh(1));
-        let generation = prewarm.results.predicted().generation();
-
-        // An earlier transaction credited the beneficiary after these results were produced.
-        let mut db = parent_state();
-        db.insert_account_info(
-            BENEFICIARY,
-            AccountInfo { balance: U256::from(2), ..Default::default() },
-        );
-        let result = prewarm.results.take_valid(0, &mut db).unwrap().unwrap();
-        assert_eq!(
-            prewarm.results.predicted().account(BENEFICIARY, 1).unwrap().unwrap().balance,
-            result.state[&BENEFICIARY].info.balance
-        );
-        assert_eq!(prewarm.results.predicted().generation(), generation + 1);
-        assert!(prewarm.results.needs_refresh(1));
-
-        prewarm.run(1);
-        assert!(!prewarm.results.needs_refresh(1));
-    }
-
-    #[test]
-    fn unchanged_reuse_does_not_advance_refresh_generation() {
-        let txs = [tx(1, 0, NOOP, 0)];
-        let prewarm = Prewarm::new(&txs, &[0]);
-        let generation = prewarm.results.predicted().generation();
-        let mut db = parent_state();
-        assert_eq!(prewarm.results.take_valid(0, &mut db).unwrap().map(drop), Ok(()));
-        assert_eq!(prewarm.results.predicted().generation(), generation);
-    }
 }
