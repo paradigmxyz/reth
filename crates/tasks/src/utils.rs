@@ -34,6 +34,22 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Lowers the current thread's priority by a few nice points, so that latency-critical threads
+/// win contended cores.
+pub fn decrease_thread_priority() {
+    #[cfg(unix)]
+    {
+        let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+        // Crossplatform value 37/99 ≈ nice +5 on unix.
+        let priority = ThreadPriority::Crossplatform(
+            ThreadPriorityValue::try_from(37u8).expect("37 is within the valid 0..100 range"),
+        );
+        if let Err(err) = priority.set_for_current() {
+            tracing::debug!(%thread_name, ?err, "failed to decrease thread priority");
+        }
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.
