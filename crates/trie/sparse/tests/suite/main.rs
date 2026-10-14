@@ -21,7 +21,7 @@ use alloy_primitives::{keccak256, map::B256Map, B256, U256};
 use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
-use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
+use reth_trie_common::{Nibbles, ProofV2Target, ProofV2TargetParent, TrieNodeV2};
 use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
 use std::{collections::BTreeMap, iter::once};
 
@@ -240,6 +240,7 @@ sparse_trie_tests! {
     test_update_leaves_blinded_node_requests_proof,
     test_update_leaves_retry_after_reveal,
     test_remove_leaf_blinded_sibling_requires_reveal,
+    test_maybe_removed_requests_removal_proofs,
     test_update_leaves_removal_branch_collapse_blinded_sibling,
     test_update_leaves_subtrie_collapse_requests_proof,
     test_update_leaves_multiple_keys_same_blinded_node,

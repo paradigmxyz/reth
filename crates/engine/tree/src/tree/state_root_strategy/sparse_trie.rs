@@ -50,8 +50,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// 1. **Execution and prewarming:** [`Self::run_hashing_task`] receives [`StateRootMessage`]s,
 ///    hashes raw state updates, and forwards [`SparseTrieTaskMessage`]s to [`Self::updates`] in
 ///    receive order. `HashedState` supplies changed values; `PrefetchProofs` supplies
-///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
-///    leaf updates before applying them in batches.
+///    [`LeafUpdate::Touched`] hints and `PrefetchRemovals` supplies [`LeafUpdate::MaybeRemoved`]
+///    hints, neither of which may overwrite changed values. The task buffers these leaf updates
+///    before applying them in batches.
 /// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
 ///    [`ProofWorkerHandle`]. Each request carries a [`ProofResultContext`] with a sender for
 ///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
@@ -88,7 +89,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// keeps it in `Idle`. In `InFlight`, the task holds only [`InFlightStorage`] buffers for new
 /// arrivals; the job owns the trie, earlier pending leaves, proofs, and fetched-target cache.
 /// When `Done` arrives, newer changed values and deletions override older pending values, while
-/// touch hints preserve them. Buffered work can then trigger another pass.
+/// touch and removal hints preserve them. Buffered work can then trigger another pass.
 ///
 /// `Idle` describes ownership, not completion: a payload can still have leaves blocked on a proof.
 /// Blocked leaves alone do not trigger another pass; new updates or that address' own proof nodes
@@ -306,6 +307,9 @@ where
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
+                }
+                StateRootMessage::PrefetchRemovals(removals) => {
+                    SparseTrieTaskMessage::PrefetchRemovals(removals)
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
@@ -605,6 +609,10 @@ where
                 self.on_prewarm_targets(targets);
                 None
             }
+            SparseTrieTaskMessage::PrefetchRemovals(removals) => {
+                self.on_prewarm_removals(removals);
+                None
+            }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
                 self.on_hashed_state_update(hashed_state);
                 None
@@ -641,6 +649,24 @@ where
 
             // Touch corresponding account leaf to make sure its revealed in accounts trie for
             // storage root update.
+            self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
+        }
+    }
+
+    /// Queues probes for storage slots that prewarming removed, so the siblings their removal
+    /// would need are fetched before the removal is known.
+    #[instrument(
+        level = "trace",
+        target = "engine::tree::payload_processor::sparse_trie",
+        skip_all
+    )]
+    fn on_prewarm_removals(&mut self, removals: B256Map<Vec<B256>>) {
+        for (address, slots) in removals {
+            merge_leaf_updates(
+                self.new_storage_updates.entry(address).or_default(),
+                slots.into_iter().map(|slot| (slot, LeafUpdate::MaybeRemoved)).collect(),
+            );
+
             self.new_account_updates.entry(address).or_insert(LeafUpdate::Touched);
         }
     }
@@ -1076,7 +1102,7 @@ where
                         Some(encoded).filter(|encoded| !encoded.is_empty())
                     }
                     // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return true,
+                    Some(LeafUpdate::Touched | LeafUpdate::MaybeRemoved) => return true,
                     None => self.trie.get_account_value(addr),
                 };
 
@@ -1475,7 +1501,8 @@ impl Default for StorageWorkOutput {
     }
 }
 
-/// Merges leaf updates into a queue, letting a newly known value win over a queued one.
+/// Merges leaf updates into a queue, letting a newly known value win over a queued one, and any
+/// update win over a queued touch.
 fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpdate>) {
     if queued.is_empty() {
         // Take the whole map at once, no per-slot loop.
@@ -1486,7 +1513,7 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
     for (slot, update) in updates {
         match queued.entry(slot) {
             Entry::Occupied(mut entry) => {
-                if update.is_changed() {
+                if update.is_changed() || entry.get().is_touched() {
                     entry.insert(update);
                 }
             }
@@ -1661,6 +1688,8 @@ enum SparseTrieTaskMessage {
     HashedState(HashedPostState),
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
+    /// Storage slots that may be removed (passed through directly).
+    PrefetchRemovals(B256Map<Vec<B256>>),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
 }
@@ -2567,6 +2596,145 @@ mod tests {
         assert!(result.expect("state root task stalled on a late hint").is_ok());
 
         drop(updates_tx);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn removal_hints_replace_touches_but_not_values() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let [touched, changed, probed, new] = [0x21, 0x22, 0x23, 0x24].map(B256::repeat_byte);
+
+        task.new_storage_updates.insert(
+            address,
+            B256Map::from_iter([
+                (touched, LeafUpdate::Touched),
+                (changed, LeafUpdate::Changed(vec![1])),
+            ]),
+        );
+        updates_tx
+            .send(StateRootMessage::PrefetchRemovals(B256Map::from_iter([(
+                address,
+                vec![touched, changed, new],
+            )])))
+            .unwrap();
+        let message = task.updates.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        assert!(task.on_message(message).is_none());
+        assert_eq!(
+            task.new_storage_updates[&address],
+            B256Map::from_iter([
+                (touched, LeafUpdate::MaybeRemoved),
+                (changed, LeafUpdate::Changed(vec![1])),
+                (new, LeafUpdate::MaybeRemoved),
+            ])
+        );
+        assert_eq!(task.new_account_updates[&address], LeafUpdate::Touched);
+
+        let mut queued = B256Map::from_iter([
+            (touched, LeafUpdate::Touched),
+            (changed, LeafUpdate::Changed(vec![1])),
+            (probed, LeafUpdate::MaybeRemoved),
+        ]);
+        merge_leaf_updates(
+            &mut queued,
+            B256Map::from_iter([
+                (touched, LeafUpdate::MaybeRemoved),
+                (changed, LeafUpdate::MaybeRemoved),
+                (probed, LeafUpdate::Touched),
+            ]),
+        );
+        assert_eq!(
+            queued,
+            B256Map::from_iter([
+                (touched, LeafUpdate::MaybeRemoved),
+                (changed, LeafUpdate::Changed(vec![1])),
+                (probed, LeafUpdate::MaybeRemoved),
+            ])
+        );
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    /// A removal hint requests the blinded sibling that removing the slot needs, so the removal
+    /// itself finds every proof requested already.
+    #[test]
+    fn removal_hints_prefetch_the_sibling_of_a_removal() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let mut slot = B256::ZERO;
+        slot[0] = 0x10;
+        let mut sibling = B256::ZERO;
+        sibling[0] = 0x20;
+
+        // The storage root branches into the slot at nibble 0x1 and a blinded node at nibble 0x2.
+        let leaf = LeafNode::new(
+            Nibbles::unpack(slot).slice(1..),
+            alloy_rlp::encode_fixed_size(&U256::from(7)).to_vec(),
+        );
+        let branch = BranchNodeV2 {
+            stack: vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf)),
+                RlpNode::word_rlp(&B256::repeat_byte(0xaa)),
+            ],
+            state_mask: TrieMask::new(0b110),
+            ..Default::default()
+        };
+        let proof = vec![
+            ProofTrieNodeV2 {
+                path: Nibbles::default(),
+                node: TrieNodeV2::Branch(branch),
+                masks: None,
+            },
+            ProofTrieNodeV2 {
+                path: Nibbles::from_nibbles([0x1]),
+                node: TrieNodeV2::Leaf(leaf),
+                masks: None,
+            },
+        ];
+
+        let storage_targets = |task: &mut SparseTrieCacheTask| {
+            let (mut targets, _) = task.pending_targets.take();
+            targets
+                .storage_targets
+                .remove(&address)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|target| target.key())
+                .collect::<Vec<_>>()
+        };
+
+        // The blind trie asks for the slot first.
+        task.on_prewarm_removals(B256Map::from_iter([(address, vec![slot])]));
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        assert_eq!(storage_targets(&mut task), vec![slot]);
+
+        // Once the slot is revealed, the hint asks for the sibling and keeps the leaf.
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(address, proof)]),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(storage_targets(&mut task), vec![sibling]);
+        assert_eq!(
+            storage_slot_value(&task, &address, &slot),
+            Some(alloy_rlp::encode_fixed_size(&U256::from(7)).to_vec())
+        );
+
+        // The removal replaces the hint and needs no new proof.
+        let mut state = HashedPostState::default();
+        state.storages.entry(address).or_default().storage.insert(slot, U256::ZERO);
+        task.on_hashed_state_update(state);
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        assert!(task.pending_targets.is_empty());
+
+        drop(updates_tx);
+        drop(task);
         drain_sparse_trie_tasks(&runtime);
     }
 }

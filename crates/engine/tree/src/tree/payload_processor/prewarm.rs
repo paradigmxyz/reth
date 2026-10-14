@@ -26,7 +26,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -44,7 +44,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
-use revm::context::Transaction as _;
+use revm::{context::Transaction as _, state::EvmState};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -375,6 +375,10 @@ where
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
+                    let removals = storage_removals(&res.state);
+                    if !removals.is_empty() {
+                        state_root_hint_stream.on_removal_hint(removals);
+                    }
                 }
             }
 
@@ -914,6 +918,29 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
     }
 }
 
+/// Returns the hashed storage slots, keyed by hashed account, that existed before and that `state`
+/// removes.
+fn storage_removals(state: &EvmState) -> B256Map<Vec<B256>> {
+    let mut removals = B256Map::default();
+    for (address, account) in state {
+        // Storage of selfdestructed accounts is wiped as a whole, see `MultiProofTargetsV2`.
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let slots = account
+            .storage
+            .iter()
+            .filter(|(_, slot)| slot.present_value.is_zero() && !slot.original_value.is_zero())
+            .map(|(key, _)| keccak256(B256::from(*key)))
+            .collect::<Vec<_>>();
+        if !slots.is_empty() {
+            removals.insert(keccak256(address), slots);
+        }
+    }
+    removals
+}
+
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
@@ -988,6 +1015,44 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
+    use revm::state::{Account, EvmStorageSlot, TransactionId};
+
+    #[test]
+    fn storage_removals_lists_removed_slots_of_touched_accounts() {
+        let slot = |original: u64, present: u64| {
+            EvmStorageSlot::new_changed(
+                U256::from(original),
+                U256::from(present),
+                TransactionId::ZERO,
+            )
+        };
+        let account = |storage: [(u64, EvmStorageSlot); 4]| {
+            let mut account = Account::default();
+            account.storage =
+                storage.into_iter().map(|(key, slot)| (U256::from(key), slot)).collect();
+            account.mark_touch();
+            account
+        };
+        let storage = || [(1, slot(5, 0)), (2, slot(5, 3)), (3, slot(0, 4)), (4, slot(0, 0))];
+
+        let touched = Address::repeat_byte(0x01);
+        let untouched = Address::repeat_byte(0x02);
+        let destroyed = Address::repeat_byte(0x03);
+        let mut untouched_account = account(storage());
+        untouched_account.unmark_touch();
+        let mut destroyed_account = account(storage());
+        destroyed_account.mark_selfdestruct();
+        let state = EvmState::from_iter([
+            (touched, account(storage())),
+            (untouched, untouched_account),
+            (destroyed, destroyed_account),
+        ]);
+
+        assert_eq!(
+            storage_removals(&state),
+            B256Map::from_iter([(keccak256(touched), vec![keccak256(B256::from(U256::from(1)))])])
+        );
+    }
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
