@@ -1080,10 +1080,11 @@ where
         let execution_start = Instant::now();
 
         // Execute all transactions and finalize
+        let rx = handle.clone_transaction_receiver();
         let (executor, senders) = self.execute_transactions(
             executor,
             transaction_count,
-            handle.iter_transactions(),
+            std::iter::from_fn(move || diag_wait_tx(&rx).map(|(_, tx)| tx)),
             &receipt_tx,
             &executed_tx_index,
             has_bal,
@@ -2181,4 +2182,15 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
+}
+
+#[inline(never)]
+fn diag_wait_tx<T>(rx: &crossbeam_channel::Receiver<T>) -> Option<T> {
+    loop {
+        match rx.try_recv() {
+            Ok(value) => return Some(value),
+            Err(crossbeam_channel::TryRecvError::Disconnected) => return None,
+            Err(crossbeam_channel::TryRecvError::Empty) => std::hint::spin_loop(),
+        }
+    }
 }
