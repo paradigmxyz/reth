@@ -15,7 +15,7 @@
 //! as large as during speculation.
 //!
 //! Prewarming also seeds results of pool transactions that the txpool prewarm worker executed on
-//! top of the parent before the block arrived, see [`PoolResults`]. Their block environment is
+//! top of the parent before the block arrived, see [`PoolSeeds`]. Their block environment is
 //! predicted, so they must not depend on fields that turn out to differ, and their fee credit to
 //! the beneficiary is applied to the actual beneficiary when the result is reused.
 
