@@ -17,6 +17,7 @@
 use alloy_primitives::{map::DefaultHashBuilder, Address, B256, U256};
 use dashmap::DashMap;
 use parking_lot::Mutex;
+use reth_primitives_traits::FastInstant as Instant;
 use revm::{
     bytecode::opcode,
     context::{result::ResultAndState, ContextTr, JournalTr},
@@ -28,10 +29,16 @@ use revm::{
     state::{Account, AccountInfo, Bytecode, EvmState},
     Database, Inspector,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
+
+/// Longest time block execution waits for prewarming to finish executing a transaction.
+const MAX_IN_FLIGHT_WAIT: Duration = Duration::from_millis(1);
 
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
 const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
@@ -49,6 +56,8 @@ pub struct PrewarmResults<H> {
 enum ResultSlot<H> {
     /// Prewarming has not executed the transaction.
     Empty,
+    /// Prewarming is executing the transaction for the first time.
+    InFlight,
     /// A result that may be reused.
     Ready(Box<PrewarmedTx<H>>),
     /// A result that cannot be reused, with the reads it depends on.
@@ -64,6 +73,16 @@ impl<H> PrewarmResults<H> {
         Self {
             slots: (0..transaction_count).map(|_| Mutex::new(ResultSlot::Empty)).collect(),
             predicted: Arc::default(),
+        }
+    }
+
+    /// Marks the transaction at `index` as being executed by prewarming for the first time.
+    pub(super) fn start(&self, index: usize) {
+        if let Some(slot) = self.slots.get(index) {
+            let mut slot = slot.lock();
+            if matches!(*slot, ResultSlot::Empty) {
+                *slot = ResultSlot::InFlight;
+            }
         }
     }
 
@@ -110,7 +129,7 @@ impl<H> PrewarmResults<H> {
         match &*slot {
             ResultSlot::Ready(previous) => self.predicted.retract(index, &previous.result.state),
             ResultSlot::Executed => return,
-            ResultSlot::Empty | ResultSlot::Unusable(_) => {}
+            ResultSlot::Empty | ResultSlot::InFlight | ResultSlot::Unusable(_) => {}
         }
         *slot = f(&self.predicted);
     }
@@ -124,7 +143,7 @@ impl<H> PrewarmResults<H> {
             ResultSlot::Empty => return true,
             ResultSlot::Ready(tx) => &tx.reads,
             ResultSlot::Unusable(reads) => reads,
-            ResultSlot::Executed => return false,
+            ResultSlot::InFlight | ResultSlot::Executed => return false,
         };
         !reads.matches(&self.predicted, index)
     }
@@ -139,9 +158,18 @@ impl<H> PrewarmResults<H> {
         index: usize,
         db: &mut DB,
     ) -> Result<ResultAndState<H>, ReuseMiss> {
-        let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
+        let slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?;
+        // Executing a transaction that prewarming is executing repeats the reads prewarming
+        // already made, so waiting for its result is usually faster.
+        let deadline = Instant::now() + MAX_IN_FLIGHT_WAIT;
+        while matches!(*slot.lock(), ResultSlot::InFlight) && Instant::now() < deadline {
+            core::hint::spin_loop();
+        }
+        let mut slot = slot.lock();
         let tx = match &mut *slot {
-            ResultSlot::Empty | ResultSlot::Executed => return Err(ReuseMiss::Missing),
+            ResultSlot::Empty | ResultSlot::InFlight | ResultSlot::Executed => {
+                return Err(ReuseMiss::Missing)
+            }
             ResultSlot::Ready(tx) => tx,
             ResultSlot::Unusable(_) => return Err(ReuseMiss::Stale),
         };
