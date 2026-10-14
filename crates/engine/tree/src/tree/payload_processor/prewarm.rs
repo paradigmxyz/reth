@@ -1007,6 +1007,9 @@ pub struct PrewarmMetrics {
 mod tests {
 
     use super::*;
+    use crate::tree::payload_processor::{
+        StateRootHandle, StateRootMessage, StateRootTaskCancelGuard,
+    };
     use alloy_consensus::{transaction::Recovered, TxLegacy};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
@@ -1018,6 +1021,85 @@ mod tests {
     use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
     use revm::database::EmptyDB;
+
+    /// Senders and recipients are hinted once every transaction is dispatched, independently of
+    /// when prewarming executes them.
+    #[test]
+    fn hints_senders_and_recipients_after_dispatch() {
+        let (caller, recipient) = (Address::repeat_byte(1), Address::repeat_byte(2));
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        let ctx = PrewarmContext {
+            env: ExecutionEnv::test_default(),
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: OverlayStateProviderFactory::new(
+                provider,
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+            prewarm_results: None,
+        };
+        let tx = |to, caller| {
+            let tx = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(
+                    TxLegacy { gas_limit: 60_000, to, ..Default::default() }.into(),
+                    Signature::test_signature(),
+                ),
+                caller,
+            );
+            WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx) }
+        };
+        let creator = Address::repeat_byte(3);
+        let txs = [tx(TxKind::Call(recipient), caller), tx(TxKind::Create, creator)];
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            cancel_guard,
+            mpsc::channel().1,
+            mpsc::channel().1,
+        );
+        let (task, _) =
+            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+        let (pending_tx, pending_rx) = mpsc::channel();
+        let (actions_tx, actions_rx) = mpsc::channel();
+        // Only transactions after the first one are hinted after their execution.
+        for tx in txs {
+            pending_tx.send((0, tx)).unwrap();
+        }
+        drop(pending_tx);
+        task.spawn_txs_prewarm(pending_rx, actions_tx, Some(handle.take_hint_stream()));
+
+        assert!(matches!(
+            actions_rx.recv_timeout(Duration::from_secs(10)),
+            Ok(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 2 })
+        ));
+        let Ok(StateRootMessage::PrefetchProofs(targets)) = updates_rx.try_recv() else {
+            panic!("expected a prefetch hint")
+        };
+        let mut accounts =
+            targets.account_targets.into_iter().map(|target| target.key()).collect::<Vec<_>>();
+        accounts.sort_unstable();
+        let mut expected = vec![keccak256(caller), keccak256(recipient), keccak256(creator)];
+        expected.sort_unstable();
+        assert_eq!(accounts, expected);
+        assert!(targets.storage_targets.is_empty());
+        assert!(updates_rx.try_recv().is_err());
+    }
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
