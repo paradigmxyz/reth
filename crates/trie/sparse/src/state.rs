@@ -1,6 +1,6 @@
 use crate::{
     traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
-    TrieNodeEpoch,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
@@ -391,20 +391,30 @@ where
         &mut self,
         new_epoch: TrieNodeEpoch,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
-        // record revealed node metrics
-        #[cfg(feature = "metrics")]
-        self.metrics.record();
-
         let storage_tries = self.storage_trie_updates();
-        let revealed = self.revealed_trie_mut()?;
-
-        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        let (root, updates) = self.root_with_account_updates(new_epoch)?;
         let updates = TrieUpdates {
             account_nodes: updates.updated_nodes,
             removed_nodes: updates.removed_nodes,
             storage_tries,
         };
         Ok((root, updates))
+    }
+
+    /// Returns sparse trie root and the account trie updates, leaving the updates of storage
+    /// tries in place.
+    ///
+    /// Returns an error if the account trie is still blind.
+    pub fn root_with_account_updates(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+    ) -> SparseStateTrieResult<(B256, SparseTrieUpdates)> {
+        // record revealed node metrics
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
+
+        let revealed = self.revealed_trie_mut()?;
+        Ok((revealed.root(new_epoch), revealed.take_updates()))
     }
 
     /// Returns storage trie updates for tries that have been revealed.

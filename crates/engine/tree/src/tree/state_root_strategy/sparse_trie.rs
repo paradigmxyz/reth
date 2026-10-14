@@ -20,8 +20,8 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
 use reth_trie::{
-    updates::TrieUpdates, DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    updates::{StorageTrieUpdates, TrieUpdates},
+    DecodedMultiProofV2, HashedPostState, TrieAccount, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
@@ -486,9 +486,16 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
-            Ok(result) => result,
+        let storage_tries = self.return_storage_tries();
+        let (state_root, trie_updates) = match self.trie.root_with_account_updates(self.new_epoch) {
+            Ok((root, updates)) => (
+                root,
+                TrieUpdates {
+                    account_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                    storage_tries,
+                },
+            ),
             Err(err)
                 if matches!(
                     err.kind(),
@@ -1034,20 +1041,38 @@ where
         Ok(())
     }
 
-    /// Puts every storage trie back into the sparse state trie.
+    /// Puts every storage trie back into the sparse state trie, returning the updates this block
+    /// made to them.
     ///
-    /// The final root and everything after it - trie updates, preservation, pruning - reads the
-    /// storage tries through [`SparseStateTrie`], so no trie may remain in the task's storage map.
-    fn return_storage_tries(&mut self) {
+    /// The final root and everything after it - preservation, pruning - reads the storage tries
+    /// through [`SparseStateTrie`], so no trie may remain in the task's storage map.
+    ///
+    /// Trie updates are only recorded when a trie is modified, which this task only does to the
+    /// tries it checked out, and each block takes them. Taking them here avoids visiting every
+    /// storage trie preserved from earlier blocks.
+    fn return_storage_tries(&mut self) -> B256Map<StorageTrieUpdates> {
         let mut storage = core::mem::take(&mut self.storage);
+        let mut storage_tries = B256Map::default();
         for (address, state) in &mut storage {
             let StorageTrieState::Idle(work) = state else {
                 unreachable!("completion must wait for every storage job")
             };
-            self.trie.insert_storage_trie(*address, core::mem::take(&mut work.trie));
+            let mut trie = core::mem::take(&mut work.trie);
+            if let Some(trie) = trie.as_revealed_mut() {
+                let updates = trie.take_updates();
+                let updates = StorageTrieUpdates {
+                    storage_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                };
+                if !updates.is_empty() {
+                    storage_tries.insert(*address, updates);
+                }
+            }
+            self.trie.insert_storage_trie(*address, trie);
         }
         // Keep the maps and proof buffers until the result has been published.
         self.storage_to_drop = storage;
+        storage_tries
     }
 
     /// Promotes the pending account updates whose storage root is already available into proper
