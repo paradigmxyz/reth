@@ -328,7 +328,7 @@ where
             let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx());
             // The pool is shared across blocks, so this thread may still hold the EVM of a
             // previous prewarm run that has not finished yet. Runs of payloads that claim the same
-            // block hash use different block environments, so the hash cannot tell them apart.
+            // block hash may use different block environments, so the hash cannot tell them apart.
             if !Arc::ptr_eq(&state.run, &ctx.terminate_execution) {
                 *state = ctx.evm_for_ctx();
             }
@@ -709,6 +709,7 @@ where
 struct PrewarmEvmState<Evm: ConfigureEvm> {
     /// Termination flag of the prewarm run that created the EVM, which identifies the run.
     run: Arc<AtomicBool>,
+    /// The EVM, `None` if its state provider could not be created.
     evm: Option<
         EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>,
     >,
@@ -989,15 +990,17 @@ pub struct PrewarmMetrics {
 mod tests {
 
     use super::*;
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::{transaction::Recovered, TxLegacy};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
+    use revm::database::EmptyDB;
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -1037,6 +1040,67 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn rebuilds_evm_for_each_prewarm_run() {
+        let caller = Address::repeat_byte(1);
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        let tx = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(
+                // Free, so that the empty caller can pay for it.
+                TxLegacy {
+                    gas_limit: 21_000,
+                    to: TxKind::Call(Address::repeat_byte(2)),
+                    ..Default::default()
+                }
+                .into(),
+                Signature::test_signature(),
+            ),
+            caller,
+        );
+        let pool = WorkerPool::new(1, "prewarm-test");
+        // Payloads that claim the same block hash may still use different block environments.
+        let prewarm = |beneficiary| {
+            let mut env = ExecutionEnv::<EthEvmConfig>::test_default();
+            env.evm_env.block_env.beneficiary = beneficiary;
+            let results = Arc::new(PrewarmResults::new(1));
+            let ctx = PrewarmContext {
+                env,
+                evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                saved_cache: None,
+                provider: OverlayStateProviderFactory::new(
+                    provider.clone(),
+                    OverlayManager::default().overlay_builder(B256::ZERO),
+                ),
+                bal_prewarm_pool: None,
+                metrics: PrewarmMetrics::default(),
+                cache_metrics: None,
+                cache_state_metrics: None,
+                terminate_execution: Arc::new(AtomicBool::new(false)),
+                executed_tx_index: Arc::new(AtomicUsize::new(0)),
+                precompile_cache_disabled: false,
+                precompile_cache_map: PrecompileCacheMap::default(),
+                disable_bal_parallel_state_root: false,
+                disable_bal_batch_io: false,
+                prewarm_results: Some(Arc::clone(&results)),
+            };
+            let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx.clone()) };
+            pool.install_fn(|| {
+                PrewarmCacheTask::<EthPrimitives, MockEthProvider, EthEvmConfig>::transact_worker(
+                    &ctx, 0, tx, None,
+                )
+            });
+            results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().state
+        };
+
+        assert!(prewarm(Address::repeat_byte(0xa)).contains_key(&Address::repeat_byte(0xa)));
+        let state = prewarm(Address::repeat_byte(0xb));
+        assert!(state.contains_key(&Address::repeat_byte(0xb)));
+        assert!(!state.contains_key(&Address::repeat_byte(0xa)));
     }
 
     fn test_prewarm_context(

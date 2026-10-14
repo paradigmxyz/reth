@@ -155,20 +155,29 @@ impl<H> PrewarmResults<H> {
     ) -> Result<Result<ResultAndState<H>, ReuseMiss>, DB::Error> {
         let Some(slot) = self.slots.get(index) else { return Ok(Err(ReuseMiss::Missing)) };
         let mut slot = slot.lock();
-        let tx = match &mut *slot {
-            ResultSlot::Empty | ResultSlot::Executed => return Ok(Err(ReuseMiss::Missing)),
+        // The result stays published as the prediction of this transaction's writes.
+        let mut tx = match core::mem::replace(&mut *slot, ResultSlot::Executed) {
             ResultSlot::Ready(tx) => tx,
-            ResultSlot::Unusable(_) => return Ok(Err(ReuseMiss::Stale)),
+            ResultSlot::Unusable(reads) => {
+                *slot = ResultSlot::Unusable(reads);
+                return Ok(Err(ReuseMiss::Stale))
+            }
+            previous => {
+                *slot = previous;
+                return Ok(Err(ReuseMiss::Missing))
+            }
         };
-        let Some(rebased) = tx.validate(db)? else { return Ok(Err(ReuseMiss::Stale)) };
+        let rebased = match tx.validate(db) {
+            Ok(Some(rebased)) => rebased,
+            stale => {
+                *slot = ResultSlot::Ready(tx);
+                return stale.map(|_| Err(ReuseMiss::Stale))
+            }
+        };
         if rebased {
             // Later transactions read the rebased balances.
             self.predicted.publish_accounts(index, &tx.result.state);
         }
-        // The result stays published as the prediction of this transaction's writes.
-        let ResultSlot::Ready(tx) = core::mem::replace(&mut *slot, ResultSlot::Executed) else {
-            unreachable!("validated result")
-        };
         Ok(Ok(tx.result))
     }
 }
@@ -385,8 +394,11 @@ impl ReadSet {
 /// The fields of a speculatively executed transaction that its validity checks depend on.
 #[derive(Debug)]
 pub(super) struct SpeculativeTx {
+    /// The transaction's sender.
     pub(super) caller: Address,
+    /// The transaction's nonce.
     pub(super) nonce: u64,
+    /// The most the caller may spend, or an error if it overflows.
     pub(super) max_balance_spending: Result<U256, InvalidTransaction>,
 }
 
@@ -736,13 +748,14 @@ impl<CTX: ContextTr<Journal: JournalTr<State = EvmState>>> Inspector<CTX> for Ba
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::Recovered, TxLegacy};
+    use alloy_consensus::{transaction::Recovered, TxEip1559, TxLegacy};
     use alloy_evm::{
         block::{BlockExecutor, TxResult},
         eth::EthBlockExecutionCtx,
         Evm, EvmEnv,
     };
     use alloy_primitives::{bytes, Bytes, Signature, TxKind};
+    use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned};
     use reth_evm::{ConfigureEvm, EvmFor, HaltReasonFor};
     use reth_evm_ethereum::EthEvmConfig;
@@ -985,6 +998,33 @@ mod tests {
         (receipts, state.take_bundle(), outcomes)
     }
 
+    /// Database that fails every read.
+    struct FailingDb;
+
+    impl Database for FailingDb {
+        type Error = ProviderError;
+
+        fn basic(&mut self, _address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn code_by_hash(&mut self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn storage(
+            &mut self,
+            _address: Address,
+            _index: StorageKey,
+        ) -> Result<StorageValue, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+
+        fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+            Err(ProviderError::BestBlockNotFound)
+        }
+    }
+
     /// Returns whether the prewarm result of the first transaction can be reused, for
     /// transactions that block execution would reject.
     fn reusable(txs: &[Recovered<TransactionSigned>]) -> Result<(), ReuseMiss> {
@@ -1090,6 +1130,31 @@ mod tests {
             reusable(&[tx_with_gas_limit(1, 0, NOOP, 0, 40_000_000)]),
             Err(ReuseMiss::Stale)
         );
+        // The most the caller may spend overflows, though the effective fee does not.
+        let overflowing = Transaction::Eip1559(TxEip1559 {
+            chain_id: 1,
+            max_fee_per_gas: u128::MAX,
+            gas_limit: 100_000,
+            to: TxKind::Call(NOOP),
+            ..Default::default()
+        });
+        let overflowing = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(overflowing, Signature::test_signature()),
+            sender(1),
+        );
+        assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
+    }
+
+    #[test]
+    fn keeps_results_on_database_errors() {
+        let txs = [tx(1, 0, NOOP, 0)];
+        let prewarm = Prewarm::new(&txs, &[0]);
+        assert!(matches!(
+            prewarm.results.take_valid(0, &mut FailingDb),
+            Err(ProviderError::BestBlockNotFound)
+        ));
+        let mut state = State::builder().with_database(parent_state()).build();
+        assert_eq!(prewarm.results.take_valid(0, &mut state).unwrap().map(drop), Ok(()));
     }
 
     #[test]
