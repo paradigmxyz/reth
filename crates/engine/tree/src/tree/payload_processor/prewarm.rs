@@ -23,7 +23,7 @@ use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{transaction::TxHashRef, Transaction as _};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{keccak256, B256};
@@ -55,6 +55,9 @@ use std::{
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
+
+/// Gas limit from which transactions are prewarmed before the others that arrive with them.
+const HEAVY_TX_GAS_LIMIT: u64 = 1_000_000;
 
 /// Maximum number of consecutive rounds that execute stale prewarm results again.
 const MAX_REFRESH_ROUNDS: usize = 4;
@@ -186,36 +189,52 @@ where
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
                 });
 
-                while let Ok((index, tx)) = pending.recv() {
-                    if ctx.should_stop() {
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            "Termination requested, stopping transaction distribution"
-                        );
-                        break;
-                    }
-
-                    // skip transactions already executed by the main loop
-                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                        continue;
-                    }
-
-                    tx_count += 1;
-                    if ctx.prewarm_results.is_some() {
-                        refresh_txs.push((index, tx.clone()));
-                    }
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                let mut burst = Vec::new();
+                while let Ok(first) = pending.recv() {
+                    // Transactions arrive in bursts. Heavy ones take longest to prewarm, so they
+                    // start first, and the others keep block order.
+                    burst.push(first);
+                    burst.extend(pending.try_iter());
+                    burst.sort_by_key(|(index, tx)| {
+                        let gas_limit = tx.tx().gas_limit();
+                        if gas_limit >= HEAVY_TX_GAS_LIMIT {
+                            (0, u64::MAX - gas_limit, *index)
+                        } else {
+                            (1, 0, *index)
+                        }
                     });
+                    for (index, tx) in burst.drain(..) {
+                        if ctx.should_stop() {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                "Termination requested, stopping transaction distribution"
+                            );
+                            break;
+                        }
+
+                        // skip transactions already executed by the main loop
+                        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                            continue;
+                        }
+
+                        tx_count += 1;
+                        if ctx.prewarm_results.is_some() {
+                            refresh_txs.push((index, tx.clone()));
+                        }
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        });
+                    }
                 }
+                refresh_txs.sort_unstable_by_key(|(index, _)| *index);
 
                 // Send withdrawal prefetch targets after all transactions dispatched
                 if let Some(state_root_hint_stream) = state_root_hint_stream &&
