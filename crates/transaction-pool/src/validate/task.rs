@@ -4,8 +4,8 @@ use crate::{
     blobstore::BlobStore,
     metrics::TxPoolValidatorMetrics,
     validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
-    EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    BlockGasLimitPolicy, EthTransactionValidator, PoolTransaction, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -316,6 +316,10 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
+    }
+
+    fn block_gas_limit_policy(&self) -> BlockGasLimitPolicy {
+        self.validator.block_gas_limit_policy()
     }
 }
 

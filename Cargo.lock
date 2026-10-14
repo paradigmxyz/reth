@@ -9445,8 +9445,6 @@ dependencies = [
  "alloy-primitives",
  "fixed-cache",
  "metrics",
- "metrics-util",
- "moka",
  "parking_lot",
  "reth-errors",
  "reth-evm",

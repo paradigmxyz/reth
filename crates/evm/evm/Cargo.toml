@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 revm.workspace = true
 # reth
-reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
@@ -43,6 +42,7 @@ fixed-cache.workspace = true
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
+reth-revm.workspace = true
 
 [features]
 account-ext = [

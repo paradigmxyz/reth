@@ -175,12 +175,14 @@ where
 {
     /// Create a new transaction pool instance.
     pub fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
+        let mut pool = TxPool::new(ordering, config.clone());
+        pool.set_block_gas_limit_policy(validator.block_gas_limit_policy());
         Self {
             identifiers: Default::default(),
             validator,
             event_listener: Default::default(),
             has_event_listeners: AtomicBool::new(false),
-            pool: RwLock::new(TxPool::new(ordering, config.clone())),
+            pool: RwLock::new(pool),
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),
             blob_transaction_sidecar_listener: Default::default(),
@@ -209,7 +211,11 @@ where
     /// This will also notify subscribers about any transactions that were promoted to the pending
     /// pool due to fee changes.
     pub fn set_block_info(&self, info: BlockInfo) {
-        let outcome = self.pool.write().set_block_info(info);
+        let outcome = {
+            let mut pool = self.pool.write();
+            pool.set_block_gas_limit_policy(self.validator.block_gas_limit_policy());
+            pool.set_block_info(info)
+        };
 
         // Notify subscribers about promoted transactions due to fee changes
         self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
@@ -541,12 +547,16 @@ where
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
         // update the pool
-        let outcome = self.pool.write().on_canonical_state_change(
-            block_info,
-            mined_transactions,
-            changed_senders,
-            update_kind,
-        );
+        let outcome = {
+            let mut pool = self.pool.write();
+            pool.set_block_gas_limit_policy(self.validator.block_gas_limit_policy());
+            pool.on_canonical_state_change(
+                block_info,
+                mined_transactions,
+                changed_senders,
+                update_kind,
+            )
+        };
 
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());

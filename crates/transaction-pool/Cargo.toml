@@ -26,6 +26,7 @@ reth-storage-api.workspace = true
 reth-tasks.workspace = true
 
 # ethereum
+evm2.workspace = true
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -62,7 +63,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-evm2.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
