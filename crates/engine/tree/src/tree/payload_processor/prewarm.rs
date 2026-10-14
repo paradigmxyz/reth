@@ -23,10 +23,13 @@ use crate::tree::{
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::{transaction::TxHashRef, Transaction as _};
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressSet, B256Map},
+    B256,
+};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -179,6 +182,8 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
+            // Senders and recipients are known before prewarming reaches their transactions.
+            let mut accounts = AddressSet::default();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
@@ -201,6 +206,12 @@ where
                     }
 
                     tx_count += 1;
+                    if state_root_hint_stream.is_some() {
+                        accounts.insert(*tx.signer());
+                        if let Some(to) = tx.tx().to() {
+                            accounts.insert(to);
+                        }
+                    }
                     if ctx.prewarm_results.is_some() {
                         refresh_txs.push((index, tx.clone()));
                     }
@@ -217,13 +228,18 @@ where
                     });
                 }
 
-                // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(state_root_hint_stream) = state_root_hint_stream &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
-                {
-                    let targets = multiproof_targets_from_withdrawals(withdrawals);
-                    state_root_hint_stream.on_access_hint(targets.into());
+                // Send transaction and withdrawal account prefetch targets after all transactions
+                // dispatched.
+                if let Some(state_root_hint_stream) = state_root_hint_stream {
+                    if let Some(withdrawals) = &ctx.env.withdrawals {
+                        accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
+                    }
+                    if !accounts.is_empty() {
+                        state_root_hint_stream.on_access_hint(StateAccessHint {
+                            accounts: accounts.iter().map(keccak256).collect(),
+                            ..Default::default()
+                        });
+                    }
                 }
             });
 
@@ -916,17 +932,6 @@ where
     }
 }
 
-/// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
-///
-/// Withdrawals only modify account balances (no storage), so the targets contain
-/// only account-level entries with empty storage sets.
-fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProofTargetsV2 {
-    MultiProofTargetsV2 {
-        account_targets: withdrawals.iter().map(|w| keccak256(w.address).into()).collect(),
-        ..Default::default()
-    }
-}
-
 /// Returns the hashed storage slots, keyed by hashed account, that existed before and that `state`
 /// removes.
 fn storage_removals(state: &EvmState) -> B256Map<Vec<B256>> {
@@ -1015,8 +1020,11 @@ pub struct PrewarmMetrics {
 mod tests {
 
     use super::*;
+    use crate::tree::payload_processor::{
+        StateRootHandle, StateRootMessage, StateRootTaskCancelGuard,
+    };
     use alloy_consensus::{transaction::Recovered, TxLegacy};
-    use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
+    use alloy_eips::{eip4895::Withdrawal, eip7702::constants::EIP7702_CLEARED_DELEGATION};
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -1065,6 +1073,88 @@ mod tests {
             storage_removals(&state),
             B256Map::from_iter([(keccak256(touched), vec![keccak256(B256::from(U256::from(1)))])])
         );
+    }
+
+    /// Senders, recipients and withdrawal addresses are hinted once every transaction is
+    /// dispatched, independently of when prewarming executes them.
+    #[test]
+    fn hints_senders_and_recipients_after_dispatch() {
+        let (caller, recipient) = (Address::repeat_byte(1), Address::repeat_byte(2));
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        let withdrawn = Address::repeat_byte(4);
+        let ctx = PrewarmContext {
+            env: ExecutionEnv {
+                withdrawals: Some(vec![Withdrawal { address: withdrawn, ..Default::default() }]),
+                ..ExecutionEnv::test_default()
+            },
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: None,
+            provider: OverlayStateProviderFactory::new(
+                provider,
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics::default(),
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+            prewarm_results: None,
+        };
+        let tx = |to, caller| {
+            let tx = Recovered::new_unchecked(
+                TransactionSigned::new_unhashed(
+                    TxLegacy { gas_limit: 60_000, to, ..Default::default() }.into(),
+                    Signature::test_signature(),
+                ),
+                caller,
+            );
+            WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx) }
+        };
+        let creator = Address::repeat_byte(3);
+        let txs = [tx(TxKind::Call(recipient), caller), tx(TxKind::Create, creator)];
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            cancel_guard,
+            mpsc::channel().1,
+            mpsc::channel().1,
+        );
+        let (task, _) =
+            PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
+        let (pending_tx, pending_rx) = mpsc::channel();
+        let (actions_tx, actions_rx) = mpsc::channel();
+        // Only transactions after the first one are hinted after their execution.
+        for tx in txs {
+            pending_tx.send((0, tx)).unwrap();
+        }
+        drop(pending_tx);
+        task.spawn_txs_prewarm(pending_rx, actions_tx, Some(handle.take_hint_stream()));
+
+        assert!(matches!(
+            actions_rx.recv_timeout(Duration::from_secs(10)),
+            Ok(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 2 })
+        ));
+        let Ok(StateRootMessage::PrefetchProofs(mut hint)) = updates_rx.try_recv() else {
+            panic!("expected a prefetch hint")
+        };
+        hint.accounts.sort_unstable();
+        let mut expected = [caller, recipient, creator, withdrawn].map(keccak256).to_vec();
+        expected.sort_unstable();
+        assert_eq!(hint.accounts, expected);
+        assert!(hint.storages.is_empty());
+        assert!(hint.storage_removals.is_empty());
+        assert!(updates_rx.try_recv().is_err());
     }
 
     #[test]
