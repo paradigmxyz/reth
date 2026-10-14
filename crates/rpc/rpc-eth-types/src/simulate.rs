@@ -596,7 +596,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn precompile_self_move_errors_for_existing_precompile() {
-        let address = address!("0000000000000000000000000000000000000001");
+        let address = Address::with_last_byte(1);
         let mut state_overrides = StateOverride::default();
         state_overrides.insert(
             address,
@@ -667,7 +667,7 @@ mod tests {
 
     #[test]
     fn moved_precompile_is_callable() {
-        let source = address!("0000000000000000000000000000000000000001");
+        let source = Address::with_last_byte(1);
         let dest = address!("0000000000000000000000000000000000123456");
         let mut state_overrides = StateOverride::default();
         state_overrides.insert(
@@ -797,7 +797,7 @@ mod tests {
         let blocks = vec![
             SimBlock {
                 block_overrides: Some(BlockOverrides {
-                    number: Some(U256::from(1)),
+                    number: Some(U256::ONE),
                     time: Some(u64::MAX),
                     ..Default::default()
                 }),

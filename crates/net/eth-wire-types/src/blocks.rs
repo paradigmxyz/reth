@@ -128,7 +128,7 @@ mod tests {
     };
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{hex, Signature, TxKind, U256};
+    use alloy_primitives::{b256, hex, Address, Bloom, Signature, TxKind, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;
@@ -195,9 +195,9 @@ mod tests {
         RequestPair::<GetBlockHeaders> {
             request_id: 1111,
             message: GetBlockHeaders {
-                start_block: BlockHashOrNumber::Hash(
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                ),
+                start_block: BlockHashOrNumber::Hash(b256!(
+                    "00000000000000000000000000000000000000000000000000000000deadc0de"
+                )),
                 limit: 5,
                 skip: 5,
                 direction: HeadersDirection::Rising,
@@ -216,9 +216,9 @@ mod tests {
         let expected = RequestPair::<GetBlockHeaders> {
             request_id: 1111,
             message: GetBlockHeaders {
-                start_block: BlockHashOrNumber::Hash(
-                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                ),
+                start_block: BlockHashOrNumber::Hash(b256!(
+                    "00000000000000000000000000000000000000000000000000000000deadc0de"
+                )),
                 limit: 5,
                 skip: 5,
                 direction: HeadersDirection::Rising,
@@ -273,34 +273,33 @@ mod tests {
         let mut data = vec![];
         RequestPair {
             request_id: 1111,
-            message: BlockHeaders(vec![
-                Header {
-                    parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    beneficiary: hex!("0000000000000000000000000000000000000000").into(),
-                    state_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    transactions_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    receipts_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                    difficulty: U256::from(0x8aeu64),
-                    number: 0xd05u64,
-                    gas_limit: 0x115c,
-                    gas_used: 0x15b3,
-                    timestamp: 0x1a0au64,
-                    extra_data: hex!("7788")[..].into(),
-                    mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64.into(),
-                    base_fee_per_gas: None,
-                    withdrawals_root: None,
-                    blob_gas_used: None,
-                    excess_blob_gas: None,
-                    parent_beacon_block_root: None,
-                    requests_hash: None,
-                    block_access_list_hash: None,
-                    slot_number: None,
-                },
-            ]),
-        }.encode(&mut data);
+            message: BlockHeaders(vec![Header {
+                parent_hash: B256::ZERO,
+                ommers_hash: B256::ZERO,
+                beneficiary: Address::ZERO,
+                state_root: B256::ZERO,
+                transactions_root: B256::ZERO,
+                receipts_root: B256::ZERO,
+                logs_bloom: Bloom::ZERO,
+                difficulty: U256::from(0x8aeu64),
+                number: 0xd05u64,
+                gas_limit: 0x115c,
+                gas_used: 0x15b3,
+                timestamp: 0x1a0au64,
+                extra_data: hex!("7788")[..].into(),
+                mix_hash: B256::ZERO,
+                nonce: 0x0000000000000000u64.into(),
+                base_fee_per_gas: None,
+                withdrawals_root: None,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: None,
+                requests_hash: None,
+                block_access_list_hash: None,
+                slot_number: None,
+            }]),
+        }
+        .encode(&mut data);
         assert_eq!(data, expected);
     }
 
@@ -312,33 +311,31 @@ mod tests {
         );
         let expected = RequestPair {
             request_id: 1111,
-            message: BlockHeaders(vec![
-                Header {
-                    parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    beneficiary: hex!("0000000000000000000000000000000000000000").into(),
-                    state_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    transactions_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    receipts_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                    difficulty: U256::from(0x8aeu64),
-                    number: 0xd05u64,
-                    gas_limit: 0x115c,
-                    gas_used: 0x15b3,
-                    timestamp: 0x1a0au64,
-                    extra_data: hex!("7788")[..].into(),
-                    mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                    nonce: 0x0000000000000000u64.into(),
-                    base_fee_per_gas: None,
-                    withdrawals_root: None,
-                    blob_gas_used: None,
-                    excess_blob_gas: None,
-                    parent_beacon_block_root: None,
-                    requests_hash: None,
-                    block_access_list_hash: None,
-                    slot_number: None,
-                },
-            ]),
+            message: BlockHeaders(vec![Header {
+                parent_hash: B256::ZERO,
+                ommers_hash: B256::ZERO,
+                beneficiary: Address::ZERO,
+                state_root: B256::ZERO,
+                transactions_root: B256::ZERO,
+                receipts_root: B256::ZERO,
+                logs_bloom: Bloom::ZERO,
+                difficulty: U256::from(0x8aeu64),
+                number: 0xd05u64,
+                gas_limit: 0x115c,
+                gas_used: 0x15b3,
+                timestamp: 0x1a0au64,
+                extra_data: hex!("7788")[..].into(),
+                mix_hash: B256::ZERO,
+                nonce: 0x0000000000000000u64.into(),
+                base_fee_per_gas: None,
+                withdrawals_root: None,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: None,
+                requests_hash: None,
+                block_access_list_hash: None,
+                slot_number: None,
+            }]),
         };
         let result = RequestPair::decode(&mut &data[..]);
         assert_eq!(result.unwrap(), expected);
@@ -354,8 +351,8 @@ mod tests {
         RequestPair {
             request_id: 1111,
             message: GetBlockBodies(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                b256!("00000000000000000000000000000000000000000000000000000000deadc0de"),
+                b256!("00000000000000000000000000000000000000000000000000000000feedbeef"),
             ]),
         }
         .encode(&mut data);
@@ -371,8 +368,8 @@ mod tests {
         let expected = RequestPair {
             request_id: 1111,
             message: GetBlockBodies(vec![
-                hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
-                hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                b256!("00000000000000000000000000000000000000000000000000000000deadc0de"),
+                b256!("00000000000000000000000000000000000000000000000000000000feedbeef"),
             ]),
         };
         let result = RequestPair::decode(&mut &data[..]);
@@ -396,7 +393,7 @@ mod tests {
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
                             gas_limit: 0x2e248,
-                            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                            to: TxKind::Call(Address::repeat_byte(0x35)),
                             value: U256::from(0x200u64),
                             input: Default::default(),
                         }), Signature::new(
@@ -410,7 +407,7 @@ mod tests {
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
                             gas_limit: 0x33450,
-                            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                            to: TxKind::Call(Address::repeat_byte(0x35)),
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
                         }), Signature::new(
@@ -422,20 +419,20 @@ mod tests {
                     ],
                     ommers: vec![
                         Header {
-                            parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            beneficiary: hex!("0000000000000000000000000000000000000000").into(),
-                            state_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            transactions_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            receipts_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                            parent_hash: B256::ZERO,
+                            ommers_hash: B256::ZERO,
+                            beneficiary: Address::ZERO,
+                            state_root: B256::ZERO,
+                            transactions_root: B256::ZERO,
+                            receipts_root: B256::ZERO,
+                            logs_bloom: Bloom::ZERO,
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
                             gas_limit: 0x115c,
                             gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
-                            mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
+                            mix_hash: B256::ZERO,
                             nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,
@@ -472,7 +469,7 @@ mod tests {
                                 nonce: 0x8u64,
                                 gas_price: 0x4a817c808,
                                 gas_limit: 0x2e248,
-                                to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                                to: TxKind::Call(Address::repeat_byte(0x35)),
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
@@ -488,7 +485,7 @@ mod tests {
                                 nonce: 0x9u64,
                                 gas_price: 0x4a817c809,
                                 gas_limit: 0x33450,
-                                to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                                to: TxKind::Call(Address::repeat_byte(0x35)),
                                 value: U256::from(0x2d9u64),
                                 input: Default::default(),
                             }),
@@ -501,20 +498,20 @@ mod tests {
                     ],
                     ommers: vec![
                         Header {
-                            parent_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            ommers_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            beneficiary: hex!("0000000000000000000000000000000000000000").into(),
-                            state_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            transactions_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            receipts_root: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
-                            logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                            parent_hash: B256::ZERO,
+                            ommers_hash: B256::ZERO,
+                            beneficiary: Address::ZERO,
+                            state_root: B256::ZERO,
+                            transactions_root: B256::ZERO,
+                            receipts_root: B256::ZERO,
+                            logs_bloom: Bloom::ZERO,
                             difficulty: U256::from(0x8aeu64),
                             number: 0xd05u64,
                             gas_limit: 0x115c,
                             gas_used: 0x15b3,
                             timestamp: 0x1a0au64,
                             extra_data: hex!("7788")[..].into(),
-                            mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
+                            mix_hash: B256::ZERO,
                             nonce: 0x0000000000000000u64.into(),
                             base_fee_per_gas: None,
                             withdrawals_root: None,

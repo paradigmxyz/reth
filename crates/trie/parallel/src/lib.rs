@@ -23,3 +23,5 @@ pub(crate) mod value_encoder;
 /// Proof task manager metrics.
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;
+
+pub mod storage_proof;

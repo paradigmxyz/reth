@@ -879,11 +879,16 @@ where
         Ok(maybe_blob_sidecar)
     }
 
-    /// Returns the recovered authorities for the given transaction
+    /// Returns recovered authorities from authorizations for this chain or all chains.
     fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
-        transaction
-            .authorization_list()
-            .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
+        transaction.authorization_list().map(|auths| {
+            let chain_id = U256::from(self.chain_id());
+            auths
+                .iter()
+                .filter(|auth| auth.chain_id().is_zero() || auth.chain_id() == &chain_id)
+                .flat_map(|auth| auth.recover_authority())
+                .collect()
+        })
     }
 
     /// Validates all given transactions.
@@ -1603,8 +1608,9 @@ mod tests {
         eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
+        eip7702::Authorization,
     };
-    use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1896,6 +1902,36 @@ mod tests {
             ),
             Err(InvalidPoolTransactionError::Consensus(InvalidTransactionError::ChainIdMismatch))
         ));
+    }
+
+    #[test]
+    fn only_recovers_authorities_for_matching_chain_id() {
+        let validator = EthTransactionValidatorBuilder::new(mock_provider(), test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let auth = |chain_id, address| {
+            Authorization { chain_id, address, nonce: 0 }.into_signed(Signature::test_signature())
+        };
+        let universal = auth(U256::ZERO, Address::repeat_byte(1));
+        let local = auth(U256::from(validator.chain_id()), Address::repeat_byte(2));
+        let foreign = auth(U256::from(validator.chain_id() + 1), Address::repeat_byte(3));
+        let oversized = auth(U256::from(u64::MAX) + U256::from(1), Address::repeat_byte(4));
+        let expected =
+            vec![universal.recover_authority().unwrap(), local.recover_authority().unwrap()];
+        let tx = alloy_consensus::TxEip7702 {
+            chain_id: validator.chain_id(),
+            authorization_list: vec![universal, foreign, local, oversized],
+            ..Default::default()
+        };
+        let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            tx.into(),
+            Signature::test_signature(),
+        );
+        let transaction = EthPooledTransaction::new(
+            alloy_consensus::transaction::Recovered::new_unchecked(signed, Address::ZERO),
+            200,
+        );
+
+        assert_eq!(validator.recover_authorities(&transaction), Some(expected));
     }
 
     // <https://github.com/paradigmxyz/reth/issues/8550>
@@ -2408,7 +2444,7 @@ mod tests {
             assert!(matches!(
                 err,
                 InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
-                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+                if funds_err.got.is_zero() && funds_err.expected == expected_cost
             ));
         } else {
             panic!("Expected Invalid outcome with InsufficientFunds error");

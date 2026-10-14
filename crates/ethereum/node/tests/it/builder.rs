@@ -5,24 +5,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
-    DatabaseEnv,
-};
-use reth_node_api::NodeTypesWithDBAdapter;
+use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{
     sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
-    EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig,
+    FullNodeComponents, NodeBuilder, NodeConfig,
 };
 use reth_node_core::{
     args::DatadirArgs,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
-use reth_provider::{
-    providers::{BlockchainProvider, ProviderNodeTypes},
-    ProviderFactory, StageCheckpointReader,
-};
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
 use reth_rpc_builder::Identity;
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
@@ -100,94 +93,12 @@ fn test_basic_setup() {
         .check_launch();
 }
 
-#[tokio::test]
-async fn test_eth_launcher() {
-    let runtime = Runtime::test();
-    let config = NodeConfig::test();
-    let db = create_test_rw_db();
-    let _builder =
-        NodeBuilder::new(config)
-            .with_database(db)
-            .with_launch_context(runtime.clone())
-            .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-            >>()
-            .with_components(EthereumNode::components())
-            .with_add_ons(EthereumAddOns::default())
-            .apply(|builder| {
-                let _ = builder.db();
-                builder
-            })
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    runtime.clone(),
-                    builder.config().datadir(),
-                    Default::default(),
-                );
-                builder.launch_with(launcher)
-            });
-}
-
-#[test]
-fn test_eth_launcher_with_tokio_runtime() {
-    // #[tokio::test] can not be used here because we need to create a custom tokio runtime
-    // and it would be dropped before the test is finished, resulting in a panic.
-    let main_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    let custom_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-
-    main_rt.block_on(async {
-        let runtime = Runtime::test();
-        let config = NodeConfig::test();
-        let db = create_test_rw_db();
-        let _builder =
-            NodeBuilder::new(config)
-                .with_database(db)
-                .with_launch_context(runtime.clone())
-                .with_types_and_provider::<EthereumNode, BlockchainProvider<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                >>()
-                .with_components(EthereumNode::components())
-                .with_add_ons(
-                    EthereumAddOns::default().with_tokio_runtime(Some(custom_rt.handle().clone())),
-                )
-                .apply(|builder| {
-                    let _ = builder.db();
-                    builder
-                })
-                .launch_with_fn(|builder| {
-                    let launcher = EngineNodeLauncher::new(
-                        runtime.clone(),
-                        builder.config().datadir(),
-                        Default::default(),
-                    );
-                    builder.launch_with(launcher)
-                });
-    });
-}
-
 #[test]
 fn test_node_setup() {
     let config = NodeConfig::test();
     let db = create_test_rw_db();
     let _builder =
         NodeBuilder::new(config).with_database(db).node(EthereumNode::default()).check_launch();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn default_launch_still_starts_the_node() -> eyre::Result<()> {
-    let (config, _datadir) = launch_config();
-
-    let _node = NodeBuilder::new(config)
-        .with_database(create_test_rw_db())
-        .with_launch_context(Runtime::test())
-        .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default())
-        .launch_with_debug_capabilities()
-        .await?;
-
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]

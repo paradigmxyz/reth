@@ -94,6 +94,10 @@ impl MultiProofTargets {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedMultiProofTargets`] for more information.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
@@ -132,6 +136,7 @@ pub struct ChunkedMultiProofTargets {
 
 impl ChunkedMultiProofTargets {
     fn new(targets: MultiProofTargets, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -1234,7 +1239,7 @@ mod tests {
 
         let storage_leaf_0 = insert_node(
             &mut witness,
-            LeafNode::new(leaf_key, encode_fixed_size(&U256::from(1)).to_vec()),
+            LeafNode::new(leaf_key, encode_fixed_size(&U256::ONE).to_vec()),
         );
         let storage_leaf_1 = insert_node(
             &mut witness,
@@ -1284,7 +1289,7 @@ mod tests {
     fn witness_nodes_follow_inline_children() {
         let leaf_key = Nibbles::from_nibbles([0]);
         let leaf_0 =
-            alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::from(1)).to_vec()));
+            alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::ONE).to_vec()));
         let leaf_1 =
             alloy_rlp::encode(LeafNode::new(leaf_key, encode_fixed_size(&U256::from(2)).to_vec()));
         assert!(leaf_0.len() < B256::len_bytes());

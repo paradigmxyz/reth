@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn can_ban_unban_peer() {
-        let peer = PeerId::new([1; 64]);
+        let peer = PeerId::repeat_byte(1);
         let mut banlist = BanList::default();
         banlist.ban_peer(peer);
         assert!(banlist.is_banned_peer(&peer));

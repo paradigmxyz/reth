@@ -138,6 +138,9 @@ Networking:
 
           [default: 200]
 
+      --snap.v2
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it, and uses the staged pipeline while the chain head predates block access lists
+
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
@@ -330,7 +333,9 @@ RPC:
           [default: 8545]
 
       --http.disable-compression
-          Disable compression for HTTP responses
+          Disable compression for HTTP responses.
+
+          Servers listening on a loopback address never compress responses.
 
       --http.compression <ALGOS>
           Comma-separated list of allowed compression algorithms for HTTP responses.
@@ -1110,6 +1115,9 @@ Engine:
 
           [default: 1]
 
+      --cpu-cores <COUNT>
+          Override the available CPU count for node thread pools and parallel execution decisions. Does not change CPU affinity. Explicit thread counts take precedence
+
       --engine.disable-precompile-cache
           Disable precompile cache
 
@@ -1186,6 +1194,9 @@ Engine:
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
+
+      --engine.prewarm-reuse
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
 
 ERA:
       --era.enable

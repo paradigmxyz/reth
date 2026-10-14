@@ -137,7 +137,7 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into()))
+            .put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.into()))
             .unwrap();
         provider_rw.commit().unwrap();
 

@@ -1812,7 +1812,7 @@ where
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static + Send + Sync,
-    Node: NodeTypes + 'static,
+    Node: NodeTypes,
     Node::ChainSpec: Send + Sync,
     N: Network,
     Self: Clone + 'static,

@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn sepolia_config_reports_its_chain_id() {
         let config = chain_config(&*SEPOLIA);
-        assert_eq!(config.chain_id, SEPOLIA.chain().id());
+        assert_eq!(config.chain_id, SEPOLIA.chain_id());
         assert_eq!(config.shanghai_time, Some(1_677_557_088));
         assert!(config.blob_schedule.contains_key("cancun"));
     }

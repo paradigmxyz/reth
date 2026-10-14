@@ -576,7 +576,7 @@ mod tests {
     };
     use reth_rpc_eth_types::RpcInvalidTransactionError;
     use reth_storage_api::{
-        BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
     use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
@@ -594,8 +594,7 @@ mod tests {
                 Receipt = reth_ethereum_primitives::Receipt,
                 Header = alloy_consensus::Header,
                 Transaction = reth_ethereum_primitives::TransactionSigned,
-            > + BlockReader
-            + ChainSpecProvider<ChainSpec = ChainSpec>
+            > + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory<Primitives = reth_ethereum_primitives::EthPrimitives>
             + NodePrimitivesProvider<Primitives = reth_ethereum_primitives::EthPrimitives>
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
@@ -1332,7 +1331,7 @@ mod tests {
         provider.add_block(hash, block);
 
         let api = build_test_eth_api(provider);
-        for block_id in [BlockId::Number(BlockNumberOrTag::Number(1)), BlockId::Hash(hash.into())] {
+        for block_id in [BlockId::number(1), BlockId::hash(hash)] {
             let header = EthBlocks::rpc_block_header(&api, block_id).await.unwrap().unwrap();
             let response = serde_json::to_value(&header).unwrap();
             assert!(response.get("size").is_none());
@@ -1340,10 +1339,7 @@ mod tests {
 
         for full in [false, true] {
             let block =
-                EthBlocks::rpc_block(&api, BlockId::Number(BlockNumberOrTag::Number(1)), full)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
     }

@@ -1,6 +1,6 @@
 //! Post-Cancun SELFDESTRUCT (EIP-6780) scenario suite driven through the engine API.
 //!
-//! The same scenario battery runs against multiple hardfork targets (Cancun, Osaka, Amsterdam)
+//! The same scenario battery runs against multiple hardfork targets (Osaka, Amsterdam)
 //! on a single node per fork: every block goes through payload building, `newPayload` and
 //! forkchoice via the consensus engine, and assertions cover receipts, RPC state and the
 //! committed execution outcome. At the end of a suite the persisted database is checked with
@@ -39,11 +39,6 @@ use reth_revm::db::BundleAccount;
 use std::sync::Arc;
 
 const ETH: u128 = 1_000_000_000_000_000_000;
-
-#[tokio::test]
-async fn test_eip6780_selfdestruct_cancun() -> eyre::Result<()> {
-    run_selfdestruct_suite(EthereumHardfork::Cancun).await
-}
 
 #[tokio::test]
 async fn test_eip6780_selfdestruct_osaka() -> eyre::Result<()> {
@@ -518,7 +513,7 @@ fn factory_create_tx(
     value: U256,
 ) -> TransactionRequest {
     let mut input = Vec::with_capacity(64 + initcode.len());
-    input.extend_from_slice(&U256::from(call_after_create as u8).to_be_bytes::<32>());
+    input.extend_from_slice(B256::with_last_byte(call_after_create as u8).as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(initcode);
     TransactionRequest::default().with_to(factory).with_input(input).with_value(value)

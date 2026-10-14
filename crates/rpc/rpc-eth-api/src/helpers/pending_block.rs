@@ -4,9 +4,9 @@
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip7840::BlobParams;
+use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::{B256, U256};
-use alloy_rpc_types_eth::{BlockNumberOrTag, BlockOverrides};
+use alloy_rpc_types_eth::BlockOverrides;
 use futures::Future;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -33,7 +33,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool,
 };
-use reth_trie_common::ComputedTrieData;
+use reth_trie_common::SortedTrieData;
 use revm::context_interface::{Block, Cfg as _};
 use std::{
     sync::Arc,
@@ -95,7 +95,7 @@ pub trait LoadPendingBlock:
             .provider()
             .latest_header()
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
 
         let evm_env = self
             .evm_config()
@@ -469,7 +469,7 @@ pub trait LoadPendingBlock:
         Ok(ExecutedBlock::new(
             block.into(),
             Arc::new(execution_outcome),
-            ComputedTrieData::new(
+            SortedTrieData::new(
                 Arc::new(hashed_state.into_sorted()),
                 Arc::new(trie_updates.into_sorted()),
             ),

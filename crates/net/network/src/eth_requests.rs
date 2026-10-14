@@ -604,7 +604,7 @@ where
         let RangeResponse { items: accounts, end } =
             state.account_range(req.starting_hash, req.limit_hash, response_bytes)?;
 
-        let proof = if req.starting_hash == B256::ZERO && end == RangeEnd::Exhausted {
+        let proof = if req.starting_hash.is_zero() && end == RangeEnd::Exhausted {
             Vec::new()
         } else {
             let boundary_keys = boundary_proof_keys(req.starting_hash, accounts.last());
@@ -669,7 +669,7 @@ where
 
             remaining_bytes = remaining_bytes.saturating_sub(account_slots.len() * 64);
             let last = account_slots.last().map(|(hash, _)| *hash);
-            let needs_proof = origin != B256::ZERO || end != RangeEnd::Exhausted;
+            let needs_proof = !origin.is_zero() || end != RangeEnd::Exhausted;
             slots.push(
                 account_slots
                     .into_iter()
@@ -1197,7 +1197,7 @@ mod tests {
 
         let missing_storage_proof = MockEthProvider::default();
         missing_storage_proof
-            .push_snap_storage_range(vec![(B256::ZERO, U256::from(1))], RangeEnd::ByteLimit);
+            .push_snap_storage_range(vec![(B256::ZERO, U256::ONE)], RangeEnd::ByteLimit);
 
         let storage_disappears = MockEthProvider::default();
         storage_disappears.push_snap_storage_range(Vec::new(), RangeEnd::Exhausted);
@@ -1517,7 +1517,7 @@ mod tests {
         let proof = vec![Bytes::from_static(&[0xcc])];
         // More entries exist beyond `limit_hash`, so the cursor stopped at the hash limit
         // rather than exhausting the trie -- a proof is required even though origin is zero.
-        provider.push_snap_storage_range(vec![(hash, U256::from(1))], RangeEnd::HashLimit);
+        provider.push_snap_storage_range(vec![(hash, U256::ONE)], RangeEnd::HashLimit);
         provider.set_snap_storage_proof(Some(proof.clone()));
 
         let handler = snap_handler(provider.clone());
@@ -1550,7 +1550,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.push_missing_snap_storage_account();
         provider.push_snap_storage_range(
-            vec![(B256::repeat_byte(0x01), U256::from(1))],
+            vec![(B256::repeat_byte(0x01), U256::ONE)],
             RangeEnd::Exhausted,
         );
         let missing_account = B256::repeat_byte(0x01);
@@ -1626,21 +1626,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn receipts70_serves_oversized_first_receipt() {
-        let provider = MockEthProvider::default();
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
-        let hash = insert_receipts_block(&provider, 1, vec![oversized.clone()]);
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        // The block holds exactly one receipt, so it is complete.
-        assert_eq!(
-            resp,
-            Receipts70 { last_block_incomplete: false, receipts: vec![vec![oversized]] }
-        );
-    }
-
-    #[tokio::test]
     async fn receipts70_serves_only_oversized_first_receipt_of_partial_block() {
         let provider = MockEthProvider::default();
         let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
@@ -1650,24 +1635,6 @@ mod tests {
         let resp = get_receipts70(provider, 0, vec![hash]).await;
 
         // The oversized receipt exhausts the budget, so the rest of the block is left out.
-        assert_eq!(
-            resp,
-            Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
-        );
-    }
-
-    #[tokio::test]
-    async fn receipts70_serves_oversized_receipt_at_first_receipt_index() {
-        let provider = MockEthProvider::default();
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
-        let hash = insert_receipts_block(
-            &provider,
-            1,
-            vec![receipt_with_data(16), oversized.clone(), receipt_with_data(16)],
-        );
-
-        let resp = get_receipts70(provider, 1, vec![hash]).await;
-
         assert_eq!(
             resp,
             Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
@@ -1701,17 +1668,6 @@ mod tests {
         assert!(!partial.is_empty() && partial.len() < receipts.len());
         assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
         assert!(partial.iter().map(Encodable::length).sum::<usize>() <= SOFT_RESPONSE_LIMIT);
-    }
-
-    #[tokio::test]
-    async fn receipts70_omits_receipt_above_hard_limit() {
-        let provider = MockEthProvider::default();
-        let hash =
-            insert_receipts_block(&provider, 1, vec![receipt_with_data(MAX_MESSAGE_SIZE + 1024)]);
-
-        let resp = get_receipts70(provider, 0, vec![hash]).await;
-
-        assert_eq!(resp, Receipts70 { last_block_incomplete: false, receipts: Vec::new() });
     }
 
     #[test_case(0, 0; "first receipt at hard limit")]

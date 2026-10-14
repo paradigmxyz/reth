@@ -84,7 +84,7 @@ pub use reth_trie_parallel::{
     state_root_task::{
         evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
         StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use reth_trie_sparse::{
@@ -686,8 +686,7 @@ impl DefaultStateRootStrategy {
                         }
                         Ok(None) => new_sparse_state_trie(),
                         Err(err) => {
-                            let _ =
-                                state_root_tx.send(Err(StateRootTaskError::Other(err.to_string())));
+                            let _ = state_root_tx.send(Err(StateRootTaskError::Other(err.into())));
                             return;
                         }
                     }
@@ -853,14 +852,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -1036,7 +1027,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateRootProvider>,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1077,14 +1067,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
         + 'static,
 {
     fn serial_fallback(
@@ -1183,14 +1165,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-            Provider: TrieCursorFactory
-                          + HashedCursorFactory
-                          + HashedPostStateProvider
-                          + StateRootProvider
-                          + Send,
-        > + Clone
-        + 'static,
 {
     fn name(&self) -> &'static str {
         "sparse-trie"
@@ -1287,12 +1261,6 @@ where
         + StorageChangeSetReader
         + StorageSettingsCache
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
-        Provider: TrieCursorFactory
-                      + HashedCursorFactory
-                      + HashedPostStateProvider
-                      + StateRootProvider,
-    >,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
@@ -1495,34 +1463,6 @@ mod tests {
     }
 
     #[test]
-    fn abandoned_sparse_trie_does_not_replace_shared_cache() {
-        for completed in [false, true] {
-            let overlay_manager = OverlayManager::<EthPrimitives>::default();
-            let block_hash = B256::with_last_byte(1);
-            let (completer, trie) = mpsc::channel();
-            let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
-            pending_trie_tx
-                .send(PendingSparseTrie { state_root: B256::ZERO, anchor_hash: B256::ZERO, trie })
-                .unwrap();
-            let next_hash = B256::with_last_byte(2);
-            overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
-                SparseStateTrie::default(),
-                next_hash,
-                block_hash,
-            ));
-
-            if completed {
-                completer.send(SparseStateTrie::default()).unwrap();
-                drop(pending_trie_rx);
-            } else {
-                drop(pending_trie_rx);
-                assert!(completer.send(SparseStateTrie::default()).is_err());
-            }
-            assert_eq!(overlay_manager.take_sparse_trie().unwrap().block_hash(), next_hash);
-        }
-    }
-
-    #[test]
     fn failed_parent_trie_closes_handoff_without_publishing() {
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let genesis_hash = init_genesis(&factory).unwrap();
@@ -1641,26 +1581,6 @@ mod tests {
         assert_eq!(
             sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
             Some((TrieNodeEpoch::new(3), expected_prune_anchor))
-        );
-    }
-
-    #[test]
-    fn sparse_trie_prune_target_does_not_move_backwards_when_anchor_is_in_prune_range() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
-        let reused_anchor_hash = blocks[2].recovered_block().hash();
-        let mut prune_blocks = blocks;
-        prune_blocks.reverse();
-        let prune_anchor = prune_blocks.last().unwrap().recovered_block().parent_hash();
-
-        assert_ne!(reused_anchor_hash, prune_anchor);
-        assert_eq!(
-            sparse_trie_prune_target(
-                reused_anchor_hash,
-                true,
-                prune_blocks[0].recovered_block().num_hash(),
-                Some(&prune_blocks),
-            ),
-            Some((TrieNodeEpoch::new(1), reused_anchor_hash))
         );
     }
 

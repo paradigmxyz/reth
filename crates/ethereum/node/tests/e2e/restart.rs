@@ -44,7 +44,7 @@ async fn restart_keeps_persisted_chain() -> eyre::Result<()> {
         let head = node.advance_block().await?.block().hash();
         node.wait_for_persisted_block(2).await?;
         let pending_tx_hash =
-            node.rpc.inject_tx(account.transfer(recipient, U256::from(1)).await).await?;
+            node.rpc.inject_tx(account.transfer(recipient, U256::ONE).await).await?;
         let exit_future =
             node.take_exit_future().ok_or_else(|| eyre::eyre!("the node has no exit future"))?;
 

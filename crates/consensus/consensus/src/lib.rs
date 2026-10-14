@@ -543,7 +543,7 @@ impl ConsensusError {
 
     /// Returns `true` if this type is a [`ConsensusError::Other`] of that error type.
     pub fn is_other<T: Error + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+        self.as_other().is_some_and(|err| err.is::<T>())
     }
 }
 

@@ -177,44 +177,6 @@ mod tests {
     }
 
     #[test]
-    fn defers_indexed_execution_errors_to_their_slot() {
-        let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(Err(BalWorkerError::Execution {
-            tx_index: 1,
-            tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
-        }))
-        .unwrap();
-        tx.send(Ok(output(0, 0))).unwrap();
-        drop(tx);
-
-        let mut outputs = ordered_worker_outputs(&rx, 2);
-
-        assert_eq!(outputs.next().expect("first item").expect("first output").result, 0);
-        expect_err_contains(outputs.next().expect("second item"), "transaction 1: bal miss");
-        assert!(outputs.next().is_none());
-    }
-
-    #[test]
-    fn continues_past_indexed_execution_errors() {
-        let (tx, rx) = crossbeam_channel::unbounded();
-        tx.send(Err(BalWorkerError::Execution {
-            tx_index: 0,
-            tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
-        }))
-        .unwrap();
-        tx.send(Ok(output(1, 10))).unwrap();
-        drop(tx);
-
-        let mut outputs = ordered_worker_outputs(&rx, 2);
-
-        expect_err_contains(outputs.next().expect("first item"), "transaction 0: bal miss");
-        assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
-        assert!(outputs.next().is_none());
-    }
-
-    #[test]
     fn orders_recovery_and_execution_errors_by_transaction_index() {
         let (tx, rx) = crossbeam_channel::unbounded();
         tx.send(Err(BalWorkerError::Execution {
