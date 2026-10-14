@@ -2748,4 +2748,41 @@ mod tests {
         drop(task);
         drain_sparse_trie_tasks(&runtime);
     }
+
+    /// The final root takes trie updates from the storage tries this block checked out, and skips
+    /// blind ones.
+    #[test]
+    fn returned_storage_tries_hand_over_their_updates() {
+        let runtime = Runtime::test();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_updates(true);
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
+        let [changed, blind] = [0x11, 0x12].map(B256::repeat_byte);
+        // A branch with a branch child is persisted, so it shows up in the trie updates.
+        let mut sibling = B256::repeat_byte(0x30);
+        sibling[1] = 0x40;
+        let slots = [B256::repeat_byte(0x30), sibling, B256::repeat_byte(0x31)];
+
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(changed) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![ProofTrieNodeV2::empty()]);
+        work.queue_updates(
+            slots.into_iter().map(|slot| (slot, LeafUpdate::Changed(vec![1]))).collect(),
+        );
+        task.run_ready_storage_work().unwrap();
+        task.storage_trie_state_mut(blind);
+
+        let storage_tries = task.return_storage_tries();
+        assert_eq!(storage_tries.keys().copied().collect::<Vec<_>>(), vec![changed]);
+        assert!(!storage_tries[&changed].storage_nodes.is_empty());
+        // Nothing is left behind for later blocks. Scanning every trie requires them revealed.
+        assert!(task.trie.take_or_create_storage_trie(&blind).is_blind());
+        assert!(task.trie.take_trie_updates().unwrap().is_empty());
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
 }
