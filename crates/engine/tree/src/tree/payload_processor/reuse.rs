@@ -29,7 +29,7 @@ use revm::{
     Database, Inspector,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -125,6 +125,19 @@ impl<H> PrewarmResults<H> {
             ResultSlot::Ready(tx) => &tx.reads,
             ResultSlot::Unusable(reads) => reads,
             ResultSlot::Executed => return false,
+        };
+        !reads.matches(&self.predicted, index)
+    }
+
+    /// Returns whether prewarming executed the transaction at `index`, but its reads no longer
+    /// match the predicted state.
+    pub(super) fn is_stale(&self, index: usize) -> bool {
+        let Some(slot) = self.slots.get(index) else { return false };
+        let slot = slot.lock();
+        let reads = match &*slot {
+            ResultSlot::Ready(tx) => &tx.reads,
+            ResultSlot::Unusable(reads) => reads,
+            ResultSlot::Empty | ResultSlot::Executed => return false,
         };
         !reads.matches(&self.predicted, index)
     }
@@ -372,6 +385,8 @@ pub(super) struct PredictedState {
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
     /// Number of transactions whose actual writes block execution published.
     generation: AtomicUsize,
+    /// Whether any account's storage was cleared, so that storage reads can skip `cleared`.
+    any_cleared: AtomicBool,
 }
 
 impl PredictedState {
@@ -388,7 +403,11 @@ impl PredictedState {
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: StorageKey, index: usize) -> Option<StorageValue> {
-        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
+        let cleared = self
+            .any_cleared
+            .load(Ordering::Relaxed)
+            .then(|| self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i)))
+            .flatten();
         let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
@@ -474,6 +493,7 @@ impl PredictedState {
             // Touched empty accounts are removed by EIP-161 state clearing.
             let destroyed = account.is_selfdestructed() || account.info.is_empty();
             if destroyed || account.is_created() {
+                self.any_cleared.store(true, Ordering::Relaxed);
                 write(&mut self.cleared.entry(*address).or_default(), index, publish.then_some(()));
             }
             // Created bytecode is kept separately, the rest is known to the database.

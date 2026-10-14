@@ -49,7 +49,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -58,6 +58,9 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 /// Maximum number of consecutive rounds that execute stale prewarm results again.
 const MAX_REFRESH_ROUNDS: usize = 4;
+
+/// Number of transactions after a prewarmed one whose stale results are executed again right away.
+const REFRESH_CHAIN: usize = 4;
 
 /// Number of transactions ahead of block execution that refreshing checks after block execution
 /// published actual writes.
@@ -179,8 +182,13 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
-            // Transactions to execute again when their results become stale.
-            let mut refresh_txs = Vec::new();
+            // Transactions to execute again when their results become stale, by index.
+            let txs = ctx
+                .prewarm_results
+                .as_ref()
+                .map(|_| (0..ctx.env.transaction_count).map(|_| OnceLock::new()).collect())
+                .unwrap_or_default();
+            let txs: &[OnceLock<Tx>] = &txs;
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
@@ -201,8 +209,8 @@ where
                     }
 
                     tx_count += 1;
-                    if ctx.prewarm_results.is_some() {
-                        refresh_txs.push((index, tx.clone()));
+                    if let Some(slot) = txs.get(index) {
+                        let _ = slot.set(tx.clone());
                     }
                     let parent_span = Span::current();
                     s.spawn(move |_| {
@@ -214,6 +222,9 @@ where
                         )
                         .entered();
                         Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        if let Some(results) = &ctx.prewarm_results {
+                            Self::refresh_after(ctx, results, txs, index);
+                        }
                     });
                 }
 
@@ -228,7 +239,7 @@ where
             });
 
             if let Some(results) = &ctx.prewarm_results {
-                Self::refresh_results(ctx, pool, results, &refresh_txs);
+                Self::refresh_results(ctx, pool, results, txs);
             }
 
             // All tasks are done — clear per-thread EVM state for the next block.
@@ -237,6 +248,25 @@ where
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
+    }
+
+    /// Executes the transactions following the one at `index` again if their results became
+    /// stale, so that chains of dependent transactions are resolved during the first pass.
+    fn refresh_after<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        results: &PrewarmResults<HaltReasonFor<Evm>>,
+        txs: &[OnceLock<Tx>],
+        index: usize,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone,
+    {
+        for (next, tx) in txs.iter().enumerate().skip(index + 1).take(REFRESH_CHAIN) {
+            if results.is_stale(next) &&
+                let Some(tx) = tx.get()
+            {
+                Self::transact_worker(ctx, next, tx.clone(), None);
+            }
+        }
     }
 
     /// Executes transactions again whose results became stale, because the predicted writes of
@@ -250,7 +280,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerPool,
         results: &PrewarmResults<HaltReasonFor<Evm>>,
-        txs: &[(usize, Tx)],
+        txs: &[OnceLock<Tx>],
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
@@ -261,15 +291,13 @@ where
         while !ctx.should_stop() {
             let generation = results.predicted().generation();
             // Skip the transaction block execution is about to reach.
-            let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
-            let start = txs.partition_point(|(index, _)| *index <= next);
-            if start == txs.len() {
+            let start = ctx.executed_tx_index.load(Ordering::Relaxed) + 2;
+            if start >= txs.len() {
                 break
             }
-            let window = &txs[start..txs.len().min(start.saturating_add(window_len))];
             // Checking is cheap, so only stale transactions are handed to the pool.
-            let stale = window
-                .iter()
+            let stale = (start..txs.len().min(start.saturating_add(window_len)))
+                .filter_map(|index| txs[index].get().map(|tx| (index, tx)))
                 .filter(|(index, _)| results.needs_refresh(*index))
                 .collect::<Vec<_>>();
             let refreshed = !stale.is_empty();
@@ -284,7 +312,7 @@ where
                                 if ctx.should_stop() {
                                     break
                                 }
-                                Self::transact_worker(ctx, *index, tx.clone(), None);
+                                Self::transact_worker(ctx, *index, (*tx).clone(), None);
                             }
                         });
                     }
