@@ -13,7 +13,6 @@ use reth_db_api::{
     cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -287,9 +286,9 @@ fn ensure_code_present(
             return Err(SnapSyncError::Cancelled)
         }
         let (_, account) = entry?;
-        // Only presence matters, so stored code is not decoded.
+        // Only presence matters, so stored code is neither copied nor decoded.
         if let Some(hash) = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY) &&
-            tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
+            !tx.contains_key::<tables::Bytecodes>(hash)?
         {
             return Err(SnapSyncError::MissingCode { hash })
         }

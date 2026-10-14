@@ -8,7 +8,6 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable,
 };
 use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
@@ -56,8 +55,8 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
             if missing.len() == limit {
                 break
             }
-            // Only presence matters, so stored code is not decoded.
-            if self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(*hash))?.is_none() {
+            // Only presence matters, so stored code is neither copied nor decoded.
+            if !self.tx_ref().contains_key::<tables::Bytecodes>(*hash)? {
                 missing.push(*hash);
             }
         }

@@ -1,7 +1,7 @@
 use crate::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{DupSort, Encode, Table},
-    DatabaseError,
+    DatabaseError, RawKey, RawTable,
 };
 use std::fmt::Debug;
 
@@ -46,6 +46,13 @@ pub trait DbTx: Debug + Send {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
+
+    /// Returns whether `key` is stored, without decoding its value.
+    ///
+    /// Backends can override this to avoid copying the stored bytes as well.
+    fn contains_key<T: Table>(&self, key: T::Key) -> Result<bool, DatabaseError> {
+        Ok(self.get::<RawTable<T>>(RawKey::new(key))?.is_some())
+    }
 }
 
 /// Read write transaction that allows writing to database
