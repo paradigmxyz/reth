@@ -1206,6 +1206,7 @@ mod tests {
             proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
             RecvTimeoutError::Disconnected
         );
+        drop(factory);
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
