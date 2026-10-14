@@ -53,6 +53,9 @@ use std::sync::{
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
+/// Maximum number of rounds that execute stale prewarm results again.
+const MAX_REFRESH_ROUNDS: usize = 4;
+
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
 /// Each variant carries the state-root capability its producers use, so the capability dies
@@ -147,7 +150,7 @@ where
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         state_root_hint_stream: Option<StateRootHintStream>,
     ) where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -166,6 +169,8 @@ where
 
             let mut tx_count = 0usize;
             let state_root_hint_stream = state_root_hint_stream.as_ref();
+            // Transactions to execute again when their results become stale.
+            let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
@@ -186,6 +191,9 @@ where
                     }
 
                     tx_count += 1;
+                    if ctx.prewarm_results.is_some() {
+                        refresh_txs.push((index, tx.clone()));
+                    }
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
@@ -209,12 +217,57 @@ where
                 }
             });
 
+            if let Some(results) = &ctx.prewarm_results {
+                Self::refresh_results(ctx, pool, results, &refresh_txs);
+            }
+
             // All tasks are done — clear per-thread EVM state for the next block.
             pool.clear();
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
+    }
+
+    /// Executes transactions again whose results became stale, because the predicted writes of
+    /// earlier transactions changed after they were executed.
+    ///
+    /// Each round checks the transactions that block execution has not reached yet, in block
+    /// order, on all pool threads. Rounds repeat while they find stale results.
+    fn refresh_results<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerPool,
+        results: &PrewarmResults<HaltReasonFor<Evm>>,
+        txs: &[(usize, Tx)],
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
+    {
+        for _ in 0..MAX_REFRESH_ROUNDS {
+            // Skip the transaction block execution is about to reach.
+            let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
+            let cursor = AtomicUsize::new(txs.partition_point(|(index, _)| *index <= next));
+            let refreshed = AtomicBool::new(false);
+            pool.in_place_scope(|s| {
+                for _ in 0..pool.current_num_threads() {
+                    s.spawn(|_| {
+                        while let Some((index, tx)) =
+                            txs.get(cursor.fetch_add(1, Ordering::Relaxed))
+                        {
+                            if ctx.should_stop() {
+                                break
+                            }
+                            if results.needs_refresh(*index) {
+                                refreshed.store(true, Ordering::Relaxed);
+                                Self::transact_worker(ctx, *index, tx.clone(), None);
+                            }
+                        }
+                    });
+                }
+            });
+            if ctx.should_stop() || !refreshed.load(Ordering::Relaxed) {
+                break
+            }
+        }
     }
 
     /// Executes a single prewarm transaction on the current pool thread's EVM.
@@ -255,8 +308,8 @@ where
             let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
             // Balances only need to be tracked to record reads for result reuse.
             evm.set_inspector_enabled(ctx.prewarm_results.is_some());
-            if ctx.prewarm_results.is_some() {
-                evm.db_mut().start_recording();
+            if let Some(results) = &ctx.prewarm_results {
+                evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
                 evm.inspector_mut().clear();
             }
             let res = match evm.transact(tx_env) {
@@ -270,6 +323,11 @@ where
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
+                    if let Some(results) = &ctx.prewarm_results &&
+                        let Some(reads) = evm.db_mut().take_reads()
+                    {
+                        results.reject(index, reads);
+                    }
                     return;
                 }
             };
@@ -289,12 +347,13 @@ where
 
             if let Some(results) = &ctx.prewarm_results &&
                 let Some(reads) = evm.db_mut().take_reads() &&
-                index >= ctx.executed_tx_index.load(Ordering::Relaxed) &&
-                let Ok(max_balance_spending) = max_balance_spending &&
-                let Some(reads) =
-                    reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending)
+                index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                results.insert(index, res, reads);
+                match reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending.ok())
+                {
+                    Ok(reads) => results.insert(index, res, reads),
+                    Err(reads) => results.reject(index, reads),
+                }
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
@@ -503,7 +562,7 @@ where
     )]
     pub fn run<Tx>(self, mode: PrewarmMode<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
     where
-        Tx: ExecutableTxFor<Evm> + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
         // Spawn execution tasks based on mode. The state-root capabilities arrive inside the
         // mode and move into the spawned producers, so they die with the producers instead of

@@ -415,7 +415,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: Option<
-            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + Sync + 'static)>,
         >,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,

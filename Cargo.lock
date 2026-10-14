@@ -8593,6 +8593,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "assert_matches",
  "crossbeam-channel",
+ "dashmap",
  "derive_more",
  "eyre",
  "futures",
