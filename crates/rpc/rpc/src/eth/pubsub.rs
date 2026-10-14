@@ -24,7 +24,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::Runtime;
-use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
+use reth_transaction_pool::{
+    pool::NEW_TX_LISTENER_BUFFER_SIZE, NewTransactionEvent, TransactionPool,
+};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use tokio::sync::{broadcast, OnceCell};
@@ -52,6 +54,7 @@ impl<Eth: EthApiTypes> EthPubSub<Eth> {
             eth_api,
             subscription_task_spawner,
             all_logs: SharedFeed::new(LOG_FEED_CAPACITY),
+            full_pending_txs: SharedFeed::new(PENDING_TX_FEED_CAPACITY),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -86,6 +89,26 @@ where
     /// Returns a stream that yields matching logs.
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = RpcLog<Eth::NetworkTypes>> {
         self.inner.eth_api.log_stream(filter)
+    }
+
+    /// Returns a stream that yields all transactions emitted by the txpool as RPC transactions.
+    pub fn full_pending_rpc_transaction_stream(
+        &self,
+    ) -> impl Stream<Item = RpcTransaction<Eth::NetworkTypes>> {
+        self.full_pending_transaction_stream().filter_map(|tx| {
+            let tx_value =
+                match self.inner.eth_api.converter().fill_pending(tx.transaction.to_consensus()) {
+                    Ok(tx) => Some(tx),
+                    Err(err) => {
+                        error!(target = "rpc",
+                            %err,
+                            "Failed to fill transaction with block context"
+                        );
+                        None
+                    }
+                };
+            std::future::ready(tx_value)
+        })
     }
 
     /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
@@ -126,26 +149,16 @@ where
                 if let Some(params) = params {
                     match params {
                         Params::Bool(true) => {
-                            // full transaction objects requested
-                            let stream = self.full_pending_transaction_stream().filter_map(|tx| {
-                                let tx_value = match self
-                                    .inner
-                                    .eth_api
-                                    .converter()
-                                    .fill_pending(tx.transaction.to_consensus())
-                                {
-                                    Ok(tx) => Some(tx),
-                                    Err(err) => {
-                                        error!(target = "rpc",
-                                            %err,
-                                            "Failed to fill transaction with block context"
-                                        );
-                                        None
-                                    }
-                                };
-                                std::future::ready(tx_value)
+                            // Every subscriber requesting full transaction objects receives the
+                            // same transactions, so they share one feed that converts and encodes
+                            // each transaction once.
+                            let rx = self.inner.full_pending_txs.subscribe(|tx| {
+                                let pubsub = self.clone();
+                                self.inner.subscription_task_spawner.spawn_task(async move {
+                                    forward(pubsub.full_pending_rpc_transaction_stream(), tx).await
+                                });
                             });
-                            return pipe_from_stream(accepted_sink, stream).await
+                            return pipe_shared(accepted_sink, rx).await
                         }
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
@@ -363,6 +376,8 @@ struct EthPubSubInner<EthApi: EthApiTypes> {
     subscription_task_spawner: Runtime,
     /// Shared feed for `logs` subscriptions without a filter.
     all_logs: SharedFeed<RpcLog<EthApi::NetworkTypes>>,
+    /// Shared feed for `newPendingTransactions` subscriptions with full transaction objects.
+    full_pending_txs: SharedFeed<RpcTransaction<EthApi::NetworkTypes>>,
 }
 
 // == impl EthPubSubInner ===
@@ -417,6 +432,12 @@ const MAX_SHARED_BATCH_LEN: usize = 4096;
 /// Its upstream produces about one batch per canonical state notification, so this matches the
 /// buffer of the canonical state notification channel.
 const LOG_FEED_CAPACITY: usize = 256;
+
+/// Capacity of the shared `newPendingTransactions` feed, in batches.
+///
+/// Each batch holds at least one transaction, so a subscriber can fall at least as far behind as
+/// the txpool listener feeding the upstream buffers by default.
+const PENDING_TX_FEED_CAPACITY: usize = NEW_TX_LISTENER_BUFFER_SIZE;
 
 /// Sender half of a [`SharedFeed`] channel.
 type SharedSender<T> = broadcast::Sender<Arc<SharedBatch<T>>>;
