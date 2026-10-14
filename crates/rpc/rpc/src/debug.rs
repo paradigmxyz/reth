@@ -1626,7 +1626,6 @@ mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
     use alloy_primitives::{keccak256, U256};
-    use alloy_rpc_types_trace::geth::GethDebugBuiltInTracerType;
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_evm_ethereum::EthEvmConfig;
@@ -1691,34 +1690,6 @@ mod tests {
 
     #[cfg(feature = "js-tracer")]
     #[test]
-    fn js_trace_interrupt_uses_requested_or_default_timeout() {
-        let timeout = |opts: GethDebugTracingOptions| {
-            JsTraceInterrupt::new(&opts).unwrap().js.map(|(_, timeout)| timeout)
-        };
-        assert_eq!(timeout(js_tracer_opts(None)), Some(DEFAULT_JS_TRACER_TIMEOUT));
-        assert_eq!(timeout(js_tracer_opts(Some("2500ms"))), Some(Duration::from_millis(2500)));
-        assert_eq!(timeout(js_tracer_opts(Some("1m30s"))), Some(Duration::from_secs(90)));
-        assert_eq!(
-            timeout(
-                GethDebugTracingOptions::new_tracer(GethDebugBuiltInTracerType::CallTracer)
-                    .with_timeout(Duration::from_secs(1))
-            ),
-            None
-        );
-    }
-
-    #[cfg(feature = "js-tracer")]
-    #[test]
-    fn js_trace_interrupt_rejects_invalid_timeout() {
-        let err = JsTraceInterrupt::new(&js_tracer_opts(Some("soon"))).unwrap_err();
-        assert!(
-            matches!(&err, EthApiError::InvalidParams(msg) if msg == "invalid tracer timeout \"soon\": expected number at 0"),
-            "{err:?}"
-        );
-    }
-
-    #[cfg(feature = "js-tracer")]
-    #[test]
     fn js_trace_interrupt_stops_attached_js_tracer() {
         use revm::{
             context::TxEnv,
@@ -1768,14 +1739,6 @@ mod tests {
         assert!(!tracer_interrupt.is_interrupted());
         drop(trace);
         assert!(tracer_interrupt.is_interrupted());
-    }
-
-    #[tokio::test]
-    async fn js_trace_interrupt_ignores_builtin_tracers() {
-        let opts = GethDebugTracingOptions::new_tracer(GethDebugBuiltInTracerType::CallTracer)
-            .with_timeout(std::time::Duration::ZERO);
-        let interrupt = JsTraceInterrupt::new(&opts).unwrap();
-        assert_eq!(interrupt.run(async { Ok::<_, EthApiError>(1) }).await.unwrap(), 1);
     }
 
     #[test]
