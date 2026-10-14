@@ -920,8 +920,7 @@ mod test {
         const TCP4_PORT: u16 = 30304;
         const TCP6_PORT: u16 = 30306;
         let remote_key = CombinedKey::generate_secp256k1();
-        let remote_enr =
-            Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
+        let remote_enr = Enr::builder().tcp4(TCP4_PORT).tcp6(TCP6_PORT).build(&remote_key).unwrap();
 
         let v4_socket: SocketAddr = "127.0.0.1:30305".parse().unwrap();
         let v6_socket: SocketAddr = "[::1]:30307".parse().unwrap();
