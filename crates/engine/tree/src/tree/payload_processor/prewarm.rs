@@ -15,7 +15,7 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{BalanceTracker, PrewarmResults, RecordingDb},
+    reuse::{BalanceTracker, PrewarmResults, RecordingDb, SpeculativeTx},
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -260,7 +260,7 @@ where
         let mut window_len = usize::MAX;
         while !ctx.should_stop() {
             let generation = results.predicted().generation();
-            // Skip the transaction block execution is about to reach.
+            // Skip the transaction block execution is executing and the one it reaches next.
             let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
             let start = txs.partition_point(|(index, _)| *index <= next);
             if start == txs.len() {
@@ -327,25 +327,30 @@ where
 
             let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx());
             // The pool is shared across blocks, so this thread may still hold the EVM of a
-            // previous block whose prewarming has not finished yet.
-            if state.0 != ctx.env.hash {
+            // previous prewarm run that has not finished yet. Runs of payloads that claim the same
+            // block hash may use different block environments, so the hash cannot tell them apart.
+            if !Arc::ptr_eq(&state.run, &ctx.terminate_execution) {
                 *state = ctx.evm_for_ctx();
             }
-            let Some(evm) = state.1.as_mut() else { return };
+            let Some(evm) = state.evm.as_mut() else { return };
 
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
             // Prewarming disables nonce and balance checks, so a reusable result must also show
             // that the caller would have passed them.
-            let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
-            // Balances only need to be tracked to record reads for result reuse.
-            evm.set_inspector_enabled(ctx.prewarm_results.is_some());
+            let speculative = SpeculativeTx {
+                caller: *tx.signer(),
+                nonce: tx_env.nonce(),
+                max_balance_spending: tx_env.max_balance_spending(),
+            };
             if let Some(results) = &ctx.prewarm_results {
                 evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
                 evm.inspector_mut().clear();
             }
-            let res = match evm.transact(tx_env) {
+            let res = evm.transact(tx_env);
+            let reads = evm.db_mut().take_reads();
+            let res = match res {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -357,7 +362,7 @@ where
                     );
                     ctx.metrics.transaction_errors.increment(1);
                     if let Some(results) = &ctx.prewarm_results &&
-                        let Some(reads) = evm.db_mut().take_reads()
+                        let Some(reads) = reads
                     {
                         results.reject(index, reads);
                     }
@@ -383,14 +388,10 @@ where
             }
 
             if let Some(results) = &ctx.prewarm_results &&
-                let Some(reads) = evm.db_mut().take_reads() &&
+                let Some(reads) = reads &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                match reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending.ok())
-                {
-                    Ok(reads) => results.insert(index, res, reads),
-                    Err(reads) => results.reject(index, reads),
-                }
+                results.store(index, res, reads, evm.inspector(), speculative);
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
@@ -709,10 +710,14 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = (
-    B256,
-    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>,
-);
+struct PrewarmEvmState<Evm: ConfigureEvm> {
+    /// Termination flag of the prewarm run that created the EVM, which identifies the run.
+    run: Arc<AtomicBool>,
+    /// The EVM, `None` if its state provider could not be created.
+    evm: Option<
+        EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>,
+    >,
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -728,7 +733,7 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Creates a per-thread EVM for prewarming, tagged with the hash of the block it executes.
+    /// Creates a per-thread EVM for prewarming, tagged with the prewarm run it belongs to.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
@@ -739,7 +744,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return (self.env.hash, None)
+                return PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: None }
             }
         };
 
@@ -766,13 +771,19 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        // JIT-compiled code would skip the inspector hooks that track observed balances.
-        let mut evm =
-            self.evm_config.clone().with_jit_support_enabled(false).evm_with_env_and_inspector(
-                RecordingDb::new(state_provider),
-                evm_env,
-                BalanceTracker::default(),
-            );
+        // Balances only need to be tracked to record reads for result reuse, and JIT-compiled
+        // code would skip the inspector hooks that track them.
+        let reuse = self.prewarm_results.is_some();
+        let mut evm_config = self.evm_config.clone();
+        if reuse {
+            evm_config = evm_config.with_jit_support_enabled(false);
+        }
+        let mut evm = evm_config.evm_with_env_and_inspector(
+            RecordingDb::new(state_provider),
+            evm_env,
+            BalanceTracker::default(),
+        );
+        evm.set_inspector_enabled(reuse);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -786,7 +797,7 @@ where
             });
         }
 
-        (self.env.hash, Some(evm))
+        PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: Some(evm) }
     }
 
     /// Returns `true` if prewarming should stop.
@@ -1006,16 +1017,20 @@ pub struct PrewarmMetrics {
 mod tests {
 
     use super::*;
-    use alloy_consensus::transaction::Recovered;
+    use alloy_consensus::{transaction::Recovered, TxLegacy};
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_stages_api::{StageCheckpoint, StageId};
     use reth_storage_overlay::OverlayManager;
-    use revm::state::{Account, EvmStorageSlot, TransactionId};
+    use revm::{
+        database::EmptyDB,
+        state::{Account, EvmStorageSlot, TransactionId},
+    };
 
     #[test]
     fn storage_removals_lists_removed_slots_of_touched_accounts() {
@@ -1092,6 +1107,67 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn rebuilds_evm_for_each_prewarm_run() {
+        let caller = Address::repeat_byte(1);
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        let tx = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(
+                // Free, so that the empty caller can pay for it.
+                TxLegacy {
+                    gas_limit: 21_000,
+                    to: TxKind::Call(Address::repeat_byte(2)),
+                    ..Default::default()
+                }
+                .into(),
+                Signature::test_signature(),
+            ),
+            caller,
+        );
+        let pool = WorkerPool::new(1, "prewarm-test");
+        // Payloads that claim the same block hash may still use different block environments.
+        let prewarm = |beneficiary| {
+            let mut env = ExecutionEnv::<EthEvmConfig>::test_default();
+            env.evm_env.block_env.beneficiary = beneficiary;
+            let results = Arc::new(PrewarmResults::new(1));
+            let ctx = PrewarmContext {
+                env,
+                evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+                saved_cache: None,
+                provider: OverlayStateProviderFactory::new(
+                    provider.clone(),
+                    OverlayManager::default().overlay_builder(B256::ZERO),
+                ),
+                bal_prewarm_pool: None,
+                metrics: PrewarmMetrics::default(),
+                cache_metrics: None,
+                cache_state_metrics: None,
+                terminate_execution: Arc::new(AtomicBool::new(false)),
+                executed_tx_index: Arc::new(AtomicUsize::new(0)),
+                precompile_cache_disabled: false,
+                precompile_cache_map: PrecompileCacheMap::default(),
+                disable_bal_parallel_state_root: false,
+                disable_bal_batch_io: false,
+                prewarm_results: Some(Arc::clone(&results)),
+            };
+            let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx.clone()) };
+            pool.install_fn(|| {
+                PrewarmCacheTask::<EthPrimitives, MockEthProvider, EthEvmConfig>::transact_worker(
+                    &ctx, 0, tx, None,
+                )
+            });
+            results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().state
+        };
+
+        assert!(prewarm(Address::repeat_byte(0xa)).contains_key(&Address::repeat_byte(0xa)));
+        let state = prewarm(Address::repeat_byte(0xb));
+        assert!(state.contains_key(&Address::repeat_byte(0xb)));
+        assert!(!state.contains_key(&Address::repeat_byte(0xa)));
     }
 
     fn test_prewarm_context(
