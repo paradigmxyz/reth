@@ -375,12 +375,12 @@ where
                 return;
             }
 
-            if index > 0 {
+            if index > 0 &&
+                let Some(state_root_hint_stream) = state_root_hint_stream
+            {
                 let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(state_root_hint_stream) = state_root_hint_stream {
-                    state_root_hint_stream.on_access_hint(targets.into());
-                }
+                state_root_hint_stream.on_access_hint(targets.into());
             }
 
             if let Some(results) = &ctx.prewarm_results &&
@@ -701,7 +701,7 @@ where
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
-    pub prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
+    pub(crate) prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
