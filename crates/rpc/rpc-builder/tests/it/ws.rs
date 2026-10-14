@@ -12,7 +12,10 @@ use reth_network_api::noop::NoopNetwork;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory, NoopProvider},
+    test_utils::{
+        blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB, NoopProvider,
+    },
+    CanonStateNotification, Chain,
 };
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
@@ -22,7 +25,7 @@ use reth_transaction_pool::{
     PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use serde_json::Value;
-use std::time::Duration;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use tokio::time::Instant;
 
 use reth_rpc_builder::{RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
@@ -41,9 +44,20 @@ async fn launch_ws_eth() -> reth_rpc_builder::RpcServerHandle {
 async fn launch_ws_eth_with_canon_state(
     max_subscriptions_per_connection: u32,
 ) -> reth_rpc_builder::RpcServerHandle {
-    let provider =
-        BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
-            .unwrap();
+    launch_ws_eth_with_provider(canon_state_provider(), max_subscriptions_per_connection).await
+}
+
+/// Returns a provider whose canonical state notification sender stays alive.
+fn canon_state_provider() -> BlockchainProvider<MockNodeTypesWithDB> {
+    BlockchainProvider::with_latest(create_test_provider_factory(), SealedHeader::default())
+        .unwrap()
+}
+
+/// Launches a WS server with the Eth module, backed by the given provider.
+async fn launch_ws_eth_with_provider(
+    provider: BlockchainProvider<MockNodeTypesWithDB>,
+    max_subscriptions_per_connection: u32,
+) -> reth_rpc_builder::RpcServerHandle {
     let pool: TestPool = TestPoolBuilder::default().into();
     let builder = RpcModuleBuilder::default()
         .with_provider(provider)
@@ -322,4 +336,64 @@ async fn test_eth_subscribe_syncing_task_exits_on_disconnect() {
     }
     let alive = metrics.num_alive_tasks();
     assert!(alive <= baseline, "subscription tasks outlived the connection: {baseline} -> {alive}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_unfiltered_logs_match_filtered_logs() {
+    reth_tracing::init_test_tracing();
+
+    let provider = canon_state_provider();
+    let handle = launch_ws_eth_with_provider(provider.clone(), 8).await;
+    let client = handle.ws_client().await.unwrap();
+
+    // Unfiltered subscriptions share one feed, while a block range makes the filter non-default
+    // without excluding any log, so that subscription encodes its own logs.
+    let mut subs = Vec::new();
+    for params in [
+        jsonrpsee::rpc_params!["logs"],
+        jsonrpsee::rpc_params!["logs", serde_json::json!({})],
+        jsonrpsee::rpc_params!["logs", serde_json::json!({"fromBlock": "0x1"})],
+    ] {
+        let sub: Subscription<Value> =
+            client.subscribe("eth_subscribe", params, "eth_unsubscribe").await.unwrap();
+        subs.push(sub);
+    }
+
+    let mut blocks = BlockchainTestData::default().blocks.into_iter();
+    let (first, mut outcome) = blocks.next().unwrap();
+    let (second, second_outcome) = blocks.next().unwrap();
+    outcome.extend(second_outcome);
+    let num_logs = outcome.receipts.iter().flatten().map(|receipt| receipt.logs.len()).sum();
+    let commit = CanonStateNotification::Commit {
+        new: Arc::new(Chain::new([first, second], outcome, BTreeMap::new())),
+    };
+
+    // Subscription tasks subscribe to canonical state asynchronously, so keep committing the same
+    // chain until every subscription received its logs.
+    let in_memory_state = provider.canonical_in_memory_state();
+    let notifier = tokio::spawn(async move {
+        loop {
+            in_memory_state.notify_canon_state(commit.clone());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    });
+
+    let mut received = Vec::new();
+    for sub in &mut subs {
+        let mut logs = Vec::with_capacity(num_logs);
+        while logs.len() < num_logs {
+            let log = tokio::time::timeout(Duration::from_secs(5), sub.next())
+                .await
+                .expect("timed out waiting for logs")
+                .expect("subscription ended unexpectedly")
+                .unwrap();
+            logs.push(log);
+        }
+        received.push(logs);
+    }
+    notifier.abort();
+
+    assert!(num_logs > 1);
+    assert_eq!(received[0], received[2]);
+    assert_eq!(received[1], received[2]);
 }
