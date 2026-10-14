@@ -17,8 +17,9 @@ use std::marker::PhantomData;
 /// Trait abstracting nibble encoding for trie keys.
 ///
 /// Allows the same cursor implementation to work with both legacy (65-byte) and
-/// packed (33-byte) nibble encodings. The underlying cursor types are monomorphized per
-/// adapter, while [`DatabaseTrieCursorFactory`] selects the encoding at runtime.
+/// packed (33-byte) nibble encodings. [`DatabaseTrieCursorFactory`] fixes the encoding through
+/// its adapter type parameter. Callers must choose an adapter matching the database's storage
+/// settings; [`crate::with_adapter!`] provides runtime dispatch between the adapter types.
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles` or `PackedStoredNibbles`).
     type AccountKey: Key + From<Nibbles> + Clone;
@@ -39,9 +40,8 @@ pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
 
 /// Trait for storage trie entry types that carry a subkey and node.
 ///
-/// Needed because [`StorageTrieEntry`] and [`PackedStorageTrieEntry`] are separate structs
-/// with different field types, but `DatabaseStorageTrieCursor` must access `.nibbles()` and
-/// `.node()` generically through `A::StorageValue`.
+/// Provides access to the encoded subkey and branch node, as well as construction and
+/// decomposition into owned parts, independently of the subkey encoding.
 pub trait StorageTrieEntryLike: Sized {
     /// The subkey type.
     type SubKey: Clone;
@@ -135,11 +135,9 @@ impl TrieKeyAdapter for PackedKeyAdapter {
     }
 }
 
-/// Helper trait to map a [`TrieKeyAdapter`] to the correct table types.
+/// Maps a [`TrieKeyAdapter`] to account and storage trie tables using its key and value types.
 ///
-/// This indirection is needed because the `tables!` macro generates non-generic
-/// table types, so we use separate "view" types for packed encoding that share
-/// the same MDBX table name.
+/// The selected table types must match the database's stored nibble encoding.
 pub trait TrieTableAdapter: TrieKeyAdapter {
     /// The account trie table type.
     type AccountTrieTable: Table<Key = Self::AccountKey, Value = BranchNodeCompact>;

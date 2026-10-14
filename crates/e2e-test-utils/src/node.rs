@@ -8,7 +8,7 @@ use crate::{
     TmpDB,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockId;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{Ethereum, IntoWallet, ReceiptResponse};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_provider::{
@@ -537,7 +537,8 @@ where
     /// ones.
     ///
     /// Use [`Self::mine_pooled`] for transactions that are already in the pool, e.g. sent through
-    /// [`Self::rpc_provider_with_wallet`] or added with the pool API.
+    /// [`Self::rpc_provider_with_wallet`] or added with the pool API, and [`Self::mine_signed`]
+    /// for signed transactions that should all succeed.
     pub async fn mine(
         &mut self,
         txs: impl IntoIterator<Item = Bytes>,
@@ -581,6 +582,34 @@ where
             + 'static,
     {
         self.mine_txs(txs, false).await
+    }
+
+    /// Mines the signed transactions like [`Self::mine`] and returns an error if one of them
+    /// reverted, see [`MinedBlock::ensure_success`].
+    ///
+    /// The transactions are EIP-2718 encoded before they are sent to the pool, so signed
+    /// transactions or envelopes, e.g. of a custom transaction type, can be passed without
+    /// encoding them first.
+    pub async fn mine_signed<T: Encodable2718>(
+        &mut self,
+        txs: impl IntoIterator<Item = T>,
+    ) -> eyre::Result<
+        MinedBlock<
+            Payload::BuiltPayload,
+            RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>,
+        >,
+    >
+    where
+        Payload::BuiltPayload: BuiltPayload<Primitives = PrimitivesTy<Node::Types>>,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        // Encoded up front, so the returned future does not hold `T` across await points.
+        let txs: Vec<Bytes> = txs.into_iter().map(|tx| tx.encoded_2718().into()).collect();
+        self.mine(txs).await?.ensure_success()
     }
 
     /// Mines the transactions with the given hashes like [`Self::mine`], for transactions that are
@@ -973,6 +1002,17 @@ where
     /// [`Finality`] policy of the context. Returns an error if the node does not sync within
     /// [`WAIT_TIMEOUT`].
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.sync_to_forkchoice(ForkchoiceState::same_hash(block)).await
+    }
+
+    /// Sends the forkchoice update `state` and waits for the node to sync to its head, like
+    /// [`Self::sync_to`], but with the safe and finalized blocks of `state`.
+    ///
+    /// A finalized block below the head, e.g. one the node does not know yet, lets a backfill
+    /// anchor to it, as a snap sync anchors its pivot to the finalized block. Returns an error if
+    /// the node does not sync within [`WAIT_TIMEOUT`].
+    pub async fn sync_to_forkchoice(&self, state: ForkchoiceState) -> eyre::Result<()> {
+        let block = state.head_block_hash;
         let sync = async {
             while self
                 .inner
@@ -981,7 +1021,11 @@ where
                 .is_none_or(|h| h.hash() != block)
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                self.update_forkchoice(block, block).await?;
+                self.inner
+                    .add_ons_handle
+                    .beacon_engine_handle
+                    .fork_choice_updated(state, None)
+                    .await?;
             }
             Ok(())
         };
@@ -1561,8 +1605,8 @@ fn describe_pending_transactions<P: TransactionPool>(pool: &P) -> String {
     )
 }
 
-/// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`] or
-/// [`NodeTestContext::mine_pooled`].
+/// A block mined by [`NodeTestContext::mine`], [`NodeTestContext::mine_including`],
+/// [`NodeTestContext::mine_signed`] or [`NodeTestContext::mine_pooled`].
 #[derive(Debug)]
 pub struct MinedBlock<Payload: BuiltPayload, Receipt> {
     /// The built payload of the block.
@@ -1726,6 +1770,7 @@ mod tests {
         wait::{assert_holds_for, poll_until_with, PollOpts},
         NodeHelperType,
     };
+    use alloy_consensus::TxEnvelope;
     use reth_node_ethereum::{EthEngineTypes, EthereumNode};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
 
@@ -1759,6 +1804,7 @@ mod tests {
         ));
         assert_send(node.mine([Bytes::new()]));
         assert_send(node.mine_including(Vec::new()));
+        assert_send(node.mine_signed(Vec::<TxEnvelope>::new()));
         assert_send(node.mine_pooled([B256::ZERO]));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
@@ -1771,6 +1817,7 @@ mod tests {
         assert_send(node.wait_for_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.sync_to_forkchoice(ForkchoiceState::default()));
         assert_send(node.submit_payload(payload.clone()));
         assert_send(node.submit_payload_with_status(payload.clone()));
         assert_send(node.import_payload(payload));

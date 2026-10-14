@@ -10,7 +10,7 @@
 //! is available, and re-anchoring starts once a pivot lags by 96 blocks rather than at the edge of
 //! the window peers still serve state for.
 
-use crate::{SnapGeneration, SnapPhase, SnapSyncError};
+use crate::{SnapGeneration, SnapSyncError};
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
@@ -90,13 +90,6 @@ impl SnapPivotPolicy {
         generation.lag(head) > self.advance_after
     }
 
-    /// Returns whether the block access lists `generation` still needs remain servable.
-    ///
-    /// Once they are not, its state cannot be carried forward and the attempt has to restart.
-    pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
-        self.is_catchable_from(generation.target().number, head)
-    }
-
     /// Returns whether the list of the block after `applied` remains servable under `head`.
     ///
     /// Catch-up continues from the last applied block, which trails the pivot while lists are
@@ -127,13 +120,6 @@ impl SnapPivotPolicy {
         Ok(None)
     }
 
-    /// Returns whether an interrupted generation is still worth finishing under `head`.
-    ///
-    /// A fully downloaded generation only needs its trie rebuilt, so it always is.
-    pub const fn is_finishable(&self, generation: SnapGeneration, head: u64) -> bool {
-        matches!(generation.phase(), SnapPhase::Trie) || self.is_catchable(generation, head)
-    }
-
     /// Returns whether the lists of blocks a reorg orphaned after `ancestor` are still worth
     /// waiting for under `head`, since peers may keep lists only for canonical blocks.
     pub const fn awaits_orphaned_lists(&self, ancestor: u64, head: u64) -> bool {
@@ -159,7 +145,6 @@ mod tests {
         assert_eq!(generation.target().number, 2);
         assert_eq!(generation.target().hash, expected.hash_slow());
         assert_eq!(generation.state_root(), expected.state_root);
-        assert_eq!(generation.phase(), SnapPhase::Accounts);
     }
 
     #[test]
@@ -236,35 +221,10 @@ mod tests {
     }
 
     #[test]
-    fn generation_outside_the_bal_window_is_not_finishable() {
-        let headers = chain(Some(0));
-        let anchor = headers[1].clone();
-        let provider = provider_with(headers);
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root);
+    fn generation_outside_the_bal_window_is_not_catchable() {
         let policy = policy();
 
-        assert!(generation.is_canonical(&provider).unwrap());
-        assert!(policy.is_finishable(generation, 9));
-        assert!(!policy.is_finishable(generation, 10));
-    }
-
-    #[test]
-    fn downloaded_state_finishes_outside_the_bal_window() {
-        let anchor = chain(Some(0))[1].clone();
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, anchor.hash_slow()), anchor.state_root)
-                .with_phase(SnapPhase::Trie);
-
-        assert!(policy().is_finishable(generation, 1_000));
-    }
-
-    #[test]
-    fn reorged_anchor_is_not_canonical() {
-        let provider = provider_with(chain(Some(0)));
-        let generation =
-            SnapGeneration::new(BlockNumHash::new(1, B256::repeat_byte(0xff)), B256::ZERO);
-
-        assert!(!generation.is_canonical(&provider).unwrap());
+        assert!(policy.is_catchable_from(1, 9));
+        assert!(!policy.is_catchable_from(1, 10));
     }
 }

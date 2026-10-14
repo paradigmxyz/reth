@@ -1720,6 +1720,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
+name = "bedrock-assertions"
+version = "0.1.0"
+source = "git+https://github.com/oss-garage/bedrock#1d75d79122a6204efb61cbf1026513e655f38586"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bimap"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8812,6 +8820,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-dst"
+version = "2.7.0"
+dependencies = [
+ "bedrock-assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-e2e-test-utils"
 version = "2.7.0"
 dependencies = [
@@ -10041,11 +10058,13 @@ dependencies = [
  "rand 0.9.5",
  "reqwest",
  "reth-chainspec",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-e2e-test-utils",
  "reth-engine-local",
  "reth-engine-primitives",
+ "reth-engine-tree",
  "reth-errors",
  "reth-eth-wire-types",
  "reth-ethereum-consensus",
@@ -10065,6 +10084,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune",
  "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
@@ -10076,7 +10096,9 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-snap-sync",
  "reth-stages",
+ "reth-stages-api",
  "reth-stages-types",
+ "reth-static-file",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",

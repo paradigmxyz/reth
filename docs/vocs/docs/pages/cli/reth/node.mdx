@@ -138,6 +138,9 @@ Networking:
 
           [default: 200]
 
+      --snap.v2
+          Advertise and serve experimental snap/2. `reth node` also bootstraps a fresh database with it, and uses the staged pipeline while the chain head predates block access lists
+
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
@@ -1109,6 +1112,9 @@ Engine:
           Configure the number of reserved CPU cores for non-reth processes
 
           [default: 1]
+
+      --cpu-cores <COUNT>
+          Override the available CPU count for node thread pools and parallel execution decisions. Does not change CPU affinity. Explicit thread counts take precedence
 
       --engine.disable-precompile-cache
           Disable precompile cache

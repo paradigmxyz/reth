@@ -70,6 +70,9 @@ pub enum BackfillAction {
     /// Moves the target of a running backfill to the new forkchoice head, without starting another
     /// run. It may arrive when no run is active, in which case it should be ignored.
     UpdateTarget(B256),
+    /// Reports the new finalized block, which a backfill may anchor irreversible work to.
+    /// Backfills that use finality retain it while idle so the next run can use it.
+    UpdateFinalized(B256),
 }
 
 /// The events that can be emitted on backfill sync.
@@ -192,7 +195,7 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),
             // Ordinary backfill finishes its current range before the engine re-evaluates FCU.
-            BackfillAction::UpdateTarget(_) => {}
+            BackfillAction::UpdateTarget(_) | BackfillAction::UpdateFinalized(_) => {}
         }
     }
 

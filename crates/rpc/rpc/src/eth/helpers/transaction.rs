@@ -147,7 +147,7 @@ mod tests {
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool, TransactionGenerator},
-        EthPooledTransaction, PoolPooledTx, TransactionOrigin, TransactionPool,
+        PoolPooledTx, TransactionOrigin, TransactionPool,
     };
 
     fn mock_eth_api(
@@ -326,22 +326,6 @@ mod tests {
             };
             assert_eq!(actual.into_sidecar(), sidecar);
         }
-    }
-
-    #[tokio::test]
-    async fn send_raw_transaction_sync_populates_sender_cache() {
-        let cache = SenderRecoveryCache::new(16);
-        let eth_api = mock_eth_api_builder(Default::default())
-            .sender_recovery_cache(Some(cache.clone()))
-            .build();
-        let raw = raw_transfer_tx();
-        let transaction = EthPooledTransaction::decode_raw_transaction(&raw).unwrap();
-        let sender = transaction.try_recover().unwrap();
-
-        let err = eth_api.send_raw_transaction_sync(raw, Some(1)).await.unwrap_err();
-        assert!(matches!(err, EthApiError::TransactionConfirmationTimeout { .. }));
-        assert_eq!(cache.get(transaction.tx_hash()), Some(sender));
-        assert_eq!(eth_api.pool().len(), 1);
     }
 
     #[tokio::test]

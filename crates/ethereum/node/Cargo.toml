@@ -45,6 +45,8 @@ reth-trie-common.workspace = true
 reth-errors.workspace = true
 reth-snap-sync.workspace = true
 reth-stages.workspace = true
+reth-engine-tree.workspace = true
+reth-network-p2p.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -79,7 +81,6 @@ reth-testing-utils.workspace = true
 reth-stages-types.workspace = true
 reth-downloaders.workspace = true
 reth-eth-wire-types.workspace = true
-reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
@@ -101,6 +102,10 @@ alloy-rpc-types-trace.workspace = true
 similar-asserts.workspace = true
 reqwest.workspace = true
 reth-rpc-layer.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-static-file.workspace = true
+reth-consensus.workspace = true
 
 [features]
 default = []
@@ -126,6 +131,7 @@ asm-keccak = [
     "reth-evm-ethereum/asm-keccak",
     "evm2/asm-keccak",
     "reth-execution-types/asm-keccak",
+    "reth-engine-tree/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
@@ -133,6 +139,7 @@ portable = [
     "evm2/portable",
     "reth-execution-types/portable",
     "reth-revm/portable",
+    "reth-engine-tree/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
@@ -162,4 +169,7 @@ test-utils = [
     "reth-stages/test-utils",
     "reth-downloaders/test-utils",
     "reth-network-p2p/test-utils",
+    "reth-consensus/test-utils",
+    "reth-engine-tree/test-utils",
+    "reth-stages-api/test-utils",
 ]

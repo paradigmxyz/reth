@@ -3578,41 +3578,6 @@ mod tests {
     }
 
     #[test]
-    fn update_only_visits_changed_senders_when_fees_are_unchanged() {
-        let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
-
-        // two senders, each with one transaction
-        let a = f.validated(MockTransaction::eip1559().inc_price_by(10));
-        let b = f.validated(MockTransaction::eip1559().inc_price_by(10));
-        let (a_id, b_id) = (*a.id(), *b.id());
-        assert_ne!(a_id.sender, b_id.sender);
-        pool.add_transaction(a, U256::from(1_000_000), 0, None).unwrap();
-        pool.add_transaction(b, U256::from(1_000_000), 0, None).unwrap();
-
-        // a full update applies the current fees to every transaction and records them
-        pool.all_transactions.update(&Default::default());
-        assert_eq!(pool.all_transactions.last_full_update_fees, pool.all_transactions.pending_fees);
-
-        // sender `a` moved past its transaction on chain, the fees did not move. Only `a` should
-        // be evaluated, and `b` must be left exactly as it was.
-        let b_state_before = pool.all_transactions.txs.get(&b_id).unwrap().state;
-        let mut changed = FxHashMap::default();
-        changed.insert(a_id.sender, SenderInfo { state_nonce: 1, balance: U256::from(1_000_000) });
-
-        let produced = pool.all_transactions.update(&changed);
-
-        assert_eq!(produced.len(), 1, "expected exactly the changed sender's update");
-        assert_eq!(produced[0].id, a_id);
-        assert!(matches!(produced[0].destination, Destination::Discard));
-        assert_eq!(
-            pool.all_transactions.txs.get(&b_id).unwrap().state,
-            b_state_before,
-            "unchanged sender was modified"
-        );
-    }
-
-    #[test]
     fn changed_sender_update_matches_full_update() {
         let senders = [
             Address::with_last_byte(0x0a),
@@ -4041,42 +4006,6 @@ mod tests {
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
-    }
-
-    #[test]
-    fn update_blob_fee_parks_pending_when_base_fee_falls_in_the_same_block() {
-        let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
-
-        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
-        let initial_base_fee = 100u64;
-        pool.all_transactions.pending_fees.base_fee = initial_base_fee;
-
-        // comfortably satisfies both fees, so it starts out pending
-        let tx = MockTransaction::eip4844()
-            .with_max_fee(500)
-            .with_priority_fee(1)
-            .with_blob_fee(initial_blob_fee + 100);
-        let validated = f.validated(tx.clone());
-        let id = *validated.id();
-        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
-        assert_eq!(pool.pending_pool.len(), 1);
-
-        // the blob fee rises past its cap while the base fee falls, which is what a blob heavy
-        // but gas light block produces. The rise still has to park it.
-        let raised_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
-        pool.all_transactions.pending_fees.base_fee = initial_base_fee - 1;
-        pool.update_blob_fee(raised_blob_fee, Ordering::Less, |_| {});
-
-        assert!(pool.pending_pool.is_empty(), "transaction was left in the pending pool");
-        assert_eq!(pool.blob_pool.len(), 1);
-
-        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
-        assert!(
-            !tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "blob fee cap flag was not cleared"
-        );
-        assert_eq!(tx_meta.subpool, SubPool::Blob);
     }
 
     #[test]

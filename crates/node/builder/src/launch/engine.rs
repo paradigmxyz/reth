@@ -5,7 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    sync::{BackfillContext, BackfillSyncBuilder, PipelineBackfill},
+    sync::{BackfillClientFor, BackfillContext, BackfillSyncBuilder, PipelineBackfill},
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -94,10 +94,7 @@ impl<B> EngineNodeLauncher<B> {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-        B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        >,
+        B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config, mut backfill } = self;
         let NodeBuilderWithComponents {
@@ -492,10 +489,8 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
-    B: BackfillSyncBuilder<
-            NodeTypesWithDBAdapter<N, DB>,
-            <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client,
-        > + 'static,
+    B: BackfillSyncBuilder<NodeTypesWithDBAdapter<N, DB>, BackfillClientFor<T, CB::Components>>
+        + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

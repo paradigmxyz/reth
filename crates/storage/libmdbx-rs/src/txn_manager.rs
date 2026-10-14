@@ -191,7 +191,7 @@ mod read_transactions {
         /// comparable. The time of transaction opening is stored as a value.
         ///
         /// The backtrace of the transaction opening is recorded only when debug assertions are
-        /// enabled.
+        /// enabled outside DST.
         active: DashMap<usize, (TransactionPtr, Instant, Option<Arc<Backtrace>>)>,
         /// List of timed out transactions that were not aborted by the user yet, hence have a
         /// dangling read transaction pointer.
@@ -210,7 +210,8 @@ mod read_transactions {
                 (
                     tx,
                     Instant::now(),
-                    cfg!(debug_assertions).then(|| Arc::new(Backtrace::force_capture())),
+                    cfg!(all(debug_assertions, not(feature = "dst")))
+                        .then(|| Arc::new(Backtrace::force_capture())),
                 ),
             );
         }
@@ -361,6 +362,10 @@ mod read_transactions {
                 let tx = env.begin_ro_txn().unwrap();
                 let tx_ptr = tx.txn() as usize;
                 assert!(read_transactions.active.contains_key(&tx_ptr));
+                assert_eq!(
+                    read_transactions.active.get(&tx_ptr).unwrap().2.is_some(),
+                    cfg!(all(debug_assertions, not(feature = "dst"))),
+                );
 
                 tx.open_db(None).unwrap();
                 drop(tx);
