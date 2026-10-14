@@ -129,6 +129,19 @@ impl<H> PrewarmResults<H> {
         !reads.matches(&self.predicted, index)
     }
 
+    /// Returns whether prewarming executed the transaction at `index`, but its reads no longer
+    /// match the predicted state.
+    pub(super) fn is_stale(&self, index: usize) -> bool {
+        let Some(slot) = self.slots.get(index) else { return false };
+        let slot = slot.lock();
+        let reads = match &*slot {
+            ResultSlot::Ready(tx) => &tx.reads,
+            ResultSlot::Unusable(reads) => reads,
+            ResultSlot::Empty | ResultSlot::Executed => return false,
+        };
+        !reads.matches(&self.predicted, index)
+    }
+
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
     /// `db`.
     ///

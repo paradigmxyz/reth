@@ -59,6 +59,10 @@ use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 /// Maximum number of consecutive rounds that execute stale prewarm results again.
 const MAX_REFRESH_ROUNDS: usize = 4;
 
+/// Number of transactions ahead of block execution that are refreshed while transactions are still
+/// executed for the first time.
+const REFRESH_FRONTIER: usize = 8;
+
 /// Number of transactions ahead of block execution that refreshing checks after block execution
 /// published actual writes.
 const REFRESH_WINDOW: usize = 64;
@@ -181,6 +185,9 @@ where
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
+            // Number of dispatched transactions that prewarming has not executed yet.
+            let pending_txs = AtomicUsize::new(0);
+            let pending_txs = &pending_txs;
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
                     pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
@@ -204,6 +211,7 @@ where
                     if ctx.prewarm_results.is_some() {
                         refresh_txs.push((index, tx.clone()));
                     }
+                    pending_txs.fetch_add(1, Ordering::Relaxed);
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
@@ -214,6 +222,7 @@ where
                         )
                         .entered();
                         Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        pending_txs.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
 
@@ -224,6 +233,10 @@ where
                 {
                     let targets = multiproof_targets_from_withdrawals(withdrawals);
                     state_root_hint_stream.on_access_hint(targets.into());
+                }
+
+                if let Some(results) = &ctx.prewarm_results {
+                    Self::refresh_frontier(ctx, results, &refresh_txs, pending_txs);
                 }
             });
 
@@ -237,6 +250,34 @@ where
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
+    }
+
+    /// Executes stale results of the transactions block execution reaches next on the current
+    /// thread, while the pool still executes transactions for the first time.
+    fn refresh_frontier<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        results: &PrewarmResults<HaltReasonFor<Evm>>,
+        txs: &[(usize, Tx)],
+        pending_txs: &AtomicUsize,
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone,
+    {
+        let mut evm = None;
+        while pending_txs.load(Ordering::Relaxed) > 0 && !ctx.should_stop() {
+            // Skip the transaction block execution is about to reach.
+            let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
+            let start = txs.partition_point(|(index, _)| *index <= next);
+            let stale = txs[start..]
+                .iter()
+                .take(REFRESH_FRONTIER)
+                .find(|(index, _)| results.is_stale(*index));
+            let Some((index, tx)) = stale else {
+                std::thread::sleep(REFRESH_POLL_INTERVAL);
+                continue
+            };
+            let Some(evm) = evm.get_or_insert_with(|| ctx.evm_for_ctx().1) else { return };
+            Self::transact(ctx, evm, *index, tx.clone(), None);
+        }
     }
 
     /// Executes transactions again whose results became stale, because the predicted writes of
@@ -332,65 +373,76 @@ where
                 *state = ctx.evm_for_ctx();
             }
             let Some(evm) = state.1.as_mut() else { return };
+            Self::transact(ctx, evm, index, tx, state_root_hint_stream);
+        });
+    }
 
-            let start = Instant::now();
+    /// Executes a single prewarm transaction on `evm`.
+    fn transact<Tx>(
+        ctx: &PrewarmContext<N, P, Evm>,
+        evm: &mut PrewarmEvm<Evm>,
+        index: usize,
+        tx: Tx,
+        state_root_hint_stream: Option<&StateRootHintStream>,
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
+        let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
-            // Prewarming disables nonce and balance checks, so a reusable result must also show
-            // that the caller would have passed them.
-            let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
-            // Balances only need to be tracked to record reads for result reuse.
-            evm.set_inspector_enabled(ctx.prewarm_results.is_some());
-            if let Some(results) = &ctx.prewarm_results {
-                evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
-                evm.inspector_mut().clear();
-            }
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    if let Some(results) = &ctx.prewarm_results &&
-                        let Some(reads) = evm.db_mut().take_reads()
-                    {
-                        results.reject(index, reads);
-                    }
-                    return;
+        let (tx_env, tx) = tx.into_parts();
+        // Prewarming disables nonce and balance checks, so a reusable result must also show
+        // that the caller would have passed them.
+        let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
+        // Balances only need to be tracked to record reads for result reuse.
+        evm.set_inspector_enabled(ctx.prewarm_results.is_some());
+        if let Some(results) = &ctx.prewarm_results {
+            evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
+            evm.inspector_mut().clear();
+        }
+        let res = match evm.transact(tx_env) {
+            Ok(res) => res,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    %err,
+                    tx_hash=%tx.tx().tx_hash(),
+                    sender=%tx.signer(),
+                    "Error when executing prewarm transaction",
+                );
+                ctx.metrics.transaction_errors.increment(1);
+                if let Some(results) = &ctx.prewarm_results &&
+                    let Some(reads) = evm.db_mut().take_reads()
+                {
+                    results.reject(index, reads);
                 }
-            };
-            ctx.metrics.execution_duration.record(start.elapsed());
-
-            if ctx.should_stop() {
                 return;
             }
+        };
+        ctx.metrics.execution_duration.record(start.elapsed());
 
-            if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
-                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                if let Some(state_root_hint_stream) = state_root_hint_stream {
-                    state_root_hint_stream.on_access_hint(targets.into());
-                }
+        if ctx.should_stop() {
+            return;
+        }
+
+        if index > 0 {
+            let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
+            ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+            if let Some(state_root_hint_stream) = state_root_hint_stream {
+                state_root_hint_stream.on_access_hint(targets.into());
             }
+        }
 
-            if let Some(results) = &ctx.prewarm_results &&
-                let Some(reads) = evm.db_mut().take_reads() &&
-                index >= ctx.executed_tx_index.load(Ordering::Relaxed)
-            {
-                match reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending.ok())
-                {
-                    Ok(reads) => results.insert(index, res, reads),
-                    Err(reads) => results.reject(index, reads),
-                }
+        if let Some(results) = &ctx.prewarm_results &&
+            let Some(reads) = evm.db_mut().take_reads() &&
+            index >= ctx.executed_tx_index.load(Ordering::Relaxed)
+        {
+            match reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending.ok()) {
+                Ok(reads) => results.insert(index, res, reads),
+                Err(reads) => results.reject(index, reads),
             }
+        }
 
-            ctx.metrics.total_runtime.record(start.elapsed());
-        });
+        ctx.metrics.total_runtime.record(start.elapsed());
     }
 
     /// Saves the warmed cache in `self.execution_cache` after prewarming completes.
@@ -705,10 +757,11 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = (
-    B256,
-    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>,
-);
+type PrewarmEvmState<Evm> = (B256, Option<PrewarmEvm<Evm>>);
+
+/// EVM used for prewarming.
+type PrewarmEvm<Evm> =
+    EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
