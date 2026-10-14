@@ -334,6 +334,9 @@ pub enum Commands<
     /// Re-execute blocks in parallel to verify historical sync correctness.
     #[command(name = "re-execute")]
     ReExecute(re_execute::Command<C>),
+    /// Capture a pinned archive range for verified offline re-execution.
+    #[command(name = "re-execute-fill")]
+    ReExecuteFill(re_execute::FillCommand<C>),
     /// Extension subcommands provided by consumers.
     #[command(flatten)]
     Ext(SubCmd),
@@ -375,6 +378,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt:
             Self::Config(_) => None,
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
+            Self::ReExecuteFill(cmd) => cmd.chain_spec(),
             Self::Ext(_) => None,
         }
     }

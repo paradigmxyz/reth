@@ -137,7 +137,7 @@ Storage:
           [default: 1]
 
       --to <TO>
-          The height to end at. Defaults to the latest block
+          Exclusive end height. Defaults to the latest block (or the corpus end)
 
       --num-tasks <NUM_TASKS>
           Number of tasks to run in parallel. Defaults to the number of available CPUs
@@ -149,6 +149,12 @@ Storage:
 
       --skip-invalid-blocks
           Continues with execution when an invalid block is encountered and collects these blocks
+
+      --corpus <CORPUS>
+          Read a pinned corpus instead of opening a local database. Uses 64 MiB serialized reservations, excluding decoded state and SDK/cache memory
+
+      --s3-endpoint <S3_ENDPOINT>
+          Optional S3-compatible endpoint. Credentials use the standard AWS chain
 
 JIT:
       --jit
