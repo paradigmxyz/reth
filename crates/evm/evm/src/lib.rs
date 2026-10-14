@@ -337,6 +337,15 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
     }
 
+    /// Recomputes the fork-dependent configuration (spec id, precompiles, opcode table, warm set)
+    /// of the given EVM environment from its block environment's `number` and `timestamp`.
+    ///
+    /// Callers that mutate the block environment after construction — notably block overrides on
+    /// `eth_call`, `eth_estimateGas` and `debug_traceCall` — must invoke this so the EVM applies
+    /// the rules of the overridden block context. Caller-specific settings such as the
+    /// `disable_*` flags must be left untouched. The default implementation is a no-op.
+    fn update_cfg_env_from_block_env(&self, _evm_env: &mut EvmEnvFor<Self>) {}
+
     /// Creates a strategy with given EVM and execution context.
     fn create_executor<'a, DB, I>(
         &'a self,

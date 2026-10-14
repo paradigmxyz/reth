@@ -88,6 +88,8 @@ pub trait EstimateCall: Call {
         // <https://github.com/ethereum/go-ethereum/pull/30695>
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, &mut db, evm_env.block_env.inner_mut());
+            // Re-derive fork rules (spec, precompiles, warm set) from the overridden block context.
+            self.evm_config().update_cfg_env_from_block_env(&mut evm_env);
         }
 
         // Apply any state overrides if specified.

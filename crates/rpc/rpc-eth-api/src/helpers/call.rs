@@ -894,13 +894,6 @@ pub trait Call:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
 
-        // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
-        // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
-        // it to execute the call like a transaction.
-        if !evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-        }
-
         // Disable additional fee charges, e.g. opstack operator fee charge
         // See:
         // <https://github.com/paradigmxyz/reth/issues/18470>
@@ -913,7 +906,17 @@ pub trait Call:
 
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, evm_env.block_env.inner_mut());
+            // Re-derive fork rules (spec, precompiles, warm set) from the overridden block context.
+            self.evm_config().update_cfg_env_from_block_env(&mut evm_env);
         }
+
+        // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
+        // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
+        // it to execute the call like a transaction.
+        if !evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
+        }
+
         if let Some(state_overrides) = overrides.state {
             apply_state_overrides(state_overrides, db)
                 .map_err(EthApiError::from_state_overrides_err)?;
