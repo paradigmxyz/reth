@@ -14,7 +14,10 @@
 //! transfers. Successful value transfers and gas payments only require the balance to be at least
 //! as large as during speculation.
 
-use alloy_primitives::{map::DefaultHashBuilder, Address, B256, U256};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashMap},
+    Address, B256, U256,
+};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use revm::{
@@ -363,15 +366,21 @@ type Writes<T> = Vec<(usize, T)>;
 /// transactions depending on earlier ones in the block can still be reused.
 #[derive(Debug, Default)]
 pub(super) struct PredictedState {
-    /// Accounts, `None` if destroyed.
-    accounts: DashMap<Address, Writes<Option<AccountInfo>>, DefaultHashBuilder>,
-    storage: DashMap<(Address, StorageKey), Writes<StorageValue>, DefaultHashBuilder>,
-    /// Transactions that cleared an account's storage by creating or destroying it.
-    cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
+    accounts: DashMap<Address, AccountWrites, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
     /// Number of transactions whose actual writes block execution published.
     generation: AtomicUsize,
+}
+
+/// Predicted writes of an account.
+#[derive(Debug, Default)]
+struct AccountWrites {
+    /// The account without its bytecode, `None` if destroyed.
+    info: Writes<Option<AccountInfo>>,
+    storage: HashMap<StorageKey, Writes<StorageValue>, DefaultHashBuilder>,
+    /// Transactions that cleared the storage by creating or destroying the account.
+    cleared: Writes<()>,
 }
 
 impl PredictedState {
@@ -383,13 +392,14 @@ impl PredictedState {
     /// Returns the latest account write predicted before the transaction at `index`.
     fn account(&self, address: Address, index: usize) -> Option<Option<AccountInfo>> {
         let writes = self.accounts.get(&address)?;
-        latest(&writes, index).map(|(_, account)| account.clone())
+        latest(&writes.info, index).map(|(_, account)| account.clone())
     }
 
     /// Returns the latest storage value predicted before the transaction at `index`.
     fn storage(&self, address: Address, slot: StorageKey, index: usize) -> Option<StorageValue> {
-        let cleared = self.cleared.get(&address).and_then(|w| latest(&w, index).map(|(i, _)| *i));
-        let written = self.storage.get(&(address, slot)).and_then(|w| latest(&w, index).copied());
+        let writes = self.accounts.get(&address)?;
+        let cleared = latest(&writes.cleared, index).map(|(i, _)| *i);
+        let written = writes.storage.get(&slot).and_then(|w| latest(w, index).copied());
         match (written, cleared) {
             (Some((written, value)), Some(cleared)) if written >= cleared => Some(value),
             (_, Some(_)) => Some(StorageValue::ZERO),
@@ -420,7 +430,7 @@ impl PredictedState {
         for (address, account) in state {
             if account.is_touched() && !account.is_selfdestructed() && !account.info.is_empty() {
                 write(
-                    &mut self.accounts.entry(*address).or_default(),
+                    &mut self.accounts.entry(*address).or_default().info,
                     index,
                     Some(Some(account.info.copy_without_code())),
                 );
@@ -440,25 +450,21 @@ impl PredictedState {
             if !account.is_touched() {
                 continue
             }
+            let mut writes = self.accounts.entry(*address).or_default();
             let Some(written) = state.get(address).filter(|account| account.is_touched()) else {
-                self.retract(index, &core::iter::once((*address, account.clone())).collect());
+                writes.update(index, account, false);
                 continue
             };
-            let clears = |account: &Account| {
-                account.is_selfdestructed() || account.info.is_empty() || account.is_created()
-            };
-            if clears(account) && !clears(written) {
-                write::<()>(&mut self.cleared.entry(*address).or_default(), index, None);
+            if clears_storage(account) && !clears_storage(written) {
+                write(&mut writes.cleared, index, None);
             }
             // Storage of destroyed accounts is not published.
-            let destroyed = written.is_selfdestructed() || written.info.is_empty();
+            let destroyed = is_destroyed(written);
             for (slot, _) in account.changed_storage_slots() {
-                if destroyed || !written.storage.get(slot).is_some_and(|value| value.is_changed()) {
-                    write::<StorageValue>(
-                        &mut self.storage.entry((*address, *slot)).or_default(),
-                        index,
-                        None,
-                    );
+                if (destroyed || !written.storage.get(slot).is_some_and(|value| value.is_changed())) &&
+                    let Some(slot_writes) = writes.storage.get_mut(slot)
+                {
+                    write(slot_writes, index, None);
                 }
             }
         }
@@ -468,29 +474,45 @@ impl PredictedState {
     /// writes.
     fn update(&self, index: usize, state: &EvmState, publish: bool) {
         for (address, account) in state {
-            if !account.is_touched() {
-                continue
-            }
-            // Touched empty accounts are removed by EIP-161 state clearing.
-            let destroyed = account.is_selfdestructed() || account.info.is_empty();
-            if destroyed || account.is_created() {
-                write(&mut self.cleared.entry(*address).or_default(), index, publish.then_some(()));
-            }
-            // Created bytecode is kept separately, the rest is known to the database.
-            let info = publish.then(|| (!destroyed).then(|| account.info.copy_without_code()));
-            write(&mut self.accounts.entry(*address).or_default(), index, info);
-            if destroyed {
-                continue
-            }
-            for (slot, value) in account.changed_storage_slots() {
-                write(
-                    &mut self.storage.entry((*address, *slot)).or_default(),
-                    index,
-                    publish.then_some(value.present_value),
-                );
+            if account.is_touched() {
+                self.accounts.entry(*address).or_default().update(index, account, publish);
             }
         }
     }
+}
+
+impl AccountWrites {
+    /// Publishes or retracts the writes of the transaction at `index` to this account.
+    fn update(&mut self, index: usize, account: &Account, publish: bool) {
+        let destroyed = is_destroyed(account);
+        if clears_storage(account) {
+            write(&mut self.cleared, index, publish.then_some(()));
+        }
+        // Created bytecode is kept separately, the rest is known to the database.
+        let info = publish.then(|| (!destroyed).then(|| account.info.copy_without_code()));
+        write(&mut self.info, index, info);
+        if destroyed {
+            return
+        }
+        for (slot, value) in account.changed_storage_slots() {
+            write(
+                self.storage.entry(*slot).or_default(),
+                index,
+                publish.then_some(value.present_value),
+            );
+        }
+    }
+}
+
+/// Returns whether `account` is destroyed after the transaction, including touched empty
+/// accounts that EIP-161 state clearing removes.
+fn is_destroyed(account: &Account) -> bool {
+    account.is_selfdestructed() || account.info.is_empty()
+}
+
+/// Returns whether the transaction clears the storage of `account`.
+fn clears_storage(account: &Account) -> bool {
+    is_destroyed(account) || account.is_created()
 }
 
 /// Sets the write of the transaction at `index`, or removes it if `value` is `None`.
