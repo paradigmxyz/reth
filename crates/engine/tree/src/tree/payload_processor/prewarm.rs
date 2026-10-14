@@ -61,7 +61,7 @@ const MAX_REFRESH_ROUNDS: usize = 4;
 
 /// Number of transactions ahead of block execution that refreshing checks after block execution
 /// published actual writes.
-const REFRESH_WINDOW: usize = 64;
+const REFRESH_WINDOW: usize = 16;
 
 /// How often refreshing checks whether block execution published actual writes.
 const REFRESH_POLL_INTERVAL: Duration = Duration::from_micros(50);
