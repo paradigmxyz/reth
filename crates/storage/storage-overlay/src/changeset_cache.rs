@@ -15,7 +15,7 @@ use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{AlloyBlockHeader, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -244,14 +244,19 @@ impl ChangesetCache {
     /// per-block trie changesets (reverts) in reverse order (newest to oldest), so that older
     /// values take precedence when there are conflicts.
     ///
-    /// If any block is missing from cache, this falls back to one aggregate database computation
-    /// for the whole range. The aggregate result restores the trie to the state before the range
-    /// and is inserted into the range cache.
+    /// If any block is missing from cache, this computes the reverts for the whole range from the
+    /// database state at `finish`, using the trie updates of in-memory blocks where available. The
+    /// result restores the trie to the state before the range and is inserted into the range cache.
+    ///
+    /// An empty range returns empty reverts.
     ///
     /// # Arguments
     ///
+    /// * `overlay_manager` - Source of in-memory blocks and the state trie overlay at `finish`
     /// * `provider` - Database provider for DB access and block lookups
     /// * `range` - Block range to accumulate reverts for (inclusive)
+    /// * `partial_state_trie` - Block up to which the persisted trie tables are complete
+    /// * `finish` - Database tip
     ///
     /// # Returns
     ///
@@ -260,7 +265,7 @@ impl ChangesetCache {
     /// # Errors
     ///
     /// Returns error if:
-    /// - Any block in the range is beyond the database tip
+    /// - Any block in the range is beyond `finish`
     /// - Database access fails
     /// - Block hash lookup fails
     /// - Changeset computation fails
@@ -286,7 +291,17 @@ impl ChangesetCache {
         let end_block = *range.end();
         let timer = Instant::now();
 
-        if !range.is_empty() && end_block > finish.number {
+        if range.is_empty() {
+            debug!(
+                target: "trie::changeset_cache",
+                start_block,
+                end_block,
+                "Empty changeset range requested"
+            );
+            return Ok(Arc::new(TrieUpdatesSorted::default()))
+        }
+
+        if end_block > finish.number {
             return Err(ProviderError::InsufficientChangesets {
                 requested: end_block,
                 available: 0..=finish.number,
@@ -301,16 +316,6 @@ impl ChangesetCache {
             ?finish,
             "Starting get_or_compute_range"
         );
-
-        if start_block > end_block {
-            debug!(
-                target: "trie::changeset_cache",
-                start_block,
-                end_block,
-                "Empty changeset range requested"
-            );
-            return Ok(Arc::new(TrieUpdatesSorted::default()))
-        }
 
         let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
             ProviderError::other(std::io::Error::new(
@@ -397,7 +402,7 @@ impl ChangesetCache {
             target: "trie::changeset_cache",
             start_block,
             end_block,
-            "Changeset cache MISS in range, falling back to aggregate DB-based computation"
+            "Changeset cache MISS in range, falling back to DB-based computation"
         );
 
         let overlay = overlay_manager
@@ -405,16 +410,8 @@ impl ChangesetCache {
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
 
-        // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
-        // missing blocks do not affect correctness.
-        let mut forward_updates = overlay_manager
-            .parent_chain(finish.hash)
-            .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| {
-                (block.recovered_block().number(), Arc::clone(&block.trie_data().trie_updates))
-            })
-            .collect::<Vec<_>>();
-        forward_updates.reverse();
+        // Blocks above the range are included because the tail is also reverted.
+        let forward_updates = overlay_manager.chain_trie_updates(finish.hash, start_block);
 
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
@@ -1049,7 +1046,7 @@ mod tests {
         assert!(!nodes.is_empty());
         assert!(nodes.iter().all(|(_, node)| node.is_none()));
 
-        let first = reth_trie_db::compute_range_trie_changesets(
+        let block1_changesets = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
             &[],
@@ -1057,7 +1054,7 @@ mod tests {
             2,
         )
         .unwrap();
-        let second = reth_trie_db::compute_range_trie_changesets(
+        let block2_changesets = reth_trie_db::compute_range_trie_changesets(
             &*provider,
             &state_trie_provider,
             &[],
@@ -1065,10 +1062,13 @@ mod tests {
             2,
         )
         .unwrap();
-        let mut merged = second.clone();
-        merged.extend_ref_and_sort(&first);
+        let mut merged = block2_changesets.clone();
+        merged.extend_ref_and_sort(&block1_changesets);
         assert_eq!(result, merged);
-        let forward = [(1, Arc::new(second.clone())), (2, Arc::new(first.clone()))];
+        // Block 1 creates the storage and block 2 removes it, so each block's forward trie updates
+        // equal the other block's changesets.
+        let forward =
+            [(1, Arc::new(block2_changesets.clone())), (2, Arc::new(block1_changesets.clone()))];
         assert_eq!(
             reth_trie_db::compute_range_trie_changesets(
                 &*provider,
@@ -1081,23 +1081,28 @@ mod tests {
             result,
         );
         let manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
-        assert_eq!(manager.compute_block_trie_updates(&*provider, 1).unwrap(), second);
-        assert_eq!(manager.compute_block_trie_updates(&*provider, 2).unwrap(), first);
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 1).unwrap(), block2_changesets);
+        assert_eq!(manager.compute_block_trie_updates(&*provider, 2).unwrap(), block1_changesets);
 
         // Recompute block 1 against its own tip instead of a later tip. Its changeset is identical.
-        let at_first = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
+        let block1_tip_provider = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
             &*provider,
             StateTrieOverlay::new(TrieInputSorted::new(
-                Arc::new(second),
+                Arc::new(block2_changesets),
                 Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
                 Default::default(),
             )),
             provider.cached_storage_settings().is_v2(),
         );
-        let at_first =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
-                .unwrap();
-        assert_eq!(first, at_first);
+        let block1_at_own_tip = reth_trie_db::compute_range_trie_changesets(
+            &*provider,
+            &block1_tip_provider,
+            &[],
+            1..=1,
+            1,
+        )
+        .unwrap();
+        assert_eq!(block1_changesets, block1_at_own_tip);
     }
 
     #[test]
