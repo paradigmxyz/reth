@@ -46,12 +46,16 @@ where
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
-/// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
+/// The returned changesets restore the trie from the state after `range.end()` to the state before
+/// `range.start()`. They contain every trie path changed within the range, including nodes created
+/// in one block and removed in a later block of the range. An empty range returns empty changesets.
 ///
-/// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
-/// strictly increasing block number. Consecutive available blocks are reverted together, preserving
-/// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
-/// transient nodes are retained.
+/// `state_trie_provider` must expose the trie and hashed state at `db_tip_block`.
+///
+/// `forward_updates` holds original trie updates of executed blocks on the chain ending at
+/// `db_tip_block`, keyed by block number in strictly increasing order. Any subset of blocks may be
+/// supplied, including none; supplied blocks speed up the computation without affecting the
+/// correctness of the result.
 ///
 /// # Errors
 ///
@@ -95,126 +99,111 @@ where
         "Computing range trie changesets from database state"
     );
 
+    // Revert blocks after the range to reconstruct the trie at the end of the range.
     let mut overlay = TrieInputSorted::default();
-    // Rewind later blocks to reconstruct the trie at the end of the requested range.
-    if end_block < db_tip_block {
-        rewind_trie_range(
-            provider,
-            state_trie_provider,
-            forward_updates,
-            (end_block + 1)..=db_tip_block,
-            &mut overlay,
-            &mut None,
-        )?;
-    }
+    revert_trie_range(
+        provider,
+        state_trie_provider,
+        forward_updates,
+        (end_block + 1)..=db_tip_block,
+        &mut overlay,
+        |_| {},
+    )?;
 
-    let mut reverts = Some(TrieUpdatesSorted::default());
-    rewind_trie_range(
+    // Revert the range itself, collecting its changesets with older values taking precedence.
+    let mut changesets = TrieUpdatesSorted::default();
+    revert_trie_range(
         provider,
         state_trie_provider,
         forward_updates,
         range,
         &mut overlay,
-        &mut reverts,
+        |segment_changesets| changesets.extend_ref_and_sort(segment_changesets),
     )?;
-    let reverts = reverts.expect("revert collection is enabled");
 
     debug!(
         target: "trie::changesets",
         start_block,
         end_block,
-        num_account_nodes = reverts.account_nodes_ref().len(),
-        num_storage_tries = reverts.storage_tries_ref().len(),
+        num_account_nodes = changesets.account_nodes_ref().len(),
+        num_storage_tries = changesets.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
 
-    Ok(reverts)
+    Ok(changesets)
 }
 
-/// Rewinds the current state and trie views, accumulating changesets when `reverts` is `Some`.
-fn rewind_trie_range<Provider, StateTrieProvider>(
+/// Reverts `overlay` across `range`, newest block first, passing the trie changesets of each
+/// reverted segment to `on_segment`.
+///
+/// On entry `overlay` must hold the hashed state and trie reverts that, layered over
+/// `state_trie_provider`, describe the state after `range.end()`. On return it describes the state
+/// before `range.start()`.
+fn revert_trie_range<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
     forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
-    blocks: RangeInclusive<BlockNumber>,
+    range: RangeInclusive<BlockNumber>,
     overlay: &mut TrieInputSorted,
-    reverts: &mut Option<TrieUpdatesSorted>,
+    mut on_segment: impl FnMut(&TrieUpdatesSorted),
 ) -> Result<(), ProviderError>
 where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
-    let mut end = *blocks.end();
-    while end >= *blocks.start() {
-        let mut start = end;
-        let mut segment_range = 0..0;
+    if range.is_empty() {
+        return Ok(())
+    }
 
-        // Select updates of consecutive blocks iterating backwards from `end`.
-        // Without the original updates, reverting one block at a time preserves nodes that
-        // appear and disappear inside the range. An endpoint-only calculation would omit them.
+    let mut end = *range.end();
+    loop {
+        // Extend the segment backwards over consecutive blocks with forward updates. A block
+        // without forward updates forms its own segment, because a calculation spanning several
+        // blocks cannot see nodes that are created and removed between its endpoints.
+        let mut start = end;
+        let mut forward_indices = 0..0;
         if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
-            segment_range = index..index + 1;
-            while segment_range.start > 0 && start > *blocks.start() {
-                if forward_updates[segment_range.start - 1].0 != start - 1 {
-                    break
-                }
-                segment_range.start -= 1;
+            forward_indices = index..index + 1;
+            while start > *range.start() &&
+                forward_indices.start > 0 &&
+                forward_updates[forward_indices.start - 1].0 == start - 1
+            {
+                forward_indices.start -= 1;
                 start -= 1;
             }
         }
 
-        // If binary_search_by_key doesn't find the block then:
-        // * start stays equal to end, so the segment covers just that one block.
-        // * segment_range stays 0..0, making the forward-update iterator empty.
-        // * The code reconstructs that block’s trie reverts from its state changesets and the
-        //   current overlay.
-        // * merge_iter receives only those calculated reverts.
-
-        // Collect reverts for the segment and use them to generate the trie reverts for the
-        // segment.
+        // Calculate the segment's trie changesets from its state reverts.
         let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
         let prefixes = segment_state_reverts.construct_prefix_sets().freeze();
         Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&segment_state_reverts);
 
-        let segment_trie_reverts = StateRoot::new(
+        let calculated_changesets = StateRoot::new(
             InMemoryTrieCursorFactory::new(state_trie_provider, overlay.nodes.as_ref()),
             HashedPostStateCursorFactory::new(state_trie_provider, overlay.state.as_ref()),
         )
         .with_prefix_sets(prefixes)
-        .root_with_updates()
-        .map_err(ProviderError::other)?
+        .root_with_updates()?
         .1
         .into_sorted();
 
-        // Merging segment_trie_reverts into segment_trie_forward is a semi-hacky way to handle a
-        // particular edge-case:
-        // * Block 5: node N is absent
-        // * Block 6: node N is created
-        // * Block 8: node N is deleted
-        //
-        // In this case if we request reverts for 6..=8 then N wouldn't appear in them, because it
-        // did not undergo any change during the range (started absent, ended absent).
-        //
-        // By merging in the forward trie updates we incorporate N's most recent update which is a
-        // deletion in block 8, therefore deleting it in the reverts as well.
-        //
-        // N will appear in segment_trie_reverts in all other cases; segment_trie_forward only
-        // surfaces updates in this one case.
-        let segment_trie_forward =
-            forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
-        let segment_trie_reverts =
-            TrieUpdatesSorted::merge_iter(once(&segment_trie_reverts).chain(segment_trie_forward));
+        // The calculation omits paths whose value is equal at both ends of the segment, such as a
+        // node created and then removed within it. Consumers may apply the changesets to a trie
+        // that still holds such a node, so every touched path must be present. For an omitted
+        // path, the newest forward update holds the value at the end of the segment, which equals
+        // its value before the segment. Calculated values take precedence.
+        let segment_changesets = TrieUpdatesSorted::merge_slice(
+            &once(&calculated_changesets)
+                .chain(forward_updates[forward_indices].iter().rev().map(|(_, updates)| &**updates))
+                .collect::<Vec<_>>(),
+        );
 
-        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_trie_reverts);
-        if let Some(reverts) = reverts {
-            reverts.extend_ref_and_sort(&segment_trie_reverts);
-        }
+        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_changesets);
+        on_segment(&segment_changesets);
 
-        if start == *blocks.start() {
-            break
+        if start == *range.start() {
+            return Ok(())
         }
         end = start - 1;
     }
-
-    Ok(())
 }
