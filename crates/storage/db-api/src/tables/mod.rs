@@ -570,6 +570,10 @@ impl Table for PackedAccountsTrie {
 pub struct PackedStoragesTrie;
 
 impl Table for PackedStoragesTrie {
+    fn storage_shard_shift() -> Option<u8> {
+        Some(6)
+    }
+
     const NAME: &'static str = <StoragesTrie as Table>::NAME;
     const DUPSORT: bool = true;
     type Key = B256;

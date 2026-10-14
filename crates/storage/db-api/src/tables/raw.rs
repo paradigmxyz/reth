@@ -16,6 +16,9 @@ pub struct RawTable<T: Table> {
 }
 
 impl<T: Table> Table for RawTable<T> {
+    fn storage_shard_shift() -> Option<u8> {
+        T::storage_shard_shift()
+    }
     const NAME: &'static str = T::NAME;
     const DUPSORT: bool = false;
 
@@ -31,6 +34,9 @@ pub struct RawDupSort<T: DupSort> {
 }
 
 impl<T: DupSort> Table for RawDupSort<T> {
+    fn storage_shard_shift() -> Option<u8> {
+        T::storage_shard_shift()
+    }
     const NAME: &'static str = T::NAME;
     const DUPSORT: bool = true;
 

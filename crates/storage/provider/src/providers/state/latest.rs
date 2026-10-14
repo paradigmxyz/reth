@@ -58,7 +58,7 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
         hashed_address: B256,
         hashed_slot: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::HashedStorages>()?;
+        let mut cursor = self.tx().cursor_dup_read_shard::<tables::HashedStorages>(hashed_slot)?;
         Ok(cursor
             .seek_by_key_subkey(hashed_address, hashed_slot)?
             .filter(|e| e.key == hashed_slot)

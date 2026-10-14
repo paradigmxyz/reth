@@ -13,7 +13,7 @@ pub extern crate reth_mdbx_sys as ffi;
 
 pub use crate::{
     codec::*,
-    cursor::{Cursor, Iter, IterDup},
+    cursor::{Cursor, Iter, IterDup, ParallelCursor},
     database::Database,
     environment::{
         Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
@@ -21,7 +21,9 @@ pub use crate::{
     },
     error::{Error, Result},
     flags::*,
-    transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
+    transaction::{
+        CommitLatency, SubTransaction, SubTransactionStats, Transaction, TransactionKind, RO, RW,
+    },
 };
 
 #[cfg(feature = "read-tx-timeouts")]
