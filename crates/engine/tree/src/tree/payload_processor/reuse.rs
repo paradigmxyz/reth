@@ -146,8 +146,8 @@ impl<H> PrewarmResults<H> {
     /// Takes the prewarm result of the transaction at `index` if it is ready and its reads match
     /// `db`.
     ///
-    /// The returned result has its balance changes applied to the current balances. Stale results
-    /// stay in their slot and are freed with `self`.
+    /// The returned result has its balance changes applied to the current balances. Stale results,
+    /// and results whose reads fail, stay in their slot unchanged and are freed with `self`.
     pub(crate) fn take_valid<DB: Database>(
         &self,
         index: usize,
@@ -155,25 +155,25 @@ impl<H> PrewarmResults<H> {
     ) -> Result<Result<ResultAndState<H>, ReuseMiss>, DB::Error> {
         let Some(slot) = self.slots.get(index) else { return Ok(Err(ReuseMiss::Missing)) };
         let mut slot = slot.lock();
-        // The result stays published as the prediction of this transaction's writes.
         let mut tx = match core::mem::replace(&mut *slot, ResultSlot::Executed) {
             ResultSlot::Ready(tx) => tx,
             ResultSlot::Unusable(reads) => {
                 *slot = ResultSlot::Unusable(reads);
                 return Ok(Err(ReuseMiss::Stale))
             }
-            previous => {
+            previous @ (ResultSlot::Empty | ResultSlot::Executed) => {
                 *slot = previous;
                 return Ok(Err(ReuseMiss::Missing))
             }
         };
         let rebased = match tx.validate(db) {
             Ok(Some(rebased)) => rebased,
-            stale => {
+            result => {
                 *slot = ResultSlot::Ready(tx);
-                return stale.map(|_| Err(ReuseMiss::Stale))
+                return result.map(|_| Err(ReuseMiss::Stale))
             }
         };
+        // The result stays published as the prediction of this transaction's writes.
         if rebased {
             // Later transactions read the rebased balances.
             self.predicted.publish_accounts(index, &tx.result.state);
@@ -202,20 +202,20 @@ impl<H> PrewarmedTx<H> {
     /// Returns whether all reads match `db`, applying the result's balance changes to the current
     /// balances of accounts whose balance differs, and whether there were any.
     ///
-    /// The result must not be used if this returns `None`.
+    /// The result is left unchanged unless this returns `Some`, so that it can be validated again.
     fn validate<DB: Database>(&mut self, db: &mut DB) -> Result<Option<bool>, DB::Error> {
         for read in &self.reads.storage {
             if db.storage(read.address, read.slot)? != read.value {
                 return Ok(None)
             }
         }
-        let mut rebased = false;
+        let mut rebased = Vec::new();
         for read in &self.reads.accounts {
             let current = db.basic(read.address)?;
             match read.compare(current.as_ref()) {
                 AccountMatch::Same => {}
                 AccountMatch::Rebase { speculative, current } => {
-                    if let Some(account) = self.result.state.get_mut(&read.address) {
+                    if let Some(account) = self.result.state.get(&read.address) {
                         // All balances are bounded, and the execution never leaves less than the
                         // difference, so this neither overflows nor underflows.
                         let Some(balance) = account
@@ -226,14 +226,18 @@ impl<H> PrewarmedTx<H> {
                         else {
                             return Ok(None)
                         };
-                        account.info.balance = balance;
-                        rebased = true;
+                        rebased.push((read.address, balance));
                     }
                 }
                 AccountMatch::Differs => return Ok(None),
             }
         }
-        Ok(Some(rebased))
+        for (address, balance) in &rebased {
+            if let Some(account) = self.result.state.get_mut(address) {
+                account.info.balance = *balance;
+            }
+        }
+        Ok(Some(!rebased.is_empty()))
     }
 }
 
@@ -1143,6 +1147,31 @@ mod tests {
             sender(1),
         );
         assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
+    }
+
+    #[test]
+    fn keeps_stale_results_unchanged() {
+        let txs = [tx(1, 0, NOOP, 0)];
+        let prewarm = Prewarm::new(&txs, &[0]);
+        // The caller's balance can be rebased, but the callee changed.
+        let mut db = parent_state();
+        db.insert_account_info(
+            sender(1),
+            AccountInfo { balance: U256::from(2 * 10u64.pow(18)), ..Default::default() },
+        );
+        let mut noop = db.basic(NOOP).unwrap().unwrap();
+        noop.nonce = 1;
+        db.insert_account_info(NOOP, noop);
+        let mut stale = State::builder().with_database(db).build();
+        assert_eq!(
+            prewarm.results.take_valid(0, &mut stale).unwrap().map(drop),
+            Err(ReuseMiss::Stale)
+        );
+
+        let mut state = State::builder().with_database(parent_state()).build();
+        let result = prewarm.results.take_valid(0, &mut state).unwrap().unwrap();
+        let fee = U256::from(21_000 * GAS_PRICE);
+        assert_eq!(result.state[&sender(1)].info.balance, U256::from(10u64.pow(18)) - fee);
     }
 
     #[test]
