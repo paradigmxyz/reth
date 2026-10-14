@@ -2,6 +2,7 @@
 set -eo pipefail
 
 fixture_variant="${1:-amsterdam}"
+# Cache-bump for the EELS frame-mapping update (a1945ddfd).
 
 case "${fixture_variant}" in
     amsterdam)
@@ -16,7 +17,7 @@ case "${fixture_variant}" in
         ;;
     bogota)
         eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-bogota-devnet@v1.1.0/fixtures_bogota-devnet.tar.gz"
-        eels_branch="fix/reth-frames-devnet-1-hive-error-mapping"
+        eels_branch="devnets/bogota/1"
         eels_fork="Bogota"
         ;;
     *)
