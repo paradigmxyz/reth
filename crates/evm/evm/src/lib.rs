@@ -516,6 +516,22 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let _ = (tx, result);
         None
     }
+
+    /// Returns the predicted environment of the block after `parent` with `beneficiary`, in which
+    /// engine validation speculatively executes pool transactions before the block arrives.
+    ///
+    /// Validation reuses such results only for blocks whose environment matches the predicted
+    /// one, apart from the beneficiary, timestamp, prevrandao and gas limit, which the
+    /// transactions must not have observed. Only called if [`Self::reuses_prewarm_results`]
+    /// returns `true`.
+    fn speculative_next_evm_env(
+        &self,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
+        beneficiary: Address,
+    ) -> Option<EvmEnvFor<Self>> {
+        let _ = (parent, beneficiary);
+        None
+    }
 }
 
 /// JIT backend controls exposed by an EVM configuration.
