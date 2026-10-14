@@ -62,6 +62,7 @@ use tracing::*;
 
 mod block_buffer;
 pub mod error;
+mod execution_strategy;
 pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
@@ -77,6 +78,7 @@ pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
+pub use execution_strategy::{PayloadExecutionStrategy, PrewarmDatabase, SequentialExecution};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;

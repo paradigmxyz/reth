@@ -15,7 +15,7 @@ use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpda
 use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
-    PayloadExecutionCache, SavedCache,
+    PayloadExecutionCache, PayloadExecutionStrategy, SavedCache, SequentialExecution,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
@@ -74,7 +74,7 @@ pub enum PrewarmMode<Tx> {
 ///
 /// Note: This task runs until cancelled externally.
 #[derive(Debug)]
-pub struct PrewarmCacheTask<N, P, Evm>
+pub struct PrewarmCacheTask<N, P, Evm, X = SequentialExecution>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -84,16 +84,17 @@ where
     /// Shared execution cache.
     execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
-    ctx: PrewarmContext<N, P, Evm>,
+    ctx: PrewarmContext<N, P, Evm, X>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
     parent_span: Span,
 }
 
-impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
+impl<N, P, Evm, X> PrewarmCacheTask<N, P, Evm, X>
 where
     N: NodePrimitives,
+    X: PayloadExecutionStrategy<Evm>,
     P: DatabaseProviderFactory + Clone + 'static,
     P::Provider: BlockNumReader
         + PruneCheckpointReader
@@ -109,7 +110,7 @@ where
     pub fn new(
         executor: Runtime,
         execution_cache: PayloadExecutionCache,
-        ctx: PrewarmContext<N, P, Evm>,
+        ctx: PrewarmContext<N, P, Evm, X>,
     ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
@@ -213,13 +214,18 @@ where
     /// Lazily initialises per-thread [`PrewarmEvmState`] via
     /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
     fn transact_worker<Tx>(
-        ctx: &PrewarmContext<N, P, Evm>,
+        ctx: &PrewarmContext<N, P, Evm, X>,
         index: usize,
         tx: Tx,
         state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
+        let _completion = PrewarmCompletion {
+            strategy: &ctx.execution_strategy,
+            index,
+            _evm: std::marker::PhantomData::<Evm>,
+        };
         WorkerPool::with_worker_mut(|worker| {
             let Some(evm) =
                 worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx()).as_mut()
@@ -239,14 +245,14 @@ where
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
+            let res = match ctx.execution_strategy.prewarm_transaction(index, evm, (tx_env, &tx)) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
+                        tx_hash = %tx.tx().tx_hash(),
+                        sender = %tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
@@ -539,11 +545,13 @@ where
 
 /// Context required by tx execution tasks.
 #[derive(Debug, Clone)]
-pub struct PrewarmContext<N, P, Evm>
+pub struct PrewarmContext<N, P, Evm, X = SequentialExecution>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Per-block transaction prewarming and execution strategy.
+    pub execution_strategy: X,
     /// The execution environment.
     pub env: ExecutionEnv<Evm>,
     /// The EVM configuration.
@@ -583,9 +591,10 @@ where
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
 type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
 
-impl<N, P, Evm> PrewarmContext<N, P, Evm>
+impl<N, P, Evm, X> PrewarmContext<N, P, Evm, X>
 where
     N: NodePrimitives,
+    X: PayloadExecutionStrategy<Evm>,
     P: DatabaseProviderFactory,
     P::Provider: BlockNumReader
         + PruneCheckpointReader
@@ -625,15 +634,9 @@ where
 
         let mut evm_env = self.env.evm_env.clone();
 
-        // we must disable the nonce check so that we can execute the transaction even if the nonce
-        // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
+        self.execution_strategy.configure_prewarm_env(&mut evm_env);
 
-        // disable the balance check so that transactions from senders who were funded by earlier
-        // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
-
-        // create a new executor and disable nonce checks in the env
+        // Create a worker EVM with the strategy's speculative environment.
         let spec_id = *evm_env.spec_id();
         let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
 
@@ -649,7 +652,7 @@ where
             });
         }
 
-        Some(evm)
+        Some(self.execution_strategy.configure_prewarm_evm(evm))
     }
 
     /// Returns `true` if prewarming should stop.
@@ -842,6 +845,19 @@ pub struct PrewarmMetrics {
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
 
+/// Releases strategy consumers when a dispatched worker finishes or unwinds.
+struct PrewarmCompletion<'a, Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> {
+    strategy: &'a X,
+    index: usize,
+    _evm: std::marker::PhantomData<Evm>,
+}
+
+impl<Evm: ConfigureEvm, X: PayloadExecutionStrategy<Evm>> Drop for PrewarmCompletion<'_, Evm, X> {
+    fn drop(&mut self) {
+        self.strategy.on_prewarm_finished(self.index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -856,10 +872,120 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
 
+    #[derive(Clone)]
+    struct RecordingStrategy(Sender<usize>);
+
+    impl PayloadExecutionStrategy<EthEvmConfig> for RecordingStrategy {
+        fn prewarm_transaction<
+            Tx: alloy_evm::block::ExecutableTxParts<TxEnvFor<EthEvmConfig>, TransactionSigned>,
+        >(
+            &self,
+            _index: usize,
+            _evm: &mut EvmFor<EthEvmConfig, crate::tree::PrewarmDatabase>,
+            _tx: Tx,
+        ) -> Result<
+            revm::context::result::ResultAndState,
+            reth_evm::EvmErrorFor<EthEvmConfig, reth_provider::ProviderError>,
+        > {
+            let mut account = revm::state::Account::from(revm::state::AccountInfo::default());
+            account.info.nonce = 1;
+            account.mark_touch();
+            Ok(revm::context::result::ResultAndState {
+                result: revm::context::result::ExecutionResult::Success {
+                    reason: revm::context::result::SuccessReason::Stop,
+                    gas: Default::default(),
+                    logs: Vec::new(),
+                    output: revm::context::result::Output::Call(Default::default()),
+                },
+                state: std::iter::once((alloy_primitives::Address::repeat_byte(7), account))
+                    .collect(),
+            })
+        }
+
+        fn on_prewarm_finished(&self, index: usize) {
+            self.0.send(index).unwrap();
+        }
+    }
+
+    struct RecordingHints(Sender<reth_trie_parallel::state_root_task::StateAccessHint>);
+
+    impl reth_trie_parallel::state_root_task::StateRootSink for RecordingHints {
+        fn on_access_hint(&self, hint: reth_trie_parallel::state_root_task::StateAccessHint) {
+            self.0.send(hint).unwrap();
+        }
+
+        fn on_state_update(&self, _state: revm::state::EvmState) {
+            panic!("prewarming must not send authoritative state updates");
+        }
+
+        fn on_hashed_state_update(&self, _state: reth_trie::HashedPostState) {
+            panic!("prewarming must not send authoritative hashed updates");
+        }
+
+        fn on_updates_finished(&self) {
+            panic!("prewarming must not close the authoritative update stream");
+        }
+    }
+
+    #[test]
+    fn custom_prewarming_keeps_trie_hints_and_completes_cancelled_workers() {
+        let runtime = Runtime::test();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let (hint_tx, hint_rx) = mpsc::channel();
+        let stream = StateRootHintStream::new(Arc::new(RecordingHints(hint_tx)));
+        let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
+        let ctx = test_prewarm_context(saved, Gauge::noop());
+        let ctx = PrewarmContext {
+            execution_strategy: RecordingStrategy(finished_tx),
+            env: ctx.env,
+            evm_config: ctx.evm_config,
+            saved_cache: ctx.saved_cache,
+            provider: ctx.provider,
+            bal_prewarm_pool: ctx.bal_prewarm_pool,
+            metrics: ctx.metrics,
+            cache_metrics: ctx.cache_metrics,
+            cache_state_metrics: ctx.cache_state_metrics,
+            terminate_execution: ctx.terminate_execution,
+            executed_tx_index: ctx.executed_tx_index,
+            precompile_cache_disabled: ctx.precompile_cache_disabled,
+            precompile_cache_map: ctx.precompile_cache_map,
+            disable_bal_parallel_state_root: ctx.disable_bal_parallel_state_root,
+            disable_bal_batch_io: ctx.disable_bal_batch_io,
+        };
+        let tx = || {
+            WithTxEnv::new(Recovered::new_unchecked(
+                TransactionSigned::Legacy(alloy_consensus::Signed::new_unhashed(
+                    alloy_consensus::TxLegacy::default(),
+                    alloy_primitives::Signature::test_signature(),
+                )),
+                alloy_primitives::Address::ZERO,
+            ))
+        };
+        runtime.prewarming_pool().install_fn(|| {
+            let provider = Box::new(MockEthProvider::default().into_evm_state_provider())
+                as EvmStateProviderBox;
+            let evm = ctx
+                .evm_config
+                .evm_with_env(StateProviderDatabase::new(provider), ctx.env.evm_env.clone());
+            WorkerPool::with_worker_mut(|worker| {
+                worker.get_or_init::<PrewarmEvmState<EthEvmConfig>>(|| Some(evm));
+            });
+            PrewarmCacheTask::transact_worker(&ctx, 1, tx(), Some(&stream));
+            ctx.stop();
+            PrewarmCacheTask::transact_worker(&ctx, 2, tx(), Some(&stream));
+        });
+        runtime.prewarming_pool().clear();
+        assert_eq!(finished_rx.try_iter().collect::<Vec<_>>(), vec![1, 2]);
+        let hints = hint_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(hints.len(), 1);
+        assert_eq!(hints[0].accounts, vec![keccak256(alloy_primitives::Address::repeat_byte(7))]);
+    }
+
     #[test]
     fn terminate_event_stops_transaction_execution() {
         let terminate_execution = Arc::new(AtomicBool::new(false));
         let ctx = PrewarmContext {
+            execution_strategy: SequentialExecution,
             env: ExecutionEnv::test_default(),
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: None,
@@ -900,6 +1026,7 @@ mod tests {
         saving_duration: Gauge,
     ) -> PrewarmContext<EthPrimitives, MockEthProvider, EthEvmConfig> {
         PrewarmContext {
+            execution_strategy: SequentialExecution,
             env: ExecutionEnv { hash: B256::repeat_byte(2), ..ExecutionEnv::test_default() },
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: Some(saved_cache),
