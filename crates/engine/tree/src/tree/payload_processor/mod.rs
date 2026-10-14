@@ -382,15 +382,17 @@ where
                                     let _parent = span.enter();
                                     let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
+                                    // Prewarming does not need block order, so it gets each
+                                    // transaction as soon as it is converted.
+                                    if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
+                                        let _ = prewarm_tx.send((idx, tx.clone()));
+                                    }
                                     (idx, tx)
                                 })
                                 .collect::<Vec<_>>();
 
                             for (idx, tx) in chunk {
                                 let failed = tx.is_err();
-                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
-                                    let _ = prewarm_tx.send((idx, tx.clone()));
-                                }
                                 if execute_tx.send((idx, tx)).is_err() || failed {
                                     return
                                 }

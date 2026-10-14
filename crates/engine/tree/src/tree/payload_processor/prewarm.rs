@@ -228,6 +228,8 @@ where
             });
 
             if let Some(results) = &ctx.prewarm_results {
+                // Transactions arrive in any order.
+                refresh_txs.sort_unstable_by_key(|(index, _)| *index);
                 Self::refresh_results(ctx, pool, results, &refresh_txs);
             }
 
