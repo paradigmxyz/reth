@@ -25,10 +25,13 @@ use revm::{
         CreateInputs, CreateOutcome, InstructionResult, Interpreter,
     },
     primitives::{StorageKey, StorageValue, KECCAK_EMPTY},
-    state::{AccountInfo, Bytecode, EvmState},
+    state::{Account, AccountInfo, Bytecode, EvmState},
     Database, Inspector,
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
 const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
@@ -50,6 +53,8 @@ enum ResultSlot<H> {
     Ready(Box<PrewarmedTx<H>>),
     /// A result that cannot be reused, with the reads it depends on.
     Unusable(ReadSet),
+    /// Block execution executed the transaction and published its actual writes.
+    Executed,
 }
 
 impl<H> PrewarmResults<H> {
@@ -83,13 +88,28 @@ impl<H> PrewarmResults<H> {
         self.set(index, |_| ResultSlot::Unusable(reads));
     }
 
+    /// Replaces the predicted writes of the transaction at `index` with the writes of its actual
+    /// execution by block execution.
+    pub fn publish_executed(&self, index: usize, state: &EvmState) {
+        let Some(slot) = self.slots.get(index) else { return };
+        let mut slot = slot.lock();
+        // Overwrite the predicted writes in place, then retract those the execution did not make.
+        self.predicted.publish(index, state);
+        if let ResultSlot::Ready(previous) = core::mem::replace(&mut *slot, ResultSlot::Executed) {
+            self.predicted.retract_unwritten(index, &previous.result.state, state);
+        }
+        self.predicted.generation.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Replaces the slot of the transaction at `index`, retracting the writes of its previous
-    /// result.
+    /// result, unless block execution already published its actual writes.
     fn set(&self, index: usize, f: impl FnOnce(&PredictedState) -> ResultSlot<H>) {
         let Some(slot) = self.slots.get(index) else { return };
         let mut slot = slot.lock();
-        if let ResultSlot::Ready(previous) = &*slot {
-            self.predicted.retract(index, &previous.result.state);
+        match &*slot {
+            ResultSlot::Ready(previous) => self.predicted.retract(index, &previous.result.state),
+            ResultSlot::Executed => return,
+            ResultSlot::Empty | ResultSlot::Unusable(_) => {}
         }
         *slot = f(&self.predicted);
     }
@@ -103,6 +123,7 @@ impl<H> PrewarmResults<H> {
             ResultSlot::Empty => return true,
             ResultSlot::Ready(tx) => &tx.reads,
             ResultSlot::Unusable(reads) => reads,
+            ResultSlot::Executed => return false,
         };
         !reads.matches(&self.predicted, index)
     }
@@ -119,7 +140,7 @@ impl<H> PrewarmResults<H> {
     ) -> Result<ResultAndState<H>, ReuseMiss> {
         let mut slot = self.slots.get(index).ok_or(ReuseMiss::Missing)?.lock();
         let tx = match &mut *slot {
-            ResultSlot::Empty => return Err(ReuseMiss::Missing),
+            ResultSlot::Empty | ResultSlot::Executed => return Err(ReuseMiss::Missing),
             ResultSlot::Ready(tx) => tx,
             ResultSlot::Unusable(_) => return Err(ReuseMiss::Stale),
         };
@@ -331,9 +352,16 @@ pub(super) struct PredictedState {
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
+    /// Number of transactions whose actual writes block execution published.
+    generation: AtomicUsize,
 }
 
 impl PredictedState {
+    /// Returns the number of transactions whose actual writes block execution published.
+    pub(super) fn generation(&self) -> usize {
+        self.generation.load(Ordering::Relaxed)
+    }
+
     /// Returns the latest account write predicted before the transaction at `index`.
     fn account(&self, address: Address, index: usize) -> Option<Option<AccountInfo>> {
         let writes = self.accounts.get(&address)?;
@@ -372,6 +400,37 @@ impl PredictedState {
     /// Retracts the writes of the transaction at `index` that were published from `state`.
     fn retract(&self, index: usize, state: &EvmState) {
         self.update(index, state, false);
+    }
+
+    /// Retracts the writes of the transaction at `index` that were published from `previous` but
+    /// that `state` does not make.
+    fn retract_unwritten(&self, index: usize, previous: &EvmState, state: &EvmState) {
+        for (address, account) in previous {
+            if !account.is_touched() {
+                continue
+            }
+            let Some(written) = state.get(address).filter(|account| account.is_touched()) else {
+                self.retract(index, &core::iter::once((*address, account.clone())).collect());
+                continue
+            };
+            let clears = |account: &Account| {
+                account.is_selfdestructed() || account.info.is_empty() || account.is_created()
+            };
+            if clears(account) && !clears(written) {
+                write::<()>(&mut self.cleared.entry(*address).or_default(), index, None);
+            }
+            // Storage of destroyed accounts is not published.
+            let destroyed = written.is_selfdestructed() || written.info.is_empty();
+            for (slot, _) in account.changed_storage_slots() {
+                if destroyed || !written.storage.get(slot).is_some_and(|value| value.is_changed()) {
+                    write::<StorageValue>(
+                        &mut self.storage.entry((*address, *slot)).or_default(),
+                        index,
+                        None,
+                    );
+                }
+            }
+        }
     }
 
     /// Publishes or retracts the writes of the transaction at `index` to every key that `state`
@@ -587,10 +646,14 @@ impl<CTX> Inspector<CTX> for BalanceTracker {
 mod tests {
     use super::*;
     use alloy_consensus::{transaction::Recovered, TxLegacy};
-    use alloy_evm::{block::BlockExecutor, eth::EthBlockExecutionCtx, Evm, EvmEnv};
+    use alloy_evm::{
+        block::{BlockExecutor, TxResult},
+        eth::EthBlockExecutionCtx,
+        Evm, EvmEnv,
+    };
     use alloy_primitives::{bytes, Bytes, Signature, TxKind};
     use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned};
-    use reth_evm::{ConfigureEvm, HaltReasonFor};
+    use reth_evm::{ConfigureEvm, EvmFor, HaltReasonFor};
     use reth_evm_ethereum::EthEvmConfig;
     use revm::{
         context::{BlockEnv, CfgEnv, Transaction as _},
@@ -680,46 +743,68 @@ mod tests {
         db
     }
 
-    /// Executes the transactions at the indices in `order` speculatively, as prewarm workers do,
-    /// then executes stale results among them again once, in block order.
-    fn prewarm(txs: &[Recovered<TransactionSigned>], order: &[usize]) -> Results {
-        let config = EthEvmConfig::mainnet();
-        let results = Results::new(txs.len());
-        let mut evm = config.evm_with_env_and_inspector(
-            RecordingDb::new(parent_state()),
-            evm_env(true),
-            BalanceTracker::default(),
-        );
-        let mut run = |index: usize| {
-            let tx = &txs[index];
-            let tx_env = config.tx_env(tx);
+    /// Speculative execution of `txs`, as by prewarm workers.
+    struct Prewarm<'a> {
+        txs: &'a [Recovered<TransactionSigned>],
+        results: Results,
+        evm: EvmFor<EthEvmConfig, RecordingDb<CacheDB<EmptyDB>>, BalanceTracker>,
+    }
+
+    impl<'a> Prewarm<'a> {
+        /// Executes the transactions at the indices in `order`, then refreshes stale results
+        /// among them in block order.
+        fn new(txs: &'a [Recovered<TransactionSigned>], order: &[usize]) -> Self {
+            let evm = EthEvmConfig::mainnet().evm_with_env_and_inspector(
+                RecordingDb::new(parent_state()),
+                evm_env(true),
+                BalanceTracker::default(),
+            );
+            let mut prewarm = Self { txs, results: Results::new(txs.len()), evm };
+            for &index in order {
+                prewarm.run(index);
+            }
+            let mut refresh = order.to_vec();
+            refresh.sort_unstable();
+            for index in refresh {
+                if prewarm.results.needs_refresh(index) {
+                    prewarm.run(index);
+                }
+            }
+            prewarm
+        }
+
+        fn run(&mut self, index: usize) {
+            let tx = &self.txs[index];
+            let tx_env = EthEvmConfig::mainnet().tx_env(tx);
             let (nonce, max_balance_spending) = (tx_env.nonce, tx_env.max_balance_spending().ok());
-            evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
-            evm.inspector_mut().clear();
-            let result = evm.transact(tx_env).unwrap();
-            let reads = evm.db_mut().take_reads().unwrap();
-            match reads.finish(evm.inspector(), tx.signer(), nonce, max_balance_spending) {
-                Ok(reads) => results.insert(index, result, reads),
-                Err(reads) => results.reject(index, reads),
-            }
-        };
-        for &index in order {
-            run(index);
-        }
-        let mut refresh = order.to_vec();
-        refresh.sort_unstable();
-        for index in refresh {
-            if results.needs_refresh(index) {
-                run(index);
+            self.evm.db_mut().start_recording(Arc::clone(self.results.predicted()), index);
+            self.evm.inspector_mut().clear();
+            let result = self.evm.transact(tx_env).unwrap();
+            let reads = self.evm.db_mut().take_reads().unwrap();
+            match reads.finish(self.evm.inspector(), tx.signer(), nonce, max_balance_spending) {
+                Ok(reads) => self.results.insert(index, result, reads),
+                Err(reads) => self.results.reject(index, reads),
             }
         }
-        results
+
+        /// Refreshes stale or missing results of transactions after `index`.
+        fn refresh_after(&mut self, index: usize) {
+            for index in index + 1..self.txs.len() {
+                if self.results.needs_refresh(index) {
+                    self.run(index);
+                }
+            }
+        }
     }
 
     /// Executes `txs` sequentially, committing valid prewarm results instead of executing.
+    ///
+    /// If `publish` is set, prewarm results are refreshed against the writes of executed
+    /// transactions.
     fn execute(
         txs: &[Recovered<TransactionSigned>],
-        results: Option<&Results>,
+        mut prewarm: Option<&mut Prewarm<'_>>,
+        publish: bool,
     ) -> (Vec<Receipt>, BundleState, Vec<Result<(), ReuseMiss>>) {
         let config = EthEvmConfig::mainnet();
         let mut state = State::builder().with_database(parent_state()).with_bundle_update().build();
@@ -736,14 +821,31 @@ mod tests {
         let mut executor = config.create_executor(evm, ctx);
         let mut outcomes = Vec::new();
         for (index, tx) in txs.iter().enumerate() {
-            let outcome = results.map_or(Err(ReuseMiss::Missing), |results| {
-                let result = results.take_valid(index, executor.evm_mut().db_mut())?;
-                executor.commit_transaction(config.prewarm_tx_result(tx.inner(), result).unwrap());
-                Ok(())
-            });
-            if outcome.is_err() {
+            let Some(prewarm) = prewarm.as_deref_mut() else {
                 executor.execute_transaction(tx).unwrap();
-            }
+                outcomes.push(Err(ReuseMiss::Missing));
+                continue
+            };
+            let outcome = match prewarm.results.take_valid(index, executor.evm_mut().db_mut()) {
+                Ok(result) => {
+                    executor
+                        .commit_transaction(config.prewarm_tx_result(tx.inner(), result).unwrap());
+                    Ok(())
+                }
+                Err(miss) if publish => {
+                    executor
+                        .execute_transaction_with_result_closure(tx, |result| {
+                            prewarm.results.publish_executed(index, &result.result().state)
+                        })
+                        .unwrap();
+                    prewarm.refresh_after(index);
+                    Err(miss)
+                }
+                Err(miss) => {
+                    executor.execute_transaction(tx).unwrap();
+                    Err(miss)
+                }
+            };
             outcomes.push(outcome);
         }
         let receipts = executor.receipts().to_vec();
@@ -755,16 +857,19 @@ mod tests {
     /// Asserts that reusing prewarm results produces the same output as executing every
     /// transaction, and returns the reuse outcomes.
     fn reuse(txs: &[Recovered<TransactionSigned>]) -> Vec<Result<(), ReuseMiss>> {
-        reuse_in(txs, &(0..txs.len()).collect::<Vec<_>>())
+        reuse_in(txs, &(0..txs.len()).collect::<Vec<_>>(), true)
     }
 
-    /// Like [`reuse`], prewarming only the transactions at the indices in `order`.
+    /// Like [`reuse`], prewarming only the transactions at the indices in `order`, and refreshing
+    /// results against the writes of executed transactions if `publish` is set.
     fn reuse_in(
         txs: &[Recovered<TransactionSigned>],
         order: &[usize],
+        publish: bool,
     ) -> Vec<Result<(), ReuseMiss>> {
-        let (receipts, bundle, outcomes) = execute(txs, Some(&prewarm(txs, order)));
-        let (expected_receipts, expected_bundle, _) = execute(txs, None);
+        let (receipts, bundle, outcomes) =
+            execute(txs, Some(&mut Prewarm::new(txs, order)), publish);
+        let (expected_receipts, expected_bundle, _) = execute(txs, None, false);
         assert_eq!(receipts, expected_receipts);
         assert_eq!(bundle, expected_bundle);
         outcomes
@@ -788,19 +893,25 @@ mod tests {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, COUNTER, 1)];
         assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
         // Results executed before the transactions they depend on are executed again.
-        assert_eq!(reuse_in(&txs, &[2, 1, 0]), [Ok(()), Ok(()), Ok(())]);
+        assert_eq!(reuse_in(&txs, &[2, 1, 0], true), [Ok(()), Ok(()), Ok(())]);
+    }
+
+    #[test]
+    fn refreshes_against_executed_writes() {
+        let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
+        assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
     }
 
     #[test]
     fn rejects_stale_storage() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
-        assert_eq!(reuse_in(&txs, &[1]), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
     }
 
     #[test]
     fn rejects_stale_callers() {
         let txs = [tx(1, 0, sender(2), 1), tx(1, 1, sender(3), 1)];
-        assert_eq!(reuse_in(&txs, &[1]), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
     }
 
     #[test]
@@ -811,7 +922,7 @@ mod tests {
             tx(3, 0, BENEFICIARY_BALANCE_READER, 1),
         ];
         assert_eq!(
-            reuse_in(&txs, &[1, 2]),
+            reuse_in(&txs, &[1, 2], false),
             [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]
         );
     }
@@ -819,6 +930,6 @@ mod tests {
     #[test]
     fn rejects_lower_sender_balances() {
         let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 2)];
-        assert_eq!(reuse_in(&txs, &[1]), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
+        assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
     }
 }

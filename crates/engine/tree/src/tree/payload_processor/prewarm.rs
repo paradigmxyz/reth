@@ -45,16 +45,26 @@ use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::context::Transaction as _;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, channel, Receiver, Sender},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, channel, Receiver, Sender},
+        Arc,
+    },
+    time::Duration,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
-/// Maximum number of rounds that execute stale prewarm results again.
+/// Maximum number of consecutive rounds that execute stale prewarm results again.
 const MAX_REFRESH_ROUNDS: usize = 4;
+
+/// Number of transactions ahead of block execution that refreshing checks after block execution
+/// published actual writes.
+const REFRESH_WINDOW: usize = 64;
+
+/// How often refreshing checks whether block execution published actual writes.
+const REFRESH_POLL_INTERVAL: Duration = Duration::from_micros(50);
 
 /// Determines the prewarming mode: transaction-based, BAL-based, or skipped.
 ///
@@ -233,7 +243,9 @@ where
     /// earlier transactions changed after they were executed.
     ///
     /// Each round checks the transactions that block execution has not reached yet, in block
-    /// order, on all pool threads. Rounds repeat while they find stale results.
+    /// order, on all pool threads. Rounds repeat while they find stale results, then wait for
+    /// block execution to publish actual writes that differ from the predicted ones, until
+    /// prewarming stops.
     fn refresh_results<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
         pool: &WorkerPool,
@@ -242,30 +254,51 @@ where
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync,
     {
-        for _ in 0..MAX_REFRESH_ROUNDS {
+        let mut rounds = 0;
+        // Rounds after block execution published writes only check the transactions it reaches
+        // soon, the others are checked in later rounds.
+        let mut window_len = usize::MAX;
+        while !ctx.should_stop() {
+            let generation = results.predicted().generation();
             // Skip the transaction block execution is about to reach.
             let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
-            let cursor = AtomicUsize::new(txs.partition_point(|(index, _)| *index <= next));
-            let refreshed = AtomicBool::new(false);
-            pool.in_place_scope(|s| {
-                for _ in 0..pool.current_num_threads() {
-                    s.spawn(|_| {
-                        while let Some((index, tx)) =
-                            txs.get(cursor.fetch_add(1, Ordering::Relaxed))
-                        {
-                            if ctx.should_stop() {
-                                break
-                            }
-                            if results.needs_refresh(*index) {
-                                refreshed.store(true, Ordering::Relaxed);
+            let start = txs.partition_point(|(index, _)| *index <= next);
+            if start == txs.len() {
+                break
+            }
+            let window = &txs[start..txs.len().min(start.saturating_add(window_len))];
+            // Checking is cheap, so only stale transactions are handed to the pool.
+            let stale = window
+                .iter()
+                .filter(|(index, _)| results.needs_refresh(*index))
+                .collect::<Vec<_>>();
+            let refreshed = !stale.is_empty();
+            if refreshed {
+                let cursor = AtomicUsize::new(0);
+                pool.in_place_scope(|s| {
+                    for _ in 0..pool.current_num_threads().min(stale.len()) {
+                        s.spawn(|_| {
+                            while let Some((index, tx)) =
+                                stale.get(cursor.fetch_add(1, Ordering::Relaxed))
+                            {
+                                if ctx.should_stop() {
+                                    break
+                                }
                                 Self::transact_worker(ctx, *index, tx.clone(), None);
                             }
-                        }
-                    });
-                }
-            });
-            if ctx.should_stop() || !refreshed.load(Ordering::Relaxed) {
-                break
+                        });
+                    }
+                });
+            }
+
+            rounds += 1;
+            if refreshed && rounds < MAX_REFRESH_ROUNDS {
+                continue
+            }
+            rounds = 0;
+            window_len = REFRESH_WINDOW;
+            while results.predicted().generation() == generation && !ctx.should_stop() {
+                std::thread::sleep(REFRESH_POLL_INTERVAL);
             }
         }
     }

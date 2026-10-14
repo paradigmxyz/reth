@@ -140,8 +140,10 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    HaltReasonFor, OnStateHook, SpecFor, TxExecutionResultFor,
+    block::{BlockExecutor, TxResult},
+    execute::ExecutableTxFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, HaltReasonFor, OnStateHook, SpecFor,
+    TxExecutionResultFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedRevmBal;
@@ -1310,19 +1312,26 @@ where
             }
 
             let tx_start = Instant::now();
-            let mut reused = false;
-            if let Some(results) = prewarm_results {
-                let outcome = self.commit_prewarm_result(
-                    &mut executor,
-                    results,
-                    senders.len() - 1,
-                    <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
-                );
-                reused = outcome.is_ok();
-                reuse_stats.record(outcome);
-            }
-            if !reused {
-                executor.execute_transaction(tx)?;
+            let index = senders.len() - 1;
+            match prewarm_results {
+                Some(results) => {
+                    let outcome = self.commit_prewarm_result(
+                        &mut executor,
+                        results,
+                        index,
+                        <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
+                    );
+                    if outcome.is_err() {
+                        // Later prewarm results are refreshed against the actual writes.
+                        executor.execute_transaction_with_result_closure(tx, |result| {
+                            results.publish_executed(index, &result.result().state)
+                        })?;
+                    }
+                    reuse_stats.record(outcome);
+                }
+                None => {
+                    executor.execute_transaction(tx)?;
+                }
             }
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
