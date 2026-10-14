@@ -421,14 +421,22 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_evm::{
+        eth::{EthEvm, EthEvmContext},
+        Database,
+    };
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{
-        context::{BlockEnv, CfgEnv},
+        context::{
+            result::{EVMError, HaltReason},
+            BlockEnv, CfgEnv, TxEnv,
+        },
         database::CacheDB,
-        database_interface::EmptyDBTyped,
+        database_interface::{DBErrorMarker, EmptyDBTyped},
         inspector::NoOpInspector,
+        Inspector,
     };
 
     #[test]
@@ -597,6 +605,54 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
         assert_eq!(evm.cfg, evm_env.cfg_env);
         assert_eq!(evm.tx, Default::default());
+    }
+
+    #[test]
+    fn test_reuses_prewarm_results_only_for_known_factories() {
+        assert!(EthEvmConfig::mainnet().reuses_prewarm_results());
+        assert!(EthEvmConfig::new_with_evm_factory(
+            MAINNET.clone(),
+            factory::RethEvmFactory::default()
+        )
+        .reuses_prewarm_results());
+
+        #[derive(Debug, Clone)]
+        struct CustomFactory(EthEvmFactory);
+
+        impl EvmFactory for CustomFactory {
+            type Evm<DB: Database, I: Inspector<Self::Context<DB>>> =
+                EthEvm<DB, I, Self::Precompiles>;
+            type Context<DB: Database> = EthEvmContext<DB>;
+            type Tx = TxEnv;
+            type Error<DBError: DBErrorMarker> = EVMError<DBError>;
+            type HaltReason = HaltReason;
+            type Spec = SpecId;
+            type BlockEnv = BlockEnv;
+            type Precompiles = PrecompilesMap;
+
+            fn create_evm<DB: Database>(
+                &self,
+                db: DB,
+                input: EvmEnv,
+            ) -> Self::Evm<DB, NoOpInspector> {
+                self.0.create_evm(db, input)
+            }
+
+            fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
+                &self,
+                db: DB,
+                input: EvmEnv,
+                inspector: I,
+            ) -> Self::Evm<DB, I> {
+                self.0.create_evm_with_inspector(db, input, inspector)
+            }
+        }
+
+        assert!(!EthEvmConfig::new_with_evm_factory(
+            MAINNET.clone(),
+            CustomFactory(EthEvmFactory::default())
+        )
+        .reuses_prewarm_results());
     }
 
     #[cfg(feature = "jit")]

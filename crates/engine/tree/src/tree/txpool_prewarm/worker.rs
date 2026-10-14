@@ -3,7 +3,7 @@ use super::{
     Job, Source, Transaction, Transactions,
 };
 use crate::tree::{
-    payload_processor::reuse::{BalanceTracker, RecordingDb},
+    payload_processor::reuse::{BalanceTracker, RecordingDb, SpeculativeTx},
     StateProviderDatabase, TxPoolPrewarmCacheSnapshot as Snapshot,
 };
 use alloy_evm::Evm;
@@ -238,23 +238,22 @@ where
                 return BatchEnd::Rest
             };
             let tx_env = evm_config.tx_env(transaction);
-            let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
-            if job.results.is_some() {
+            let speculative = job.results.as_ref().map(|_| SpeculativeTx {
+                caller: sender,
+                nonce: tx_env.nonce(),
+                max_balance_spending: tx_env.max_balance_spending(),
+            });
+            if speculative.is_some() {
                 evm.db_mut().start_recording_inner();
                 evm.inspector_mut().clear();
             }
             match evm.transact(tx_env) {
                 Ok(result) => {
                     if let Some(results) = &job.results &&
-                        let Some(reads) = evm.db_mut().take_reads() &&
-                        let Ok(reads) = reads.finish(
-                            evm.inspector(),
-                            sender,
-                            nonce,
-                            max_balance_spending.ok(),
-                        )
+                        let Some(speculative) = speculative &&
+                        let Some(reads) = evm.db_mut().take_reads()
                     {
-                        results.insert(hash, result, reads);
+                        results.store(hash, result, reads, evm.inspector(), speculative);
                     }
                 }
                 Err(err) => {

@@ -15,7 +15,7 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb},
+    reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, SpeculativeTx},
     StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -26,7 +26,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{
@@ -271,7 +271,7 @@ where
         let mut window_len = usize::MAX;
         while !ctx.should_stop() {
             let generation = results.predicted().generation();
-            // Skip the transaction block execution is about to reach.
+            // Skip the transaction block execution is executing and the one it reaches next.
             let next = ctx.executed_tx_index.load(Ordering::Relaxed) + 1;
             let start = txs.partition_point(|(index, _)| *index <= next);
             if start == txs.len() {
@@ -340,11 +340,12 @@ where
 
             let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx());
             // The pool is shared across blocks, so this thread may still hold the EVM of a
-            // previous block whose prewarming has not finished yet.
-            if state.0 != ctx.env.hash {
+            // previous prewarm run that has not finished yet. Runs of payloads that claim the same
+            // block hash use different block environments, so the hash cannot tell them apart.
+            if !Arc::ptr_eq(&state.run, &ctx.terminate_execution) {
                 *state = ctx.evm_for_ctx();
             }
-            let Some(evm) = state.1.as_mut() else { return };
+            let Some(evm) = state.evm.as_mut() else { return };
 
             let start = Instant::now();
 
@@ -375,14 +376,18 @@ where
 
             // Prewarming disables nonce and balance checks, so a reusable result must also show
             // that the caller would have passed them.
-            let (nonce, max_balance_spending) = (tx_env.nonce(), tx_env.max_balance_spending());
-            // Balances only need to be tracked to record reads for result reuse.
-            evm.set_inspector_enabled(ctx.prewarm_results.is_some());
+            let speculative = SpeculativeTx {
+                caller: *tx.signer(),
+                nonce: tx_env.nonce(),
+                max_balance_spending: tx_env.max_balance_spending(),
+            };
             if let Some(results) = &ctx.prewarm_results {
                 evm.db_mut().start_recording(Arc::clone(results.predicted()), index);
                 evm.inspector_mut().clear();
             }
-            let res = match evm.transact(tx_env) {
+            let res = evm.transact(tx_env);
+            let reads = evm.db_mut().take_reads();
+            let res = match res {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
@@ -394,7 +399,7 @@ where
                     );
                     ctx.metrics.transaction_errors.increment(1);
                     if let Some(results) = &ctx.prewarm_results &&
-                        let Some(reads) = evm.db_mut().take_reads()
+                        let Some(reads) = reads
                     {
                         results.reject(index, reads);
                     }
@@ -410,14 +415,10 @@ where
             send_hints(&res.state);
 
             if let Some(results) = &ctx.prewarm_results &&
-                let Some(reads) = evm.db_mut().take_reads() &&
+                let Some(reads) = reads &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                match reads.finish(evm.inspector(), *tx.signer(), nonce, max_balance_spending.ok())
-                {
-                    Ok(reads) => results.insert(index, res, reads),
-                    Err(reads) => results.reject(index, reads),
-                }
+                results.store(index, res, reads, evm.inspector(), speculative);
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
@@ -736,10 +737,13 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = (
-    B256,
-    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>,
-);
+struct PrewarmEvmState<Evm: ConfigureEvm> {
+    /// Termination flag of the prewarm run that created the EVM, which identifies the run.
+    run: Arc<AtomicBool>,
+    evm: Option<
+        EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>,
+    >,
+}
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -755,7 +759,7 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Creates a per-thread EVM for prewarming, tagged with the hash of the block it executes.
+    /// Creates a per-thread EVM for prewarming, tagged with the prewarm run it belongs to.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
@@ -766,7 +770,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return (self.env.hash, None)
+                return PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: None }
             }
         };
 
@@ -793,13 +797,19 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        // JIT-compiled code would skip the inspector hooks that track observed balances.
-        let mut evm =
-            self.evm_config.clone().with_jit_support_enabled(false).evm_with_env_and_inspector(
-                RecordingDb::new(state_provider),
-                evm_env,
-                BalanceTracker::default(),
-            );
+        // Balances only need to be tracked to record reads for result reuse, and JIT-compiled
+        // code would skip the inspector hooks that track them.
+        let reuse = self.prewarm_results.is_some();
+        let mut evm_config = self.evm_config.clone();
+        if reuse {
+            evm_config = evm_config.with_jit_support_enabled(false);
+        }
+        let mut evm = evm_config.evm_with_env_and_inspector(
+            RecordingDb::new(state_provider),
+            evm_env,
+            BalanceTracker::default(),
+        );
+        evm.set_inspector_enabled(reuse);
 
         if !self.precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -813,7 +823,7 @@ where
             });
         }
 
-        (self.env.hash, Some(evm))
+        PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: Some(evm) }
     }
 
     /// Returns `true` if prewarming should stop.
@@ -1014,7 +1024,7 @@ mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{Address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
