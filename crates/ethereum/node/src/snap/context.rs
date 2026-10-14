@@ -62,7 +62,7 @@ impl<N: ProviderNodeTypes, C> NodeSnapContext<N, C> {
 impl<N, C> SnapSyncContext for NodeSnapContext<N, C>
 where
     N: ProviderNodeTypes,
-    C: DownloadClient + Send + Sync,
+    C: DownloadClient,
 {
     fn head(&self) -> Result<u64, SnapSyncError> {
         Ok(self.factory.database_provider_ro()?.last_block_number()?)

@@ -137,7 +137,7 @@ impl MetricServer {
         Ok(())
     }
 
-    async fn start_endpoint<F: Hook + 'static>(
+    async fn start_endpoint<F: Hook>(
         &self,
         listen_addr: SocketAddr,
         hook: Arc<F>,

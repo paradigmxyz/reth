@@ -832,7 +832,7 @@ pub async fn backup_local_transactions_task<P>(
     pool: P,
     config: LocalTransactionBackupConfig,
 ) where
-    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>> + Clone,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
