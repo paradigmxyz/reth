@@ -13,7 +13,7 @@ const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 /// A trait that provides payload builder settings.
 ///
 /// This provides all basic payload builder settings and is implemented by the
-/// [`PayloadBuilderArgs`](crate::args::PayloadBuilderArgs) type.
+/// [`crate::args::PayloadBuilderArgs`] type.
 pub trait PayloadBuilderConfig {
     /// Returns the extra data as bytes.
     fn extra_data(&self) -> Bytes;
@@ -59,7 +59,7 @@ pub trait RethNetworkConfig {
     /// If both peers share the same protocol, the corresponding handler will be included alongside
     /// the `eth` protocol.
     ///
-    /// See also [`ProtocolHandler`](reth_network::protocol::ProtocolHandler)
+    /// See also [`reth_network::protocol::ProtocolHandler`]
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
 
     /// Returns the secret key used for authenticating sessions.
@@ -79,7 +79,7 @@ impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N>
 }
 
 /// A trait that provides all basic config values for the transaction pool and is implemented by the
-/// [`TxPoolArgs`](crate::args::TxPoolArgs) type.
+/// [`crate::args::TxPoolArgs`] type.
 pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
