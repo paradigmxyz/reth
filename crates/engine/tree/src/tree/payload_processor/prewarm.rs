@@ -351,12 +351,12 @@ where
 
             let (tx_env, tx) = tx.into_parts();
             let send_hints = |state: &EvmState| {
-                if index > 0 {
+                if index > 0 &&
+                    let Some(state_root_hint_stream) = state_root_hint_stream
+                {
                     let (targets, storage_targets) = MultiProofTargetsV2::from_state(state);
                     ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                    if let Some(state_root_hint_stream) = state_root_hint_stream {
-                        state_root_hint_stream.on_access_hint(targets.into());
-                    }
+                    state_root_hint_stream.on_access_hint(targets.into());
                 }
             };
 
@@ -1013,7 +1013,8 @@ pub struct PrewarmMetrics {
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
-    /// Counter for transactions seeded with results of pool transactions instead of executed
+    /// Counter for transactions seeded with results of pool transactions instead of being
+    /// executed.
     pub(crate) seeded_transactions: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,

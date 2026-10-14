@@ -142,14 +142,16 @@ where
     }
 
     /// Returns the recorded results of pool transactions on top of `parent_hash` that prewarming
-    /// of a block with `evm_env` may reuse.
+    /// of a block with `evm_env` may reuse, `None` if there are none.
     pub(crate) fn seeds(
         &self,
         parent_hash: B256,
         evm_env: &EvmEnvFor<Evm>,
     ) -> Option<PoolSeeds<HaltReasonFor<Evm>>> {
         let speculation = self.speculation.read();
-        let speculation = speculation.as_ref().filter(|s| s.parent_hash == parent_hash)?;
+        let speculation = speculation
+            .as_ref()
+            .filter(|s| s.parent_hash == parent_hash && !s.results.is_empty())?;
         let differs = env_differences(&speculation.evm_env, evm_env)?;
         Some(PoolSeeds::new(
             Arc::clone(&speculation.results),
@@ -282,6 +284,16 @@ mod tests {
     }
 
     #[test]
+    fn offers_no_seeds_without_results() {
+        let handle =
+            TestHandle::spawn(&Runtime::test(), Arc::new(NoPool), EthEvmConfig::mainnet(), true);
+        let parent = SealedHeader::seal_slow(Header::default());
+        start(&handle, &parent);
+        let evm_env = handle.speculation.read().as_ref().unwrap().evm_env.clone();
+        assert!(handle.seeds(parent.hash(), &evm_env).is_none());
+    }
+
+    #[test]
     fn records_no_results_with_eip8037() {
         let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
         let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
@@ -333,6 +345,10 @@ mod tests {
                 ..Default::default()
             })
         );
+
+        let mut other_chain = actual.clone();
+        other_chain.cfg_env.chain_id += 1;
+        assert_eq!(env_differences(&predicted, &other_chain), None);
 
         actual.block_env.basefee += 1;
         assert_eq!(env_differences(&predicted, &actual), None);

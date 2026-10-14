@@ -529,7 +529,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Validation reuses such results only for blocks whose environment matches the predicted
     /// one, apart from the beneficiary, timestamp, prevrandao and gas limit, which the
     /// transactions must not have observed. Only called if [`Self::reuses_prewarm_results`]
-    /// returns `true`.
+    /// returns `true`. Returns `None` if the environment cannot be predicted, which disables
+    /// recording pool transaction results.
     fn speculative_next_evm_env(
         &self,
         parent: &SealedHeader<HeaderTy<Self::Primitives>>,

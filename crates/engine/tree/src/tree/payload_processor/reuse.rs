@@ -709,15 +709,21 @@ impl BlockEnvFields {
 /// environment with [`POOL_BENEFICIARY`] as the beneficiary, by transaction hash.
 #[derive(Debug)]
 pub(crate) struct PoolResults<H> {
-    txs: RwLock<B256Map<Arc<PoolTx<H>>>>,
-    /// Estimated number of bytes held by the stored results.
-    bytes: AtomicUsize,
+    stored: RwLock<StoredPoolTxs<H>>,
 }
 
 impl<H> Default for PoolResults<H> {
     fn default() -> Self {
-        Self { txs: RwLock::default(), bytes: AtomicUsize::default() }
+        Self { stored: RwLock::new(StoredPoolTxs { txs: B256Map::default(), bytes: 0 }) }
     }
+}
+
+/// Results of pool transactions stored in [`PoolResults`].
+#[derive(Debug)]
+struct StoredPoolTxs<H> {
+    txs: B256Map<Arc<PoolTx<H>>>,
+    /// Estimated number of bytes held by `txs`.
+    bytes: usize,
 }
 
 impl<H> PoolResults<H> {
@@ -740,7 +746,7 @@ impl<H> PoolResults<H> {
         let Ok(mut reads) = reads.finish(balances, tx) else { return false };
 
         // The beneficiary was only loaded to credit fees, which are credited to the actual
-        // beneficiary instead.
+        // beneficiary instead. Crediting fees always loads and touches it, even for zero fees.
         let Some(beneficiary) = result.state.remove(&POOL_BENEFICIARY) else { return false };
         let Some(index) = reads.position(POOL_BENEFICIARY) else { return false };
         let speculative = reads.accounts.remove(index).info.map_or(U256::ZERO, |info| info.balance);
@@ -751,20 +757,25 @@ impl<H> PoolResults<H> {
         let Some(credit) = beneficiary.info.balance.checked_sub(speculative) else { return false };
 
         let bytes = retained_bytes(&result, &reads);
-        let mut txs = self.txs.write();
-        let total = self.bytes.load(Ordering::Relaxed) + bytes;
-        let Entry::Vacant(entry) = txs.entry(hash) else { return false };
+        let mut stored = self.stored.write();
+        let total = stored.bytes + bytes;
         if total > MAX_POOL_RESULT_BYTES {
             return false
         }
+        let Entry::Vacant(entry) = stored.txs.entry(hash) else { return false };
         entry.insert(Arc::new(PoolTx { result, reads, credit }));
-        self.bytes.store(total, Ordering::Relaxed);
+        stored.bytes = total;
         true
     }
 
     /// Returns the result of the pool transaction with `hash`.
     pub(crate) fn get(&self, hash: &B256) -> Option<Arc<PoolTx<H>>> {
-        self.txs.read().get(hash).cloned()
+        self.stored.read().txs.get(hash).cloned()
+    }
+
+    /// Returns whether no result is stored.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.stored.read().txs.is_empty()
     }
 }
 
@@ -773,12 +784,12 @@ fn retained_bytes<H>(result: &ResultAndState<H>, reads: &ReadSet) -> usize {
     let accounts = result.state.values().map(|account| {
         // Other bytecode is shared with the database.
         let code = account.info.code.as_ref().filter(|_| account.is_created());
-        size_of::<(Address, Account)>() +
-            account.storage.len() * size_of::<(StorageKey, EvmStorageSlot)>() +
+        account.storage.capacity() * size_of::<(StorageKey, EvmStorageSlot)>() +
             code.map_or(0, Bytecode::len)
     });
-    reads.accounts.len() * size_of::<AccountRead>() +
-        reads.storage.len() * size_of::<StorageRead>() +
+    result.state.capacity() * size_of::<(Address, Account)>() +
+        reads.accounts.capacity() * size_of::<AccountRead>() +
+        reads.storage.capacity() * size_of::<StorageRead>() +
         result.result.output().map_or(0, |output| output.len()) +
         result.result.logs().iter().map(InMemorySize::size).sum::<usize>() +
         accounts.sum::<usize>()
@@ -814,7 +825,7 @@ impl<H> PoolTx<H> {
 /// Results of pool transactions that may seed the [`PrewarmResults`] of a block on top of the
 /// parent they were executed on.
 #[derive(Debug, Clone)]
-pub struct PoolSeeds<H> {
+pub(crate) struct PoolSeeds<H> {
     results: Arc<PoolResults<H>>,
     /// The beneficiary of the block.
     beneficiary: Address,
@@ -1114,6 +1125,10 @@ mod tests {
     const POOL_BENEFICIARY_CALLER: Address = Address::repeat_byte(0xcb);
     /// Reads the balance of [`BENEFICIARY`] by its address.
     const BENEFICIARY_BALANCE_BY_ADDRESS: Address = Address::repeat_byte(0xcc);
+    /// Stores the prevrandao in slot 0.
+    const PREVRANDAO_READER: Address = Address::repeat_byte(0xcd);
+    /// Has the largest balance.
+    const SATURATED: Address = Address::repeat_byte(0xce);
     /// Index of a sender with the largest nonce.
     const EXHAUSTED_SENDER: u8 = 5;
     const GAS_PRICE: u128 = 2;
@@ -1167,7 +1182,7 @@ mod tests {
     fn parent_state() -> CacheDB<EmptyDB> {
         let mut db = CacheDB::new(EmptyDB::default());
         // The exhausted sender is funded separately.
-        for i in [1, 2, 3, 4, 6] {
+        for i in [1, 2, 3, 4, 6, 7] {
             db.insert_account_info(
                 sender(i),
                 AccountInfo { balance: U256::from(10u64.pow(18)), ..Default::default() },
@@ -1186,6 +1201,7 @@ mod tests {
             AccountInfo { balance: U256::from(1), ..Default::default() },
         );
         db.insert_account_info(RICH, AccountInfo { balance: U256::MAX >> 1, ..Default::default() });
+        db.insert_account_info(SATURATED, AccountInfo { balance: U256::MAX, ..Default::default() });
         db.insert_account_info(ZERO_BALANCE, AccountInfo { nonce: 1, ..Default::default() });
         db.insert_account_info(
             UNKNOWN_CODE,
@@ -1208,6 +1224,7 @@ mod tests {
                 BENEFICIARY_BALANCE_BY_ADDRESS,
                 bytes!("73bebebebebebebebebebebebebebebebebebebebe3100"),
             ),
+            (PREVRANDAO_READER, bytes!("445f5500")),
         ] {
             let code = Bytecode::new_raw(code);
             db.insert_account_info(
@@ -1469,6 +1486,17 @@ mod tests {
         beneficiary: Address,
     ) -> Vec<Result<(), ReuseMiss>> {
         let differs = BlockEnvFields { timestamp: true, prevrandao: true, ..Default::default() };
+        reuse_pool_with(txs, pool, beneficiary, differs)
+    }
+
+    /// Like [`reuse_pool`], for a block environment that differs from the predicted one in
+    /// `differs`.
+    fn reuse_pool_with(
+        txs: &[Recovered<TransactionSigned>],
+        pool: &[Recovered<TransactionSigned>],
+        beneficiary: Address,
+        differs: BlockEnvFields,
+    ) -> Vec<Result<(), ReuseMiss>> {
         let seeds = PoolSeeds::new(Arc::new(pool_results(pool)), beneficiary, differs);
         let mut prewarm = Prewarm::new(txs, &[]);
         for (index, tx) in txs.iter().enumerate() {
@@ -1582,8 +1610,28 @@ mod tests {
             tx(3, 0, POOL_BENEFICIARY, 1),
             tx(4, 0, POOL_BENEFICIARY_CALLER, 1),
             tx(6, 0, BENEFICIARY, 1),
+            tx(7, 0, PREVRANDAO_READER, 1),
         ];
-        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing); 5]);
+        assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing); 6]);
+
+        let txs = [tx(1, 0, GAS_LIMIT_READER, 1)];
+        let differs = BlockEnvFields { gas_limit: true, ..Default::default() };
+        assert_eq!(reuse_pool_with(&txs, &txs, BENEFICIARY, differs), [Err(ReuseMiss::Missing)]);
+    }
+
+    #[test]
+    fn seeds_only_unexecuted_transactions() {
+        let txs = [tx(1, 0, COUNTER, 1)];
+        let differs = BlockEnvFields::default();
+        let seeds = PoolSeeds::new(Arc::new(pool_results(&txs)), BENEFICIARY, differs);
+        assert!(Prewarm::new(&txs, &[]).results.seed(0, txs[0].tx_hash(), &seeds).is_some());
+        assert!(Prewarm::new(&txs, &[0]).results.seed(0, txs[0].tx_hash(), &seeds).is_none());
+    }
+
+    #[test]
+    fn rejects_pool_results_overflowing_the_beneficiary() {
+        let txs = [tx(1, 0, COUNTER, 1)];
+        assert_eq!(reuse_pool(&txs, &txs, SATURATED), [Err(ReuseMiss::Stale)]);
     }
 
     /// Stores the recorded result of `tx` in `results` again under `hash`, after `modify` changed

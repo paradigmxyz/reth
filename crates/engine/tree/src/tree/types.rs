@@ -42,7 +42,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     ///
     /// None if txpool prewarming does not record results or the block environment differs from
     /// the predicted one.
-    pub pool_seeds: Option<PoolSeeds<HaltReasonFor<Evm>>>,
+    pub(crate) pool_seeds: Option<PoolSeeds<HaltReasonFor<Evm>>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>
