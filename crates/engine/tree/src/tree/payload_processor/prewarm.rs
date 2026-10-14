@@ -186,7 +186,9 @@ where
             let txs = ctx
                 .prewarm_results
                 .as_ref()
-                .map(|_| (0..ctx.env.transaction_count).map(|_| OnceLock::new()).collect())
+                .map(|_| {
+                    (0..ctx.env.transaction_count).map(|_| OnceLock::new()).collect::<Box<[_]>>()
+                })
                 .unwrap_or_default();
             let txs: &[OnceLock<Tx>] = &txs;
             pool.in_place_scope(|s| {
