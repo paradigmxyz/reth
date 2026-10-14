@@ -487,8 +487,19 @@ where
 
         let start = Instant::now();
         self.return_storage_tries();
-        let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
-            Ok(result) => result,
+        // Trie updates are only recorded when a trie is modified. This task only modifies the
+        // storage tries it checked out, and every block takes their updates, so the tries
+        // retained from earlier blocks need not be visited.
+        let storage_tries = self.trie.storage_trie_updates_of(self.storage_to_drop.keys());
+        let (state_root, trie_updates) = match self.trie.root_with_account_updates(self.new_epoch) {
+            Ok((root, updates)) => (
+                root,
+                TrieUpdates {
+                    account_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                    storage_tries,
+                },
+            ),
             Err(err)
                 if matches!(
                     err.kind(),
@@ -2718,6 +2729,45 @@ mod tests {
         task.pending_updates = 1;
         task.process_new_updates().unwrap();
         assert!(task.pending_targets.is_empty());
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    /// The final root takes trie updates from the storage tries this block checked out, skips
+    /// blind ones, and leaves nothing behind.
+    #[test]
+    fn final_root_takes_updates_of_checked_out_storage_tries() {
+        let runtime = Runtime::test();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(RevealableSparseTrie::revealed_empty())
+            .with_updates(true);
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
+        let [changed, blind] = [0x11, 0x12].map(B256::repeat_byte);
+        // A branch with a branch child is persisted, so it shows up in the trie updates.
+        let mut sibling = B256::repeat_byte(0x30);
+        sibling[1] = 0x40;
+        let slots = [B256::repeat_byte(0x30), sibling, B256::repeat_byte(0x31)];
+
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(changed) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![ProofTrieNodeV2::empty()]);
+        work.queue_updates(
+            slots.into_iter().map(|slot| (slot, LeafUpdate::Changed(vec![1]))).collect(),
+        );
+        task.run_ready_storage_work().unwrap();
+        task.storage_trie_state_mut(blind);
+
+        task.return_storage_tries();
+        let storage_tries = task.trie.storage_trie_updates_of(task.storage_to_drop.keys());
+        assert_eq!(storage_tries.keys().copied().collect::<Vec<_>>(), vec![changed]);
+        assert!(!storage_tries[&changed].storage_nodes.is_empty());
+        assert!(task.trie.storage_trie_updates_of(&[B256::repeat_byte(0x13)]).is_empty());
+        // Nothing is left behind for later blocks. Scanning every trie requires them revealed.
+        assert!(task.trie.take_or_create_storage_trie(&blind).is_blind());
+        assert!(task.trie.take_trie_updates().unwrap().is_empty());
 
         drop(updates_tx);
         drop(task);
