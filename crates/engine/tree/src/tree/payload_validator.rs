@@ -1322,9 +1322,13 @@ where
                         <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
                     );
                     if outcome.is_err() {
+                        let reason =
+                            crate::tree::payload_processor::reuse::DIAG.with(|d| d.replace(0));
                         // Later prewarm results are refreshed against the actual writes.
-                        executor.execute_transaction_with_result_closure(tx, |result| {
-                            results.publish_executed(index, &result.result().state)
+                        diag_execute(reason, || {
+                            executor.execute_transaction_with_result_closure(tx, |result| {
+                                results.publish_executed(index, &result.result().state)
+                            })
                         })?;
                     }
                     reuse_stats.record(outcome);
@@ -1384,6 +1388,7 @@ where
         let block = executor.evm().block();
         let block_gas_used = executor.receipts().last().map_or(0, |r| r.cumulative_gas_used());
         if tx.gas_limit() > block.gas_limit().saturating_sub(block_gas_used) {
+            crate::tree::payload_processor::reuse::DIAG.with(|d| d.set(9));
             return Err(ReuseMiss::Stale)
         }
 
@@ -2181,4 +2186,51 @@ struct ExecutedBal {
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
+}
+
+macro_rules! diag_fns {
+    ($($name:ident => $variant:pat),* $(,)?) => {
+        $(
+            #[inline(never)]
+            fn $name<R>(f: impl FnOnce() -> R) -> R {
+                std::hint::black_box(stringify!($name));
+                std::hint::black_box(f())
+            }
+        )*
+
+        fn diag_execute<R>(reason: u8, f: impl FnOnce() -> R) -> R {
+            match reason {
+                $($variant => $name(f),)*
+                _ => diag_execute_other(f),
+            }
+        }
+    };
+}
+
+diag_fns! {
+    diag_execute_disabled => 0,
+    diag_execute_unusable => 6,
+    diag_execute_missing => 7,
+    diag_execute_in_flight => 8,
+    diag_execute_in_flight_first8 => 30,
+    diag_execute_in_flight_first32 => 31,
+    diag_execute_gas => 9,
+    diag_execute_parent_existence => 10,
+    diag_execute_parent_fields => 11,
+    diag_execute_parent_balance_exact => 12,
+    diag_execute_parent_balance_lower => 13,
+    diag_execute_parent_balance_bound => 14,
+    diag_execute_parent_storage => 15,
+    diag_execute_predicted_existence => 20,
+    diag_execute_predicted_fields => 21,
+    diag_execute_predicted_balance_exact => 22,
+    diag_execute_predicted_balance_lower => 23,
+    diag_execute_predicted_balance_bound => 24,
+    diag_execute_predicted_storage => 25,
+}
+
+#[inline(never)]
+fn diag_execute_other<R>(f: impl FnOnce() -> R) -> R {
+    std::hint::black_box("diag_execute_other");
+    std::hint::black_box(f())
 }
