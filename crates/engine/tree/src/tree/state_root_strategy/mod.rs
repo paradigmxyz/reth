@@ -71,7 +71,6 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
@@ -641,7 +640,6 @@ impl DefaultStateRootStrategy {
 
         let parent_span = Span::current();
         executor.clone().spawn_blocking_named("sparse-trie", move || {
-            reth_tasks::once!(increase_thread_priority);
 
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
