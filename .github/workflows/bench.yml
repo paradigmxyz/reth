@@ -1664,7 +1664,7 @@ jobs:
 
           quote_arg() {
             local value="$1"
-            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+-]+$ ]]; then
+            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+,-]+$ ]]; then
               printf '%s' "$value"
             else
               printf "'%s'" "${value//\'/\'\\\'\'}"
