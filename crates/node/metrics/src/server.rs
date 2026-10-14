@@ -204,8 +204,10 @@ impl MetricServer {
                     let response = service.call(req).await?;
                     // CompressionBody performs CPU work when polled. Fully collect it on a
                     // blocking worker so Hyper only polls the completed bytes on Tokio workers.
+                    let span = tracing::Span::current();
                     let result = executor
                         .spawn_blocking(move || {
+                            let _entered = span.enter();
                             // Keep the concurrency slot even if the client disconnects.
                             let _permit = permit;
                             tokio::runtime::Handle::current().block_on(async move {
@@ -219,7 +221,7 @@ impl MetricServer {
                     let response = match result {
                         Ok(Ok(response)) => response,
                         error => {
-                            tracing::warn!(?error, "Failed to encode metrics response");
+                            tracing::error!(target: "reth::cli", ?error, "Failed to encode metrics response");
                             metrics_error_response(
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 "Failed to encode metrics response.",
@@ -610,8 +612,14 @@ mod tests {
 
         // Send request to the metrics endpoint
         let url = format!("http://{listen_addr}");
-        let client =
-            Client::builder().no_gzip().no_brotli().no_deflate().no_zstd().build().unwrap();
+        let client = Client::builder()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
         let response = client.get(&url).send().await.unwrap();
         assert!(response.status().is_success());
         assert_eq!(response.headers().get(CONTENT_ENCODING), None);
@@ -669,7 +677,10 @@ mod tests {
             let started = started.clone();
             Arc::new(move || {
                 started.add_permits(1);
-                let _ = wait_for_release.lock().unwrap().recv();
+                assert_eq!(
+                    wait_for_release.lock().unwrap().recv_timeout(Duration::from_secs(10)),
+                    Err(mpsc::RecvTimeoutError::Disconnected)
+                );
             })
         };
         server
@@ -708,7 +719,9 @@ mod tests {
         assert_eq!(started.available_permits(), 0);
         // Closing the channel releases every collector, including during panic unwinding.
         drop(release);
-        while let Some(result) = scrapes.join_next().await {
+        while let Some(result) =
+            tokio::time::timeout(Duration::from_secs(10), scrapes.join_next()).await.unwrap()
+        {
             result.unwrap();
         }
         assert_eq!(client.get(&busy_url).send().await.unwrap().status(), StatusCode::OK);
