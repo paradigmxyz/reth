@@ -92,6 +92,16 @@ metrics.workspace = true
 blake3.workspace = true
 rayon.workspace = true
 
+# historical execution corpus
+async-trait.workspace = true
+aws-config.workspace = true
+aws-credential-types.workspace = true
+bytes.workspace = true
+crossbeam-channel.workspace = true
+object_store.workspace = true
+slatedb.workspace = true
+wincode.workspace = true
+
 # io
 fdlimit.workspace = true
 toml = { workspace = true, features = ["display"] }
@@ -108,7 +118,14 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-cli.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-evm-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
+reth-trie-common.workspace = true
+alloy-genesis.workspace = true
+proptest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

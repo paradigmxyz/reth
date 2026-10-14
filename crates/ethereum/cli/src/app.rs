@@ -71,6 +71,7 @@ where
     {
         let jit_args = match &self.cli.command {
             Commands::ReExecute(cmd) => cmd.jit.clone(),
+            Commands::ReExecuteFill(cmd) => cmd.jit.clone(),
             _ => Default::default(),
         };
 
@@ -213,6 +214,9 @@ where
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::ReExecute(command) => {
+            runner.run_until_ctrl_c(command.execute::<N>(components, rt))
+        }
+        Commands::ReExecuteFill(command) => {
             runner.run_until_ctrl_c(command.execute::<N>(components, rt))
         }
         Commands::Ext(command) => command.execute(runner),

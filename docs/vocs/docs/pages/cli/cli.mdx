@@ -7,3 +7,72 @@ The Reth node is operated via the CLI by running the `reth node` command. To sto
 However, Reth has more commands:
 
 <Summary />
+
+## Historical execution corpora
+
+Capture a finite range from an archive, then replay it without that archive:
+
+```bash
+export AWS_PROFILE=corpus-writer
+reth re-execute-fill --chain mainnet --datadir /path/to/archive \
+  --from 20000001 --to 20001001 --blocks-per-chunk 100 \
+  --corpus s3://my-corpus/ethereum-20000001-20001001
+
+export AWS_PROFILE=corpus-reader
+reth re-execute --chain mainnet \
+  --from 20000001 --to 20001001 --blocks-per-chunk 100 --num-tasks 16 \
+  --corpus s3://my-corpus/ethereum-20000001-20001001
+```
+
+Both commands use an **exclusive `--to`**: this example executes exactly 1,000
+blocks, ending at 20,001,000. Genesis is recorded as chain context, not executed.
+As with the existing local command, an end beyond the archive head is clamped
+to the head, which itself is excluded. Prefer a finalized historical range;
+fill records canonical parent/tip hashes and fails if the pin changes during capture.
+
+Use `--s3-endpoint https://s3.example.com` for an S3-compatible service. Credentials
+come from the standard AWS chain, including environment, profiles, and workload
+identity. Do not put credentials in URLs or command arguments. Replay needs read
+access to the corpus, not archive-source credentials or a local database. Omitting
+`--corpus` retains local database re-execution.
+
+### Completion, resumption, and verification
+
+Repeating the same fill command resumes missing chunks, or performs a no-write
+metadata/checkpoint check if complete. Add `--verify-existing` to read and fully
+replay previously published records. The default completeness check does **not**
+scan every stored payload. The prefix is bound to its chain ID, genesis, hardfork
+schedule, canonical range, schema, and chunk size; use a new prefix for a different
+configuration. Replay subranges must align with stored chunk boundaries.
+
+Each publication follows durable writes, checkpoint creation, and a readback
+integrity check. Concurrent fill invocations fence previous writers; a superseded
+writer fails instead of overwriting the catalog. Replay pins an immutable checkpoint
+and does not create or extend checkpoints. Incomplete publication, gaps, duplicates,
+missing state, incompatible context, and record digest errors fail explicitly.
+There is no RPC fallback. Retain the checkpoint and its objects for as long as
+readers need the corpus; object-store lifecycle deletion can make it unreadable.
+
+Both data sources share the configured Reth executor, post-execution consensus
+checks (including receipts/gas and applicable BAL checks), and historical changeset
+verifier. Neither path recomputes the global state root. Corpus mode fails on
+invalid execution and does not support `--skip-invalid-blocks`. Generic node
+components remain in use, including native protocol reads through the EVM database
+interface; capture discovers reads with fresh state per block so later executor
+resets do not lose values hidden by a warm cache.
+
+### Format and memory bounds
+
+The maintained `corpus-v1` layout uses typed wincode records with canonical RLP
+blocks and independently read historical expectations. The earlier experimental
+corpus format is incompatible and is not migrated automatically. Fill includes
+extra discovery and verification work; measure it separately from replay.
+
+Replay uses four asynchronous reader-runtime threads, at most 64 concurrent scans,
+1 MiB scan read-ahead, and a four-record ready queue feeding `--num-tasks` native
+execution threads. A 64 MiB serialized-byte budget covers materialized reads,
+queued records, and records being executed. Bytes move directly to workers without
+pipe framing. This is **not an RSS cap**: decoded blocks/state, SlateDB caches and
+read-ahead, and SDK allocations are additional. Wincode also checks each sequence
+against its default 4 MiB preallocation limit. Oversized captures fail; choose
+smaller chunks in a fresh prefix rather than disabling bounds.

@@ -661,3 +661,10 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+# historical execution corpus
+aws-config = "=1.8.15"
+aws-credential-types = "=1.2.14"
+object_store = { version = "=0.14.2", features = ["aws"] }
+slatedb = { version = "=0.17.0", default-features = false, features = ["aws", "moka", "zstd"] }
+wincode = { version = "=0.6.1", features = ["derive"] }

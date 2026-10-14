@@ -4,18 +4,14 @@ use crate::common::{
     AccessRights, CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment,
     EnvironmentArgs,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
-use alloy_eip7928::bal::Bal;
 use alloy_primitives::{Address, B256, U256};
 use clap::Parser;
-use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
-use reth_consensus::FullConsensus;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_node_core::args::JitArgs;
-use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
+use reth_primitives_traits::{format_gas_throughput, Account};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
@@ -40,6 +36,14 @@ use std::{
 use tokio::{sync::mpsc, task::JoinSet};
 use tracing::*;
 
+mod chunk;
+mod execute;
+mod fill;
+mod replay;
+mod store;
+
+pub use fill::FillCommand;
+
 /// `reth re-execute` command
 ///
 /// Re-execute blocks in parallel to verify historical sync correctness.
@@ -52,7 +56,7 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, default_value = "1")]
     from: u64,
 
-    /// The height to end at. Defaults to the latest block.
+    /// Exclusive end height. Defaults to the latest block (or the corpus end).
     #[arg(long)]
     to: Option<u64>,
 
@@ -67,6 +71,15 @@ pub struct Command<C: ChainSpecParser> {
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
     skip_invalid_blocks: bool,
+
+    /// Read a pinned corpus instead of opening a local database.
+    /// Uses 64 MiB serialized reservations, excluding decoded state and SDK/cache memory.
+    #[arg(long, conflicts_with = "skip_invalid_blocks")]
+    corpus: Option<String>,
+
+    /// Optional S3-compatible endpoint. Credentials use the standard AWS chain.
+    #[arg(long, requires = "corpus")]
+    s3_endpoint: Option<String>,
 
     #[command(flatten)]
     pub jit: JitArgs,
@@ -89,6 +102,52 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
+        if let Some(location) = &self.corpus {
+            let store = store::Store::open(location, self.s3_endpoint.as_deref()).await?;
+            let (catalog, _) = store.catalog().await?.ok_or_else(|| {
+                eyre::eyre!("no maintained corpus catalog; prototype format is not compatible")
+            })?;
+            eyre::ensure!(catalog.complete, "corpus is not complete");
+            let context = &catalog.context;
+            let chain = self.env.chain.clone();
+            eyre::ensure!(
+                context.chain_id == chain.chain_id() &&
+                    context.genesis == chain.genesis_hash().to_string() &&
+                    context.forks == chain.display_hardforks().to_string(),
+                "corpus chain/fork context mismatch"
+            );
+            let end = self.to.unwrap_or(context.end).min(context.end);
+            eyre::ensure!(
+                self.from >= context.start &&
+                    self.from < end &&
+                    self.blocks_per_chunk == context.chunk_blocks,
+                "corpus range/chunk configuration mismatch"
+            );
+            let records: Vec<_> = catalog
+                .records
+                .iter()
+                .filter(|r| r.start >= self.from && r.end <= end)
+                .cloned()
+                .collect();
+            eyre::ensure!(
+                records.first().map(|r| r.start) == Some(self.from) &&
+                    records.last().map(|r| r.end) == Some(end),
+                "corpus range must align with stored chunk boundaries"
+            );
+            let workers = self.num_tasks.map(usize::try_from).transpose()?.unwrap_or_else(|| {
+                std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+            });
+            let components = components(chain);
+            let config = components.evm_config().clone().with_jit_support();
+            let consensus = components.consensus().clone();
+            let cancellation = CancellationToken::new();
+            let _guard = cancellation.drop_guard();
+            return tokio::task::spawn_blocking(move || {
+                replay::run(store, catalog, records, config, consensus, workers, cancellation)
+            })
+            .await?;
+        }
+
         // Default to 4GB RocksDB block cache for re-execute unless explicitly set.
         if self.env.db.rocksdb_block_cache_size.is_none() {
             self.env.db.rocksdb_block_cache_size = Some(4 << 30);
@@ -148,11 +207,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let next_block = Arc::clone(&next_block);
             tasks.spawn_blocking(move || {
                 let evm_config = evm_config.with_jit_support();
-                let executor_lifetime = Duration::from_secs(600);
-                let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
+                let provider =
+                    provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
                 let state_provider_factory = BlockchainProvider::new(provider_factory.clone())?;
-                // Reused across blocks for BAL hash encoding.
-                let mut bal_buf = Vec::new();
 
                 let db_at = {
                     |block_number: u64| {
@@ -175,139 +232,31 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
 
                     // Atomically grab the next chunk of blocks.
-                    let chunk_start =
-                        next_block.fetch_add(blocks_per_chunk, Ordering::Relaxed);
+                    let chunk_start = next_block.fetch_add(blocks_per_chunk, Ordering::Relaxed);
                     if chunk_start >= max_block {
                         break;
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
-
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
-                    let mut executor_created = Instant::now();
-
-                    'blocks: for block in chunk_start..chunk_end {
-                        if cancellation.is_cancelled() {
-                            break;
-                        }
-
-                        let block = provider_factory
-                            .recovered_block(block.into(), TransactionVariant::NoHash)?
-                            .unwrap();
-
-                        let result = match executor.execute_one(&block) {
-                            Ok(result) => result,
-                            Err(err) => {
-                                if skip_invalid_blocks {
-                                    executor =
-                                        evm_config.batch_executor(db_at(block.number()));
-                                    let _ =
-                                        info_tx.send((block, eyre::Report::new(err)));
-                                    continue
-                                }
-                                return Err(err.into())
-                            }
-                        };
-
-                        let bal_hash = executor
-                            .take_bal()
-                            .map(|bal| Bal::from(bal).compute_hash_with_buf(&mut bal_buf));
-
-                        if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None, bal_hash)
-                            .wrap_err_with(|| {
-                                format!(
-                                    "Failed to validate block {} {}",
-                                    block.number(),
-                                    block.hash()
-                                )
-                            })
-                        {
-                            let correct_receipts = provider_factory
-                                .receipts_by_block(block.number().into())?
-                                .unwrap();
-
-                            for (i, (receipt, correct_receipt)) in
-                                result.receipts.iter().zip(correct_receipts.iter()).enumerate()
-                            {
-                                if receipt != correct_receipt {
-                                    let tx_hash =
-                                        block.body().transactions()[i].tx_hash();
-                                    error!(
-                                        ?receipt,
-                                        ?correct_receipt,
-                                        index = i,
-                                        ?tx_hash,
-                                        "Invalid receipt"
-                                    );
-                                    let expected_gas_used =
-                                        correct_receipt.cumulative_gas_used() -
-                                            if i == 0 {
-                                                0
-                                            } else {
-                                                correct_receipts[i - 1]
-                                                    .cumulative_gas_used()
-                                            };
-                                    let got_gas_used = receipt.cumulative_gas_used() -
-                                        if i == 0 {
-                                            0
-                                        } else {
-                                            result.receipts[i - 1].cumulative_gas_used()
-                                        };
-                                    if got_gas_used != expected_gas_used {
-                                        let mismatch = GotExpected {
-                                            expected: expected_gas_used,
-                                            got: got_gas_used,
-                                        };
-
-                                        error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
-                                        if skip_invalid_blocks {
-                                            executor = evm_config
-                                                .batch_executor(db_at(block.number()));
-                                            let _ = info_tx.send((block, err));
-                                            continue 'blocks;
-                                        }
-                                        return Err(err);
-                                    }
-                                } else {
-                                    continue;
-                                }
-                            }
-
-                            if skip_invalid_blocks {
-                                executor =
-                                    evm_config.batch_executor(db_at(block.number()));
-                                let _ = info_tx.send((block, err));
-                                continue 'blocks;
-                            }
-                            return Err(err);
-                        }
-                        let _ = stats_tx.send((block.number(), block.gas_used()));
-
-                        // Reset DB once in a while to avoid OOM or read tx timeouts
-                        if executor.size_hint() > 5_000_000 ||
-                            executor_created.elapsed() > executor_lifetime
-                        {
-                            let last_block = block.number();
-                            let old_executor = std::mem::replace(
-                                &mut executor,
-                                evm_config.batch_executor(db_at(last_block)),
-                            );
-                            let bundle = old_executor.into_state().take_bundle();
-                            verify_bundle_against_changesets(
-                                &provider,
-                                &bundle,
-                                last_block,
-                            )?;
-                            executor_created = Instant::now();
-                        }
-                    }
-
-                    // Full verification at chunk end for remaining unverified blocks
-                    let bundle = executor.into_state().take_bundle();
-                    verify_bundle_against_changesets(
+                    execute::execute_chunk(
+                        &evm_config,
+                        &consensus,
                         &provider,
-                        &bundle,
-                        chunk_end - 1,
+                        chunk_start..chunk_end,
+                        skip_invalid_blocks,
+                        &cancellation,
+                        |number| Ok(db_at(number)),
+                        |number| {
+                            Ok(provider_factory
+                                .recovered_block(number.into(), TransactionVariant::NoHash)?
+                                .unwrap())
+                        },
+                        |number| Ok(provider_factory.receipts_by_block(number.into())?.unwrap()),
+                        |number, gas| {
+                            let _ = stats_tx.send((number, gas));
+                        },
+                        |block, err| {
+                            let _ = info_tx.send((block, err));
+                        },
                     )?;
                 }
 

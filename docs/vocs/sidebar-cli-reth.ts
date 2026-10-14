@@ -310,6 +310,10 @@ export const rethCliSidebar: SidebarItem = {
         {
             text: "reth re-execute",
             link: "/cli/reth/re-execute"
+        },
+        {
+            text: "reth re-execute-fill",
+            link: "/cli/reth/re-execute-fill"
         }
     ]
 };
