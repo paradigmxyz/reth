@@ -49,7 +49,7 @@ pub mod bal;
 pub mod bal_prewarm_pool;
 pub mod prewarm;
 pub mod receipt_root_task;
-pub mod reuse;
+pub(crate) mod reuse;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -635,7 +635,7 @@ impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
     }
 
     /// Returns the transaction prewarming results that execution may reuse, if enabled.
-    pub fn prewarm_results(&self) -> Option<Arc<PrewarmResults<H>>> {
+    pub(crate) fn prewarm_results(&self) -> Option<Arc<PrewarmResults<H>>> {
         self.prewarm_handle.prewarm_results.clone()
     }
 

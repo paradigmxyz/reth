@@ -11,8 +11,8 @@
 //! account's balance produces the same result for any balance, apart from the balance itself, so
 //! such balances may differ and the transaction's balance change is applied to the current balance
 //! instead. Balances are observed by `BALANCE`, `SELFBALANCE`, `SELFDESTRUCT` and failed value
-//! transfers. Successful value transfers and gas payments only require the balance to be at least
-//! as large as during speculation.
+//! transfers. Successful value transfers and gas payments only require enough starting balance
+//! to cover the largest cumulative debit recorded during speculation.
 
 use alloy_primitives::{map::DefaultHashBuilder, Address, B256, U256};
 use dashmap::DashMap;
@@ -41,7 +41,7 @@ const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);
 
 /// Speculative prewarm results of a block's transactions, indexed by their position in the block.
 #[derive(Debug)]
-pub struct PrewarmResults<H> {
+pub(crate) struct PrewarmResults<H> {
     slots: Box<[Mutex<ResultSlot<H>>]>,
     /// Writes predicted by the stored results.
     predicted: Arc<PredictedState>,
@@ -177,6 +177,7 @@ impl<H> PrewarmResults<H> {
         if rebased {
             // Later transactions read the rebased balances.
             self.predicted.publish_accounts(index, &tx.result.state);
+            self.predicted.generation.fetch_add(1, Ordering::Relaxed);
         }
         Ok(Ok(tx.result))
     }
@@ -187,7 +188,7 @@ impl<H> PrewarmResults<H> {
 pub(crate) enum ReuseMiss {
     /// Prewarming had not finished the transaction.
     Missing,
-    /// The transaction read state that changed before it in the block.
+    /// The speculative result was unusable or failed a reuse eligibility check.
     Stale,
 }
 
@@ -434,12 +435,13 @@ pub(super) struct PredictedState {
     cleared: DashMap<Address, Writes<()>, DefaultHashBuilder>,
     /// Bytecode deployed by predicted writes.
     code: DashMap<B256, Bytecode, DefaultHashBuilder>,
-    /// Number of transactions whose actual writes block execution published.
+    /// Number of actual execution or rebased account updates published by block execution.
     generation: AtomicUsize,
 }
 
 impl PredictedState {
-    /// Returns the number of transactions whose actual writes block execution published.
+    /// Returns the number of actual execution or rebased account updates published by block
+    /// execution.
     pub(super) fn generation(&self) -> usize {
         self.generation.load(Ordering::Relaxed)
     }
