@@ -228,8 +228,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
-    /// Whether to disable reusing transaction prewarming results during block execution.
-    disable_prewarm_reuse: bool,
+    /// Whether block execution reuses transaction prewarming results.
+    prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
     ///
     /// This trusts the block header's state root. It is intended for experiments that measure
@@ -287,7 +287,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
-            disable_prewarm_reuse: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -379,7 +379,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
-            disable_prewarm_reuse: false,
+            prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
@@ -851,15 +851,14 @@ impl TreeConfig {
         self
     }
 
-    /// Returns whether reusing transaction prewarming results during block execution is disabled.
-    pub const fn disable_prewarm_reuse(&self) -> bool {
-        self.disable_prewarm_reuse
+    /// Returns whether block execution reuses transaction prewarming results.
+    pub const fn prewarm_reuse(&self) -> bool {
+        self.prewarm_reuse
     }
 
-    /// Setter for whether to disable reusing transaction prewarming results during block
-    /// execution.
-    pub const fn without_prewarm_reuse(mut self, disable_prewarm_reuse: bool) -> Self {
-        self.disable_prewarm_reuse = disable_prewarm_reuse;
+    /// Setter for whether block execution reuses transaction prewarming results.
+    pub const fn with_prewarm_reuse(mut self, prewarm_reuse: bool) -> Self {
+        self.prewarm_reuse = prewarm_reuse;
         self
     }
 

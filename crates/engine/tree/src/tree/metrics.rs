@@ -124,7 +124,7 @@ pub(crate) struct PrewarmReuseMetrics {
     reused_transactions: Counter,
     /// Transactions executed because prewarming had not finished them.
     missing_transactions: Counter,
-    /// Transactions executed because their prewarm results were stale.
+    /// Transactions executed because a prewarm result was unusable or failed reuse checks.
     stale_transactions: Counter,
 }
 

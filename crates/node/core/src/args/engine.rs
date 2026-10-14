@@ -597,10 +597,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
-    /// Disable reusing transaction prewarming results during block execution. When set, every
-    /// transaction is executed again after prewarming.
-    #[arg(long = "engine.disable-prewarm-reuse", default_value_t = false)]
-    pub disable_prewarm_reuse: bool,
+    /// Reuse transaction prewarming results during block execution instead of executing
+    /// transactions again when their prewarm reads are still valid.
+    #[arg(long = "engine.prewarm-reuse", default_value_t = false)]
+    pub prewarm_reuse: bool,
 
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
@@ -695,7 +695,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
-            disable_prewarm_reuse: false,
+            prewarm_reuse: false,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -809,7 +809,7 @@ impl EngineArgs {
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
             .without_bal_batch_io(self.disable_bal_batch_io)
-            .without_prewarm_reuse(self.disable_prewarm_reuse);
+            .with_prewarm_reuse(self.prewarm_reuse);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         if let Some(cpu_cores) = self.cpu_cores {
@@ -1028,7 +1028,7 @@ mod tests {
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
-            disable_prewarm_reuse: true,
+            prewarm_reuse: true,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -1077,7 +1077,7 @@ mod tests {
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
-            "--engine.disable-prewarm-reuse",
+            "--engine.prewarm-reuse",
         ])
         .args;
 

@@ -11,7 +11,7 @@
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 //! 4. Block execution commits prewarm results whose reads are still valid instead of executing the
-//!    transactions again, see [`super::reuse`]
+//!    transactions again
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
@@ -732,7 +732,7 @@ where
     /// Whether BAL state prefetching during prewarm is disabled.
     pub disable_bal_batch_io: bool,
     /// Results of transaction prewarming that block execution may reuse, `None` if disabled.
-    pub prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
+    pub(crate) prewarm_results: Option<Arc<PrewarmResults<HaltReasonFor<Evm>>>>,
 }
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in

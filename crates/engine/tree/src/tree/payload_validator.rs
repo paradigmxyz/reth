@@ -388,7 +388,7 @@ where
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
-            self.evm_config.reuses_prewarm_results() && !self.config.disable_prewarm_reuse(),
+            self.evm_config.reuses_prewarm_results() && self.config.prewarm_reuse(),
         ));
         self
     }
