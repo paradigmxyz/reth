@@ -63,7 +63,7 @@ impl<T, N: NodeTypes> PayloadBuilderFor<N> for T where
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
+pub trait FullNodeComponents: FullNodeTypes {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 

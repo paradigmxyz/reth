@@ -1360,6 +1360,13 @@ impl Discv4Service {
                         trace!(target: "discv4", from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
                         return
                     }
+                    // The echo only proves reachability at the IP the ping was sent to.
+                    if request.node.udp_addr().ip().to_canonical() !=
+                        remote_addr.ip().to_canonical()
+                    {
+                        trace!(target: "discv4", from=?remote_addr, expected=?request.node.udp_addr(), "Ignoring Pong from unexpected IP");
+                        return
+                    }
                 }
                 entry.remove()
             }
@@ -3399,6 +3406,25 @@ mod tests {
             expire: service.ping_expiration(),
             enr_sq: None,
         }
+    }
+
+    #[tokio::test]
+    async fn test_pong_from_unpinged_ip_does_not_establish_bond() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+        let echo_hash = insert_initial_ping(&mut service, record);
+        let unexpected_addr = "127.0.0.2:30303".parse().unwrap();
+
+        service.on_pong(make_pong(&service, echo_hash), unexpected_addr, record.id);
+
+        assert!(service.pending_pings.contains_key(&record.id));
+        assert!(!service.has_bond(record.id, unexpected_addr.ip()));
+
+        let expected_addr = SocketAddr::from((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), 30304));
+        service.on_pong(make_pong(&service, echo_hash), expected_addr, record.id);
+
+        assert!(!service.pending_pings.contains_key(&record.id));
+        assert!(service.has_bond(record.id, expected_addr.ip()));
     }
 
     #[tokio::test]

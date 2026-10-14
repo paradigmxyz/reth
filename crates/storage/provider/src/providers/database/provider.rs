@@ -144,7 +144,7 @@ impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut,
     }
 }
 
-impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
+impl<DB: Database, N: NodeTypes> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<()> {
         self.0.commit()
@@ -4001,7 +4001,7 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes + 'static> DbTxProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> DbTxProvider for DatabaseProvider<TX, N> {
     type Tx = TX;
 
     fn tx(&self) -> &Self::Tx {
@@ -4009,7 +4009,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DbTxProvider for DatabaseProvid
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> DBProvider for DatabaseProvider<TX, N> {
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }

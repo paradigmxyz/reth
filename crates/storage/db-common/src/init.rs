@@ -29,9 +29,9 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, OriginalValuesKnown, ProviderError, RevertsInit,
-    RocksDBProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
-    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, RocksDBProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -129,7 +129,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -160,7 +159,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -193,7 +191,6 @@ where
         + ChainSpecProvider
         + StorageSettingsCache
         + RocksDBProviderFactory
-        + NodePrimitivesProvider
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -522,7 +519,6 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + BlockNumReader
-                        + BlockHashReader
                         + ChainSpecProvider
                         + StageCheckpointWriter
                         + HistoryWriter
@@ -532,7 +528,6 @@ where
                         + StateWriter
                         + StorageSettingsCache
                         + RocksDBProviderFactory
-                        + NodePrimitivesProvider
                         + AsRef<PF::ProviderRW>,
     >,
 {
@@ -682,10 +677,7 @@ fn dump_state<PF>(
 ) -> Result<(), eyre::Error>
 where
     PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
-    PF::ProviderRW: StaticFileProviderFactory
-        + StorageSettingsCache
-        + RocksDBProviderFactory
-        + NodePrimitivesProvider,
+    PF::ProviderRW: StaticFileProviderFactory + StorageSettingsCache + RocksDBProviderFactory,
 {
     let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
     if storage_settings.storage_v2 {
@@ -761,8 +753,7 @@ where
         ProviderRW: StaticFileProviderFactory
                         + DBProvider<Tx: DbTxMut>
                         + StorageSettingsCache
-                        + RocksDBProviderFactory
-                        + NodePrimitivesProvider,
+                        + RocksDBProviderFactory,
     >,
 {
     let accounts_len = collector.len();
