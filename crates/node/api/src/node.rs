@@ -114,6 +114,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Notification channel for engine API events
     pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
+    ///
+    /// Random when the auth server is disabled, since the secret is only used by the auth server.
     pub jwt_secret: JwtSecret,
     /// Cache of recovered transaction senders shared by node components, if enabled.
     pub sender_recovery_cache: Option<SenderRecoveryCache>,
