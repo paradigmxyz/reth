@@ -992,7 +992,8 @@ impl RuntimeBuilder {
             let storage_pool = build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(storage_threads)
-                    .thread_name(|i| format!("storage-{i:02}")),
+                    .thread_name(|i| format!("storage-{i:02}"))
+                    .start_handler(|_| crate::utils::deprioritize_current_thread()),
             )?;
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);

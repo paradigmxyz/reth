@@ -319,6 +319,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
         let join_handle = spawn_os_thread("persistence", || {
+            reth_tasks::utils::deprioritize_current_thread();
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }

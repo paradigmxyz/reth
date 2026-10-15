@@ -12,6 +12,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+libc.workspace = true
 reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true

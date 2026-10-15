@@ -34,6 +34,21 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Lowers the current thread's priority to nice +10, so that latency-critical threads win
+/// contended cores. Failures are logged at `debug` level.
+pub fn deprioritize_current_thread() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: setpriority with `PRIO_PROCESS` and id 0 affects only the calling thread on Linux.
+    unsafe {
+        if libc::setpriority(libc::PRIO_PROCESS, 0, 10) != 0 {
+            tracing::debug!(
+                err = std::io::Error::last_os_error().to_string(),
+                "failed to deprioritize thread"
+            );
+        }
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.

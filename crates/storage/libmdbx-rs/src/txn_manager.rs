@@ -111,6 +111,15 @@ impl TxnManager {
                 }
             }
         };
+        let task = move || {
+            // Commits are not latency critical and their msync must not delay readers.
+            #[cfg(target_os = "linux")]
+            // SAFETY: setpriority with `PRIO_PROCESS` and id 0 affects only the calling thread.
+            unsafe {
+                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+            }
+            task()
+        };
         std::thread::Builder::new().name("mdbx-rs-txn-mgr".to_string()).spawn(task).unwrap();
     }
 
