@@ -69,7 +69,8 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// Invoked when the `RLPx` connection was established and the eth `Status` handshake
     /// succeeded.
     ///
-    /// Messages arriving before `Status` completes are queued within [`Self::inbound_limits`].
+    /// Messages arriving before `Status` completes are queued within [`Self::inbound_limits`]
+    /// and an aggregate handshake budget of 256 KiB or 64 messages, whichever is reached first.
     /// The callback runs when the authenticated connection is first polled.
     ///
     /// The returned future should resolve when the connection should disconnect.

@@ -318,7 +318,9 @@ async fn matching_identity_establishes_session() {
 /// even if it already sends messages of that protocol.
 #[tokio::test(flavor = "multi_thread")]
 async fn extra_protocol_waits_for_status_handshake() {
-    for max_frame_bytes in [2, 1] {
+    for (max_frame_bytes, frame_bytes, frame_count) in
+        [(2, 2, 1), (1, 2, 1), (102_400, 102_400, 3), (2, 2, 65)]
+    {
         let (local_key, local_id) = new_peer();
         let (remote_key, remote_id) = new_peer();
 
@@ -363,8 +365,12 @@ async fn extra_protocol_waits_for_status_handshake() {
                 .find(&spy_protocol().cap)
                 .unwrap()
                 .relative_message_id_offset();
-            p2p_stream.send(Bytes::from(vec![offset, 0x80])).await.unwrap();
-            if max_frame_bytes > 1 {
+            for _ in 0..frame_count {
+                let mut frame = vec![0x80; frame_bytes];
+                frame[0] = offset;
+                p2p_stream.send(Bytes::from(frame)).await.unwrap();
+            }
+            if max_frame_bytes == 2 && frame_count == 1 {
                 p2p_stream.disconnect(DisconnectReason::ClientQuitting).await.unwrap();
             }
         });
@@ -385,6 +391,12 @@ async fn extra_protocol_waits_for_status_handshake() {
                     max_size: 1,
                     ..
                 })
+            ));
+        }
+        if frame_count > 1 {
+            assert!(matches!(
+                error,
+                EthStreamError::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull { .. })
             ));
         }
         remote.await.unwrap();
