@@ -39573,9 +39573,9 @@ MDBX_MAYBE_UNUSED static const char *cmp2name(MDBX_cmp_func);
 MDBX_MAYBE_UNUSED static const char *search_foliage2name(MDBX_search_foliage);
 MDBX_MAYBE_UNUSED static const char *search_branch2name(MDBX_search_branch);
 
-#if MDBX_DEBUG_SEARCH_BRANCHLESS
+#if 1
 
-MDBX_MAYBE_UNUSED __cold static sfr_t old_node_search(MDBX_cursor *mc, const MDBX_val *key) {
+MDBX_MAYBE_UNUSED __hot static sfr_t old_node_search(MDBX_cursor *mc, const MDBX_val *key) {
   page_t *mp = mc->pg[mc->top];
   const intptr_t nkeys = page_numkeys(mp);
   DEBUG("searching %zu keys in %s %spage %" PRIaPGNO, nkeys, is_leaf(mp) ? "leaf" : "branch",
@@ -39661,8 +39661,8 @@ MDBX_MAYBE_UNUSED __cold static sfr_t old_node_search(MDBX_cursor *mc, const MDB
   return ret;
 }
 
-MDBX_MAYBE_UNUSED __cold static size_t old_branch_search(MDBX_cursor *mc, const MDBX_val *key) {
-  sfr_t nsr = old_node_search(mc, key);
+MDBX_MAYBE_UNUSED __hot static size_t old_branch_search(const MDBX_cursor *mc, const MDBX_val *key) {
+  sfr_t nsr = old_node_search((MDBX_cursor *)mc, key);
   size_t indx = page_numkeys(mc->pg[mc->top]) - 1;
   if (likely(nsr.node))
     indx = mc->ki[mc->top] + (intptr_t)nsr.exact - 1;
@@ -39673,6 +39673,8 @@ MDBX_MAYBE_UNUSED __cold static size_t old_branch_search(MDBX_cursor *mc, const 
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION __hot static MDBX_search_foliage
 cursor_to_search_foliage(const MDBX_cursor *mc) {
+  if (1)
+    return old_node_search;
   MDBX_cmp_func comparator = mc->clc->k.cmp;
   ASSERT(comparator != nullptr);
 
@@ -39834,6 +39836,8 @@ SEARCH_BRANCH(custom, mc->clc->k.cmp)
 
 MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION __hot static MDBX_search_branch
 cursor_to_search_branch(const MDBX_cursor *mc) {
+  if (1)
+    return old_branch_search;
   MDBX_cmp_func comparator = mc->clc->k.cmp;
   ASSERT(comparator != nullptr);
 
