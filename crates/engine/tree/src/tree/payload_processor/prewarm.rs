@@ -357,7 +357,7 @@ where
                     let (targets, storage_targets) = MultiProofTargetsV2::from_state(state);
                     ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                     let mut hint = StateAccessHint::from(targets);
-                    hint.storage_removals = storage_removals(&res.state);
+                    hint.storage_removals = storage_removals(state);
                     state_root_hint_stream.on_access_hint(hint);
                 }
             };
