@@ -8683,6 +8683,7 @@ dependencies = [
  "eyre",
  "futures",
  "indexmap 2.14.2",
+ "libc",
  "metrics",
  "metrics-util",
  "parking_lot",

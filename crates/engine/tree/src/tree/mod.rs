@@ -475,6 +475,18 @@ where
         let incoming = task.incoming_tx.clone();
         spawn_os_thread("engine", || {
             increase_thread_priority();
+            #[cfg(target_os = "linux")]
+            // SAFETY: sched_setscheduler with pid 0 affects only the calling thread.
+            unsafe {
+                let param = libc::sched_param { sched_priority: 1 };
+                if libc::sched_setscheduler(0, libc::SCHED_FIFO, std::ptr::from_ref(&param)) != 0 {
+                    debug!(
+                        target: "engine::tree",
+                        err = %std::io::Error::last_os_error(),
+                        "failed to set SCHED_FIFO"
+                    );
+                }
+            }
             task.run()
         });
         (incoming, outgoing)
