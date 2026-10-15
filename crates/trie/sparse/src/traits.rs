@@ -49,6 +49,11 @@ pub enum LeafUpdate {
     /// The leaf value may have changed, but the new value is not yet known.
     /// Used for optimistic prewarming when the actual value is unavailable.
     Touched,
+    /// The leaf may be removed, but whether it is is not yet known.
+    ///
+    /// Behaves like [`Self::Touched`], and also requests the blinded sibling that removing the
+    /// leaf would need to collapse its parent branch.
+    MaybeRemoved,
 }
 
 impl LeafUpdate {
@@ -242,6 +247,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Callers should deduplicate if needed.
     ///
     /// [`LeafUpdate::Touched`] behaves identically except it does not modify the leaf value.
+    /// [`LeafUpdate::MaybeRemoved`] does not modify the leaf value either, and remains in the map
+    /// until the sibling its removal would need is revealed.
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,

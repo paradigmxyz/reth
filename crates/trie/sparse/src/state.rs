@@ -1,6 +1,6 @@
 use crate::{
     traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
-    TrieNodeEpoch,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::vec::Vec;
 use alloy_primitives::{map::B256Map, B256};
@@ -391,20 +391,30 @@ where
         &mut self,
         new_epoch: TrieNodeEpoch,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
-        // record revealed node metrics
-        #[cfg(feature = "metrics")]
-        self.metrics.record();
-
         let storage_tries = self.storage_trie_updates();
-        let revealed = self.revealed_trie_mut()?;
-
-        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        let (root, updates) = self.root_with_account_updates(new_epoch)?;
         let updates = TrieUpdates {
             account_nodes: updates.updated_nodes,
             removed_nodes: updates.removed_nodes,
             storage_tries,
         };
         Ok((root, updates))
+    }
+
+    /// Returns sparse trie root and the account trie updates, leaving the updates of storage
+    /// tries in place.
+    ///
+    /// Returns an error if the account trie is still blind.
+    pub fn root_with_account_updates(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+    ) -> SparseStateTrieResult<(B256, SparseTrieUpdates)> {
+        // record revealed node metrics
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
+
+        let revealed = self.revealed_trie_mut()?;
+        Ok((revealed.root(new_epoch), revealed.take_updates()))
     }
 
     /// Returns storage trie updates for tries that have been revealed.
@@ -415,16 +425,38 @@ where
             .tries
             .iter_mut()
             .map(|(address, trie)| {
-                let trie = trie.as_revealed_mut().unwrap();
-                let updates = trie.take_updates();
-                let updates = StorageTrieUpdates {
-                    storage_nodes: updates.updated_nodes,
-                    removed_nodes: updates.removed_nodes,
-                };
-                (*address, updates)
+                (*address, Self::take_storage_trie_updates(trie.as_revealed_mut().unwrap()))
             })
             .filter(|(_, updates)| !updates.is_empty())
             .collect()
+    }
+
+    /// Returns storage trie updates for the given addresses, leaving the other storage tries
+    /// untouched.
+    ///
+    /// Use this instead of [`Self::storage_trie_updates`] when only these tries can have updates,
+    /// to avoid visiting every retained storage trie. Blind and missing tries have no updates.
+    pub fn storage_trie_updates_of<'a>(
+        &mut self,
+        addresses: impl IntoIterator<Item = &'a B256>,
+    ) -> B256Map<StorageTrieUpdates> {
+        addresses
+            .into_iter()
+            .filter_map(|address| {
+                let trie = self.storage.tries.get_mut(address)?.as_revealed_mut()?;
+                Some((*address, Self::take_storage_trie_updates(trie)))
+            })
+            .filter(|(_, updates)| !updates.is_empty())
+            .collect()
+    }
+
+    /// Takes the updates of a revealed storage trie.
+    fn take_storage_trie_updates(trie: &mut S) -> StorageTrieUpdates {
+        let updates = trie.take_updates();
+        StorageTrieUpdates {
+            storage_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+        }
     }
 
     /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.

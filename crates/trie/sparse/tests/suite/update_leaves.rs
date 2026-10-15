@@ -645,6 +645,81 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     );
 }
 
+/// `LeafUpdate::MaybeRemoved` requests the same proofs, round by round, as removing the leaf
+/// would, without changing the trie. Covers a sibling in the upper trie and a sibling inside a
+/// subtrie whose removal could also collapse the branch above the subtrie.
+pub(super) fn test_maybe_removed_requests_removal_proofs<T: SparseTrie>(new_trie: fn() -> T) {
+    /// Runs reveal-update rounds and returns the proof targets requested in each round.
+    fn proof_rounds<T: SparseTrie>(
+        harness: &SuiteTestHarness,
+        trie: &mut T,
+        mut leaf_updates: B256Map<LeafUpdate>,
+    ) -> Vec<Vec<(B256, ProofV2TargetParent)>> {
+        let mut rounds = Vec::new();
+        loop {
+            let mut targets = Vec::new();
+            trie.update_leaves(&mut leaf_updates, |key, parent| targets.push((key, parent)))
+                .expect("update_leaves should succeed");
+            if targets.is_empty() {
+                assert!(leaf_updates.is_empty(), "updates should drain without proofs");
+                return rounds
+            }
+            let mut proof_targets = targets
+                .iter()
+                .map(|(key, parent)| ProofV2Target::new(*key).with_parent(*parent))
+                .collect::<Vec<_>>();
+            rounds.push(targets);
+            let (mut proof_nodes, _) = harness.proof_v2(&mut proof_targets);
+            trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+        }
+    }
+
+    for prefix in [&[][..], &[0xAB, 0xCD][..]] {
+        let key = |byte: u8| {
+            let mut key = B256::ZERO;
+            key.0[..prefix.len()].copy_from_slice(prefix);
+            key.0[prefix.len()] = byte;
+            key
+        };
+
+        // A branch with one revealed leaf at nibble 0x1 and 16 blinded keys at nibble 0x2. The
+        // deep branch gets blinded keys at 0x5 and 0xA0, so that it sits in the subtrie at 0xAB.
+        let revealed_key = key(0x10);
+        let mut storage = BTreeMap::from([(revealed_key, U256::ONE)]);
+        for i in 0u8..16 {
+            storage.insert(key(0x20 | i), U256::from(i as u64 + 100));
+        }
+        if !prefix.is_empty() {
+            for first in [0x50, 0xA0] {
+                let mut other_key = B256::ZERO;
+                other_key.0[0] = first;
+                storage.insert(other_key, U256::from(7));
+            }
+        }
+        let harness = SuiteTestHarness::new(storage.clone());
+
+        let mut removal_trie: T = harness.init_trie_with_targets(&[revealed_key], false, new_trie);
+        let removal_rounds = proof_rounds(
+            &harness,
+            &mut removal_trie,
+            SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)])),
+        );
+        assert_eq!(removal_rounds.len(), 1 + prefix.len() / 2);
+
+        let mut trie: T = harness.init_trie_with_targets(&[revealed_key], false, new_trie);
+        let rounds = proof_rounds(
+            &harness,
+            &mut trie,
+            B256Map::from_iter([(revealed_key, LeafUpdate::MaybeRemoved)]),
+        );
+        assert_eq!(rounds, removal_rounds);
+        assert_eq!(trie.root(epoch(0)), harness.original_root());
+
+        storage.remove(&revealed_key);
+        assert_eq!(removal_trie.root(epoch(0)), SuiteTestHarness::new(storage).original_root());
+    }
+}
+
 /// Atomic rollback preserves a revealed leaf when its sibling is blinded.
 ///
 /// The update remains pending until the sibling can be revealed.
