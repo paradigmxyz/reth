@@ -45,12 +45,19 @@ impl PayloadTypes for BbPayloadTypes {
     type PayloadAttributes = <EthPayloadTypes as PayloadTypes>::PayloadAttributes;
 
     fn block_to_payload(
-        _block: SealedBlock<
+        block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
-        _bal: Option<Bytes>,
+        bal: Option<Bytes>,
     ) -> Self::ExecutionData {
-        unreachable!()
+        BigBlockData {
+            block_number: block.number,
+            // Historical headers have no BAL hash, so the inner payload conversion drops the
+            // supplied BAL. Keep it separately without changing the original block hash.
+            env_switches: vec![EthPayloadTypes::block_to_payload(block, bal.clone())],
+            prior_block_hashes: vec![],
+            merged_block_access_list: bal,
+        }
     }
 }
 
@@ -230,5 +237,53 @@ fn main() {
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_engine_primitives::ExecutionPayload as _;
+    use reth_engine_tree::tree::payload_validator::BlockOrPayload;
+    use reth_primitives_traits::Block as _;
+
+    #[test]
+    fn historical_block_replay_preserves_bal() {
+        let mut block = Block::default();
+        block.header.number = 42;
+        block.header.base_fee_per_gas = Some(1);
+        let block = block.seal_slow();
+        let bal = Bytes::from_static(&[0xc0]);
+        let payload = BbPayloadTypes::block_to_payload(block.clone(), Some(bal.clone()));
+
+        assert_eq!(payload.block_access_list(), Some(&bal));
+        assert_eq!(payload.block_number(), block.number);
+        assert_eq!(payload.block_hash(), block.hash());
+        assert_eq!(payload.env_switches.len(), 1);
+        assert_eq!(payload.env_switches[0].payload.block_access_list(), None);
+        assert_eq!(payload.prior_block_hashes, vec![]);
+
+        let input = BlockOrPayload::<BbPayloadTypes>::Payload(payload.clone());
+        assert!(input.has_block_access_list());
+        assert!(input.try_decoded_access_list().unwrap().unwrap().as_bal().is_empty());
+
+        let validator =
+            BbEngineValidator { inner: EthereumEngineValidator::new(ChainSpec::default().into()) };
+        let converted = validator.convert_payload_to_block(payload).unwrap();
+        assert_eq!(converted, block);
+        assert_eq!(converted.block_access_list_hash, None);
+    }
+
+    #[test]
+    fn block_replay_without_bal_preserves_payload() {
+        let block = Block::default().seal_slow();
+        let payload = BbPayloadTypes::block_to_payload(block.clone(), None);
+
+        assert_eq!(payload.block_access_list(), None);
+        assert_eq!(payload.block_hash(), block.hash());
+        assert_eq!(payload.env_switches.len(), 1);
+        let input = BlockOrPayload::<BbPayloadTypes>::Payload(payload);
+        assert!(!input.has_block_access_list());
+        assert!(input.try_decoded_access_list().unwrap().is_none());
     }
 }

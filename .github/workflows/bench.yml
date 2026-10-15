@@ -801,7 +801,7 @@ jobs:
               if (!featureName) featureName = (process.env.GITHUB_REF_NAME || '');
             }
 
-            const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
+            const nodeBin = bigBlocks === 'true' || bal !== 'false' ? 'reth-bb' : 'reth';
 
             core.setOutput('pr', pr || '');
             core.setOutput('actor', actor);
