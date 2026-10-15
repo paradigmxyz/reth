@@ -290,15 +290,14 @@ where
         Ok(Pass::Done)
     }
 
-    // Whether `target` is above the local headers, or `None` when no peer serves its header. The
-    // header stage only finishes once it downloads the block after the local head, so a pass to a
-    // sibling or an older block never completes. A detached immediate successor also returns the
-    // unwind target needed to validate attachment through a header batch.
-    async fn is_ahead(&self, target: B256) -> Result<Option<(bool, Option<u64>)>, PipelineError> {
+    // Where `target` sits relative to the local headers. The header stage only finishes once it
+    // downloads the block after the local head, so a pass to a sibling or an older block never
+    // completes.
+    async fn position(&self, target: B256) -> Result<TargetPosition, PipelineError> {
         let head = {
             let provider = self.factory.provider()?;
             if provider.block_number(target)?.is_some() {
-                return Ok(Some((false, None)))
+                return Ok(TargetPosition::Behind)
             }
             let number = provider.last_block_number()?;
             BlockNumHash::new(number, provider.block_hash(number)?.unwrap_or_default())
@@ -310,11 +309,10 @@ where
             .and_then(|header| header.into_data())
             .filter(|header| header.hash_slow() == target)
         else {
-            return Ok(None)
+            return Ok(TargetPosition::Unavailable)
         };
         // A tip-only download bypasses the downloader's batch parent check.
-        let detached = if header.number().checked_sub(1) == Some(head.number) &&
-            header.parent_hash() != head.hash
+        if header.number().checked_sub(1) == Some(head.number) && header.parent_hash() != head.hash
         {
             // Unwinding needs a header below the head, which genesis doesn't have.
             if head.number <= self.factory.chain_spec().genesis_header().number() {
@@ -322,11 +320,13 @@ where
                     "snap headers do not connect to genesis",
                 )))
             }
-            Some(head.number - 1)
+            return Ok(TargetPosition::Detached { unwind_to: head.number - 1 })
+        }
+        Ok(if header.number() > head.number {
+            TargetPosition::Ahead
         } else {
-            None
-        };
-        Ok(Some((header.number() > head.number, detached)))
+            TargetPosition::Behind
+        })
     }
 
     // Returns the hash of the highest local header.
@@ -352,14 +352,22 @@ where
     ) -> Result<Option<(B256, bool)>, PipelineError> {
         loop {
             let target = *targets.borrow_and_update();
-            let ahead = tokio::select! {
+            let position = tokio::select! {
                 biased;
                 () = self.stop.cancelled() => return Ok(None),
                 Ok(()) = targets.changed() => continue,
-                ahead = self.is_ahead(target) => ahead?,
+                position = self.position(target) => position?,
             };
-            if let Some((ahead, detached)) = ahead {
-                if let Some(unwind_to) = detached {
+            match position {
+                TargetPosition::Unavailable => tokio::select! {
+                    biased;
+                    () = self.stop.cancelled() => return Ok(None),
+                    Ok(()) = targets.changed() => {},
+                    () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => {},
+                },
+                TargetPosition::Behind => return Ok(Some((target, false))),
+                TargetPosition::Ahead => return Ok(Some((target, true))),
+                TargetPosition::Detached { unwind_to } => {
                     // Reopen a two-header gap so the downloader validates attachment and performs
                     // its normal fork unwind before snap uses the canonical headers.
                     let unwind = pipeline
@@ -368,15 +376,7 @@ where
                         return Ok(None)
                     };
                     result?;
-                    continue
                 }
-                return Ok(Some((target, ahead)))
-            }
-            tokio::select! {
-                biased;
-                () = self.stop.cancelled() => return Ok(None),
-                Ok(()) = targets.changed() => {},
-                () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => {},
             }
         }
     }
@@ -394,6 +394,19 @@ enum Pass {
     RootMismatch,
     // The pass finished, so the run moves on to its next step.
     Done,
+}
+
+// Where a forkchoice target sits relative to the local headers.
+#[derive(Debug, PartialEq, Eq)]
+enum TargetPosition {
+    // No peer serves the target's header yet.
+    Unavailable,
+    // The target is a local header or not above the local head.
+    Behind,
+    // The target is above the local head.
+    Ahead,
+    // The target follows the local head on another branch, so headers unwind to `unwind_to`.
+    Detached { unwind_to: u64 },
 }
 
 #[cfg(test)]
@@ -900,7 +913,7 @@ pub(crate) mod tests {
         let client = ServesHeaders { headers: vec![genesis], ..Default::default() };
         let (run, _stop) = snap_run_with(&factory, client);
 
-        assert_eq!(run.is_ahead(target()).await.unwrap(), None);
+        assert_eq!(run.position(target()).await.unwrap(), TargetPosition::Unavailable);
     }
 
     #[tokio::test]
@@ -1081,7 +1094,7 @@ pub(crate) mod tests {
         let client = ServesHeaders { headers: vec![header], ..Default::default() };
         let (run, _) = snap_run_with(&factory, client);
 
-        let error = run.is_ahead(hash).await.unwrap_err();
+        let error = run.position(hash).await.unwrap_err();
 
         assert_eq!(error.to_string(), "snap headers do not connect to genesis");
     }
