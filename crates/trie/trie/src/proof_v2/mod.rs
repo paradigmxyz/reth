@@ -1673,6 +1673,14 @@ where
         let mut storage_value_encoder = StorageValueEncoder;
         self.root_node(&mut storage_value_encoder)
     }
+
+    /// Calculates the storage root hash of the account at `hashed_address`.
+    pub fn storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
+        let root_node = self.storage_root_node(hashed_address)?;
+        Ok(self
+            .compute_root_hash(core::slice::from_ref(&root_node))?
+            .expect("storage_root_node returns a node at empty path"))
+    }
 }
 
 /// Helper type wrapping a slice of [`ProofV2Target`]s, primarily used to iterate through targets in

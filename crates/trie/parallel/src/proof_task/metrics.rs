@@ -1,3 +1,5 @@
+//! Proof worker metrics.
+
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},

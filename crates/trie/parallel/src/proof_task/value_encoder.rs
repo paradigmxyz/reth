@@ -1,3 +1,5 @@
+//! Account leaf value encoding for account proof workers.
+
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
@@ -14,14 +16,14 @@ use std::rc::Rc;
 ///
 /// Storage roots are calculated with a shared [`StorageProofCalculator`], reusing its cursors and
 /// buffers across accounts.
-pub(crate) struct AccountValueEncoder<TC, HC> {
+pub(super) struct AccountValueEncoder<TC, HC> {
     /// Calculator used for the storage root of every encoded account.
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
 }
 
 impl<TC, HC> AccountValueEncoder<TC, HC> {
     /// Creates an encoder that calculates storage roots with `storage_calculator`.
-    pub(crate) const fn new(
+    pub(super) const fn new(
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self { storage_calculator }
@@ -50,7 +52,7 @@ where
 }
 
 /// Returned from [`AccountValueEncoder`] to calculate an account's storage root when encoded.
-pub(crate) struct AccountDeferredValueEncoder<TC, HC> {
+pub(super) struct AccountDeferredValueEncoder<TC, HC> {
     /// Calculator shared with the [`AccountValueEncoder`] that created this encoder.
     storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     hashed_address: B256,
@@ -63,11 +65,8 @@ where
     HC: HashedStorageCursor<Value = U256>,
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let mut calculator = self.storage_calculator.borrow_mut();
-        let root_node = calculator.storage_root_node(self.hashed_address)?;
-        let storage_root = calculator
-            .compute_root_hash(&[root_node])?
-            .expect("storage_root_node returns a node at empty path");
+        let storage_root =
+            self.storage_calculator.borrow_mut().storage_root(self.hashed_address)?;
         self.account.into_trie_account(storage_root).encode(buf);
         Ok(())
     }
