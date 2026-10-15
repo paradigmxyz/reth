@@ -22,7 +22,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::info;
+use tracing::{info, warn};
 use url::Url;
 
 /// Maximum retry attempts for a single download segment.
@@ -669,7 +669,7 @@ impl SegmentedDownload {
         };
 
         while let Some(piece) = state.next_piece(context.cancel_token) {
-            if let Err(error) = Self::download_piece_with_retries(
+            match Self::download_piece_with_retries(
                 client,
                 context.url,
                 &file,
@@ -680,9 +680,23 @@ impl SegmentedDownload {
                 context.cancel_token,
                 context.session,
             ) {
-                state.note_terminal_failure();
-                terminal_failure.record(error);
-                return;
+                Ok(()) => {}
+                Err(PieceAttemptFailure::Retryable { error, .. }) if state.requeue(piece) => {
+                    warn!(target: "reth::cli",
+                        start = piece.start,
+                        end = piece.end,
+                        %error,
+                        "Piece download failed, requeued"
+                    );
+                }
+                Err(
+                    PieceAttemptFailure::Retryable { error, .. } |
+                    PieceAttemptFailure::Terminal(error),
+                ) => {
+                    state.note_terminal_failure();
+                    terminal_failure.record(error);
+                    return;
+                }
             }
         }
     }
@@ -702,13 +716,15 @@ impl SegmentedDownload {
         request_limiter: &DownloadRequestLimiter,
         cancel_token: &CancellationToken,
         session: &DownloadSession,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), PieceAttemptFailure> {
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
             if cancel_token.is_cancelled() {
-                return Err(eyre::eyre!("Download cancelled"))
+                return Err(PieceAttemptFailure::Terminal(eyre::eyre!("Download cancelled")))
             }
 
-            let _request_permit = request_limiter.acquire(shared, cancel_token)?;
+            let _request_permit = request_limiter
+                .acquire(shared, cancel_token)
+                .map_err(PieceAttemptFailure::Terminal)?;
             match Self::download_piece_once(
                 client,
                 url,
@@ -726,12 +742,13 @@ impl SegmentedDownload {
                         session.retry_delay(piece_retry_backoff(attempt, throttled)),
                     );
                 }
-                Err(PieceAttemptFailure::Retryable { error, .. }) => return Err(error),
-                Err(PieceAttemptFailure::Terminal(error)) => return Err(error),
+                Err(failure) => return Err(failure),
             }
         }
 
-        Err(eyre::eyre!("Piece download failed after {SEGMENT_RETRY_ATTEMPTS} attempts"))
+        Err(PieceAttemptFailure::Terminal(eyre::eyre!(
+            "Piece download failed after {SEGMENT_RETRY_ATTEMPTS} attempts"
+        )))
     }
 
     /// Downloads one queued piece once.
@@ -838,12 +855,28 @@ struct SegmentedDownloadState {
     pieces: Mutex<VecDeque<DownloadPiece>>,
     /// Set once a worker hits a fatal error.
     failed: AtomicBool,
+    /// Remaining number of times a piece that exhausted its retries may be requeued.
+    requeues_left: AtomicU64,
 }
 
 impl SegmentedDownloadState {
     /// Creates the shared queue state for one segmented archive attempt.
     fn new(pieces: VecDeque<DownloadPiece>) -> Self {
-        Self { pieces: Mutex::new(pieces), failed: AtomicBool::new(false) }
+        let requeues_left = AtomicU64::new(pieces.len() as u64);
+        Self { pieces: Mutex::new(pieces), failed: AtomicBool::new(false), requeues_left }
+    }
+
+    /// Puts a piece back on the queue, returning `false` once the requeue budget is spent.
+    fn requeue(&self, piece: DownloadPiece) -> bool {
+        if self
+            .requeues_left
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
+            .is_err()
+        {
+            return false
+        }
+        self.pieces.lock().unwrap().push_back(piece);
+        true
     }
 
     /// Returns the next piece unless cancellation or a fatal error stopped the attempt.
@@ -939,15 +972,8 @@ fn piece_retry_backoff(attempt: u32, throttled: bool) -> Duration {
 
 /// Returns whether an HTTP status should retry the current piece.
 fn is_retryable_piece_status(status: StatusCode) -> bool {
-    matches!(
-        status,
-        StatusCode::REQUEST_TIMEOUT |
-            StatusCode::TOO_MANY_REQUESTS |
-            StatusCode::INTERNAL_SERVER_ERROR |
-            StatusCode::BAD_GATEWAY |
-            StatusCode::SERVICE_UNAVAILABLE |
-            StatusCode::GATEWAY_TIMEOUT
-    )
+    matches!(status, StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS) ||
+        status.is_server_error()
 }
 
 /// Returns whether a piece request should retry after the given status.
@@ -1030,6 +1056,7 @@ mod tests {
     fn piece_status_retry_policy_retries_200_ok() {
         assert!(should_retry_piece_status(StatusCode::OK));
         assert!(should_retry_piece_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(should_retry_piece_status(StatusCode::from_u16(520).unwrap()));
         assert!(!should_retry_piece_status(StatusCode::NOT_FOUND));
     }
 
@@ -1077,5 +1104,17 @@ mod tests {
         assert_eq!(downloaded.size, b"local archive bytes".len() as u64);
         assert!(!cache_dir.join("state.tar.zst").exists());
         assert!(!cache_dir.join("state.tar.zst.part").exists());
+    }
+
+    #[test]
+    fn segmented_state_requeues_failed_pieces_within_budget() {
+        let state = SegmentedDownloadState::new(build_download_pieces(8, 4));
+        let token = CancellationToken::new();
+        let first = state.next_piece(&token).unwrap();
+
+        assert!(state.requeue(first));
+        assert!(state.requeue(first));
+        assert!(!state.requeue(first));
+        assert_eq!(state.pieces.lock().unwrap().back(), Some(&first));
     }
 }
