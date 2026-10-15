@@ -685,15 +685,15 @@ jobs:
               featureNodeArgs = [featureNodeArgs, '--debug.skip-state-root'].filter(Boolean).join(' ');
             }
 
-            const isBigBlocks = bigBlocks === 'true';
+            const useBigBlockDefaults = bigBlocks === 'true';
             // In call mode `blocks` counts the chain blocks a static corpus is generated
             // from and `warmup` is a warmup duration in seconds.
             const isCall = mode === 'call';
             if (!explicitBlocks) {
-              blocks = isCall ? '20' : defaultBlocks(isBigBlocks);
+              blocks = isCall ? '20' : defaultBlocks(useBigBlockDefaults);
             }
             if (!explicitRunPairs) {
-              runPairs = defaultRunPairs(isBigBlocks);
+              runPairs = defaultRunPairs(useBigBlockDefaults);
             }
             if (!/^\d+$/.test(blocks)) {
               core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
@@ -712,6 +712,15 @@ jobs:
             }
             const runOrder = benchRunOrder(runPairs);
 
+            // Historical block headers lack a BAL hash. Use the existing big-block
+            // payload format to retain BALs, including when replaying older baseline refs.
+            if (mode === 'engine' && bal !== 'false' && bigBlocks !== 'true') {
+              bigBlocks = 'true';
+              bigBlocksTargetGas = '1';
+            }
+
+            const isBigBlocks = bigBlocks === 'true';
+
             if (!validBalModes.has(bal)) {
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
@@ -722,6 +731,10 @@ jobs:
             }
             if (mode !== 'engine' && (isBigBlocks || reorg || bal !== 'false')) {
               core.setFailed(`${mode} mode does not support big-blocks, reorg, or BAL`);
+              return;
+            }
+            if (isBigBlocks && reorg) {
+              core.setFailed('reorg is not supported with big-blocks or BAL (reth-bb cannot build reorg blocks)');
               return;
             }
             if (mempool && (mode !== 'engine' || isBigBlocks || reorg)) {
