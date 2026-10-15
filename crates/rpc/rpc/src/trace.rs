@@ -23,7 +23,7 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
+    helpers::{LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
@@ -91,7 +91,7 @@ impl<Eth> TraceApi<Eth>
 where
     // tracing methods do _not_ read from mempool, hence no `LoadBlock` trait
     // bound
-    Eth: Trace + Call + LoadPendingBlock + LoadTransaction + 'static,
+    Eth: Trace + LoadTransaction,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
@@ -361,7 +361,7 @@ impl<Eth> TraceApi<Eth>
 where
     // tracing methods read from mempool, hence `LoadBlock` trait bound via
     // `TraceExt`
-    Eth: TraceExt + 'static,
+    Eth: TraceExt,
 {
     /// Returns all transaction traces that match the given filter.
     ///
@@ -701,7 +701,7 @@ fn apply_trace_filter_pagination(
 #[async_trait]
 impl<Eth> TraceApiServer<RpcTxReq<Eth::NetworkTypes>> for TraceApi<Eth>
 where
-    Eth: TraceExt + 'static,
+    Eth: TraceExt,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///
