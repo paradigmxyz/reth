@@ -354,6 +354,7 @@ async fn extra_protocol_waits_for_status_handshake() {
             .await
         });
 
+        let (keep_alive_tx, keep_alive_rx) = oneshot::channel();
         let remote = tokio::spawn(async move {
             let outgoing = TcpStream::connect(local_addr).await.unwrap();
             let ecies = ECIESStream::connect(outgoing, remote_key, local_id).await.unwrap();
@@ -372,6 +373,10 @@ async fn extra_protocol_waits_for_status_handshake() {
             }
             if max_frame_bytes == 2 && frame_count == 1 {
                 p2p_stream.disconnect(DisconnectReason::ClientQuitting).await.unwrap();
+            } else {
+                // Keep unread Status data from causing an early TCP reset before the local
+                // handshake reports the ingress-limit error.
+                let _ = keep_alive_rx.await;
             }
         });
 
@@ -399,6 +404,7 @@ async fn extra_protocol_waits_for_status_handshake() {
                 EthStreamError::P2PStreamError(P2PStreamError::SubprotocolInboundBufferFull { .. })
             ));
         }
+        let _ = keep_alive_tx.send(());
         remote.await.unwrap();
 
         assert!(
