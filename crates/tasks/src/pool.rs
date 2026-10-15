@@ -200,7 +200,8 @@ impl WorkerPool {
             build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(self.num_threads)
-                    .thread_name(move |i| format!("{prefix}-{i:02}")),
+                    .thread_name(move |i| format!("{prefix}-{i:02}"))
+                    .start_handler(|_| crate::utils::set_current_thread_batch()),
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })

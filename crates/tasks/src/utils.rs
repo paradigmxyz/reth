@@ -34,6 +34,22 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Moves the current thread to `SCHED_BATCH`, so that waking it does not preempt running
+/// latency-critical threads. Failures are logged at `debug` level.
+pub fn set_current_thread_batch() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: sched_setscheduler with pid 0 affects only the calling thread.
+    unsafe {
+        let param = libc::sched_param { sched_priority: 0 };
+        if libc::sched_setscheduler(0, libc::SCHED_BATCH, std::ptr::from_ref(&param)) != 0 {
+            tracing::debug!(
+                err = std::io::Error::last_os_error().to_string(),
+                "failed to set SCHED_BATCH"
+            );
+        }
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
 /// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
 /// scheduling policy on them.
