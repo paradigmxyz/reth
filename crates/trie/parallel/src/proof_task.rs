@@ -13,10 +13,9 @@
 //! # Message Flow
 //!
 //! 1. The `SparseTrieCacheTask` prepares a storage or account job and hands it to
-//!    `ProofWorkerHandle`. The job carries a `ProofResultContext` so the worker knows how to send
-//!    the result back.
+//!    `ProofWorkerHandle`, which attaches its internal result sender to the job.
 //! 2. A worker receives the job, runs the proof, and sends a `ProofResultMessage` through the
-//!    provided `ProofResultSender`.
+//!    handle's result channel.
 //! 3. The `SparseTrieCacheTask` receives the message and proceeds with its state-root logic.
 //!
 //! Both worker pools send results directly to the `SparseTrieCacheTask` through its shared
@@ -143,6 +142,10 @@ impl AvailabilitySheet {
 /// channels, and workers shut down gracefully when all handles are dropped.
 #[derive(Debug, Clone)]
 pub struct ProofWorkerHandle {
+    /// Sender retained for dispatching jobs and keeping the result channel connected.
+    proof_result_tx: ProofResultSender,
+    /// Results returned by both worker pools.
+    proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Direct sender to storage worker pool
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Direct sender to account worker pool
@@ -180,7 +183,6 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         worker_counts: ProofWorkerCounts,
-        proof_result_tx: ProofResultSender,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -189,6 +191,7 @@ impl ProofWorkerHandle {
             + Sync
             + 'static,
     {
+        let (proof_result_tx, proof_result_rx) = unbounded();
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
@@ -261,7 +264,7 @@ impl ProofWorkerHandle {
         {
             let work_rx = account_work_rx;
             let availability = account_availability.clone();
-            let result_tx = proof_result_tx;
+            let result_tx = proof_result_tx.clone();
             let parent_span = tracing::Span::current();
             runtime.spawn_blocking_named("account-workers", move || {
                 let next_worker_id = AtomicUsize::new(0);
@@ -300,6 +303,8 @@ impl ProofWorkerHandle {
         }
 
         Self {
+            proof_result_tx,
+            proof_result_rx,
             storage_work_tx,
             account_work_tx,
             storage_availability,
@@ -339,14 +344,18 @@ impl ProofWorkerHandle {
         self.account_worker_count
     }
 
+    /// Results from both worker pools, consumed by the sparse trie task.
+    ///
+    /// Cloned handles share the same queue; receiving a result consumes it for every handle.
+    pub const fn results(&self) -> &CrossbeamReceiver<ProofResultMessage> {
+        &self.proof_result_rx
+    }
+
     /// Dispatch a storage proof computation to the storage worker pool.
     ///
-    /// The result will be sent via the sender in `proof_result_context`.
-    pub fn dispatch_storage_proof(
-        &self,
-        input: StorageProofInput,
-        proof_result_context: ProofResultContext,
-    ) -> Result<(), ProviderError> {
+    /// The result will be available through [`Self::results`].
+    pub fn dispatch_storage_proof(&self, input: StorageProofInput) -> Result<(), ProviderError> {
+        let proof_result_context = ProofResultContext::new(self.proof_result_tx.clone());
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_context })
             .map_err(|err| {
@@ -365,11 +374,15 @@ impl ProofWorkerHandle {
 
     /// Dispatch an account multiproof computation
     ///
-    /// The result will be sent via the sender in [`AccountMultiproofInput::proof_result_context`].
+    /// The result will be available through [`Self::results`].
     pub fn dispatch_account_multiproof(
         &self,
-        input: AccountMultiproofInput,
+        targets: Vec<ProofV2Target>,
     ) -> Result<(), ProviderError> {
+        let input = AccountMultiproofInput {
+            targets,
+            proof_result_context: ProofResultContext::new(self.proof_result_tx.clone()),
+        };
         self.account_work_tx
             .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
             .map_err(|err| {
@@ -511,7 +524,7 @@ where
 ///
 /// Workers use this sender to deliver proof results or terminal initialization errors directly to
 /// `SparseTrieCacheTask`.
-pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
+type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
 /// `SparseTrieCacheTask`.
@@ -533,29 +546,25 @@ pub struct ProofResultMessage {
 /// This struct contains all context needed to send and track proof calculation results.
 /// Workers use this to deliver completed proofs back to the main event loop.
 #[derive(Debug, Clone)]
-pub struct ProofResultContext {
+struct ProofResultContext {
     /// Channel sender for result delivery
-    pub sender: ProofResultSender,
+    sender: ProofResultSender,
     /// Original state update that triggered this proof
-    pub state: HashedPostState,
+    state: HashedPostState,
     /// Calculation start time for measuring elapsed duration
-    pub start_time: Instant,
+    start_time: Instant,
 }
 
 impl ProofResultContext {
     /// Creates a new proof result context.
-    pub const fn new(
-        sender: ProofResultSender,
-        state: HashedPostState,
-        start_time: Instant,
-    ) -> Self {
-        Self { sender, state, start_time }
+    fn new(sender: ProofResultSender) -> Self {
+        Self { sender, state: HashedPostState::default(), start_time: Instant::now() }
     }
 }
 
 /// Internal message for storage workers.
 #[derive(Debug)]
-pub(crate) enum StorageWorkerJob {
+enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
         /// Storage proof input parameters
@@ -1031,11 +1040,11 @@ impl StorageProofInput {
 
 /// Input parameters for account multiproof computation.
 #[derive(Debug)]
-pub struct AccountMultiproofInput {
+struct AccountMultiproofInput {
     /// The targets for which to compute the multiproof.
-    pub targets: Vec<ProofV2Target>,
+    targets: Vec<ProofV2Target>,
     /// Context for sending the proof result.
-    pub proof_result_context: ProofResultContext,
+    proof_result_context: ProofResultContext,
 }
 
 /// Internal message for account workers.
@@ -1085,13 +1094,7 @@ mod tests {
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let (proof_result_tx, _) = unbounded();
-        let proof_handle = ProofWorkerHandle::new(
-            &runtime,
-            ctx,
-            ProofWorkerCounts::full(&runtime),
-            proof_result_tx,
-        );
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, ProofWorkerCounts::full(&runtime));
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
@@ -1130,48 +1133,28 @@ mod tests {
             ProofWorkerCounts::full(&runtime),
             ProofWorkerCounts::new(pool_threads + 1, pool_threads + 2),
         ] {
-            let (proof_result_tx, proof_result_rx) = unbounded();
-            let handle =
-                ProofWorkerHandle::new(&runtime, ctx.clone(), counts, proof_result_tx.clone());
+            let handle = ProofWorkerHandle::new(&runtime, ctx.clone(), counts);
             assert_eq!(handle.total_storage_workers(), counts.storage.max(1).min(pool_threads));
             assert_eq!(handle.total_account_workers(), counts.account.max(1).min(pool_threads));
 
             let address = B256::ZERO;
             let slot = ProofV2Target::new(B256::ZERO);
-            handle
-                .dispatch_storage_proof(
-                    StorageProofInput::new(address, vec![slot]),
-                    ProofResultContext::new(
-                        proof_result_tx.clone(),
-                        HashedPostState::default(),
-                        Instant::now(),
-                    ),
-                )
-                .unwrap();
+            handle.dispatch_storage_proof(StorageProofInput::new(address, vec![slot])).unwrap();
             let storage =
-                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+                handle.results().recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
             assert!(storage.storage_proofs.contains_key(&address));
 
-            handle
-                .dispatch_account_multiproof(AccountMultiproofInput {
-                    targets: vec![ProofV2Target::new(address)],
-                    proof_result_context: ProofResultContext::new(
-                        proof_result_tx.clone(),
-                        HashedPostState::default(),
-                        Instant::now(),
-                    ),
-                })
-                .unwrap();
+            handle.dispatch_account_multiproof(vec![ProofV2Target::new(address)]).unwrap();
             let proof =
-                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+                handle.results().recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
             assert!(proof.storage_proofs.is_empty());
 
+            let results = handle.results().clone();
             drop(handle);
-            drop(proof_result_tx);
             // Every broadcast holds a result sender until all its workers have exited. An
             // initialization error is a message here, rather than a successful shutdown.
             assert!(matches!(
-                proof_result_rx.recv_timeout(Duration::from_secs(30)),
+                results.recv_timeout(Duration::from_secs(30)),
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected)
             ));
         }

@@ -24,10 +24,7 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{
-        AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
-        ProofWorkerHandle, StorageProofInput,
-    },
+    proof_task::{ProofResultMessage, ProofWorkerHandle, StorageProofInput},
 };
 use reth_trie_sparse::{
     errors::{
@@ -53,10 +50,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
 ///    leaf updates before applying them in batches.
 /// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
-///    [`ProofWorkerHandle`]. Each request carries a [`ProofResultContext`] with a sender for
-///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
-///    account proofs locally, and queues storage proofs on the corresponding address'
-///    [`StorageTrieState`].
+///    [`ProofWorkerHandle`]. The task coalesces [`ProofResultMessage`]s returned through
+///    [`ProofWorkerHandle::results`], reveals account proofs locally, and queues storage proofs on
+///    the corresponding address' [`StorageTrieState`].
 /// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
 ///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie
 ///    once its pending leaves are drained. It sends [`StorageJobMessage::Done`] via
@@ -120,10 +116,6 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// this task's thread. During draining, pending updates with no remaining source of progress
 /// produce [`StateRootTaskError::Stalled`].
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
-    /// Sender for proof results.
-    proof_result_tx: ProofResultSender,
-    /// Receiver for proof results directly from workers.
-    proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -235,8 +227,6 @@ where
         cancel_rx: CrossbeamReceiver<()>,
         final_hashed_state_tx: std::sync::mpsc::Sender<Arc<HashedPostState>>,
         proof_worker_handle: ProofWorkerHandle,
-        proof_result_tx: ProofResultSender,
-        proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
         metrics: SparseTrieTaskMetrics,
         trie: SparseStateTrie<A, S>,
         parent_state_root: B256,
@@ -254,8 +244,6 @@ where
         });
 
         Self {
-            proof_result_tx,
-            proof_result_rx,
             updates: hashed_state_rx,
             cancel_rx,
             proof_worker_handle,
@@ -403,7 +391,7 @@ where
                     }
                     self.pending_updates += 1;
                 }
-                recv(self.proof_result_rx) -> message => {
+                recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -442,7 +430,7 @@ where
         while !done {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
-                recv(self.proof_result_rx) -> message => {
+                recv(self.proof_worker_handle.results()) -> message => {
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -529,7 +517,7 @@ where
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
         let mut result = self.on_proof_result_message(message)?;
-        while let Ok(next) = self.proof_result_rx.try_recv() {
+        while let Ok(next) = self.proof_worker_handle.results().try_recv() {
             let res = self.on_proof_result_message(next)?;
             result.extend(res);
         }
@@ -556,7 +544,7 @@ where
 
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
-        if !updates_queued && self.proof_result_rx.is_empty() {
+        if !updates_queued && self.proof_worker_handle.results().is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
             // storage roots and promoting account updates.
             self.dispatch_pending_targets()?;
@@ -574,7 +562,7 @@ where
 
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
-            if self.proof_result_rx.is_empty() {
+            if self.proof_worker_handle.results().is_empty() {
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
@@ -1145,14 +1133,10 @@ where
 
                 let MultiProofTargetsV2 { account_targets, storage_targets } = proof_targets;
                 for (hashed_address, targets) in storage_targets {
-                    match self.proof_worker_handle.dispatch_storage_proof(
-                        StorageProofInput::new(hashed_address, targets),
-                        ProofResultContext::new(
-                            self.proof_result_tx.clone(),
-                            HashedPostState::default(),
-                            Instant::now(),
-                        ),
-                    ) {
+                    match self
+                        .proof_worker_handle
+                        .dispatch_storage_proof(StorageProofInput::new(hashed_address, targets))
+                    {
                         Ok(()) => self.in_flight_proof_batches += 1,
                         Err(e) => {
                             error!("failed to dispatch storage proof: {e:?}");
@@ -1163,16 +1147,7 @@ where
                 }
 
                 if !account_targets.is_empty() {
-                    match self.proof_worker_handle.dispatch_account_multiproof(
-                        AccountMultiproofInput {
-                            targets: account_targets,
-                            proof_result_context: ProofResultContext::new(
-                                self.proof_result_tx.clone(),
-                                HashedPostState::default(),
-                                Instant::now(),
-                            ),
-                        },
-                    ) {
+                    match self.proof_worker_handle.dispatch_account_multiproof(account_targets) {
                         Ok(()) => self.in_flight_proof_batches += 1,
                         Err(e) => {
                             error!("failed to dispatch account multiproof: {e:?}");
@@ -1218,7 +1193,7 @@ where
             self.pending_updates == 0 &&
             self.pending_targets.is_empty() &&
             self.in_flight_proof_batches == 0 &&
-            self.proof_result_rx.is_empty() &&
+            self.proof_worker_handle.results().is_empty() &&
             self.storage_in_flight == 0 &&
             !self.has_ready_storage_work() &&
             self.has_pending_sparse_trie_updates()
@@ -1716,12 +1691,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(runtime),
-            proof_result_tx.clone(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = crossbeam_channel::bounded(0);
@@ -1731,8 +1704,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             EMPTY_ROOT_HASH,
@@ -2353,12 +2324,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2376,8 +2345,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -2437,12 +2404,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2460,8 +2425,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             parent_state_root,
@@ -2492,12 +2455,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2514,8 +2475,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::repeat_byte(0x55),
@@ -2583,12 +2542,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2605,8 +2562,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::repeat_byte(0x55),
@@ -2636,12 +2591,10 @@ mod tests {
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
         );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
         );
 
         let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
@@ -2658,8 +2611,6 @@ mod tests {
             cancel_rx,
             std::sync::mpsc::channel().0,
             proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
             SparseTrieTaskMetrics::default(),
             trie,
             B256::repeat_byte(0x55),
