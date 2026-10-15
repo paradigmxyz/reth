@@ -17,7 +17,6 @@ use error::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
-use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -32,21 +31,17 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChainSpecProvider,
-    ChangeSetReader, DatabaseProviderFactory, HistoryReader, ProviderError, PruneCheckpointReader,
-    SaveBlocksInput, StageCheckpointReader, StateProviderFactory, StateReader,
-    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, HistoryReader, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::{
-    context_interface::{Block as _, Cfg},
-    interpreter::debug_unreachable,
-    primitives::hardfork::SpecId,
-};
+use revm::{context_interface::Cfg, interpreter::debug_unreachable, primitives::hardfork::SpecId};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -67,9 +62,7 @@ use tracing::*;
 
 mod block_buffer;
 mod inclusion_list;
-use inclusion_list::{
-    blob_gas_available, inclusion_list_satisfied, InclusionListContext, RetainedInclusionLists,
-};
+use inclusion_list::{inclusion_list_satisfied, InclusionListContext, RetainedInclusionLists};
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -372,8 +365,6 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + BalProvider
-        // The EIP-7805 appendability check needs the block's blob schedule.
-        + ChainSpecProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
@@ -3612,7 +3603,6 @@ where
                 return Ok(None)
             }
         };
-        let blob_params = self.provider.chain_spec().blob_params_at_timestamp(block.timestamp());
         let ctx = InclusionListContext {
             chain_id: evm_env.cfg_env.chain_id,
             spec_id: evm_env.cfg_env.spec.into(),
@@ -3620,9 +3610,6 @@ where
             available_gas: block.gas_limit().saturating_sub(block.gas_used()),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
-            blob_gas_available: blob_gas_available(blob_params, block.blob_gas_used()),
-            blob_gas_price: evm_env.block_env.blob_gasprice().unwrap_or_default(),
-            max_blobs_per_tx: blob_params.map(|params| params.max_blobs_per_tx),
         };
 
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;

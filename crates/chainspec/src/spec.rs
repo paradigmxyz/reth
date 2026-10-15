@@ -2,7 +2,7 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
-    constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
+    constants::{BOGOTA_BLOB_PARAMS, MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     ethereum::SEPOLIA_PARIS_TTD,
     holesky, hoodi, mainnet,
     mainnet::{MAINNET_PARIS_BLOCK, MAINNET_PARIS_TTD},
@@ -536,6 +536,8 @@ impl<H: BlockHeader> ChainSpec<H> {
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
+    ///
+    /// Use [`EthChainSpec::next_block_base_fee`] for the Bogota rational fee update.
     pub fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         match self.base_fee_params {
             BaseFeeParamsKind::Constant(bf_params) => bf_params,
@@ -923,9 +925,6 @@ impl From<Genesis> for ChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut hardforks);
 
-        // Extract blob parameters directly from blob_schedule
-        let blob_params = genesis.config.blob_schedule_blob_params();
-
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
@@ -935,6 +934,7 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        let blob_params = blob_params_from_genesis(&genesis, &hardforks);
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -1247,6 +1247,7 @@ impl ChainSpecBuilder {
             })
         };
         let genesis = self.genesis.expect("The genesis is required");
+        let blob_params = blob_params_from_genesis(&genesis, &self.hardforks);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
@@ -1257,9 +1258,40 @@ impl ChainSpecBuilder {
             hardforks: self.hardforks,
             paris_block_and_final_difficulty,
             deposit_contract: None,
+            blob_params,
             ..Default::default()
         }
     }
+}
+
+/// Applies Bogota's default schedule when the genesis does not supply one.
+fn blob_params_from_genesis(
+    genesis: &Genesis,
+    hardforks: &ChainHardforks,
+) -> BlobScheduleBlobParams {
+    let mut config = genesis.config.clone();
+    // The pinned Alloy parser recognizes these two fork names only in title case.
+    for (key, alias) in [("amsterdam", "Amsterdam"), ("bogota", "Bogota")] {
+        if let Some(params) = config.blob_schedule.remove(key) {
+            config.blob_schedule.insert(alias.to_string(), params);
+        }
+    }
+    let timestamp = |fork| match hardforks.fork(fork) {
+        ForkCondition::Timestamp(timestamp) => Some(timestamp),
+        _ => None,
+    };
+    // Builders may override the genesis activation times.
+    config.amsterdam_time = timestamp(EthereumHardfork::Amsterdam);
+    config.bogota_time = timestamp(EthereumHardfork::Bogota);
+    let mut params = config.blob_schedule_blob_params();
+    if !config.blob_schedule.contains_key("Bogota") &&
+        let Some(timestamp) = config.bogota_time
+    {
+        // Insert after earlier forks at the same timestamp, including genesis activations.
+        params.scheduled.push((timestamp, BOGOTA_BLOB_PARAMS));
+        params.scheduled.sort_by_key(|(timestamp, _)| *timestamp);
+    }
+    params
 }
 
 impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
@@ -3081,5 +3113,128 @@ Post-merge hard forks (timestamp based):
                 fork_block: None,
             }
         )
+    }
+
+    #[test]
+    fn bogota_base_fee_activates_on_the_child_timestamp() {
+        let spec = ChainSpecBuilder::mainnet().with_bogota_at(15_000).build();
+        let parent = Header {
+            gas_limit: 30_000_000,
+            gas_used: 30_000_000,
+            base_fee_per_gas: Some(1_000_000_000),
+            timestamp: 14_998,
+            ..Default::default()
+        };
+        assert_eq!(spec.next_block_base_fee(&parent, 14_999), Some(1_125_000_000));
+        assert_eq!(spec.next_block_base_fee(&parent, 15_000), Some(1_104_166_666));
+        assert_eq!(spec.next_block_base_fee(&parent, 15_012), Some(1_104_166_666));
+    }
+
+    #[test]
+    fn bogota_base_fee_rounding_and_floor() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        // Gas limit, gas used, parent fee, expected child fee. The 99-wei case distinguishes
+        // the spec's gas-target division from multiplying the full expression by 5 first.
+        let cases = [
+            (30_000_000, 30_000_000, 1_000_000_000, 1_104_166_666),
+            (30_000_000, 0, 1_000_000_000, 895_833_334),
+            (30_000_000, 15_000_000, 1_000_000_007, 1_000_000_007),
+            (20, 9, 99, 99),
+            (20, 20, 47, 51),
+            (20, 20, 0, 1),
+            (20, 20, 1, 2),
+            (20, 0, 9, 9),
+            (20, 0, 10, 9),
+        ];
+        for (gas_limit, gas_used, base_fee, expected) in cases {
+            let parent = Header {
+                gas_limit,
+                gas_used,
+                base_fee_per_gas: Some(base_fee),
+                ..Default::default()
+            };
+            assert_eq!(spec.next_block_base_fee(&parent, 12), Some(expected), "{parent:?}");
+        }
+        assert_eq!(spec.next_block_base_fee(&Header::default(), 12), None);
+    }
+
+    #[test]
+    fn bogota_default_blob_schedule_from_genesis() {
+        let mut genesis: Genesis = serde_json::from_value(serde_json::json!({
+            "config": {
+                "londonBlock": 0,
+                "cancunTime": 0,
+                "pragueTime": 0,
+                "osakaTime": 0,
+                "amsterdamTime": 0,
+                "bogotaTime": 15_000,
+                "blobSchedule": {
+                    "amsterdam": {"target": 14, "max": 21, "baseFeeUpdateFraction": 11_684_671}
+                }
+            }
+        }))
+        .unwrap();
+        let spec = ChainSpec::from_genesis(genesis.clone());
+        assert_eq!(spec.blob_params_at_timestamp(14_999).unwrap().max_blob_count, 21);
+        assert_eq!(spec.blob_params_at_timestamp(15_000), Some(BOGOTA_BLOB_PARAMS));
+        assert_eq!(spec.blob_params_at_timestamp(15_012), Some(BOGOTA_BLOB_PARAMS));
+        genesis.config.bogota_time = Some(0);
+        let at_genesis = ChainSpec::from_genesis(genesis);
+        assert_eq!(at_genesis.blob_params_at_timestamp(0), Some(BOGOTA_BLOB_PARAMS));
+    }
+
+    #[test]
+    fn bogota_explicit_blob_schedule_is_preserved() {
+        let mut genesis: Genesis = serde_json::from_value(serde_json::json!({
+            "config": {
+                "osakaTime": 0,
+                "amsterdamTime": 0,
+                "bogotaTime": 0,
+                "blobSchedule": {
+                    "amsterdam": {"target": 14, "max": 21, "baseFeeUpdateFraction": 11_684_671},
+                    "bogota": {"target": 4, "max": 6, "baseFeeUpdateFraction": 3_338_477}
+                }
+            }
+        }))
+        .unwrap();
+        let spec = ChainSpec::from_genesis(genesis.clone());
+        let params = spec.blob_params_at_timestamp(0).unwrap();
+        assert_eq!(
+            (params.target_blob_count, params.max_blob_count, params.update_fraction),
+            (4, 6, 3_338_477)
+        );
+        let built = ChainSpecBuilder::mainnet().genesis(genesis.clone()).bogota_activated().build();
+        assert_eq!(built.blob_params_at_timestamp(0), Some(params));
+        for (key, alias) in [("amsterdam", "Amsterdam"), ("bogota", "Bogota")] {
+            let params = genesis.config.blob_schedule.remove(key).unwrap();
+            genesis.config.blob_schedule.insert(alias.to_string(), params);
+        }
+        assert_eq!(ChainSpec::from_genesis(genesis).blob_params_at_timestamp(0), Some(params));
+    }
+
+    #[test]
+    fn bogota_builder_has_default_blob_schedule() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        assert_eq!(spec.blob_params_at_timestamp(0), Some(BOGOTA_BLOB_PARAMS));
+        let earlier = ChainSpecBuilder::mainnet().amsterdam_activated().build();
+        assert_eq!(earlier.blob_params_at_timestamp(0), Some(BlobParams::osaka()));
+    }
+
+    #[test]
+    fn bogota_default_blob_schedule_preserves_later_updates() {
+        let genesis: Genesis = serde_json::from_value(serde_json::json!({
+            "config": {
+                "osakaTime": 0,
+                "bogotaTime": 15_000,
+                "bpo3Time": 16_000,
+                "blobSchedule": {
+                    "bpo3": {"target": 9, "max": 14, "baseFeeUpdateFraction": 8_832_827}
+                }
+            }
+        }))
+        .unwrap();
+        let spec = ChainSpec::from_genesis(genesis);
+        assert_eq!(spec.blob_params_at_timestamp(15_000), Some(BOGOTA_BLOB_PARAMS));
+        assert_eq!(spec.blob_params_at_timestamp(16_000).unwrap().max_blob_count, 14);
     }
 }

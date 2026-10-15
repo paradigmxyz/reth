@@ -4,7 +4,7 @@ use alloy_consensus::{constants::EMPTY_WITHDRAWALS, BlockHeader, Header};
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, B256, B64, U256};
 use alloy_rlp::Encodable;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_primitives_traits::{Block as BlockTrait, SealedBlock};
 use std::{io::Write, path::Path};
@@ -65,21 +65,15 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             if let Some(parent_fee) = parent_base_fee {
                 // For the first block, we need to use the exact expected base fee
                 // The consensus rules expect it to be calculated from the genesis
-                let (parent_gas_used, parent_gas_limit) = if i == 1 {
+                let parent = if i == 1 {
                     // Genesis block parameters
-                    (genesis_header.gas_used, genesis_header.gas_limit)
+                    genesis_header.header()
                 } else {
-                    let last_block = blocks.last().unwrap();
-                    (last_block.gas_used, last_block.gas_limit)
+                    blocks.last().unwrap().header()
                 };
-                header.base_fee_per_gas = Some(alloy_eips::calc_next_block_base_fee(
-                    parent_gas_used,
-                    parent_gas_limit,
-                    parent_fee,
-                    chain_spec.base_fee_params_at_timestamp(header.timestamp),
-                ));
+                header.base_fee_per_gas = chain_spec.next_block_base_fee(parent, header.timestamp);
                 debug!(target: "e2e::import", "Block {} calculated base fee: {:?} (parent gas used: {}, parent gas limit: {}, parent base fee: {})",
-                    i, header.base_fee_per_gas, parent_gas_used, parent_gas_limit, parent_fee);
+                    i, header.base_fee_per_gas, parent.gas_used, parent.gas_limit, parent_fee);
                 parent_base_fee = header.base_fee_per_gas;
             }
         }
