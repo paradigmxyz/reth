@@ -534,6 +534,30 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
+        #[cfg(target_os = "linux")]
+        if kind.is_rw() &&
+            let Ok(file) = std::fs::File::open(path.join("mdbx.dat"))
+        {
+            std::thread::Builder::new()
+                .name("mdbx-flusher".to_string())
+                .spawn(move || {
+                    use std::os::fd::AsRawFd;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(25));
+                        // SAFETY: the fd stays open for the lifetime of `file`.
+                        unsafe {
+                            libc::sync_file_range(
+                                file.as_raw_fd(),
+                                0,
+                                0,
+                                libc::SYNC_FILE_RANGE_WRITE,
+                            );
+                        }
+                    }
+                })
+                .map_err(|e| DatabaseError::Other(e.to_string()))?;
+        }
+
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             path: path.to_path_buf(),
