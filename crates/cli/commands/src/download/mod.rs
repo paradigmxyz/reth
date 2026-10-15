@@ -182,12 +182,8 @@ pub struct DownloadDefaults {
     pub snapshot_api_url: Cow<'static, str>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
-    /// Whether the full preset also downloads the snapshot's RocksDB indices.
-    ///
-    /// The indices cover the source node's whole history, so the index stages keep their
-    /// snapshot checkpoints instead of rebuilding the retained history window, and the pruner
-    /// trims index entries as new blocks arrive. Enable this when the full preset retains enough
-    /// history that rebuilding its indices takes longer than downloading them.
+    /// Whether the full preset also downloads the snapshot's RocksDB indices instead of
+    /// rebuilding them.
     pub full_preset_includes_rocksdb_indices: bool,
 }
 
@@ -437,8 +433,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
     /// Skip optional RocksDB indices even when archive components are selected.
     ///
-    /// This affects `--archive`/`--all` and TUI archive preset (`a`), and `--full` and the TUI
-    /// full preset (`f`) when the full preset is configured to include RocksDB indices.
+    /// This affects `--archive`/`--all`, TUI archive preset (`a`), and the full preset when it
+    /// includes RocksDB indices.
     #[arg(long, conflicts_with_all = ["url", "with_rocksdb"])]
     without_rocksdb: bool,
 
@@ -1069,9 +1065,6 @@ fn inject_archive_only_components(
 }
 
 /// Selects the manifest's RocksDB indices, if it publishes them.
-///
-/// Older manifests without the component keep the selection unchanged, so the index stages are
-/// reset and rebuilt as before.
 fn inject_rocksdb_indices(
     selections: &mut BTreeMap<SnapshotComponentType, ComponentSelection>,
     manifest: &SnapshotManifest,
