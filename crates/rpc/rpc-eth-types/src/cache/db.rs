@@ -76,9 +76,8 @@ pub fn apply_state_overrides<DB: DynDatabase>(
     db: &mut CacheDB<DB>,
 ) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
     for (address, account_override) in overrides {
-        let account = db.get_account(&address).map_err(StateOverrideError::Database)?;
-        let existed = account.is_some();
-        let mut account = account.unwrap_or_default();
+        let mut account =
+            db.get_account(&address).map_err(StateOverrideError::Database)?.unwrap_or_default();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;
@@ -97,18 +96,29 @@ pub fn apply_state_overrides<DB: DynDatabase>(
                 db.cache.storage.entry(address).or_default().wipe();
                 Some(state)
             }
-            (None, Some(state)) => Some(state),
+            (None, Some(state)) => {
+                // Storage materializes an empty account as newly created, discarding its previous
+                // storage.
+                if account.is_empty() && !state.is_empty() {
+                    db.cache.storage.entry(address).or_default().wipe();
+                }
+                Some(state)
+            }
             (None, None) => None,
         };
 
-        // Account existence affects authorization refunds and new-account gas charges. A full
-        // storage replacement always materializes the account, even with no slots.
-        if existed ||
-            !account.is_empty() ||
+        // Account existence affects authorization refunds and new-account gas charges. The
+        // override touches the account, so under EIP-161 an empty result is removed regardless of
+        // whether the account existed before, unless storage materializes it. A full storage
+        // replacement always materializes the account, even with no slots.
+        if !account.is_empty() ||
             replaces_storage ||
             storage.as_ref().is_some_and(|state| !state.is_empty())
         {
             db.insert_account_info(&address, account);
+        } else {
+            db.cache.accounts.insert(address, None);
+            db.cache.storage.entry(address).or_default().wipe();
         }
         if let Some(storage) = storage {
             for (key, value) in storage {
@@ -149,8 +159,59 @@ mod tests {
 
     use super::*;
     use alloy_eip7928::{BalanceChange, StorageChange};
-    use alloy_primitives::{Address, Bytes, U256};
+    use alloy_primitives::{Address, Bytes, B256, U256};
+    use alloy_rpc_types_eth::state::AccountOverride;
     use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
+
+    #[test]
+    fn state_overrides_handle_accounts_left_empty() {
+        let emptied = Address::with_last_byte(1);
+        let absent = Address::with_last_byte(2);
+        let replaced = Address::with_last_byte(3);
+        let diffed = Address::with_last_byte(4);
+        let kept = Address::with_last_byte(5);
+        let slot = U256::ONE;
+        let diff = [(B256::with_last_byte(2), B256::with_last_byte(7))];
+
+        let mut db = InMemoryDB::default();
+        for address in [emptied, replaced, diffed, kept] {
+            db.insert_account_info(
+                &address,
+                AccountInfo { balance: U256::from(5), ..Default::default() },
+            );
+            db.insert_account_storage(&address, &slot, &U256::from(9));
+        }
+        let mut state = CacheDB::new(db);
+
+        let overrides = StateOverride::from_iter([
+            (emptied, AccountOverride::default().with_balance(U256::ZERO)),
+            (absent, AccountOverride::default()),
+            (
+                replaced,
+                AccountOverride::default()
+                    .with_balance(U256::ZERO)
+                    .with_state(std::iter::empty::<(B256, B256)>()),
+            ),
+            (diffed, AccountOverride::default().with_balance(U256::ZERO).with_state_diff(diff)),
+            (kept, AccountOverride::default().with_state_diff(diff)),
+        ]);
+        apply_state_overrides(overrides, &mut state).unwrap();
+
+        // An existing account touched into emptiness is removed under EIP-161, with its storage.
+        assert_eq!(state.get_account(&emptied).unwrap(), None);
+        assert_eq!(state.get_storage(&emptied, &slot).unwrap(), U256::ZERO);
+        assert_eq!(state.get_account(&absent).unwrap(), None);
+        // A full storage replacement materializes the account even when it is left empty.
+        assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
+        // A storage diff materializes an empty account as newly created, discarding old storage.
+        assert_eq!(state.get_account(&diffed).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(state.get_storage(&diffed, &slot).unwrap(), U256::ZERO);
+        assert_eq!(state.get_storage(&diffed, &U256::from(2)).unwrap(), U256::from(7));
+        // A storage diff on a non-empty account applies on top of its existing storage.
+        assert_eq!(state.get_storage(&kept, &slot).unwrap(), U256::from(9));
+        assert_eq!(state.get_storage(&kept, &U256::from(2)).unwrap(), U256::from(7));
+    }
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
