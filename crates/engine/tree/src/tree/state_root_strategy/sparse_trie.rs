@@ -26,7 +26,7 @@ use reth_trie_parallel::{
     error::StateRootTaskError,
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofResultSender,
-        ProofWorkerHandle,
+        ProofWorkerHandle, StorageProofInput,
     },
 };
 use reth_trie_sparse::{
@@ -1143,20 +1143,41 @@ where
                     return;
                 }
 
-                match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
-                    targets: proof_targets,
-                    proof_result_context: ProofResultContext::new(
-                        self.proof_result_tx.clone(),
-                        HashedPostState::default(),
-                        Instant::now(),
-                    ),
-                }) {
-                    Ok(()) => {
-                        self.in_flight_proof_batches += 1;
+                let MultiProofTargetsV2 { account_targets, storage_targets } = proof_targets;
+                for (hashed_address, targets) in storage_targets {
+                    match self.proof_worker_handle.dispatch_storage_proof(
+                        StorageProofInput::new(hashed_address, targets),
+                        ProofResultContext::new(
+                            self.proof_result_tx.clone(),
+                            HashedPostState::default(),
+                            Instant::now(),
+                        ),
+                    ) {
+                        Ok(()) => self.in_flight_proof_batches += 1,
+                        Err(e) => {
+                            error!("failed to dispatch storage proof: {e:?}");
+                            dispatch_error = Some(StateRootTaskError::Provider(e));
+                            return;
+                        }
                     }
-                    Err(e) => {
-                        error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::Provider(e));
+                }
+
+                if !account_targets.is_empty() {
+                    match self.proof_worker_handle.dispatch_account_multiproof(
+                        AccountMultiproofInput {
+                            targets: account_targets,
+                            proof_result_context: ProofResultContext::new(
+                                self.proof_result_tx.clone(),
+                                HashedPostState::default(),
+                                Instant::now(),
+                            ),
+                        },
+                    ) {
+                        Ok(()) => self.in_flight_proof_batches += 1,
+                        Err(e) => {
+                            error!("failed to dispatch account multiproof: {e:?}");
+                            dispatch_error = Some(StateRootTaskError::Provider(e));
+                        }
                     }
                 }
             },
