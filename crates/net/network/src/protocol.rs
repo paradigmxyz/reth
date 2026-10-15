@@ -69,8 +69,8 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// Invoked when the `RLPx` connection was established and the eth `Status` handshake
     /// succeeded.
     ///
-    /// Messages of this protocol that the peer sends before the `Status` handshake completes are
-    /// dropped.
+    /// Messages arriving before `Status` completes are queued within [`Self::inbound_limits`].
+    /// The callback runs when the authenticated connection is first polled.
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
