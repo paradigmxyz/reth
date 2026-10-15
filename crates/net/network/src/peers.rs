@@ -2894,62 +2894,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_incoming_rate_limit() {
-        let config = PeersConfig {
-            incoming_ip_throttle_duration: Duration::from_millis(100),
-            ..PeersConfig::test()
-        };
-        let mut peers = PeersManager::new(config);
+        for max_inbound in [0, 1] {
+            let config = PeersConfig {
+                incoming_ip_throttle_duration: Duration::from_millis(100),
+                ..PeersConfig::test().with_max_inbound(max_inbound)
+            };
+            let mut peers = PeersManager::new(config);
+            peers.add_trusted_peer_id(PeerId::random());
 
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8009);
-        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
-        assert_eq!(
-            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
-            InboundConnectionError::IpBanned
-        );
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8009);
+            peers.on_incoming_pending_session(addr.ip()).unwrap();
+            peers.on_incoming_pending_session_gracefully_closed();
+            assert_eq!(
+                peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+                InboundConnectionError::IpBanned
+            );
 
-        peers.release_interval.reset_immediately();
-        tokio::time::sleep(peers.incoming_ip_throttle_duration).await;
+            peers.release_interval.reset_immediately();
+            tokio::time::sleep(peers.incoming_ip_throttle_duration).await;
 
-        // await unban
-        poll_fn(|cx| loop {
-            if peers.poll(cx).is_pending() {
-                return Poll::Ready(());
-            }
-        })
-        .await;
+            // await unban
+            poll_fn(|cx| loop {
+                if peers.poll(cx).is_pending() {
+                    return Poll::Ready(());
+                }
+            })
+            .await;
 
-        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
-        assert_eq!(
-            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
-            InboundConnectionError::IpBanned
-        );
-    }
-
-    #[tokio::test]
-    async fn test_incoming_rate_limit_at_capacity() {
-        // Pending sessions admitted while the inbound slots are full, so that trusted peers can
-        // still connect, must be rate limited per IP like any other.
-        let config = PeersConfig {
-            incoming_ip_throttle_duration: Duration::from_millis(100),
-            ..PeersConfig::test().with_max_inbound(1)
-        };
-        let mut peers = PeersManager::new(config);
-        peers.add_trusted_peer_id(PeerId::random());
-
-        // fill the only inbound slot
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 2)), 8008);
-        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
-        peers.on_incoming_session_established(PeerId::random(), addr);
-        assert!(!peers.connection_info.has_in_capacity());
-
-        // a pending session is still admitted, but its ip is throttled
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(168, 0, 1, 3)), 8009);
-        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
-        peers.on_incoming_pending_session_gracefully_closed();
-        assert_eq!(
-            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
-            InboundConnectionError::IpBanned
-        );
+            peers.on_incoming_pending_session(addr.ip()).unwrap();
+            peers.on_incoming_pending_session_gracefully_closed();
+            assert_eq!(
+                peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+                InboundConnectionError::IpBanned
+            );
+        }
     }
 
     #[tokio::test]
