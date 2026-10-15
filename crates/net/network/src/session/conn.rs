@@ -10,7 +10,7 @@ use reth_eth_wire::{
     EthMessage, EthNetworkPrimitives, EthSnapMessage, EthSnapStream, EthStream, EthVersion,
     NetworkPrimitives, P2PStream,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{RawCapabilityMessage, RawResponse};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -134,6 +134,28 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             Self::EthOnly(conn) => conn.set_reject_block_announcements(reject),
             Self::EthSnap(conn) => conn.set_reject_block_announcements(reject),
             Self::Satellite(conn) => conn.primary_mut().set_reject_block_announcements(reject),
+        }
+    }
+
+    /// Sets whether to defer decoding of `eth` response messages, which are then yielded as
+    /// [`EthMessage::RawResponse`] so the request id can be checked before paying for the decode.
+    pub fn set_lazy_responses(&mut self, lazy: bool) {
+        match self {
+            Self::EthOnly(conn) => conn.set_lazy_responses(lazy),
+            Self::EthSnap(conn) => conn.set_lazy_responses(lazy),
+            Self::Satellite(conn) => conn.primary_mut().set_lazy_responses(lazy),
+        }
+    }
+
+    /// Decodes a response yielded as [`EthMessage::RawResponse`] into its typed variant.
+    pub fn decode_raw_response(
+        &self,
+        response: &RawResponse,
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.decode_raw_response(response),
+            Self::EthSnap(conn) => conn.decode_raw_response(response),
+            Self::Satellite(conn) => conn.primary().decode_raw_response(response),
         }
     }
 }
