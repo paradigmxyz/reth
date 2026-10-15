@@ -471,7 +471,6 @@ impl DatabaseEnv {
             // We disable readahead because it improves performance for linear scans, but
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
-            coalesce: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
         });
