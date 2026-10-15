@@ -29,6 +29,14 @@ esac
 mkdir hive_assets/
 
 cd hivetests
+
+# Keep fixtures compressed in the images to avoid exhausting disk during builds.
+curl --fail --location --retry 3 "${eels_fixtures}" \
+    -o simulators/ethereum/eels/consume-engine/fixtures.tar.gz
+cp simulators/ethereum/eels/consume-engine/fixtures.tar.gz \
+    simulators/ethereum/eels/consume-rlp/fixtures.tar.gz
+eels_fixtures="/fixtures"
+
 go build .
 
 ./hive -client reth # first builds and caches the client
