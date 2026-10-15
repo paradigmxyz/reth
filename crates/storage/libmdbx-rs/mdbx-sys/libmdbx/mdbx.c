@@ -9938,7 +9938,7 @@ static uint16_t default_subpage_reserve_limit(const MDBX_env *env) {
 
 static uint16_t default_merge_threshold_dot16(const MDBX_env *env) {
   (void)env;
-  return 65536 / 3 /* 33% */;
+  return 65536 / 4 /* 25% */;
 }
 
 static pgno_t default_dp_reserve_limit(const MDBX_env *env) {
