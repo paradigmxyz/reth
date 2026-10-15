@@ -53,9 +53,7 @@ impl<TxReq: DeserializeOwned> SimulateV1Request<TxReq> {
             Err(SimulatePayloadLimitExceeded::Blocks) => {
                 Err(EthApiError::other(EthSimulateError::TooManyBlocks))
             }
-            Err(err @ SimulatePayloadLimitExceeded::Calls) => {
-                Err(EthApiError::InvalidParams(err.to_string()))
-            }
+            Err(err) => Err(EthApiError::InvalidParams(err.to_string())),
         }
     }
 }
