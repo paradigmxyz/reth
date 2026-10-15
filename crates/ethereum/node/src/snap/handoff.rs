@@ -415,7 +415,7 @@ pub(crate) mod tests {
     }
 
     // Headers through the pivot, with the state published at it.
-    fn published() -> ProviderFactory<MockNodeTypesWithDB> {
+    pub(crate) fn published() -> ProviderFactory<MockNodeTypesWithDB> {
         let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
         provider.anchor_pruned_static_files(PIVOT).unwrap();

@@ -437,7 +437,7 @@ enum TargetPosition {
 pub(crate) mod tests {
     use super::*;
     use crate::snap::{
-        handoff::tests::{downloaded_attempt, PIVOT},
+        handoff::tests::{downloaded_attempt, published, PIVOT},
         tests::{
             hashed_factory, headers_done, headers_reach, next_target, pipeline, pipeline_on,
             pipeline_with, target,
@@ -447,7 +447,7 @@ pub(crate) mod tests {
     use alloy_eips::eip1898::BlockWithParent;
     use alloy_primitives::U256;
     use futures::future::{pending, ready, Either, Pending, Ready};
-    use reth_consensus::{test_utils::TestConsensus, ConsensusError};
+    use reth_consensus::{ConsensusError, HeaderValidator};
     use reth_db::{tables, transaction::DbTxMut};
     use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
     use reth_eth_wire_types::snap::{
@@ -459,14 +459,15 @@ pub(crate) mod tests {
         priority::Priority, test_utils::TestHeadersClient, NoopFullBlockClient,
     };
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::{Account, SealedHeader};
+    use reth_primitives_traits::{Account, GotExpected, SealedHeader};
     use reth_provider::{
         test_utils::{
             create_test_provider_factory_with_genesis_block_number, insert_headers,
             MockNodeTypesWithDB,
         },
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
-        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter,
     };
     use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{
@@ -630,6 +631,29 @@ pub(crate) mod tests {
     }
 
     // A run over `factory` that refreshes headers as soon as forkchoice moves.
+    // Accepts a header only on top of its parent, which `TestConsensus` doesn't check.
+    #[derive(Debug)]
+    struct ParentHashValidator;
+
+    impl HeaderValidator<Header> for ParentHashValidator {
+        fn validate_header(&self, _header: &SealedHeader<Header>) -> Result<(), ConsensusError> {
+            Ok(())
+        }
+
+        fn validate_header_against_parent(
+            &self,
+            header: &SealedHeader<Header>,
+            parent: &SealedHeader<Header>,
+        ) -> Result<(), ConsensusError> {
+            if header.parent_hash != parent.hash() {
+                return Err(ConsensusError::ParentHashMismatch(
+                    GotExpected { got: header.parent_hash, expected: parent.hash() }.into(),
+                ))
+            }
+            Ok(())
+        }
+    }
+
     fn snap_run(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
     ) -> (SnapRun<MockNodeTypesWithDB, ServesHeaders>, CancellationToken) {
@@ -1081,8 +1105,8 @@ pub(crate) mod tests {
         // unwound before downloading the replacement.
         let client = TestHeadersClient::default();
         client.extend([target.clone(), replacement.clone_header()]).await;
-        let downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(client, Arc::new(TestConsensus::default()));
+        let downloader =
+            ReverseHeadersDownloaderBuilder::default().build(client, Arc::new(ParentHashValidator));
         let (tip, receiver) = watch::channel(B256::ZERO);
         let headers = HeaderStage::new(factory.clone(), downloader, receiver, Default::default());
         let mut pipeline =
@@ -1146,6 +1170,35 @@ pub(crate) mod tests {
 
         assert!(resolved.is_err());
         assert_eq!(requests.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn a_detached_target_does_not_unwind_published_state() {
+        let factory = published();
+        let pivot = factory.sealed_header(PIVOT).unwrap();
+        let stages = StageSetBuilder::default()
+            .add_stage(TestStage::new(StageId::Headers))
+            .add_stage(TestStage::new(StageId::Execution))
+            .add_stage(TestStage::new(StageId::Finish));
+        let mut pipeline = pipeline_on(&factory, stages, watch::channel(B256::ZERO).0);
+        let detached =
+            Header { number: PIVOT + 1, parent_hash: B256::repeat_byte(1), ..Default::default() };
+        let (_targets, mut receiver) = watch::channel(detached.hash_slow());
+        let client = ServesHeaders { headers: vec![detached], ..Default::default() };
+        let (run, _stop) = snap_run_with(&factory, client);
+
+        let error = run.finish(&mut pipeline, &mut receiver).await.unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Cannot unwind to block 0 as AccountHistory is pruned through block 1"
+        );
+        assert_eq!(factory.sealed_header(PIVOT).unwrap(), pivot);
+        let provider = factory.provider().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
+            Some(StageCheckpoint::new(PIVOT))
+        );
     }
 
     #[tokio::test]
