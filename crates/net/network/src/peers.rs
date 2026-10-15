@@ -41,6 +41,9 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
+/// Limit admission-time IP bans so source-address churn cannot grow the throttle state without bound.
+const MAX_INCOMING_IP_THROTTLE_ENTRIES: usize = 16_384;
+
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -351,7 +354,7 @@ impl PeersManager {
                 if self.connection_info.num_pending_in < max_inbound {
                     // Rate limit these admissions as well, otherwise a single host could keep
                     // the pending slots occupied once the inbound slots are taken.
-                    self.throttle_incoming_ip(addr);
+                    self.throttle_incoming_ip(addr)?;
                     self.connection_info.inc_pending_in();
                     return Ok(())
                 }
@@ -367,7 +370,7 @@ impl PeersManager {
         }
 
         // apply the rate limit
-        self.throttle_incoming_ip(addr);
+        self.throttle_incoming_ip(addr)?;
 
         self.connection_info.inc_pending_in();
         Ok(())
@@ -492,9 +495,16 @@ impl PeersManager {
     }
 
     /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
-    fn throttle_incoming_ip(&mut self, ip: IpAddr) {
-        self.ban_list
-            .ban_ip_until(ip, std::time::Instant::now() + self.incoming_ip_throttle_duration);
+    fn throttle_incoming_ip(&mut self, ip: IpAddr) -> Result<(), InboundConnectionError> {
+        if self.ban_list.ban_ip_until_with_capacity(
+            ip,
+            std::time::Instant::now() + self.incoming_ip_throttle_duration,
+            MAX_INCOMING_IP_THROTTLE_ENTRIES,
+        ) {
+            Ok(())
+        } else {
+            Err(InboundConnectionError::ExceedsCapacity)
+        }
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
@@ -1545,7 +1555,7 @@ mod tests {
         error::SessionError,
         peers::{
             ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
-            PeerConnectionState,
+            PeerConnectionState, MAX_INCOMING_IP_THROTTLE_ENTRIES,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -2927,6 +2937,26 @@ mod tests {
                 peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
                 InboundConnectionError::IpBanned
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_incoming_throttle_capacity() {
+        for max_inbound in [0, 1] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(max_inbound));
+            peers.add_trusted_peer_id(PeerId::random());
+            peers.ban_list = BanList::new(
+                [],
+                (0..MAX_INCOMING_IP_THROTTLE_ENTRIES)
+                    .map(|i| IpAddr::V4(Ipv4Addr::from(0x0800_0000 + u32::try_from(i).unwrap()))),
+            );
+            let ip = IpAddr::from([1, 1, 1, 1]);
+            assert_eq!(
+                peers.on_incoming_pending_session(ip),
+                Err(InboundConnectionError::ExceedsCapacity)
+            );
+            assert_eq!(peers.connection_info.num_pending_in, 0);
+            assert!(!peers.ban_list.is_banned_ip(&ip));
         }
     }
 
