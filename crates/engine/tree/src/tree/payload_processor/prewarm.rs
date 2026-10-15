@@ -15,7 +15,7 @@
 
 use super::{
     bal_prewarm_pool::BalPrewarmPool,
-    reuse::{BalanceTracker, PrewarmResults, RecordingDb, SpeculativeTx},
+    reuse::{BalanceTracker, PoolTx, PrewarmResults, RecordingDb, SpeculativeTx},
     StateAccessHint, StateRootHintStream, StateRootUpdateStream,
 };
 use crate::tree::{
@@ -204,6 +204,17 @@ where
                     if ctx.prewarm_results.is_some() {
                         refresh_txs.push((index, tx.clone()));
                     }
+                    // Seed results before queueing, so that they are ready as soon as possible.
+                    let seeded = if let Some(results) = &ctx.prewarm_results &&
+                        let Some(seeds) = &ctx.env.pool_seeds
+                    {
+                        results.seed(index, tx.tx().tx_hash(), seeds)
+                    } else {
+                        None
+                    };
+                    if seeded.is_some() {
+                        ctx.metrics.seeded_transactions.increment(1);
+                    }
                     let parent_span = Span::current();
                     s.spawn(move |_| {
                         let _enter = trace_span!(
@@ -213,7 +224,7 @@ where
                             i = index,
                         )
                         .entered();
-                        Self::transact_worker(ctx, index, tx, state_root_hint_stream);
+                        Self::transact_worker(ctx, index, tx, seeded, state_root_hint_stream);
                     });
                 }
 
@@ -284,7 +295,7 @@ where
                                 if ctx.should_stop() {
                                     break
                                 }
-                                Self::transact_worker(ctx, *index, tx.clone(), None);
+                                Self::transact_worker(ctx, *index, tx.clone(), None, None);
                             }
                         });
                     }
@@ -303,7 +314,8 @@ where
         }
     }
 
-    /// Executes a single prewarm transaction on the current pool thread's EVM.
+    /// Executes a single prewarm transaction on the current pool thread's EVM, or only loads the
+    /// reads of its `seeded` pool transaction result.
     ///
     /// Lazily initialises per-thread [`PrewarmEvmState`] via
     /// [`get_or_init`](reth_tasks::pool::Worker::get_or_init) on first access.
@@ -311,6 +323,7 @@ where
         ctx: &PrewarmContext<N, P, Evm>,
         index: usize,
         tx: Tx,
+        seeded: Option<Arc<PoolTx<HaltReasonFor<Evm>>>>,
         state_root_hint_stream: Option<&StateRootHintStream>,
     ) where
         Tx: ExecutableTxFor<Evm>,
@@ -337,6 +350,32 @@ where
             let start = Instant::now();
 
             let (tx_env, tx) = tx.into_parts();
+            let send_hints = |state: &EvmState| {
+                if index > 0 &&
+                    let Some(state_root_hint_stream) = state_root_hint_stream
+                {
+                    let (targets, storage_targets) = MultiProofTargetsV2::from_state(state);
+                    ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
+                    let mut hint = StateAccessHint::from(targets);
+                    hint.storage_removals = storage_removals(&res.state);
+                    state_root_hint_stream.on_access_hint(hint);
+                }
+            };
+
+            if let Some(seeded) = seeded {
+                // Block execution loads the reads to validate the result.
+                if let Err(err) = seeded.load_reads(evm.db_mut()) {
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        tx_hash=%tx.tx().tx_hash(),
+                        "Failed to load reads of seeded pool transaction",
+                    );
+                }
+                send_hints(seeded.state());
+                return;
+            }
+
             // Prewarming disables nonce and balance checks, so a reusable result must also show
             // that the caller would have passed them.
             let speculative = SpeculativeTx {
@@ -375,21 +414,13 @@ where
                 return;
             }
 
-            if index > 0 &&
-                let Some(state_root_hint_stream) = state_root_hint_stream
-            {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(&res.state);
-                ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
-                let mut hint = StateAccessHint::from(targets);
-                hint.storage_removals = storage_removals(&res.state);
-                state_root_hint_stream.on_access_hint(hint);
-            }
+            send_hints(&res.state);
 
             if let Some(results) = &ctx.prewarm_results &&
                 let Some(reads) = reads &&
                 index >= ctx.executed_tx_index.load(Ordering::Relaxed)
             {
-                results.store(index, res, reads, evm.inspector(), speculative);
+                results.store(index, res, reads, evm.inspector_mut(), speculative);
             }
 
             ctx.metrics.total_runtime.record(start.elapsed());
@@ -1007,6 +1038,9 @@ pub struct PrewarmMetrics {
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
+    /// Counter for transactions seeded with results of pool transactions instead of being
+    /// executed.
+    pub(crate) seeded_transactions: Counter,
     /// A histogram of BAL slot iteration duration during prefetching
     pub(crate) bal_slot_iteration_duration: Histogram,
 }
@@ -1156,7 +1190,7 @@ mod tests {
             let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx.clone()) };
             pool.install_fn(|| {
                 PrewarmCacheTask::<EthPrimitives, MockEthProvider, EthEvmConfig>::transact_worker(
-                    &ctx, 0, tx, None,
+                    &ctx, 0, tx, None, None,
                 )
             });
             results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().state

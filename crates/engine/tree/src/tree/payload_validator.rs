@@ -388,6 +388,7 @@ where
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
+            self.evm_config.reuses_prewarm_results() && self.config.prewarm_reuse(),
         ));
         self
     }
@@ -574,6 +575,10 @@ where
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
+        let pool_seeds = self
+            .txpool_prewarm
+            .as_ref()
+            .and_then(|prewarmer| prewarmer.seeds(parent_hash, &evm_env));
 
         // Extract the decoded BAL, if present. Undecodable block access list bytes invalidate the
         // payload.
@@ -599,6 +604,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
             txpool_snapshot: txpool_snapshot.clone(),
+            pool_seeds,
         };
 
         // Get an iterator over the transactions in the payload
@@ -1971,9 +1977,10 @@ where
                 return
             }
         };
-        // Warming reuses the head block's own environment rather than predicting the next
-        // block's: attribute-level accuracy (timestamp, basefee) doesn't matter for collecting
-        // state reads, and the worker disables the fee checks a stale basefee would trip.
+        // Unless results are recorded, warming reuses the head block's own environment rather
+        // than predicting the next block's: attribute-level accuracy (timestamp, basefee) doesn't
+        // matter for collecting state reads, and the worker disables the fee checks a stale
+        // basefee would trip.
         let evm_env = match self.evm_config.evm_env(parent.header()) {
             Ok(evm_env) => evm_env,
             Err(err) => {
@@ -2001,7 +2008,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, state_provider_factory)
+        txpool_prewarm.start(&parent, evm_env, state_provider_factory)
     }
 
     fn payload_builder_resources(
