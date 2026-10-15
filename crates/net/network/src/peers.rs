@@ -355,7 +355,7 @@ impl PeersManager {
                 if self.connection_info.num_pending_in < max_inbound {
                     // Rate limit these admissions as well, otherwise a single host could keep
                     // the pending slots occupied once the inbound slots are taken.
-                    self.throttle_incoming_ip(addr)?;
+                    self.throttle_incoming_ip(addr);
                     self.connection_info.inc_pending_in();
                     return Ok(())
                 }
@@ -371,7 +371,7 @@ impl PeersManager {
         }
 
         // apply the rate limit
-        self.throttle_incoming_ip(addr)?;
+        self.throttle_incoming_ip(addr);
 
         self.connection_info.inc_pending_in();
         Ok(())
@@ -496,16 +496,14 @@ impl PeersManager {
     }
 
     /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
-    fn throttle_incoming_ip(&mut self, ip: IpAddr) -> Result<(), InboundConnectionError> {
-        if self.ban_list.ban_ip_until_with_capacity(
+    fn throttle_incoming_ip(&mut self, ip: IpAddr) {
+        // Skip new throttle entries when full so source-address churn cannot block admission
+        // from unrelated IPs. Connection limits still bound pending and active sessions.
+        self.ban_list.ban_ip_until_with_capacity(
             ip,
             std::time::Instant::now() + self.incoming_ip_throttle_duration,
             MAX_INCOMING_IP_THROTTLE_ENTRIES,
-        ) {
-            Ok(())
-        } else {
-            Err(InboundConnectionError::ExceedsCapacity)
-        }
+        );
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
@@ -2952,12 +2950,17 @@ mod tests {
                     .map(|i| IpAddr::V4(Ipv4Addr::from(0x0800_0000 + u32::try_from(i).unwrap()))),
             );
             let ip = IpAddr::from([1, 1, 1, 1]);
-            assert_eq!(
-                peers.on_incoming_pending_session(ip),
-                Err(InboundConnectionError::ExceedsCapacity)
-            );
-            assert_eq!(peers.connection_info.num_pending_in, 0);
+            assert!(peers.on_incoming_pending_session(ip).is_ok());
+            assert_eq!(peers.connection_info.num_pending_in, 1);
             assert!(!peers.ban_list.is_banned_ip(&ip));
+            peers.on_incoming_pending_session_gracefully_closed();
+            assert_eq!(peers.connection_info.num_pending_in, 0);
+
+            // A saturated throttle table must not weaken existing security bans.
+            assert_eq!(
+                peers.on_incoming_pending_session(IpAddr::from([8, 0, 0, 1])),
+                Err(InboundConnectionError::IpBanned)
+            );
         }
     }
 
