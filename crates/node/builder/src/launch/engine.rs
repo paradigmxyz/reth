@@ -38,6 +38,7 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, StorageSettingsCache,
 };
+use reth_rpc_layer::JwtSecret;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -210,8 +211,13 @@ impl<B> EngineNodeLauncher<B> {
 
         let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
 
-        // extract the jwt secret from the args if possible
-        let jwt_secret = ctx.auth_jwt_secret()?;
+        // The JWT secret is only used by the auth server, so don't read or create it when the auth
+        // server is disabled.
+        let jwt_secret = if ctx.node_config().rpc.disable_auth_server {
+            JwtSecret::random()
+        } else {
+            ctx.auth_jwt_secret()?
+        };
 
         let add_ons_ctx = AddOnsContext {
             node: ctx.node_adapter().clone(),
