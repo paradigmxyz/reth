@@ -61,7 +61,7 @@ impl TxnManager {
     /// executes an FFI function, and returns the result on the provided channel.
     ///
     /// - [`TxnManagerMessage::Begin`] opens a new transaction with [`ffi::mdbx_txn_begin_ex`]
-    /// - [`TxnManagerMessage::Abort`] aborts a transaction with [`ffi::mdbx_txn_abort`]
+    /// - [`TxnManagerMessage::Abort`] aborts a transaction with [`ffi::mdbx_txn_abort_ex`]
     /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
