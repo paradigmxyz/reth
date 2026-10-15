@@ -73,10 +73,8 @@ where
         tx.get::<tables::BlockBodyIndices>(snapshot_block)?.map(|indices| indices.last_tx_num());
 
     for (segment, prune_mode) in &checkpoints {
-        // History lookups treat everything at or below the checkpoint as pruned, and the history
-        // pruner resumes from the block after it. The snapshot retains history down to the prune
-        // target, so a checkpoint at the snapshot block would hide every historical state and keep
-        // the pruner from trimming downloaded indices.
+        // History at or below the checkpoint reads as pruned, and the snapshot retains history
+        // down to the prune target.
         let (block_number, tx_number) =
             if matches!(segment, PruneSegment::AccountHistory | PruneSegment::StorageHistory) {
                 let Some((target, _)) =
