@@ -1021,8 +1021,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let provider = self.database.provider()?;
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
-        let from_transaction_num = block_body.first_tx_num();
-        let to_transaction_num = block_body.last_tx_num();
         let account_changeset = provider.account_changesets_range(block..=block)?;
         let storage_changeset = provider.storage_changeset(block)?;
 
@@ -1037,7 +1035,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             |address| state_provider.basic_account(&address),
             |address, storage_key| state_provider.storage(address, storage_key),
         )?;
-        let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+        let receipts = provider.receipts_by_tx_range(block_body.tx_num_range())?;
 
         Ok(Some(ExecutionOutcome::new_init(
             state,
@@ -3579,14 +3577,21 @@ mod tests {
             let block = random_block(
                 &mut rng,
                 number as u64,
-                BlockParams { parent: Some(parent), tx_count: Some(tx_count), ..Default::default() },
+                BlockParams {
+                    parent: Some(parent),
+                    tx_count: Some(tx_count),
+                    ..Default::default()
+                },
             )
             .try_recover()
             .expect("failed to recover test block");
             parent = block.hash();
             expected.push(
-                block.body().transactions.iter()
-                    .map(|tx| random_receipt(&mut rng, tx, Some(2), None))
+                block
+                    .body()
+                    .transactions
+                    .iter()
+                    .map(|tx| random_receipt(&mut rng, tx, Some(0), Some(0)))
                     .collect::<Vec<_>>(),
             );
             writer.insert_block(&block)?;
