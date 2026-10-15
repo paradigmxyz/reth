@@ -299,34 +299,38 @@ where
             if provider.block_number(target)?.is_some() {
                 return Ok(TargetPosition::Behind)
             }
-            let number = provider.last_block_number()?;
-            BlockNumHash::new(number, provider.block_hash(number)?.unwrap_or_default())
+            provider.last_block_number()?
         };
-        let header = self.client.get_header(target.into()).await;
         // A peer may answer with another block's header.
-        let Some(header) = header
+        let Some(header) = self
+            .client
+            .get_header(target.into())
+            .await
             .ok()
             .and_then(|header| header.into_data())
             .filter(|header| header.hash_slow() == target)
         else {
             return Ok(TargetPosition::Unavailable)
         };
-        // A tip-only download bypasses the downloader's batch parent check.
-        if header.number().checked_sub(1) == Some(head.number) && header.parent_hash() != head.hash
-        {
-            // Unwinding needs a header below the head, which genesis doesn't have.
-            if head.number <= self.factory.chain_spec().genesis_header().number() {
-                return Err(PipelineError::Internal(RethError::msg(
-                    "snap headers do not connect to genesis",
-                )))
-            }
-            return Ok(TargetPosition::Detached { unwind_to: head.number - 1 })
+        if header.number() <= head {
+            return Ok(TargetPosition::Behind)
         }
-        Ok(if header.number() > head.number {
-            TargetPosition::Ahead
-        } else {
-            TargetPosition::Behind
-        })
+        if header.number() > head + 1 {
+            return Ok(TargetPosition::Ahead)
+        }
+        // A tip-only download bypasses the downloader's batch parent check, so the head's
+        // successor must attach to it.
+        let head_hash = self.factory.provider()?.block_hash(head)?.unwrap_or_default();
+        if header.parent_hash() == head_hash {
+            return Ok(TargetPosition::Ahead)
+        }
+        // Unwinding needs a header below the head, which genesis doesn't have.
+        if head <= self.factory.chain_spec().genesis_header().number() {
+            return Err(PipelineError::Internal(RethError::msg(
+                "snap headers do not connect to genesis",
+            )))
+        }
+        Ok(TargetPosition::Detached { unwind_to: head - 1 })
     }
 
     // Returns the hash of the highest local header.
