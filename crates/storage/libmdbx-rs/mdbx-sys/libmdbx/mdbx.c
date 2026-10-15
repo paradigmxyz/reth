@@ -19359,34 +19359,14 @@ __hot __noinline size_t dpl_search(const MDBX_txn *txn, pgno_t pgno) {
     }
   }
 
-  switch (dl->length - dl->sorted) {
-  default:
+  if (dl->length - dl->sorted > 127)
     /* sort a whole */
     dpl_sort_slowpath(txn);
-    break;
-  case 0:
-    /* whole sorted cases */
-    break;
-
-#define LINEAR_SEARCH_CASE(N)                                                                                          \
-  case N:                                                                                                              \
-    if (dl->items[dl->length - N + 1].pgno == pgno)                                                                    \
-      return dl->length - N + 1;                                                                                       \
-    __fallthrough
-
-    /* use linear scan until the threshold */
-    LINEAR_SEARCH_CASE(7); /* fall through */
-    LINEAR_SEARCH_CASE(6); /* fall through */
-    LINEAR_SEARCH_CASE(5); /* fall through */
-    LINEAR_SEARCH_CASE(4); /* fall through */
-    LINEAR_SEARCH_CASE(3); /* fall through */
-    LINEAR_SEARCH_CASE(2); /* fall through */
-  case 1:
-    if (dl->items[dl->length].pgno == pgno)
-      return dl->length;
-    /* continue bsearch on the sorted part */
-    break;
-  }
+  else
+    /* use linear scan of the unsorted tail until the threshold */
+    for (size_t i = dl->length; i > dl->sorted; --i)
+      if (dl->items[i].pgno == pgno)
+        return i;
   return dp_bsearch(dl->items + 1, dl->sorted, pgno) - dl->items;
 }
 
