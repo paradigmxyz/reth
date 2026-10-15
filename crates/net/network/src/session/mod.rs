@@ -1275,11 +1275,11 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
                     stream::once(async move {
                         // A closed gate means authentication failed and the connection is dropped.
-                        if protocol_ready.wait_for(|started| *started).await.is_ok() {
-                            Some(handler.into_connection(direction, remote_peer_id, conn))
-                        } else {
-                            None
-                        }
+                        protocol_ready
+                            .wait_for(|started| *started)
+                            .await
+                            .is_ok()
+                            .then(|| handler.into_connection(direction, remote_peer_id, conn))
                     })
                     .filter_map(future::ready)
                     .flatten()
