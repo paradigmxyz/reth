@@ -139,7 +139,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         timeout_ms: Option<u64>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
     where
-        Self: LoadReceipt + 'static,
+        Self: LoadReceipt,
     {
         let this = self.clone();
         let configured_timeout = self.send_raw_transaction_sync_timeout();
@@ -282,7 +282,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         hash: B256,
     ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadReceipt + 'static,
+        Self: LoadReceipt,
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
@@ -504,7 +504,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
+        Self: EthApiSpec + EstimateCall + LoadFee,
     {
         async move {
             let from = match request.as_ref().from() {
@@ -588,7 +588,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<FillTransaction<TxTy<Self::Primitives>>, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
+        Self: EthApiSpec + EstimateCall + LoadFee,
     {
         async move {
             if request.as_ref().value().is_none() {

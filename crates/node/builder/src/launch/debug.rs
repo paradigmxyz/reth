@@ -357,7 +357,7 @@ where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N> + 'static,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
-    B: PayloadProvider<ExecutionData = PayloadDataTy<N::Types>> + Clone + 'static,
+    B: PayloadProvider<ExecutionData = PayloadDataTy<N::Types>> + Clone,
 {
     type Output = eyre::Result<NodeHandle<N, AddOns>>;
     type IntoFuture = Pin<Box<dyn Future<Output = eyre::Result<NodeHandle<N, AddOns>>> + Send>>;

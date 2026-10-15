@@ -12,7 +12,6 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
     HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
-use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
@@ -47,7 +46,6 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + StageCheckpointReader
     + PruneCheckpointReader
     + Clone
-    + Debug
     + Unpin
     + 'static
 {
@@ -85,7 +83,6 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + StageCheckpointReader
         + PruneCheckpointReader
         + Clone
-        + Debug
         + Unpin
         + 'static
 {
