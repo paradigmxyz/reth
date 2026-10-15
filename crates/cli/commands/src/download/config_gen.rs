@@ -8,7 +8,8 @@ use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PruneSegment, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
+    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, MINIMUM_DISTANCE,
+    MINIMUM_UNWIND_SAFE_DISTANCE,
 };
 use reth_stages_types::StageCheckpoint;
 use std::{collections::BTreeMap, path::Path};
@@ -72,8 +73,23 @@ where
         tx.get::<tables::BlockBodyIndices>(snapshot_block)?.map(|indices| indices.last_tx_num());
 
     for (segment, prune_mode) in &checkpoints {
+        // History lookups treat everything at or below the checkpoint as pruned, and the history
+        // pruner resumes from the block after it. The snapshot retains history down to the prune
+        // target, so a checkpoint at the snapshot block would hide every historical state and keep
+        // the pruner from trimming downloaded indices.
+        let (block_number, tx_number) =
+            if matches!(segment, PruneSegment::AccountHistory | PruneSegment::StorageHistory) {
+                let Some((target, _)) =
+                    prune_mode.prune_target_block(snapshot_block, *segment, PrunePurpose::User)?
+                else {
+                    continue
+                };
+                (target, None)
+            } else {
+                (snapshot_block, tx_number)
+            };
         let checkpoint = PruneCheckpoint {
-            block_number: Some(snapshot_block),
+            block_number: Some(block_number),
             tx_number,
             prune_mode: *prune_mode,
         };
@@ -82,7 +98,7 @@ where
 
         info!(target: "reth::cli",
             segment = %segment,
-            block = snapshot_block,
+            block = block_number,
             tx = ?tx_number,
             mode = ?prune_mode,
             "Set prune checkpoint"
@@ -338,8 +354,6 @@ mod tests {
             PruneSegment::SenderRecovery,
             PruneSegment::TransactionLookup,
             PruneSegment::Receipts,
-            PruneSegment::AccountHistory,
-            PruneSegment::StorageHistory,
             PruneSegment::Bodies,
         ] {
             let checkpoint = tx
@@ -350,6 +364,77 @@ mod tests {
             // No BlockBodyIndices in empty DB, so tx_number should be None
             assert_eq!(checkpoint.tx_number, None);
         }
+    }
+
+    #[test]
+    fn write_prune_checkpoints_sets_history_to_retained_window_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
+
+        let mut selections = BTreeMap::new();
+        selections.insert(SnapshotComponentType::State, ComponentSelection::All);
+        selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
+        selections.insert(
+            SnapshotComponentType::AccountChangesets,
+            ComponentSelection::Distance(500_000),
+        );
+        selections.insert(
+            SnapshotComponentType::StorageChangesets,
+            ComponentSelection::Distance(500_000),
+        );
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+        let snapshot_block = 21_000_000;
+
+        {
+            let tx = db.tx_mut().unwrap();
+            write_prune_checkpoints_tx(&tx, &config, snapshot_block).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let tx = db.tx().unwrap();
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            let checkpoint = tx
+                .get::<tables::PruneCheckpoints>(segment)
+                .unwrap()
+                .unwrap_or_else(|| panic!("expected checkpoint for {segment}"));
+            assert_eq!(checkpoint.block_number, Some(snapshot_block - 500_000));
+            assert_eq!(checkpoint.prune_mode, PruneMode::Distance(500_000));
+        }
+    }
+
+    #[test]
+    fn write_prune_checkpoints_skips_history_shorter_than_distance() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = reth_db::init_db(dir.path(), reth_db::mdbx::DatabaseArguments::default()).unwrap();
+
+        let mut selections = BTreeMap::new();
+        selections.insert(
+            SnapshotComponentType::AccountChangesets,
+            ComponentSelection::Distance(500_000),
+        );
+        let config = config_for_selections(
+            &selections,
+            &empty_manifest(),
+            None,
+            None::<&reth_chainspec::ChainSpec>,
+        );
+
+        {
+            let tx = db.tx_mut().unwrap();
+            write_prune_checkpoints_tx(&tx, &config, 100_000).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let tx = db.tx().unwrap();
+        assert!(tx
+            .get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
