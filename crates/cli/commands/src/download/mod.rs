@@ -182,10 +182,18 @@ pub struct DownloadDefaults {
     pub snapshot_api_url: Cow<'static, str>,
     /// Optional custom long help text that overrides the generated help
     pub long_help: Option<String>,
+    /// Whether the full preset also downloads the snapshot's RocksDB indices.
+    ///
+    /// The indices cover the source node's whole history, so the index stages keep their
+    /// snapshot checkpoints instead of rebuilding the retained history window, and the pruner
+    /// trims index entries as new blocks arrive. Enable this when the full preset retains enough
+    /// history that rebuilding its indices takes longer than downloading them.
+    pub full_preset_includes_rocksdb_indices: bool,
 }
 
 impl DownloadDefaults {
     /// Initialize the global download defaults with this configuration
+    #[expect(clippy::result_large_err, reason = "returns the rejected defaults to the caller")]
     pub fn try_init(self) -> Result<(), Self> {
         DOWNLOAD_DEFAULTS.set(self)
     }
@@ -206,6 +214,7 @@ impl DownloadDefaults {
             default_chain_aware_base_url: None,
             snapshot_api_url: Cow::Borrowed(RETH_SNAPSHOTS_API_URL),
             long_help: None,
+            full_preset_includes_rocksdb_indices: false,
         }
     }
 
@@ -312,6 +321,12 @@ impl DownloadDefaults {
         self.default_base_url = source_url.clone();
         self.default_chain_aware_base_url = Some(source_url.clone());
         self.snapshot_api_url = Cow::Owned(format!("{}{SNAPSHOT_API_PATH}", source_url.as_ref()));
+        self
+    }
+
+    /// Builder: Make the full preset also download the snapshot's RocksDB indices.
+    pub const fn with_full_preset_rocksdb_indices(mut self) -> Self {
+        self.full_preset_includes_rocksdb_indices = true;
         self
     }
 
@@ -422,7 +437,8 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 
     /// Skip optional RocksDB indices even when archive components are selected.
     ///
-    /// This affects `--archive`/`--all` and TUI archive preset (`a`).
+    /// This affects `--archive`/`--all` and TUI archive preset (`a`), and `--full` and the TUI
+    /// full preset (`f`) when the full preset is configured to include RocksDB indices.
     #[arg(long, conflicts_with_all = ["url", "with_rocksdb"])]
     without_rocksdb: bool,
 
@@ -615,8 +631,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let manifest = self.load_manifest(chain_id).await?;
         let ResolvedComponents { mut selections, preset } = self.resolve_components(&manifest)?;
 
-        if matches!(preset, Some(SelectionPreset::Archive)) {
-            inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb);
+        match preset {
+            Some(SelectionPreset::Archive) => {
+                inject_archive_only_components(&mut selections, &manifest, !self.without_rocksdb)
+            }
+            Some(SelectionPreset::Full)
+                if DownloadDefaults::get_global().full_preset_includes_rocksdb_indices &&
+                    !self.without_rocksdb =>
+            {
+                inject_rocksdb_indices(&mut selections, &manifest)
+            }
+            _ => {}
         }
 
         let planned = collect_planned_archives(&manifest, &selections)?;
@@ -1040,6 +1065,19 @@ fn inject_archive_only_components(
         if manifest.component(component).is_some() {
             selections.insert(component, ComponentSelection::All);
         }
+    }
+}
+
+/// Selects the manifest's RocksDB indices, if it publishes them.
+///
+/// Older manifests without the component keep the selection unchanged, so the index stages are
+/// reset and rebuilt as before.
+fn inject_rocksdb_indices(
+    selections: &mut BTreeMap<SnapshotComponentType, ComponentSelection>,
+    manifest: &SnapshotManifest,
+) {
+    if manifest.component(SnapshotComponentType::RocksdbIndices).is_some() {
+        selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
     }
 }
 
@@ -1537,6 +1575,35 @@ mod tests {
             Some(&ComponentSelection::All)
         );
         assert_eq!(selections.get(&SnapshotComponentType::RocksdbIndices), None);
+    }
+
+    #[test]
+    fn inject_rocksdb_indices_keeps_index_stages() {
+        let manifest = manifest_with_archive_only_components();
+        let mut selections = BTreeMap::new();
+        selections
+            .insert(SnapshotComponentType::AccountChangesets, ComponentSelection::Distance(10));
+
+        inject_rocksdb_indices(&mut selections, &manifest);
+
+        assert_eq!(
+            selections.get(&SnapshotComponentType::RocksdbIndices),
+            Some(&ComponentSelection::All)
+        );
+        assert_eq!(selections.get(&SnapshotComponentType::TransactionSenders), None);
+        assert!(!should_reset_index_stage_checkpoints(&selections));
+    }
+
+    #[test]
+    fn inject_rocksdb_indices_skips_manifest_without_indices() {
+        let mut manifest = manifest_with_archive_only_components();
+        manifest.components.clear();
+        let mut selections = BTreeMap::new();
+
+        inject_rocksdb_indices(&mut selections, &manifest);
+
+        assert!(selections.is_empty());
+        assert!(should_reset_index_stage_checkpoints(&selections));
     }
 
     #[test]
