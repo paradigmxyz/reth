@@ -6,9 +6,7 @@ use crate::{
 use alloy_consensus::TxReceipt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
-};
+use reth_provider::{BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
     MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -29,7 +27,6 @@ impl<Provider> Segment<Provider> for ReceiptsByLogs
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
-        + TransactionsProvider
         + BlockReader
         + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {

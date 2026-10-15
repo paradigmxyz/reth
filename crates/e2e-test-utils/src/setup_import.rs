@@ -12,6 +12,7 @@ use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig, Impo
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
+use reth_node_builder::sync::PipelineBackfill;
 use reth_node_core::args::StorageArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
@@ -108,7 +109,7 @@ pub async fn setup_engine_with_chain_import(
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
         let database = open_test_database(&datadir)?;
-        let node = launch_test_node::<EthereumNode>(
+        let node = launch_test_node(
             LaunchArgs {
                 idx,
                 node_factory: Arc::new(|_| EthereumNode::default()),
@@ -121,6 +122,7 @@ pub async fn setup_engine_with_chain_import(
                 dev_payload_attributes: None,
             },
             database,
+            PipelineBackfill,
         )
         .instrument(span)
         .await?;
