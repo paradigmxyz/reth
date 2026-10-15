@@ -351,6 +351,17 @@ where
         let _ = targets.changed().await;
     }
 
+    // Resolves after the lookup retry delay or a forkchoice update, or `false` once the backfill
+    // stops.
+    async fn retry_due(&self, targets: &mut watch::Receiver<B256>) -> bool {
+        tokio::select! {
+            biased;
+            () = self.stop.cancelled() => false,
+            Ok(()) = targets.changed() => true,
+            () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => true,
+        }
+    }
+
     // Resolve the target before starting a pipeline pass, which cannot safely be retargeted with
     // headers buffered. Only the peer lookup and retry delay are interrupted by forkchoice.
     async fn resolve_target(
@@ -367,12 +378,11 @@ where
                 position = self.position(target) => position?,
             };
             match position {
-                TargetPosition::Unavailable => tokio::select! {
-                    biased;
-                    () = self.stop.cancelled() => return Ok(None),
-                    Ok(()) = targets.changed() => {},
-                    () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => {},
-                },
+                TargetPosition::Unavailable => {
+                    if !self.retry_due(targets).await {
+                        return Ok(None)
+                    }
+                }
                 TargetPosition::Behind => return Ok(Some((target, false))),
                 TargetPosition::Ahead => return Ok(Some((target, true))),
                 TargetPosition::Detached { unwind_to } => {
@@ -384,6 +394,12 @@ where
                         return Ok(None)
                     };
                     result?;
+                    // An unwind that skips the stage leaves the target detached from the same head.
+                    if self.factory.provider()?.last_block_number()? > unwind_to &&
+                        !self.retry_due(targets).await
+                    {
+                        return Ok(None)
+                    }
                 }
             }
         }
@@ -460,7 +476,7 @@ pub(crate) mod tests {
     use reth_stages_api::test_utils::TestStage;
     use std::{
         sync::{
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc, Mutex,
         },
         task::{Context, Poll},
@@ -474,6 +490,7 @@ pub(crate) mod tests {
         noop: NoopFullBlockClient,
         empty_response: Arc<AtomicBool>,
         pending_target: Option<B256>,
+        requests: Arc<AtomicUsize>,
     }
 
     impl Default for ServesHeaders {
@@ -485,6 +502,7 @@ pub(crate) mod tests {
                 noop: NoopFullBlockClient::default(),
                 empty_response: Arc::default(),
                 pending_target: None,
+                requests: Arc::default(),
             }
         }
     }
@@ -507,6 +525,7 @@ pub(crate) mod tests {
             request: HeadersRequest,
             _priority: Priority,
         ) -> Self::Output {
+            self.requests.fetch_add(1, Ordering::Relaxed);
             if self.pending_target.is_some_and(|hash| request.start == hash.into()) {
                 return Either::Right(pending())
             }
@@ -1098,6 +1117,35 @@ pub(crate) mod tests {
         let error = run.position(hash).await.unwrap_err();
 
         assert_eq!(error.to_string(), "no header found for Number(0)");
+    }
+
+    #[tokio::test]
+    async fn an_unwind_that_keeps_the_head_waits_before_retrying() {
+        let (tip, _) = watch::channel(B256::ZERO);
+        let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
+        let genesis = SealedHeader::seal_slow(Header::default());
+        let head = SealedHeader::seal_slow(Header {
+            number: 1,
+            parent_hash: genesis.hash(),
+            ..Default::default()
+        });
+        // Without a headers checkpoint above genesis, the pipeline skips the stage's unwind.
+        insert_headers(&factory, &[genesis, head]);
+        let detached =
+            Header { number: 2, parent_hash: B256::repeat_byte(1), ..Default::default() };
+        let (_targets, mut receiver) = watch::channel(detached.hash_slow());
+        let client = ServesHeaders { headers: vec![detached], ..Default::default() };
+        let requests = client.requests.clone();
+        let (run, _stop) = snap_run_with(&factory, client);
+
+        let resolved = tokio::time::timeout(
+            HEADER_LOOKUP_RETRY / 2,
+            run.resolve_target(&mut pipeline, &mut receiver),
+        )
+        .await;
+
+        assert!(resolved.is_err());
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
