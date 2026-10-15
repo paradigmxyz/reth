@@ -569,7 +569,7 @@ impl DefaultStateRootStrategy {
                 gas_used,
             ),
         );
-        let proof_handle = ProofWorkerHandle::new(executor, task_ctx, worker_counts);
+        let proof_worker_handle = ProofWorkerHandle::new(executor, task_ctx, worker_counts);
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
@@ -578,7 +578,7 @@ impl DefaultStateRootStrategy {
 
         self.spawn_sparse_trie_task(
             executor,
-            proof_handle,
+            proof_worker_handle,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,

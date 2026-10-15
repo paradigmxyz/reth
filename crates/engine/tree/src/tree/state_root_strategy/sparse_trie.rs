@@ -24,7 +24,7 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{ProofResult, ProofWorkerHandle, StorageProofInput},
+    proof_task::{ProofWorkerHandle, ProofWorkerResult},
 };
 use reth_trie_sparse::{
     errors::{
@@ -49,8 +49,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    receive order. `HashedState` supplies changed values; `PrefetchProofs` supplies
 ///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
 ///    leaf updates before applying them in batches.
-/// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
-///    [`ProofWorkerHandle`]. The task coalesces [`ProofResult`]s returned through
+/// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] chunks, which
+///    [`ProofWorkerHandle::dispatch`] splits into independent account and per-address storage jobs.
+///    The task coalesces the [`ProofWorkerResult`]s returned through
 ///    [`ProofWorkerHandle::results`], reveals account proofs locally, and queues storage proofs on
 ///    the corresponding address' [`StorageTrieState`].
 /// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
@@ -180,8 +181,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_cache_misses: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
-    /// Proof batches dispatched to workers and not yet received.
-    in_flight_proof_batches: usize,
+    /// Proof jobs queued on the workers whose results have not been received yet.
+    in_flight_proof_jobs: usize,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
     /// queued leaf updates, the proof nodes waiting to be revealed into it and its proof target
     /// cache. See [`StorageTrieState`].
@@ -265,7 +266,7 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             pending_targets: Default::default(),
-            in_flight_proof_batches: 0,
+            in_flight_proof_jobs: 0,
             storage: Default::default(),
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
@@ -400,9 +401,9 @@ where
                     t = wake;
 
                     let Ok(result) = message else {
-                        unreachable!("we own the sender half")
+                        unreachable!("proof worker results never disconnect while the handle is alive")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_worker_result(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -439,9 +440,9 @@ where
                     t = wake;
 
                     let Ok(result) = message else {
-                        unreachable!("we own the sender half")
+                        unreachable!("proof worker results never disconnect while the handle is alive")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_worker_result(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -509,17 +510,16 @@ where
         })
     }
 
-    /// Handles a received proof result: coalesces everything already queued, reveals the
+    /// Handles a received proof worker result: coalesces everything already queued, reveals the
     /// proof in the trie, and records timing metrics.
-    fn on_proof_results(
+    fn on_proof_worker_result(
         &mut self,
-        message: ProofResult,
+        result: ProofWorkerResult,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
-        let mut result = self.on_proof_result_message(message)?;
+        let mut proofs = self.complete_proof_job(result)?;
         while let Ok(next) = self.proof_worker_handle.results().try_recv() {
-            let res = self.on_proof_result_message(next)?;
-            result.extend(res);
+            proofs.extend(self.complete_proof_job(next)?);
         }
 
         let phase_end = Instant::now();
@@ -528,7 +528,7 @@ where
             .record(phase_end.duration_since(*t));
         *t = phase_end;
 
-        self.on_proof_result(result)?;
+        self.on_proofs(proofs)?;
         self.metrics.sparse_trie_reveal_multiproof_duration_histogram.record(t.elapsed());
         Ok(())
     }
@@ -680,16 +680,16 @@ where
         self.final_hashed_state.extend(hashed_state_update);
     }
 
-    fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
-        self.reveal_proof_result(result).map_err(|e| StateRootTaskError::Other(e.into()))
+    fn on_proofs(&mut self, proofs: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        self.reveal_proof_result(proofs).map_err(|e| StateRootTaskError::Other(e.into()))
     }
 
     /// Reveals a proof batch.
     ///
     /// The account trie is revealed here because it can never be checked out. Storage proof nodes
     /// are queued on their address' entry and revealed by the job that runs for it next.
-    fn reveal_proof_result(&mut self, result: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
-        let DecodedMultiProofV2 { account_proofs, storage_proofs } = result;
+    fn reveal_proof_result(&mut self, proofs: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
+        let DecodedMultiProofV2 { account_proofs, storage_proofs } = proofs;
 
         self.queue_storage_proofs(storage_proofs);
         // Get the workers going before spending this thread on the account trie.
@@ -726,17 +726,19 @@ where
         })
     }
 
-    fn on_proof_result_message(
+    /// Accounts for a received proof job result and returns its proofs.
+    fn complete_proof_job(
         &mut self,
-        message: ProofResult,
+        result: ProofWorkerResult,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
-        let result = message?;
+        let proofs = result?;
         debug_assert!(
-            self.in_flight_proof_batches > 0,
-            "received proof result without an in-flight proof batch"
+            self.in_flight_proof_jobs > 0,
+            "received proof result without an in-flight proof job"
         );
-        self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
-        Ok(result)
+        // Saturates so that a broken invariant in release builds still lets the stall check fire.
+        self.in_flight_proof_jobs = self.in_flight_proof_jobs.saturating_sub(1);
+        Ok(proofs)
     }
 
     /// Applies buffered input and runs ready storage work, including work buffered while a job
@@ -1131,28 +1133,13 @@ where
                     return;
                 }
 
-                let MultiProofTargetsV2 { account_targets, storage_targets } = proof_targets;
-                for (hashed_address, targets) in storage_targets {
-                    match self
-                        .proof_worker_handle
-                        .dispatch_storage_proof(StorageProofInput::new(hashed_address, targets))
-                    {
-                        Ok(()) => self.in_flight_proof_batches += 1,
-                        Err(e) => {
-                            error!("failed to dispatch storage proof: {e:?}");
-                            dispatch_error = Some(StateRootTaskError::Provider(e));
-                            return;
-                        }
-                    }
-                }
-
-                if !account_targets.is_empty() {
-                    match self.proof_worker_handle.dispatch_account_multiproof(account_targets) {
-                        Ok(()) => self.in_flight_proof_batches += 1,
-                        Err(e) => {
-                            error!("failed to dispatch account multiproof: {e:?}");
-                            dispatch_error = Some(StateRootTaskError::Provider(e));
-                        }
+                // A chunk becomes several jobs, and an address whose slots span chunks gets one
+                // storage job per chunk. Every job returns its own result.
+                match self.proof_worker_handle.dispatch(proof_targets) {
+                    Ok(jobs) => self.in_flight_proof_jobs += jobs,
+                    Err(e) => {
+                        error!("failed to dispatch proofs: {e}");
+                        dispatch_error = Some(StateRootTaskError::Other(Box::new(e)));
                     }
                 }
             },
@@ -1192,7 +1179,7 @@ where
             !updates_queued &&
             self.pending_updates == 0 &&
             self.pending_targets.is_empty() &&
-            self.in_flight_proof_batches == 0 &&
+            self.in_flight_proof_jobs == 0 &&
             self.proof_worker_handle.results().is_empty() &&
             self.storage_in_flight == 0 &&
             !self.has_ready_storage_work() &&
@@ -1857,7 +1844,7 @@ mod tests {
             )),
             masks: None,
         };
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![leaf])]),
             ..Default::default()
         })
@@ -1985,7 +1972,7 @@ mod tests {
         // Deliver the requested parent proof directly so the interleaving is deterministic.
         let (targets, _) = task.pending_targets.take();
         assert_eq!(targets.storage_targets[&address].len(), 4);
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![parent_leaf.clone()])]),
             ..Default::default()
         })
@@ -2044,7 +2031,7 @@ mod tests {
         task.run_ready_storage_work().unwrap();
         assert_eq!(task.storage_cache_misses, 1);
 
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(
                 B256::repeat_byte(0x33),
                 vec![ProofTrieNodeV2::empty()],
@@ -2055,7 +2042,7 @@ mod tests {
         assert_eq!(task.storage_cache_misses, 1, "unrelated reveals cannot unblock this trie");
         assert_eq!(storage_slot_value(&task, &address, &slot), None);
 
-        task.on_proof_result(DecodedMultiProofV2 {
+        task.on_proofs(DecodedMultiProofV2 {
             storage_proofs: B256Map::from_iter([(address, vec![ProofTrieNodeV2::empty()])]),
             ..Default::default()
         })
@@ -2193,8 +2180,7 @@ mod tests {
             })
             .collect();
 
-        task.on_proof_result(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs })
-            .unwrap();
+        task.on_proofs(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs }).unwrap();
 
         assert_eq!(task.storage_in_flight, leaves.len());
         assert!(task.has_pending_sparse_trie_updates(), "completion must wait for the reveals");
@@ -2319,10 +2305,10 @@ mod tests {
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
             if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
-                assert_eq!(task.in_flight_proof_batches, 0);
+                assert_eq!(task.in_flight_proof_jobs, 0);
             }
         }
-        assert!(task.in_flight_proof_batches > 0, "proof work must start before the queue drains");
+        assert!(task.in_flight_proof_jobs > 0, "proof work must start before the queue drains");
         assert_eq!(task.pending_updates, 0);
 
         // A second batch remains buffered; the early flush must not become a permanent small
@@ -2451,14 +2437,14 @@ mod tests {
         work.updated = true;
         work.pending.insert(slot, LeafUpdate::Touched);
         work.fetched.insert(storage_target, ProofV2TargetParent::new(11));
-        task.in_flight_proof_batches = 1;
+        task.in_flight_proof_jobs = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
 
         let result = Ok(DecodedMultiProofV2::default());
-        task.on_proof_result_message(result).expect("proof result should be ok");
+        task.complete_proof_job(result).expect("proof result should be ok");
 
-        assert_eq!(task.in_flight_proof_batches, 0);
+        assert_eq!(task.in_flight_proof_jobs, 0);
         let error = task.ensure_not_stalled(false).expect_err("task should be stalled");
         assert!(matches!(error, StateRootTaskError::Stalled));
         let error = error.to_string();
