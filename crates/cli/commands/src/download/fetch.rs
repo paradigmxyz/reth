@@ -162,11 +162,20 @@ impl ArchiveFetcher {
 
     /// Probes the remote source for file size and HTTP range support.
     fn probe(&self, client: &BlockingClient) -> Result<RemoteArchiveProbe> {
-        let probe = client
-            .get(&self.url)
-            .header(RANGE, "bytes=0-0")
-            .send()
-            .and_then(|response| response.error_for_status());
+        let mut attempt = 1;
+        let probe = loop {
+            let probe = client
+                .get(&self.url)
+                .header(RANGE, "bytes=0-0")
+                .send()
+                .and_then(|response| response.error_for_status());
+            // A transient failure here would permanently downgrade the archive to one stream.
+            if probe.is_ok() || attempt == SEGMENT_RETRY_ATTEMPTS {
+                break probe
+            }
+            std::thread::sleep(self.session.retry_delay(piece_retry_backoff(attempt, false)));
+            attempt += 1;
+        };
 
         let (supports_ranges, total_size) = match probe {
             Ok(response) if response.status() == StatusCode::PARTIAL_CONTENT => {
