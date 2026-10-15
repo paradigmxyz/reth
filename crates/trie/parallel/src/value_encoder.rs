@@ -11,11 +11,14 @@ use reth_trie::{
 use std::rc::Rc;
 
 /// Returned from [`AsyncAccountValueEncoder`] to calculate a storage root inline when encoded.
-pub(crate) struct AsyncAccountDeferredValueEncoder<TC, HC> {
-    /// Shared storage proof calculator for computing storage roots.
-    storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-    hashed_address: B256,
-    account: Account,
+pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
+    /// Synchronous storage root computation.
+    Sync {
+        /// Shared storage proof calculator for computing storage roots.
+        storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
+        hashed_address: B256,
+        account: Account,
+    },
 }
 
 impl<TC, HC> DeferredValueEncoder for AsyncAccountDeferredValueEncoder<TC, HC>
@@ -24,12 +27,13 @@ where
     HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let mut calculator = self.storage_calculator.borrow_mut();
-        let root_node = calculator.storage_root_node(self.hashed_address)?;
+        let Self::Sync { storage_calculator, hashed_address, account } = self;
+        let mut calculator = storage_calculator.borrow_mut();
+        let root_node = calculator.storage_root_node(hashed_address)?;
         let storage_root = calculator
             .compute_root_hash(&[root_node])?
             .expect("storage_root_node returns a node at empty path");
-        self.account.into_trie_account(storage_root).encode(buf);
+        account.into_trie_account(storage_root).encode(buf);
         Ok(())
     }
 }
@@ -67,7 +71,7 @@ where
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {
-        AsyncAccountDeferredValueEncoder {
+        AsyncAccountDeferredValueEncoder::Sync {
             storage_calculator: self.storage_calculator.clone(),
             hashed_address,
             account,
