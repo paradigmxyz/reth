@@ -7,10 +7,12 @@ use super::{
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use reth_chainspec::EthChainSpec;
 use reth_errors::RethError;
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ProviderError, ProviderFactory,
+    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainSpecProvider,
+    ProviderError, ProviderFactory,
 };
 use reth_snap_sync::{SnapBootstrap, SnapBootstrapOutcome, SnapWrite};
 use reth_stages::{
@@ -314,9 +316,13 @@ where
         let detached = if header.number().checked_sub(1) == Some(head.number) &&
             header.parent_hash() != head.hash
         {
-            Some(head.number.checked_sub(1).ok_or_else(|| {
-                PipelineError::Internal(RethError::msg("snap headers do not connect to genesis"))
-            })?)
+            // Unwinding needs a header below the head, which genesis doesn't have.
+            if head.number <= self.factory.chain_spec().genesis_header().number() {
+                return Err(PipelineError::Internal(RethError::msg(
+                    "snap headers do not connect to genesis",
+                )))
+            }
+            Some(head.number - 1)
         } else {
             None
         };
@@ -402,6 +408,7 @@ pub(crate) mod tests {
     };
     use alloy_consensus::Header;
     use alloy_eips::eip1898::BlockWithParent;
+    use alloy_primitives::U256;
     use futures::future::{pending, ready, Either, Pending, Ready};
     use reth_consensus::{test_utils::TestConsensus, ConsensusError};
     use reth_db::{tables, transaction::DbTxMut};
@@ -417,9 +424,12 @@ pub(crate) mod tests {
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::{Account, SealedHeader};
     use reth_provider::{
-        test_utils::{insert_headers, MockNodeTypesWithDB},
+        test_utils::{
+            create_test_provider_factory_with_genesis_block_number, insert_headers,
+            MockNodeTypesWithDB,
+        },
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
-        StageCheckpointWriter,
+        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{
@@ -1058,9 +1068,15 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn a_detached_genesis_child_is_rejected() {
-        let factory = hashed_factory();
-        insert_headers(&factory, &[SealedHeader::seal_slow(Header::default())]);
-        let header = Header { number: 1, parent_hash: B256::repeat_byte(1), ..Default::default() };
+        let factory = create_test_provider_factory_with_genesis_block_number(5);
+        let genesis = SealedHeader::seal_slow(factory.chain_spec().genesis_header().clone());
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.get_writer(5, StaticFileSegment::Headers).unwrap();
+        writer.user_header_mut().set_block_range(5, 5);
+        writer.append_header_direct(genesis.header(), U256::ZERO, &genesis.hash()).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
+        let header = Header { number: 6, parent_hash: B256::repeat_byte(1), ..Default::default() };
         let hash = header.hash_slow();
         let client = ServesHeaders { headers: vec![header], ..Default::default() };
         let (run, _) = snap_run_with(&factory, client);
