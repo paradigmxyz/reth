@@ -11056,7 +11056,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
- "reth-storage-errors",
  "reth-storage-overlay",
  "reth-tasks",
  "reth-trie",
