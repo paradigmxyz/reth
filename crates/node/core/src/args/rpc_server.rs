@@ -4,7 +4,7 @@ use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
-use alloy_primitives::map::AddressSet;
+use alloy_primitives::{map::AddressSet, utils::format_ether};
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
@@ -664,7 +664,7 @@ pub struct RpcServerArgs {
         alias = "rpc-txfeecap",
         value_name = "TX_FEE_CAP",
         value_parser = parse_ether_value,
-        default_value = "1.0"
+        default_value = format_tx_fee_cap(DefaultRpcServerArgs::get_global().rpc_tx_fee_cap)
     )]
     pub rpc_tx_fee_cap: u128,
 
@@ -999,6 +999,11 @@ impl Default for RpcServerArgs {
     }
 }
 
+/// Formats a wei amount as the ether string `--rpc.txfeecap` parses, without trailing zeros.
+fn format_tx_fee_cap(wei: u128) -> String {
+    format_ether(wei).trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// clap value parser for [`RpcModuleSelection`] with configurable validation.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
@@ -1201,6 +1206,29 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
+    }
+
+    #[test]
+    fn test_format_tx_fee_cap() {
+        for (wei, ether) in [
+            (0, "0"),
+            (1, "0.000000000000000001"),
+            (500_000_000_000_000_000, "0.5"),
+            (1_000_000_000_000_000_000, "1"),
+            (1_050_000_000_000_000_000, "1.05"),
+            (1_000_000_000_000_000_000_000, "1000"),
+        ] {
+            assert_eq!(format_tx_fee_cap(wei), ether);
+        }
+    }
+
+    #[test]
+    fn test_format_tx_fee_cap_round_trips() {
+        for wei in
+            [0, 500_000_000_000_000_000, 1_000_000_000_000_000_000, 1_000_000_000_000_000_000_000]
+        {
+            assert_eq!(parse_ether_value(&format_tx_fee_cap(wei)).unwrap(), wei);
+        }
     }
 
     #[test]
