@@ -218,7 +218,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     }
 
     /// Constructs a new [`TrieWalker`] for the state trie.
-    pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
+    pub fn state_trie(cursor: C, changes: PrefixSet) -> Result<Self, DatabaseError> {
         Self::new(
             cursor,
             changes,
@@ -228,7 +228,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     }
 
     /// Constructs a new [`TrieWalker`] for the storage trie.
-    pub fn storage_trie(cursor: C, changes: PrefixSet) -> Self {
+    pub fn storage_trie(cursor: C, changes: PrefixSet) -> Result<Self, DatabaseError> {
         Self::new(
             cursor,
             changes,
@@ -242,7 +242,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         cursor: C,
         changes: PrefixSet,
         #[cfg(feature = "metrics")] trie_type: crate::TrieType,
-    ) -> Self {
+    ) -> Result<Self, DatabaseError> {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
             cursor,
@@ -257,13 +257,13 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         };
 
         // Set up the root node of the trie in the stack, if it exists.
-        if let Some((key, value)) = this.node(true).unwrap() {
+        if let Some((key, value)) = this.node(true)? {
             this.stack[0] = CursorSubNode::new(key, Some(value));
         }
 
         // Update the skip state for the root node.
         this.update_skip_node();
-        this
+        Ok(this)
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.
@@ -460,6 +460,7 @@ mod tests {
         StorageRoot,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
+    use reth_storage_errors::db::DatabaseErrorInfo;
     use std::collections::BTreeMap;
 
     fn branch_node(state_mask: u16, tree_mask: u16, hash_mask: u16) -> BranchNodeCompact {
@@ -500,6 +501,7 @@ mod tests {
         prefix_set.insert(Nibbles::from_nibbles([0x2, 0x3, 0x1]));
 
         TrieWalker::state_trie(factory.account_trie_cursor().unwrap(), prefix_set.freeze())
+            .unwrap()
             .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
     }
 
@@ -685,6 +687,7 @@ mod tests {
         let changes = PrefixSetMut::from([Nibbles::from_nibbles([0x3, 0xa])]).freeze();
         let mut walker =
             TrieWalker::<_>::state_trie(factory.account_trie_cursor().unwrap(), changes)
+                .unwrap()
                 .with_walk_all_changed_branch_children(true)
                 .with_deletions_retained(true);
         walker.cursor.seek_exact(parent).unwrap();
@@ -699,5 +702,55 @@ mod tests {
             .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
             .count();
         assert!(next_count <= 4, "cleanup walked {next_count} entries for 3 orphan nodes");
+    }
+
+    #[test]
+    fn state_trie_initial_read_timeout_returns_error() {
+        let error =
+            TrieWalker::<_>::state_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
+        assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
+    }
+
+    #[test]
+    fn storage_trie_initial_read_timeout_returns_error() {
+        let error =
+            TrieWalker::<_>::storage_trie(TimedOutTrieCursor, PrefixSet::default()).unwrap_err();
+        assert_matches::assert_matches!(error, DatabaseError::Read(info) if info == timeout_error());
+    }
+
+    fn timeout_error() -> DatabaseErrorInfo {
+        DatabaseErrorInfo { message: "read transaction has been timed out".into(), code: -96000 }
+    }
+
+    #[derive(Debug)]
+    struct TimedOutTrieCursor;
+
+    impl TrieCursor for TimedOutTrieCursor {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            assert_eq!(key, Nibbles::default());
+            Err(DatabaseError::Read(timeout_error()))
+        }
+
+        fn seek(
+            &mut self,
+            _key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            unreachable!("initialization only seeks the root exactly")
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            unreachable!("initialization only seeks the root exactly")
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            unreachable!("initialization only seeks the root exactly")
+        }
+
+        fn reset(&mut self) {
+            unreachable!("initialization only seeks the root exactly")
+        }
     }
 }
