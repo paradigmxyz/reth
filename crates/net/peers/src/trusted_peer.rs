@@ -8,7 +8,7 @@ use core::{
     str::FromStr,
 };
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use url::Host;
+use url::{Host, Url};
 
 /// Represents the node record of a trusted peer. The only difference between this and a
 /// [`NodeRecord`] is that this does not contain the IP address of the peer, but rather a domain
@@ -128,8 +128,6 @@ impl FromStr for TrustedPeer {
             return Ok(record.into())
         }
 
-        use url::Url;
-
         let url = Url::parse(s).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
 
         // The enode scheme is not a special scheme, so the parser keeps the host as an opaque
@@ -212,30 +210,6 @@ mod tests {
     }
 
     #[test]
-    fn test_url_parse_port_80() {
-        let id = b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0");
-        let cases = [
-            (format!("enode://{id:x}@10.3.58.6:80"), Host::Ipv4([10, 3, 58, 6].into()), 80, 80),
-            (
-                format!("enode://{id:x}@10.3.58.6:80?discport=30301"),
-                Host::Ipv4([10, 3, 58, 6].into()),
-                80,
-                30301,
-            ),
-            (format!("enode://{id:x}@my-domain:80"), Host::Domain("my-domain".to_string()), 80, 80),
-        ];
-
-        for (url, host, tcp_port, udp_port) in cases {
-            let node: TrustedPeer = url.parse().unwrap();
-            assert_eq!(node, TrustedPeer { host, tcp_port, udp_port, id });
-            assert_eq!(url, node.to_string());
-        }
-
-        let url = format!("enode://{id:x}@10.3.58.6");
-        assert!(url.parse::<TrustedPeer>().is_err());
-    }
-
-    #[test]
     fn test_node_display() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
         let node: TrustedPeer = url.parse().unwrap();
@@ -295,10 +269,10 @@ mod tests {
         let cases = vec![
             // IPv4
             (
-                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"",
+                "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:80?discport=30301\"",
                 TrustedPeer {
                     host: Host::Ipv4([10, 3, 58, 6].into()),
-                    tcp_port: 30303u16,
+                    tcp_port: 80u16,
                     udp_port: 30301u16,
                     id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
                 }
@@ -315,10 +289,10 @@ mod tests {
             ),
             // URL
             (
-                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\"",
+                "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:80?discport=52151\"",
                 TrustedPeer {
                     host: Host::Domain("my-domain".to_string()),
-                    tcp_port: 52150u16,
+                    tcp_port: 80u16,
                     udp_port: 52151u16,
                     id: b512!("1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439"),
                 }
