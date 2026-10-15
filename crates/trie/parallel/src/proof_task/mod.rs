@@ -23,6 +23,8 @@
 //! ProofWorkerHandle::results <-- ProofWorkerResult
 //! ```
 
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod value_encoder;
 
 use self::value_encoder::AccountValueEncoder;
@@ -51,7 +53,7 @@ use std::{
 use tracing::{debug, debug_span, error, instrument, trace};
 
 #[cfg(feature = "metrics")]
-use crate::proof_task_metrics::{ProofTaskCursorMetricsCache, ProofWorkerMetrics};
+use self::metrics::{ProofTaskCursorMetricsCache, ProofWorkerMetrics};
 
 /// Type alias for the V2 account proof calculator with worker cursors.
 type V2AccountProofCalculator<'a, Provider> = proof_v2::ProofCalculator<

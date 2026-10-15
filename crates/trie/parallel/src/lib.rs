@@ -16,7 +16,3 @@ pub mod proof_task;
 
 /// State root task interface types shared between the engine tree and the payload builder.
 pub mod state_root_task;
-
-/// Proof task manager metrics.
-#[cfg(feature = "metrics")]
-pub mod proof_task_metrics;
