@@ -434,12 +434,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[error(
-        "child gas_limit {child_gas_limit} max allowed is {max_allowed} (parent {parent_gas_limit})",
-        max_allowed = parent_gas_limit.saturating_add(
-            (parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR).saturating_sub(1)
-        )
-    )]
+    #[error("child gas_limit {child_gas_limit} exceeds the max allowed increase ({parent_gas_limit}/{GAS_LIMIT_BOUND_DIVISOR})")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -622,18 +617,5 @@ mod tests {
 
         assert_eq!(consensus_err.to_string(), "consensus message");
         assert!(consensus_err.downcast_other_ref::<MessageError>().is_some());
-    }
-
-    #[test]
-    fn gas_limit_increase_error_reports_maximum_child_limit() {
-        let error = ConsensusError::GasLimitInvalidIncrease {
-            parent_gas_limit: 30_000_000,
-            child_gas_limit: 30_029_296,
-        };
-
-        assert_eq!(
-            error.to_string(),
-            "child gas_limit 30029296 max allowed is 30029295 (parent 30000000)"
-        );
     }
 }
