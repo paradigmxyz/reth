@@ -1,5 +1,7 @@
 # tracked by https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
+  - debug_traceBlockByNumber/trace-block-invalid-number (reth)
+  - debug_getRawReceipts/get-block-hash (reth)
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
   - debug_getRawReceipts/get-invalid-number (reth)
