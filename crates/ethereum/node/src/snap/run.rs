@@ -320,7 +320,11 @@ where
         }
         // A tip-only download bypasses the downloader's batch parent check, so the head's
         // successor must attach to it.
-        let head_hash = self.factory.provider()?.block_hash(head)?.unwrap_or_default();
+        let head_hash = self
+            .factory
+            .provider()?
+            .block_hash(head)?
+            .ok_or(ProviderError::HeaderNotFound(head.into()))?;
         if header.parent_hash() == head_hash {
             return Ok(TargetPosition::Ahead)
         }
@@ -1081,6 +1085,19 @@ pub(crate) mod tests {
         assert_eq!(factory.sealed_header(1).unwrap(), Some(replacement));
         assert_eq!(factory.block_number(local.hash()).unwrap(), None);
         assert_eq!(factory.block_hash(2).unwrap(), Some(target_hash));
+    }
+
+    #[tokio::test]
+    async fn a_missing_head_hash_fails_the_attachment_check() {
+        let factory = hashed_factory();
+        let header = Header { number: 1, parent_hash: B256::repeat_byte(1), ..Default::default() };
+        let hash = header.hash_slow();
+        let client = ServesHeaders { headers: vec![header], ..Default::default() };
+        let (run, _) = snap_run_with(&factory, client);
+
+        let error = run.position(hash).await.unwrap_err();
+
+        assert_eq!(error.to_string(), "no header found for Number(0)");
     }
 
     #[tokio::test]
