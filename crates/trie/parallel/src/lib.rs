@@ -17,9 +17,6 @@ pub mod proof_task;
 /// State root task interface types shared between the engine tree and the payload builder.
 pub mod state_root_task;
 
-/// Deferred account value encoder for V2 proofs.
-pub(crate) mod value_encoder;
-
 /// Proof task manager metrics.
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;

@@ -9,17 +9,17 @@ use std::{
     time::Duration,
 };
 
-/// Metrics for the proof task.
+/// Idle time metrics of the proof workers.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.proof_task")]
-pub struct ProofTaskTrieMetrics {
+pub struct ProofWorkerIdleMetrics {
     /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
     storage_worker_idle_time_seconds: Histogram,
     /// Histogram for account worker idle time in seconds (waiting for proof jobs).
     account_worker_idle_time_seconds: Histogram,
 }
 
-impl ProofTaskTrieMetrics {
+impl ProofWorkerIdleMetrics {
     /// Record storage worker idle time.
     pub fn record_storage_worker_idle_time(&self, duration: Duration) {
         self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());
@@ -122,7 +122,7 @@ impl ProofTaskCursorMetricsCache {
 #[derive(Clone, Debug, Default)]
 pub struct ProofWorkerMetrics {
     /// Worker idle time metrics.
-    pub trie: ProofTaskTrieMetrics,
+    pub idle: ProofWorkerIdleMetrics,
     /// Trie and hashed cursor operation metrics.
     pub cursor: ProofTaskCursorMetrics,
 }
