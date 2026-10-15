@@ -96,14 +96,7 @@ pub fn apply_state_overrides<DB: DynDatabase>(
                 db.cache.storage.entry(address).or_default().wipe();
                 Some(state)
             }
-            (None, Some(state)) => {
-                // Storage materializes an empty account as newly created, discarding its previous
-                // storage.
-                if account.is_empty() && !state.is_empty() {
-                    db.cache.storage.entry(address).or_default().wipe();
-                }
-                Some(state)
-            }
+            (None, Some(state)) => Some(state),
             (None, None) => None,
         };
 
@@ -164,17 +157,14 @@ mod tests {
     use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, InMemoryDB};
 
     #[test]
-    fn state_overrides_handle_accounts_left_empty() {
+    fn state_overrides_remove_accounts_left_empty() {
         let emptied = Address::with_last_byte(1);
         let absent = Address::with_last_byte(2);
         let replaced = Address::with_last_byte(3);
-        let diffed = Address::with_last_byte(4);
-        let kept = Address::with_last_byte(5);
         let slot = U256::ONE;
-        let diff = [(B256::with_last_byte(2), B256::with_last_byte(7))];
 
         let mut db = InMemoryDB::default();
-        for address in [emptied, replaced, diffed, kept] {
+        for address in [emptied, replaced] {
             db.insert_account_info(
                 &address,
                 AccountInfo { balance: U256::from(5), ..Default::default() },
@@ -192,8 +182,6 @@ mod tests {
                     .with_balance(U256::ZERO)
                     .with_state(std::iter::empty::<(B256, B256)>()),
             ),
-            (diffed, AccountOverride::default().with_balance(U256::ZERO).with_state_diff(diff)),
-            (kept, AccountOverride::default().with_state_diff(diff)),
         ]);
         apply_state_overrides(overrides, &mut state).unwrap();
 
@@ -204,13 +192,6 @@ mod tests {
         // A full storage replacement materializes the account even when it is left empty.
         assert_eq!(state.get_account(&replaced).unwrap(), Some(AccountInfo::default()));
         assert_eq!(state.get_storage(&replaced, &slot).unwrap(), U256::ZERO);
-        // A storage diff materializes an empty account as newly created, discarding old storage.
-        assert_eq!(state.get_account(&diffed).unwrap(), Some(AccountInfo::default()));
-        assert_eq!(state.get_storage(&diffed, &slot).unwrap(), U256::ZERO);
-        assert_eq!(state.get_storage(&diffed, &U256::from(2)).unwrap(), U256::from(7));
-        // A storage diff on a non-empty account applies on top of its existing storage.
-        assert_eq!(state.get_storage(&kept, &slot).unwrap(), U256::from(9));
-        assert_eq!(state.get_storage(&kept, &U256::from(2)).unwrap(), U256::from(7));
     }
 
     #[test]
