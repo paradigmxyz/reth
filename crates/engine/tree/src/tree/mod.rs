@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
+use alloy_evm::block::TxResult;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -23,25 +24,28 @@ use reth_engine_primitives::{
     NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{execute::BlockExecutor, ConfigureEvm};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    BlockBody, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
     DatabaseProviderFactory, HistoryReader, ProviderError, PruneCheckpointReader, SaveBlocksInput,
-    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
-    StorageSettingsCache, TransactionVariant,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::{context_interface::Cfg, interpreter::debug_unreachable, primitives::hardfork::SpecId};
+use revm::{
+    context_interface::Cfg, database::State, interpreter::debug_unreachable,
+    primitives::hardfork::SpecId,
+};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -62,7 +66,9 @@ use tracing::*;
 
 mod block_buffer;
 mod inclusion_list;
-use inclusion_list::{inclusion_list_satisfied, InclusionListContext, RetainedInclusionLists};
+use inclusion_list::{
+    inclusion_list_satisfied, InclusionListContext, InclusionListGas, RetainedInclusionLists,
+};
 pub mod error;
 pub mod instrumented_state;
 mod invalid_headers;
@@ -3586,6 +3592,10 @@ where
             };
             block
         };
+        if transactions.is_empty() {
+            self.state.inclusion_lists.cache_result(block_hash, true);
+            return Ok(Some(true))
+        }
         let provider_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             self.state.tree_state.overlay_manager.overlay_builder(block_hash),
@@ -3603,11 +3613,21 @@ where
                 return Ok(None)
             }
         };
+        // A header stores only the maximum of the two EIP-8037 gas totals. Replay once when
+        // accounting is unavailable, then retain both totals across replacement lists.
+        let gas = if let Some(gas) = self.state.inclusion_lists.gas(&block_hash) {
+            gas
+        } else {
+            let gas = self.inclusion_list_gas(&block)?;
+            self.state.inclusion_lists.cache_gas(block_hash, gas);
+            gas
+        };
         let ctx = InclusionListContext {
             chain_id: evm_env.cfg_env.chain_id,
             spec_id: evm_env.cfg_env.spec.into(),
             base_fee_per_gas: block.base_fee_per_gas(),
-            available_gas: block.gas_limit().saturating_sub(block.gas_used()),
+            available_gas: block.gas_limit().saturating_sub(gas.execution),
+            available_state_gas: block.gas_limit().saturating_sub(gas.state),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
             max_initcode_size: evm_env.cfg_env.max_initcode_size(),
         };
@@ -3615,6 +3635,39 @@ where
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;
         self.state.inclusion_lists.cache_result(block_hash, result);
         Ok(Some(result))
+    }
+
+    /// Recovers the gas budgets immediately after the transactions, before post-execution calls.
+    fn inclusion_list_gas(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+    ) -> ProviderResult<InclusionListGas> {
+        if block.body().transactions_iter().next().is_none() {
+            return Ok(InclusionListGas::default())
+        }
+        let parent_hash = block.parent_hash();
+        let factory = OverlayStateProviderFactory::new(
+            self.provider.clone(),
+            self.state.tree_state.overlay_manager.overlay_builder(parent_hash),
+        );
+        let provider = reth_provider::DatabaseProviderROFactory::database_provider_ro(&factory)?;
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(provider.into_evm_state_provider()))
+            .build();
+        let mut executor =
+            self.evm_config.executor_for_block(&mut db, block).map_err(ProviderError::other)?;
+        executor.apply_pre_execution_changes().map_err(ProviderError::other)?;
+        let mut gas = InclusionListGas::default();
+        for transaction in block.transactions_recovered() {
+            executor
+                .execute_transaction_with_result_closure(transaction, |result| {
+                    let used = result.result().result.gas();
+                    gas.execution += used.block_regular_gas_used();
+                    gas.state += used.block_state_gas_used();
+                })
+                .map_err(ProviderError::other)?;
+        }
+        Ok(gas)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.

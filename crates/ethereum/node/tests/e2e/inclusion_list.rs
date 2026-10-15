@@ -1,10 +1,12 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip7840::BlobParams,
 };
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{bytes, Address, Bytes, U256};
 use alloy_rpc_types_engine::{BogotaPayloadFields, ExecutionData, ExecutionPayloadSidecar};
 use alloy_rpc_types_eth::TransactionRequest;
+use reth_chainspec::ChainSpecBuilder;
 use reth_e2e_test_utils::{
     test_chain_spec_builder, transaction::TransactionTestContext, E2ETestSetupExt,
 };
@@ -97,6 +99,69 @@ async fn inclusion_list_checks_entries_after_a_skipped_blob() -> eyre::Result<()
 
     for already_executed in [false, true] {
         assert_eq!(blob_inclusion_list_verdict(2, true, already_executed).await?, Some(false));
+    }
+    Ok(())
+}
+
+async fn inclusion_list_gas_verdict(already_executed: bool) -> eyre::Result<()> {
+    let chain_spec = Arc::new(test_chain_spec_builder().bogota_activated().build());
+    let mut genesis = chain_spec.genesis.clone();
+    let burner = Address::repeat_byte(0x42);
+    genesis.alloc.entry(burner).or_default().code = Some(bytes!("5b600056"));
+    let chain_spec = ChainSpecBuilder::from(&chain_spec).genesis(genesis).build();
+    let (mut node, wallet) =
+        EthereumNode::test_setup(1, Arc::new(chain_spec)).build_single().await?;
+    for (nonce, to, gas, value) in [(0, burner, 1_000_000, 0u64), (1, Address::ZERO, 210_000, 1)] {
+        let transaction = TransactionRequest {
+            chain_id: Some(1),
+            nonce: Some(nonce),
+            gas: Some(gas),
+            to: Some(to.into()),
+            value: Some(U256::from(value)),
+            max_fee_per_gas: Some(20_000_000_000),
+            max_priority_fee_per_gas: Some(1_000_000_000),
+            ..Default::default()
+        };
+        let encoded = TransactionTestContext::sign_tx_bytes(wallet.signer(0), transaction).await;
+        node.rpc.inject_tx(encoded).await?;
+    }
+    let payload = node.new_payload().await?;
+    assert_eq!(payload.block().body().transactions.len(), 2);
+    let block_hash = payload.block().hash();
+    // Execution gas dominates this block. The full pending limit exceeds execution room by
+    // one, while its capped execution grant and full state-gas reservation both fit.
+    let pending = TransactionRequest {
+        chain_id: Some(1),
+        nonce: Some(0),
+        gas: Some(payload.block().gas_limit() - payload.block().gas_used() + 1),
+        to: Some(Address::ZERO.into()),
+        max_fee_per_gas: Some(20_000_000_000),
+        max_priority_fee_per_gas: Some(1_000_000_000),
+        ..Default::default()
+    };
+    let list = vec![TransactionTestContext::sign_tx_bytes(wallet.signer(1), pending).await];
+    let mut data = ExecutionData::from(payload);
+    let engine = &node.inner.add_ons_handle.beacon_engine_handle;
+    if already_executed {
+        assert!(engine.new_payload(data.clone()).await?.is_valid());
+    }
+    data.sidecar = ExecutionPayloadSidecar::v6(
+        data.sidecar.cancun().cloned().unwrap(),
+        data.sidecar.prague().cloned().unwrap(),
+        BogotaPayloadFields::new(list.clone()),
+    );
+    for _ in 0..3 {
+        let status = engine.new_payload_with_inclusion_list(data.clone(), list.clone()).await?;
+        assert!(status.is_valid(), "{status:?}");
+        assert_eq!(engine.inclusion_list_status(block_hash).await?, Some(false));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn repeated_payload_preserves_separate_inclusion_list_gas_budgets() -> eyre::Result<()> {
+    for already_executed in [false, true] {
+        inclusion_list_gas_verdict(already_executed).await?;
     }
     Ok(())
 }

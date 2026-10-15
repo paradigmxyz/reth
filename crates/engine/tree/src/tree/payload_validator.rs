@@ -99,6 +99,7 @@ use crate::tree::{
     error::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
+    inclusion_list::{InclusionListExecution, InclusionListGas},
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -116,7 +117,7 @@ use alloy_eip7928::{
     BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip2718::Decodable2718, eip4895::Withdrawal, NumHash};
-use alloy_evm::Evm;
+use alloy_evm::{block::TxResult, Evm};
 use alloy_primitives::{
     map::{AddressMap, B256Set},
     Bytes, B256,
@@ -754,7 +755,7 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, executed_bal, inclusion_list_satisfied) =
+        let (output, senders, receipt_root_rx, executed_bal, inclusion_list) =
             ensure_ok!(execution_result);
         let (built_bal, revm_bal) =
             executed_bal.map(|ExecutedBal { alloy, revm }| (alloy, revm)).unzip();
@@ -932,7 +933,8 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        if let Some(satisfied) = inclusion_list_satisfied {
+        ctx.state_mut().inclusion_lists.cache_gas(block.hash(), inclusion_list.gas);
+        if let Some(satisfied) = inclusion_list.satisfied {
             ctx.state_mut().inclusion_lists.cache_result(block.hash(), satisfied);
         }
 
@@ -1042,7 +1044,7 @@ where
             Vec<Address>,
             ReceiptRootReceiver,
             Option<ExecutedBal>,
-            Option<bool>,
+            InclusionListExecution,
         ),
         InsertBlockErrorKind,
     >
@@ -1103,7 +1105,7 @@ where
         let execution_start = Instant::now();
 
         // Execute all transactions and finalize
-        let (mut executor, senders, executed_tx_hashes) = self.execute_transactions(
+        let (mut executor, senders, executed_tx_hashes, gas) = self.execute_transactions(
             executor,
             transaction_count,
             handle.iter_transactions(),
@@ -1196,7 +1198,13 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal, inclusion_list_satisfied))
+        Ok((
+            output,
+            senders,
+            result_rx,
+            built_bal,
+            InclusionListExecution { satisfied: inclusion_list_satisfied, gas },
+        ))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1244,7 +1252,7 @@ where
             Vec<Address>,
             ReceiptRootReceiver,
             Option<ExecutedBal>,
-            Option<bool>,
+            InclusionListExecution,
         ),
         InsertBlockErrorKind,
     >
@@ -1271,7 +1279,7 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal, received_bal_revm) =
+        let (output, senders, built_bal, received_bal_revm, gas) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,
                 &self.evm_config,
@@ -1306,7 +1314,10 @@ where
             senders,
             result_rx,
             Some(ExecutedBal { alloy: built_bal, revm: received_bal_revm }),
-            inclusion_list_satisfied,
+            InclusionListExecution {
+                satisfied: inclusion_list_satisfied,
+                gas: InclusionListGas { execution: gas.0, state: gas.1 },
+            },
         ))
     }
 
@@ -1342,7 +1353,7 @@ where
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
         collect_transaction_hashes: bool,
-    ) -> Result<(E, Vec<Address>, Option<B256Set>), BlockExecutionError>
+    ) -> Result<(E, Vec<Address>, Option<B256Set>, InclusionListGas), BlockExecutionError>
     where
         E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
         Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
@@ -1351,6 +1362,7 @@ where
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
+        let mut gas = InclusionListGas::default();
         let mut transaction_hashes = collect_transaction_hashes.then(|| {
             let mut hashes = B256Set::default();
             hashes.reserve(transaction_count);
@@ -1404,7 +1416,11 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            executor.execute_transaction_with_result_closure(tx, |result| {
+                let used = result.result().result.gas();
+                gas.execution += used.block_regular_gas_used();
+                gas.state += used.block_state_gas_used();
+            })?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
@@ -1427,7 +1443,7 @@ where
 
         drop(exec_span);
 
-        Ok((executor, senders, transaction_hashes))
+        Ok((executor, senders, transaction_hashes, gas))
     }
 
     /// Validates the block after execution.

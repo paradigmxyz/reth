@@ -695,15 +695,15 @@ alloy-transport-ipc = { git = "https://github.com/mattsse/alloy", rev = "6277666
 alloy-transport-ws = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
 alloy-tx-macros = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
 
-revm = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-bytecode = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-context = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-context-interface = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-database = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-database-interface = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-handler = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-inspector = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-interpreter = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-precompile = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-primitives = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
-revm-state = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-bytecode = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-context = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-context-interface = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-database = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-database-interface = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-handler = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-inspector = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-interpreter = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-precompile = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-primitives = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }
+revm-state = { git = "https://github.com/Soubhik-10/revm", rev = "bf66cc8265adaa9c7914d79bc6215967c19b3ced" }

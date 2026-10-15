@@ -958,9 +958,9 @@ where
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
         // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
         // because the cap only applies to regular gas (state gas uses a reservoir).
-        // Store 0 to disable the txpool-level check.
+        // Apply the separate EIP-8037 cap to the full gas limit.
         let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            0
+            revm::primitives::eip8037::MAX_TX_TOTAL_GAS_LIMIT
         } else {
             evm_env.cfg_env.tx_gas_limit_cap()
         };
@@ -1162,7 +1162,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
 
             // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
             tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-                0
+                revm::primitives::eip8037::MAX_TX_TOTAL_GAS_LIMIT
             } else {
                 evm_env.cfg_env.tx_gas_limit_cap()
             },
@@ -1571,6 +1571,7 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -2203,5 +2204,37 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
+
+    #[test]
+    fn total_transaction_gas_cap_survives_head_updates() {
+        let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
+        let provider =
+            MockEthProvider::default().with_chain_spec(spec.clone()).with_genesis_block();
+        let validator =
+            EthTransactionValidatorBuilder::new(provider, EthEvmConfig::new(Arc::new(spec)))
+                .build(InMemoryBlobStore::default());
+        let head = alloy_consensus::Header { gas_limit: 5_000_000_000, ..Default::default() };
+        validator.block_gas_limit.store(head.gas_limit, std::sync::atomic::Ordering::Relaxed);
+        for update_head in [false, true] {
+            if update_head {
+                validator.on_new_head_block(&head);
+            }
+            let at_cap =
+                eip1559_tx(Address::repeat_byte(1), Address::repeat_byte(2), 0, u32::MAX as u64);
+            assert!(validator.validate_stateless(TransactionOrigin::External, &at_cap).is_ok());
+            let over_cap = eip1559_tx(
+                Address::repeat_byte(1),
+                Address::repeat_byte(2),
+                0,
+                u32::MAX as u64 + 1,
+            );
+            assert!(matches!(
+                validator.validate_stateless(TransactionOrigin::External, &over_cap),
+                Err(InvalidPoolTransactionError::Consensus(
+                    InvalidTransactionError::GasLimitTooHigh
+                ))
+            ));
+        }
     }
 }

@@ -13,8 +13,9 @@ use reth_errors::ProviderResult;
 use reth_primitives_traits::{BlockBody as _, NodePrimitives, RecoveredBlock, SignedTransaction};
 use reth_provider::StateProviderBox;
 use revm::{
-    context_interface::cfg::gas_params::Eip2780TxInfo, interpreter::gas::calculate_initial_tx_gas,
-    primitives::hardfork::SpecId,
+    context_interface::cfg::gas_params::Eip2780TxInfo,
+    interpreter::gas::calculate_initial_tx_gas,
+    primitives::{eip8037::MAX_TX_TOTAL_GAS_LIMIT, hardfork::SpecId},
 };
 use std::collections::VecDeque;
 use tracing::{debug, info};
@@ -26,12 +27,28 @@ pub(super) struct InclusionListContext {
     pub(super) chain_id: u64,
     pub(super) spec_id: SpecId,
     pub(super) base_fee_per_gas: Option<u64>,
-    /// Gas still unspent at the end of the block.
+    /// Execution gas still unspent at the end of the block.
     pub(super) available_gas: u64,
+    /// State gas still unspent at the end of the block.
+    pub(super) available_state_gas: u64,
     /// EIP-7825 cap on a single transaction's gas limit.
     pub(super) tx_gas_limit_cap: u64,
     /// EIP-3860 init code bound, as raised by EIP-7954 from Amsterdam on.
     pub(super) max_initcode_size: usize,
+}
+
+/// Gas consumed by the block's transactions in each EIP-8037 dimension.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct InclusionListGas {
+    pub(super) execution: u64,
+    pub(super) state: u64,
+}
+
+/// Inclusion-list status and gas accounting from authoritative block execution.
+#[derive(Debug)]
+pub(super) struct InclusionListExecution {
+    pub(super) satisfied: Option<bool>,
+    pub(super) gas: InclusionListGas,
 }
 
 /// Returns whether the block satisfies its EIP-7805 inclusion list, i.e. no inclusion-list
@@ -128,9 +145,17 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    // Block gas capacity. The EIP-7825 cap is not a bound on the gas limit itself; it bounds
-    // regular gas only, and is checked against intrinsic gas below.
-    if transaction.gas_limit() > ctx.available_gas {
+    // EIP-8037 admits the capped execution gas and the full gas limit against separate budgets.
+    let gas_limit = transaction.gas_limit();
+    let execution_gas = if ctx.spec_id >= SpecId::AMSTERDAM {
+        if gas_limit > MAX_TX_TOTAL_GAS_LIMIT || gas_limit > ctx.available_state_gas {
+            return Ok(false)
+        }
+        gas_limit.min(ctx.tx_gas_limit_cap)
+    } else {
+        gas_limit
+    };
+    if execution_gas > ctx.available_gas {
         return Ok(false)
     }
 
@@ -203,10 +228,12 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    let max_gas_cost = U256::from(transaction.gas_limit())
+    let Some(max_cost) = U256::from(transaction.gas_limit())
         .checked_mul(U256::from(transaction.max_fee_per_gas()))
-        .unwrap_or(U256::MAX);
-    let max_cost = max_gas_cost.checked_add(transaction.value()).unwrap_or(U256::MAX);
+        .and_then(|cost| cost.checked_add(transaction.value()))
+    else {
+        return Ok(false)
+    };
 
     Ok(account.nonce == transaction.nonce() && balance >= max_cost)
 }
@@ -223,6 +250,7 @@ const MAX_RETAINED_INCLUSION_LISTS: usize = 64;
 pub(super) struct RetainedInclusionLists {
     lists: B256Map<Vec<Bytes>>,
     results: B256Map<bool>,
+    gas: B256Map<InclusionListGas>,
     order: VecDeque<B256>,
 }
 
@@ -237,6 +265,7 @@ impl RetainedInclusionLists {
             if let Some(evicted) = self.order.pop_front() {
                 self.lists.remove(&evicted);
                 self.results.remove(&evicted);
+                self.gas.remove(&evicted);
             }
         }
     }
@@ -253,9 +282,20 @@ impl RetainedInclusionLists {
         self.results.insert(block_hash, satisfied);
     }
 
+    pub(super) fn gas(&self, block_hash: &B256) -> Option<InclusionListGas> {
+        self.gas.get(block_hash).copied()
+    }
+
+    pub(super) fn cache_gas(&mut self, block_hash: B256, gas: InclusionListGas) {
+        if self.lists.contains_key(&block_hash) {
+            self.gas.insert(block_hash, gas);
+        }
+    }
+
     pub(super) fn remove(&mut self, block_hash: &B256) {
         self.lists.remove(block_hash);
         self.results.remove(block_hash);
+        self.gas.remove(block_hash);
         // The FIFO must stay in sync with `lists`: a hash left here would be pushed a second time
         // by a re-insert of the same block, and the stale copy would later evict the live entry.
         self.order.retain(|hash| hash != block_hash);
@@ -285,6 +325,7 @@ mod inclusion_list_tests {
             spec_id: SpecId::BOGOTA,
             base_fee_per_gas: Some(BASE_FEE),
             available_gas: 1_000_000,
+            available_state_gas: u64::MAX,
             tx_gas_limit_cap: 500_000,
             max_initcode_size: revm::primitives::eip7954::MAX_INITCODE_SIZE,
         }
@@ -583,5 +624,78 @@ mod inclusion_list_tests {
             retained.insert(B256::with_last_byte(i as u8 + 2), Vec::new());
         }
         assert_eq!(retained.get(&hash), Some(&vec![Bytes::from_static(b"tx")]));
+    }
+
+    #[test]
+    fn appendability_uses_separate_gas_budgets() {
+        let cap = 16_777_216;
+        for (execution_room, state_room, gas_limit, expected) in [
+            (cap, cap + 837_400, cap + 1, true),
+            (cap - 1, cap + 837_399, cap + 1, false),
+            (cap, cap + 837_400, cap + 837_400, true),
+            (cap, cap + 837_400, cap + 837_401, false),
+        ] {
+            let ctx = InclusionListContext {
+                available_gas: execution_room,
+                available_state_gas: state_room,
+                tx_gas_limit_cap: cap,
+                ..context()
+            };
+            assert_eq!(
+                could_append(legacy_tx(Some(CHAIN_ID), 0, gas_limit), funded(0), ctx),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn appendability_enforces_total_transaction_gas_cap() {
+        let ctx = InclusionListContext {
+            available_gas: u64::MAX,
+            available_state_gas: u64::MAX,
+            ..context()
+        };
+        assert!(could_append(legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT), funded(0), ctx));
+        assert!(!could_append(
+            legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT + 1),
+            funded(0),
+            ctx
+        ));
+    }
+
+    #[test]
+    fn overflowing_total_cost_is_not_appendable() {
+        let fee = U256::from(100_000 * BASE_FEE);
+        for (value, expected) in [(U256::MAX, false), (U256::MAX - fee, true)] {
+            let account = ExtendedAccount::new(0, U256::MAX);
+            let tx = EthTransaction::Legacy(TxLegacy {
+                chain_id: Some(CHAIN_ID),
+                gas_price: BASE_FEE as u128,
+                gas_limit: 100_000,
+                to: TxKind::Call(Address::ZERO),
+                value,
+                ..Default::default()
+            });
+            assert_eq!(could_append(tx, account, context()), expected);
+        }
+    }
+
+    #[test]
+    fn replacing_a_list_preserves_gas_but_eviction_removes_it() {
+        let mut retained = RetainedInclusionLists::default();
+        let hash = B256::with_last_byte(1);
+        let gas = InclusionListGas { execution: 1_021_000, state: 183_600 };
+        retained.cache_gas(hash, gas);
+        assert_eq!(retained.gas(&hash), None);
+        retained.insert(hash, Vec::new());
+        retained.cache_gas(hash, gas);
+        retained.cache_result(hash, true);
+        retained.insert(hash, vec![Bytes::from_static(b"replacement")]);
+        assert_eq!(retained.gas(&hash), Some(gas));
+        assert_eq!(retained.cached_result(&hash), None);
+        for i in 0..MAX_RETAINED_INCLUSION_LISTS {
+            retained.insert(B256::with_last_byte(i as u8 + 2), Vec::new());
+        }
+        assert_eq!(retained.gas(&hash), None);
     }
 }
