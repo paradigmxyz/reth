@@ -462,9 +462,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: BlockHashReader
-        + DBProvider
-        + Sized
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -516,7 +514,11 @@ where
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
-        self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.provider()
+            .tx()
+            .prefetch(true)
+            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
     }
 }
 
@@ -534,14 +536,14 @@ where
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let input =
-                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), true)?;
+                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), false)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
         })
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
                 self.provider().tx(),
                 input,
@@ -602,7 +604,7 @@ where
                     HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
                         .into_sorted(),
                 ),
-                true,
+                false,
             )?;
             <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
                 .map_err(|err| ProviderError::Database(err.into()))
@@ -633,7 +635,7 @@ where
                     HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
                         .into_sorted(),
                 ),
-                true,
+                false,
             )?;
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
                 self.provider().tx(),
@@ -665,7 +667,7 @@ where
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -683,7 +685,7 @@ where
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -701,7 +703,7 @@ where
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),
@@ -720,7 +722,7 @@ where
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
                     DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
@@ -769,7 +771,7 @@ where
             return Ok(hashed_state)
         }
 
-        let overlay_state = self.build_overlay(TrieInputSorted::default(), true)?.state;
+        let overlay_state = self.build_overlay(TrieInputSorted::default(), false)?.state;
         zero_destroyed_account_storage(
             &HashedPostStateCursorFactory::new(
                 DatabaseHashedCursorFactory::new(self.provider().tx()),
@@ -787,7 +789,6 @@ where
     Provider: Deref,
     Provider::Target: DBProvider
         + HistoryReader
-        + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -1047,8 +1048,8 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
-        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
-        HashedStorage, Nibbles,
+        updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        SortedTrieData,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1076,7 +1077,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 

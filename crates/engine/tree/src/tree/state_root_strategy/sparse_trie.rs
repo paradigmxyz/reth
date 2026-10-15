@@ -396,7 +396,7 @@ where
                         .record(wake.duration_since(t));
 
                     let update = message.map_err(|_| StateRootTaskError::Other(
-                        "updates channel disconnected before state root calculation".to_string(),
+                        "updates channel disconnected before state root calculation".into(),
                     ))?;
                     if let Some(hashed_state) = self.on_message(update) {
                         finalized_hashed_state = Some(hashed_state);
@@ -497,11 +497,7 @@ where
                 // the unchanged root node.
                 (self.parent_state_root, TrieUpdates::default())
             }
-            Err(err) => {
-                return Err(StateRootTaskError::Other(format!(
-                    "could not calculate state root: {err:?}"
-                )))
-            }
+            Err(err) => return Err(StateRootTaskError::Other(err.into())),
         };
 
         let end = Instant::now();
@@ -697,8 +693,7 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
-        self.reveal_proof_result(result)
-            .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
+        self.reveal_proof_result(result).map_err(|e| StateRootTaskError::Other(e.into()))
     }
 
     /// Reveals a proof batch.
@@ -1150,7 +1145,7 @@ where
 
                 match self.proof_worker_handle.dispatch_account_multiproof(AccountMultiproofInput {
                     targets: proof_targets,
-                    proof_result_sender: ProofResultContext::new(
+                    proof_result_context: ProofResultContext::new(
                         self.proof_result_tx.clone(),
                         HashedPostState::default(),
                         Instant::now(),
@@ -1161,7 +1156,7 @@ where
                     }
                     Err(e) => {
                         error!("failed to dispatch account multiproof: {e:?}");
-                        dispatch_error = Some(StateRootTaskError::ProofDispatch(e));
+                        dispatch_error = Some(StateRootTaskError::Provider(e));
                     }
                 }
             },
@@ -1673,11 +1668,13 @@ enum SparseTrieTaskMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{B256, U256};
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
+    use reth_trie_common::{
+        BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
+    };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1776,56 +1773,6 @@ mod tests {
             panic!("payload is out with a job")
         };
         work.trie.root(TrieNodeEpoch::new(1)).expect("storage trie must be revealed")
-    }
-
-    #[test]
-    fn test_run_hashing_task_hashed_state_update_forwards() {
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-
-        let address = keccak256(Address::random());
-        let slot = keccak256(B256::with_last_byte(42));
-        let value = U256::from(999);
-
-        let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(
-            address,
-            Some(Account { balance: U256::from(100), nonce: 1, ..Default::default() }),
-        );
-        let mut storage = reth_trie::HashedStorage::default();
-        storage.storage.insert(slot, value);
-        hashed_state.storages.insert(address, storage);
-
-        let expected_state = hashed_state.clone();
-
-        let handle = std::thread::spawn(move || {
-            SparseTrieCacheTask::<ArenaParallelSparseTrie, ArenaParallelSparseTrie>::run_hashing_task(
-                updates_rx,
-                hashed_state_tx,
-                SparseTrieTaskMetrics::default(),
-            );
-        });
-
-        updates_tx.send(StateRootMessage::HashedStateUpdate(hashed_state)).unwrap();
-        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
-        drop(updates_tx);
-
-        let SparseTrieTaskMessage::HashedState(received) = hashed_state_rx.recv().unwrap() else {
-            panic!("expected HashedState message");
-        };
-
-        let account = received.accounts.get(&address).unwrap().as_ref().unwrap();
-        assert_eq!(account.balance, expected_state.accounts[&address].as_ref().unwrap().balance);
-        assert_eq!(account.nonce, expected_state.accounts[&address].as_ref().unwrap().nonce);
-
-        let storage = received.storages.get(&address).unwrap();
-        assert_eq!(*storage.storage.get(&slot).unwrap(), value);
-
-        let second = hashed_state_rx.recv().unwrap();
-        assert!(matches!(second, SparseTrieTaskMessage::FinishedStateUpdates));
-
-        assert!(hashed_state_rx.recv().is_err());
-        handle.join().unwrap();
     }
 
     #[test]
@@ -2164,13 +2111,12 @@ mod tests {
         let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
             unreachable!()
         };
-        // An unfused extension root is unsupported and deterministically panics in set_root.
         work.queue_proofs(&mut vec![ProofTrieNodeV2 {
             path: Nibbles::default(),
-            node: TrieNodeV2::Extension(ExtensionNode::new(
-                Nibbles::from_nibbles([1]),
-                RlpNode::word_rlp(&B256::ZERO),
-            )),
+            node: TrieNodeV2::Branch(BranchNodeV2 {
+                state_mask: TrieMask::from(1),
+                ..Default::default()
+            }),
             masks: None,
         }]);
         let work = check_out_storage(&mut task, address);
@@ -2184,6 +2130,39 @@ mod tests {
         assert!(panic.is_err());
         assert_eq!(task.storage_in_flight, 0);
         assert!(!task.storage.contains_key(&address));
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn unsupported_storage_root_errors_are_returned_to_the_task() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
+            unreachable!()
+        };
+        work.queue_proofs(&mut vec![ProofTrieNodeV2 {
+            path: Nibbles::default(),
+            node: TrieNodeV2::Extension(ExtensionNode::new(
+                Nibbles::from_nibbles([1]),
+                RlpNode::word_rlp(&B256::ZERO),
+            )),
+            masks: None,
+        }]);
+        let work = check_out_storage(&mut task, address);
+        task.spawn_storage_jobs(vec![StorageTrieJob { address, work }]);
+
+        let message = receive_storage_job(&task);
+        assert!(matches!(&message, StorageJobMessage::Done(done) if done.address == address));
+        let error = task.on_storage_job_message(message).unwrap_err();
+        assert!(
+            matches!(error.kind(), SparseTrieErrorKind::Reveal { path, .. } if path.is_empty())
+        );
+        assert_eq!(task.storage_in_flight, 0);
+        assert!(matches!(task.storage.get(&address), Some(StorageTrieState::Idle(_))));
 
         drop(updates_tx);
         drop(task);
@@ -2519,59 +2498,6 @@ mod tests {
         assert!(!error.contains("pending_account_updates"));
         assert!(!error.contains(&format!("{slot:?}")));
 
-        drop(task);
-        drain_sparse_trie_tasks(&runtime);
-    }
-
-    #[test]
-    fn run_errors_when_cancel_guard_drops_before_updates_finish() {
-        let runtime = reth_tasks::Runtime::test();
-        let provider_factory = create_test_provider_factory();
-        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
-        );
-        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
-        let proof_worker_handle = ProofWorkerHandle::new(
-            &runtime,
-            ProofTaskCtx::new(state_provider_factory),
-            ProofWorkerCounts::full(&runtime),
-            proof_result_tx.clone(),
-        );
-
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
-        let trie = SparseStateTrie::default()
-            .with_accounts_trie(default_trie.clone())
-            .with_default_storage_trie(default_trie)
-            .with_updates(true);
-
-        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
-        let (cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
-        let mut task = SparseTrieCacheTask::new_with_trie(
-            &runtime,
-            updates_rx,
-            cancel_rx,
-            std::sync::mpsc::channel().0,
-            proof_worker_handle,
-            proof_result_tx,
-            proof_result_rx,
-            SparseTrieTaskMetrics::default(),
-            trie,
-            B256::repeat_byte(0x55),
-            TrieNodeEpoch::UNMODIFIED,
-            1,
-        );
-
-        // The consumer abandons the computation. The updates channel is still open (no finish
-        // marker was sent), so without the cancel signal the task would wait forever.
-        drop(cancel_guard);
-
-        let error = task.run().expect_err("canceled task must return an error");
-        assert!(matches!(error, StateRootTaskError::Canceled));
-
-        drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
     }

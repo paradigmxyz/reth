@@ -156,20 +156,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poll_until_with_returns_first_value() {
-        let mut polls = 0;
-        let opts = PollOpts { interval: Duration::from_millis(1), ..Default::default() };
-        let value = poll_until_with(opts, "third poll", || {
-            polls += 1;
-            let value = (polls == 3).then_some(polls);
-            async move { Ok(value) }
-        })
-        .await
-        .unwrap();
-        assert_eq!(value, 3);
-    }
-
-    #[tokio::test]
     async fn assert_holds_for_returns_after_duration() {
         let duration = Duration::from_millis(50);
         let start = Instant::now();

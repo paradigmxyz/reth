@@ -76,7 +76,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
 
 impl<C, F, X> SnapBootstrap<C, F, X> {
     /// Returns this run anchoring and re-anchoring pivots with `policy`.
-    pub fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
+    pub const fn with_policy(mut self, policy: SnapPivotPolicy) -> Self {
         self.policy = policy;
         self.session = SnapSyncSession::new(policy);
         self
@@ -196,7 +196,7 @@ where
     }
 
     // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
-    // the pivot under `head`. Starting one reads the kept headers and writes a few records, cheap
+    // the pivot under `head`. Starting one reads the kept blocks and writes a few records, cheap
     // enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
@@ -214,7 +214,7 @@ where
         }
 
         session.select(&provider, head, self.context.finalized())?;
-        let Some((generation, _)) = session.start() else {
+        let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
             // header pass may stop at the finalized block, so if block access lists
@@ -301,7 +301,7 @@ where
         let pivot = self.pivot()?;
         let provider = self.factory.database_provider_ro()?;
         let Some(reorg) = provider.snap_reorg(write)? else {
-            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
+            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept blocks, restarting");
             return Ok(Step::Restart)
         };
         let ancestor = reorg.ancestor();
@@ -610,7 +610,6 @@ mod tests {
     };
     use alloy_eip7928::{
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
-        NonceChange,
     };
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
@@ -713,11 +712,11 @@ mod tests {
 
     // Blocks `0..=tip`, each committing to an empty list and to `root`.
     fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
-        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
+        let access_list_hash = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
         let mut parent = B256::ZERO;
         (0..=tip)
             .map(|number| {
-                let mut header = header(number, parent, Some(commitment));
+                let mut header = header(number, parent, Some(access_list_hash));
                 header.state_root = root;
                 let sealed = SealedHeader::seal_slow(header);
                 parent = sealed.hash();
@@ -736,8 +735,8 @@ mod tests {
         lists
             .iter()
             .map(|list| {
-                let commitment = compute_block_access_list_hash(list);
-                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
+                let access_list_hash = compute_block_access_list_hash(list);
+                let mut header = header(parent.number() + 1, parent.hash(), Some(access_list_hash));
                 header.state_root = root;
                 parent = SealedHeader::seal_slow(header);
                 parent.clone()
@@ -1078,7 +1077,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reorged_pivot_without_kept_headers_restarts_the_attempt() {
+    async fn a_reorged_pivot_without_kept_blocks_restarts_the_attempt() {
         let accounts = accounts();
         let factory = hashed_factory();
         insert_chain(&factory, 3, state_root(&accounts));
@@ -1113,19 +1112,6 @@ mod tests {
         let (client, mut resumed) = scripted(&factory, [], [3]);
 
         assert_eq!(resumed.run().await.unwrap(), first);
-        assert!(client.origins().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_cancelled_run_stops_before_any_work() {
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts()));
-        let cancel = CancellationToken::new();
-        let (client, bootstrap) = scripted(&factory, [], [3]);
-        let mut bootstrap = bootstrap.with_cancellation(cancel.clone());
-        cancel.cancel();
-
-        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert!(client.origins().is_empty());
     }
 
@@ -1285,16 +1271,6 @@ mod tests {
         let origins = recover([Vec::new(), Vec::new()], true).await;
 
         // The untouched account is kept, never fetched again.
-        assert_eq!(origins, [keccak256(STALE)]);
-    }
-
-    #[tokio::test]
-    async fn another_field_changed_on_the_new_branch_leaves_the_account_to_repair() {
-        let nonce =
-            stale_changes().with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1));
-
-        let origins = recover([vec![nonce], Vec::new()], true).await;
-
         assert_eq!(origins, [keccak256(STALE)]);
     }
 

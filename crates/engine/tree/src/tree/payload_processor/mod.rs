@@ -2,7 +2,10 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+    payload_processor::{
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+        reuse::{cfg_reuses_prewarm_results, PrewarmResults},
+    },
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
     ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
 };
@@ -14,7 +17,8 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
+    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, HaltReasonFor, SpecFor,
+    TxEnvFor,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -29,7 +33,7 @@ pub use reth_trie_parallel::{
     state_root_task::{
         evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
         StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use std::{
@@ -45,6 +49,7 @@ pub mod bal;
 pub mod bal_prewarm_pool;
 pub mod prewarm;
 pub mod receipt_root_task;
+pub(crate) mod reuse;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -57,6 +62,7 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
+    HaltReasonFor<Evm>,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -108,6 +114,8 @@ where
     disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
+    /// Whether block execution may reuse transaction prewarming results.
+    reuse_prewarm_results: bool,
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
@@ -139,6 +147,7 @@ where
                 .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
+            reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
         }
     }
@@ -406,13 +415,13 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: Option<
-            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + Sync + 'static)>,
         >,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
+    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt, HaltReasonFor<Evm>>
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: BlockNumReader
@@ -438,6 +447,16 @@ where
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
+        // Reused results replace whole transaction executions, which is only equivalent for
+        // configurations that opt in, without block access lists and EIP-8037 multidimensional
+        // block gas.
+        let prewarm_results = (self.reuse_prewarm_results &&
+            matches!(mode, PrewarmMode::Transactions { .. }) &&
+            env.decoded_bal.is_none() &&
+            cfg_reuses_prewarm_results(&env.evm_env.cfg_env) &&
+            self.evm_config.reuses_prewarm_results())
+        .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
+
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -455,6 +474,7 @@ where
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
+            prewarm_results: prewarm_results.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -470,6 +490,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            prewarm_results,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -583,17 +604,18 @@ where
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive `BundleState`.
+/// caching task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err, R> {
-    prewarm_handle: CacheTaskHandle<R>,
+pub struct PayloadHandle<Tx, Err, R, H> {
+    prewarm_handle: CacheTaskHandle<R, H>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
     /// Span for tracing
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
+impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
@@ -610,6 +632,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// prewarm workers can skip transactions that have already been processed.
     pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
         &self.prewarm_handle.executed_tx_index
+    }
+
+    /// Returns the transaction prewarming results that execution may reuse, if enabled.
+    pub(crate) fn prewarm_results(&self) -> Option<Arc<PrewarmResults<H>>> {
+        self.prewarm_handle.prewarm_results.clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -647,9 +674,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive `BundleState`.
+/// prewarm task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
-pub struct CacheTaskHandle<R> {
+pub struct CacheTaskHandle<R, H> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
@@ -657,11 +685,13 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Transaction prewarming results that execution may reuse.
+    prewarm_results: Option<Arc<PrewarmResults<H>>>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
 
-impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
+impl<R: Send + Sync + 'static, H> CacheTaskHandle<R, H> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -692,7 +722,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     }
 }
 
-impl<R> Drop for CacheTaskHandle<R> {
+impl<R, H> Drop for CacheTaskHandle<R, H> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
@@ -871,10 +901,11 @@ mod tests {
                 false,
             );
             let handle = super::PayloadHandle {
-                prewarm_handle: super::CacheTaskHandle::<()> {
+                prewarm_handle: super::CacheTaskHandle::<(), ()> {
                     saved_cache: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
+                    prewarm_results: None,
                     cache_metrics: None,
                 },
                 transactions: receiver,

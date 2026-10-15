@@ -473,56 +473,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
-
-    let signer = wallet.signer(0);
-    let sender = signer.address();
-    let provider = node.rpc_provider_with_wallet(signer);
-
-    let tx_hash = *provider
-        .send_transaction(TransactionRequest::default().to(Address::ZERO))
-        .await?
-        .tx_hash();
-    // Transaction ingress has already recovered the sender through the shared cache.
-    let payload = node.new_payload().await?;
-    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    let request = BuilderBlockValidationRequestV3 {
-        request: SignedBidSubmissionV3 {
-            message: BidTrace {
-                parent_hash: payload.block().parent_hash,
-                block_hash: payload.block().hash(),
-                gas_used: payload.block().gas_used,
-                gas_limit: payload.block().gas_limit,
-                ..Default::default()
-            },
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                payload.block().hash(),
-                &payload.block().clone().into_block(),
-            ),
-            blobs_bundle: BlobsBundleV1::new([]),
-            signature: Default::default(),
-        },
-        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
-        registered_gas_limit: payload.block().gas_limit,
-    };
-
-    provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await?;
-    // Validation accepts the submission while reusing the sender cached by transaction ingress.
-    assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

@@ -10,8 +10,6 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use itertools::Itertools;
-#[cfg(feature = "rayon")]
-pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
@@ -169,6 +167,10 @@ impl HashedPostState {
     /// Returns an iterator that yields chunks of the specified size.
     ///
     /// See [`ChunkedHashedPostState`] for more information.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the chunk size is zero.
     pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
         ChunkedHashedPostState::new(self, size)
     }
@@ -772,6 +774,7 @@ impl FlattenedHashedPostStateItem {
 
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
+        assert!(size > 0, "chunk size must be non-zero");
         let flattened = hashed_post_state
             .storages
             .into_iter()

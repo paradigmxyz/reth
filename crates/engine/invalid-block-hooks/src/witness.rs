@@ -205,7 +205,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -327,11 +327,11 @@ where
             if &trie_output != original_updates {
                 let original_path = self.save_file(
                     format!("{}.trie_updates.original.json", block_prefix),
-                    &original_updates.into_sorted_ref(),
+                    &original_updates.to_sorted_ref(),
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}.trie_updates.re_executed.json", block_prefix),
-                    &trie_output.into_sorted_ref(),
+                    &trie_output.to_sorted_ref(),
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -395,7 +395,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(

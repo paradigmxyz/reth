@@ -228,8 +228,8 @@ pub enum FromOrchestrator {
     /// Gracefully terminate the engine service.
     ///
     /// When this variant is received, the engine will persist all remaining in-memory blocks
-    /// to disk before shutting down. Once persistence is complete, a signal is sent through
-    /// the oneshot channel to notify the caller.
+    /// to disk before shutting down. Once persistence is complete and the engine has shut down,
+    /// a signal is sent through the oneshot channel to notify the caller.
     Terminate {
         /// Channel to signal termination completion.
         tx: tokio::sync::oneshot::Sender<()>,

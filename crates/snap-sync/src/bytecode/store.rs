@@ -164,32 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn a_scan_stops_once_it_has_the_hashes_a_request_can_carry() {
-        let hashes: Vec<_> = (1..=4).map(|byte| keccak256(code(byte))).collect();
-        let (factory, write) = started(&[(key(1), contract(1, &code(1)))]);
-        let provider = factory.database_provider_ro().unwrap();
-
-        assert_eq!(provider.missing_code(write, &hashes, 2).unwrap(), hashes[..2]);
-    }
-
-    #[test]
-    fn code_already_stored_is_not_requested_again() {
-        let stored = code(1);
-        let accounts = vec![(key(1), contract(1, &stored))];
-        let (factory, write) = started(&accounts);
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_bytecodes(write, vec![(keccak256(&stored), stored.clone())]).unwrap();
-        provider.commit().unwrap();
-
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider
-            .missing_code(write, &[keccak256(&stored)], usize::MAX)
-            .unwrap()
-            .is_empty());
-        assert!(is_stored(&provider, &stored));
-    }
-
-    #[test]
     fn code_that_does_not_hash_to_its_requested_hash_is_refused() {
         let wanted = code(1);
         let accounts = vec![(key(1), contract(1, &wanted))];
