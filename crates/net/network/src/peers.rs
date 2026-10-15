@@ -41,7 +41,8 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
-/// Limit admission-time IP bans so source-address churn cannot grow the throttle state without bound.
+/// Limit admission-time IP bans so source-address churn cannot grow the throttle state without
+/// bound.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: usize = 16_384;
 
 /// Maintains the state of _all_ the peers known to the network.
