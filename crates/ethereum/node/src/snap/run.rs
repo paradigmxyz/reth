@@ -312,36 +312,30 @@ where
         else {
             return Ok(TargetPosition::Unavailable)
         };
-        if header.number() <= head {
-            return Ok(TargetPosition::Behind)
+        let next = head + 1;
+        match header.number() {
+            number if number < next => Ok(TargetPosition::Behind),
+            number if number > next => Ok(TargetPosition::Ahead),
+            // A tip-only download bypasses the downloader's batch parent check, so the head's
+            // successor must attach to it.
+            _ if header.parent_hash() == self.local_hash(head)? => Ok(TargetPosition::Ahead),
+            // Unwinding needs a header below the head, which genesis doesn't have.
+            _ if head <= self.factory.chain_spec().genesis_header().number() => Err(
+                PipelineError::Internal(RethError::msg("snap headers do not connect to genesis")),
+            ),
+            _ => Ok(TargetPosition::Detached { unwind_to: head - 1 }),
         }
-        if header.number() > head + 1 {
-            return Ok(TargetPosition::Ahead)
-        }
-        // A tip-only download bypasses the downloader's batch parent check, so the head's
-        // successor must attach to it.
-        let head_hash = self
-            .factory
-            .provider()?
-            .block_hash(head)?
-            .ok_or(ProviderError::HeaderNotFound(head.into()))?;
-        if header.parent_hash() == head_hash {
-            return Ok(TargetPosition::Ahead)
-        }
-        // Unwinding needs a header below the head, which genesis doesn't have.
-        if head <= self.factory.chain_spec().genesis_header().number() {
-            return Err(PipelineError::Internal(RethError::msg(
-                "snap headers do not connect to genesis",
-            )))
-        }
-        Ok(TargetPosition::Detached { unwind_to: head - 1 })
     }
 
     // Returns the hash of the highest local header.
     fn local_head(&self) -> Result<B256, PipelineError> {
-        let provider = self.factory.provider()?;
-        let number = provider.last_block_number()?;
-        Ok(provider.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))?)
+        self.local_hash(self.factory.provider()?.last_block_number()?)
+    }
+
+    // Returns the hash of the local header at `number`.
+    fn local_hash(&self, number: u64) -> Result<B256, PipelineError> {
+        let hash = self.factory.provider()?.block_hash(number)?;
+        Ok(hash.ok_or(ProviderError::HeaderNotFound(number.into()))?)
     }
 
     // Resolves once the refresh interval has passed and forkchoice has moved, or once the
@@ -630,7 +624,6 @@ pub(crate) mod tests {
         }
     }
 
-    // A run over `factory` that refreshes headers as soon as forkchoice moves.
     // Accepts a header only on top of its parent, which `TestConsensus` doesn't check.
     #[derive(Debug)]
     struct ParentHashValidator;
@@ -654,6 +647,7 @@ pub(crate) mod tests {
         }
     }
 
+    // A run over `factory` that refreshes headers as soon as forkchoice moves.
     fn snap_run(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
     ) -> (SnapRun<MockNodeTypesWithDB, ServesHeaders>, CancellationToken) {
@@ -1143,7 +1137,7 @@ pub(crate) mod tests {
         assert_eq!(error.to_string(), "no header found for Number(0)");
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn an_unwind_that_keeps_the_head_waits_before_retrying() {
         let (tip, _) = watch::channel(B256::ZERO);
         let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
@@ -1162,14 +1156,15 @@ pub(crate) mod tests {
         let requests = client.requests.clone();
         let (run, _stop) = snap_run_with(&factory, client);
 
+        // Paused time advances only through the retry delays, so this spans exactly one retry.
         let resolved = tokio::time::timeout(
-            HEADER_LOOKUP_RETRY / 2,
+            HEADER_LOOKUP_RETRY * 3 / 2,
             run.resolve_target(&mut pipeline, &mut receiver),
         )
         .await;
 
         assert!(resolved.is_err());
-        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert_eq!(requests.load(Ordering::Relaxed), 2);
     }
 
     #[tokio::test]
