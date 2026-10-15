@@ -4,8 +4,8 @@
 #
 # Usage: bench-txgen-build.sh <baseline|feature> <source-dir> <commit>
 #
-# Big-block and BAL benchmarks use reth-bb to carry access lists independently of
-# historical block headers. Both comparison arms use the same node type.
+# Big-block benchmarks build reth-bb because txgen replays reth-bb's extended
+# payload format.
 set -euxo pipefail
 
 # Use the runner's Git authentication configuration when fetching dependencies.
@@ -16,7 +16,7 @@ SOURCE_DIR="$2"
 COMMIT="$3"
 
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
-if [ "$BIG_BLOCKS" = "true" ] || [ "${BENCH_BAL:-false}" != "false" ]; then
+if [ "$BIG_BLOCKS" = "true" ]; then
   NODE_BIN="reth-bb"
   NODE_PKG="-p reth-bb"
 else
