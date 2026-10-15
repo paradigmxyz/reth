@@ -15,8 +15,8 @@ case "${fixture_variant}" in
         eels_fork="Osaka"
         ;;
     bogota)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-focil-devnet@v0.3.0/fixtures_focil-devnet.tar.gz"
-        eels_branch="devnets/focil/0"
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-heze-devnet@v2.0.0/fixtures_heze-devnet.tar.gz"
+        eels_branch="devnets/heze/2"
         eels_fork="Bogota"
         ;;
     *)
