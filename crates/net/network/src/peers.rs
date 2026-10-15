@@ -1,6 +1,7 @@
 //! Peer related implementations
 
 use crate::{
+    cache::LruMap,
     error::SessionError,
     session::{Direction, PendingSessionHandshakeError},
     swarm::NetworkConnectionState,
@@ -12,7 +13,7 @@ use futures::StreamExt;
 use rand::Rng;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_ethereum_forks::ForkId;
-use reth_net_banlist::BanList;
+use reth_net_banlist::{is_global, BanList};
 use reth_network_api::test_utils::{PeerCommand, PeersHandle};
 use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
 use reth_network_types::{
@@ -41,9 +42,8 @@ use tokio::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{trace, warn};
 
-/// Limit admission-time IP bans so source-address churn cannot grow the throttle state without
-/// bound.
-const MAX_INCOMING_IP_THROTTLE_ENTRIES: usize = 16_384;
+/// Bound admission-time throttling independently of long-lived security bans.
+const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -77,6 +77,8 @@ pub struct PeersManager {
     connection_info: ConnectionInfo,
     /// Tracks unwanted ips/peer ids.
     ban_list: BanList,
+    /// Bounded recent-source throttle, separate from security bans.
+    incoming_ip_throttle: LruMap<IpAddr, std::time::Instant>,
     /// Tracks currently backed off peers.
     backed_off_peers: HashMap<PeerId, std::time::Instant, FbBuildHasher<64>>,
     /// Interval at which to check for peers to unban and release from the backoff map.
@@ -199,6 +201,7 @@ impl PeersManager {
             release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
             connection_info: ConnectionInfo::new(connection_info),
             ban_list,
+            incoming_ip_throttle: LruMap::new(MAX_INCOMING_IP_THROTTLE_ENTRIES),
             backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
@@ -332,7 +335,11 @@ impl PeersManager {
             return Err(InboundConnectionError::IpBanned)
         }
 
-        if self.ban_list.is_banned_ip(&addr) {
+        if self.ban_list.is_banned_ip(&addr) ||
+            self.incoming_ip_throttle
+                .get(&addr)
+                .is_some_and(|until| *until > std::time::Instant::now())
+        {
             return Err(InboundConnectionError::IpBanned)
         }
 
@@ -495,15 +502,14 @@ impl PeersManager {
         self.ban_list.ban_ip_until(ip, std::time::Instant::now() + self.ban_duration);
     }
 
-    /// Bans the IP temporarily to rate limit inbound connection attempts per IP.
+    /// Rate limits recent global sources without allowing the throttle state to grow unbounded.
     fn throttle_incoming_ip(&mut self, ip: IpAddr) {
-        // Skip new throttle entries when full so source-address churn cannot block admission
-        // from unrelated IPs. Connection limits still bound pending and active sessions.
-        self.ban_list.ban_ip_until_with_capacity(
-            ip,
-            std::time::Instant::now() + self.incoming_ip_throttle_duration,
-            MAX_INCOMING_IP_THROTTLE_ENTRIES,
-        );
+        if is_global(&ip) {
+            // Evict the least recently used throttle when full. Security bans are never evicted,
+            // and a new source still gets throttled without blocking unrelated admissions.
+            self.incoming_ip_throttle
+                .insert(ip, std::time::Instant::now() + self.incoming_ip_throttle_duration);
+        }
     }
 
     /// Temporarily puts the peer in timeout by inserting it into the backedoff peers set
@@ -2219,7 +2225,11 @@ mod tests {
     async fn test_dropped_incoming() {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 0, 1, 2)), 8008);
         let ban_duration = Duration::from_millis(500);
-        let config = PeersConfig { ban_duration, ..PeersConfig::test() };
+        let config = PeersConfig {
+            ban_duration,
+            incoming_ip_throttle_duration: ban_duration,
+            ..PeersConfig::test()
+        };
         let mut peers = PeersManager::new(config);
 
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
@@ -2947,14 +2957,24 @@ mod tests {
             peers.ban_list = BanList::new(
                 [],
                 (0..MAX_INCOMING_IP_THROTTLE_ENTRIES)
-                    .map(|i| IpAddr::V4(Ipv4Addr::from(0x0800_0000 + u32::try_from(i).unwrap()))),
+                    .map(|i| IpAddr::V4(Ipv4Addr::from(0x0800_0000 + i))),
             );
+            for i in 0..MAX_INCOMING_IP_THROTTLE_ENTRIES {
+                peers.throttle_incoming_ip(IpAddr::V4(Ipv4Addr::from(0x0900_0000 + i)));
+            }
             let ip = IpAddr::from([1, 1, 1, 1]);
             assert!(peers.on_incoming_pending_session(ip).is_ok());
             assert_eq!(peers.connection_info.num_pending_in, 1);
-            assert!(!peers.ban_list.is_banned_ip(&ip));
+            assert_eq!(
+                peers.incoming_ip_throttle.len(),
+                usize::try_from(MAX_INCOMING_IP_THROTTLE_ENTRIES).unwrap()
+            );
             peers.on_incoming_pending_session_gracefully_closed();
             assert_eq!(peers.connection_info.num_pending_in, 0);
+            assert_eq!(
+                peers.on_incoming_pending_session(ip),
+                Err(InboundConnectionError::IpBanned)
+            );
 
             // A saturated throttle table must not weaken existing security bans.
             assert_eq!(

@@ -10,12 +10,7 @@
 
 type PeerId = alloy_primitives::B512;
 
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    net::IpAddr,
-    str::FromStr,
-    time::Instant,
-};
+use std::{collections::HashMap, net::IpAddr, str::FromStr, time::Instant};
 
 /// Determines whether or not the IP is globally routable.
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
@@ -170,34 +165,6 @@ impl BanList {
             self.banned_ips.insert(ip, until);
         }
     }
-
-    /// Adds a timed IP ban without growing the IP set beyond `max_entries`.
-    ///
-    /// Returns `false` if a new global IP cannot fit. Existing entries may still be updated,
-    /// and non-global IPs are ignored, as with [`Self::ban_ip_until`].
-    pub fn ban_ip_until_with_capacity(
-        &mut self,
-        ip: IpAddr,
-        until: Instant,
-        max_entries: usize,
-    ) -> bool {
-        if !is_global(&ip) {
-            return true
-        }
-        let at_capacity = self.banned_ips.len() >= max_entries;
-        match self.banned_ips.entry(ip) {
-            Entry::Occupied(mut entry) => {
-                entry.insert(Some(until));
-            }
-            Entry::Vacant(entry) => {
-                if at_capacity {
-                    return false
-                }
-                entry.insert(Some(until));
-            }
-        }
-        true
-    }
 }
 
 #[cfg(test)]
@@ -246,30 +213,6 @@ mod tests {
         ip = IpAddr::from([172, 16, 0, 0]);
         banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
-    }
-
-    #[test]
-    fn timed_ip_bans_respect_capacity() {
-        let mut bans = BanList::default();
-        let now = Instant::now();
-        let first = IpAddr::from([1, 1, 1, 1]);
-        let second = IpAddr::from([1, 1, 1, 2]);
-        bans.ban_ip(first);
-        assert!(!bans.ban_ip_until_with_capacity(second, now, 1));
-        assert!(!bans.is_banned_ip(&second));
-        assert!(bans.ban_ip_until_with_capacity(second, now, 2));
-        assert!(bans.ban_ip_until_with_capacity(
-            second,
-            now + std::time::Duration::from_secs(1),
-            2
-        ));
-        assert!(bans.evict_ips(now).is_empty());
-        assert_eq!(bans.banned_ips.len(), 2);
-        assert_eq!(bans.evict_ips(now + std::time::Duration::from_secs(2)), vec![second]);
-        assert!(bans.is_banned_ip(&first));
-        assert!(bans.ban_ip_until_with_capacity(second, now, 2));
-        assert!(bans.ban_ip_until_with_capacity(IpAddr::from([127, 0, 0, 1]), now, 0));
-        assert_eq!(bans.banned_ips.len(), 2);
     }
 }
 
