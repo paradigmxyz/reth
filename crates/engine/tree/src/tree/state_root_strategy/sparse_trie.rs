@@ -24,7 +24,7 @@ use reth_trie::{
 use reth_trie_common::{MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, ProofV2TargetParent};
 use reth_trie_parallel::{
     error::StateRootTaskError,
-    proof_task::{ProofResultMessage, ProofWorkerHandle, StorageProofInput},
+    proof_task::{ProofResult, ProofWorkerHandle, StorageProofInput},
 };
 use reth_trie_sparse::{
     errors::{
@@ -50,7 +50,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
 ///    leaf updates before applying them in batches.
 /// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
-///    [`ProofWorkerHandle`]. The task coalesces [`ProofResultMessage`]s returned through
+///    [`ProofWorkerHandle`]. The task coalesces [`ProofResult`]s returned through
 ///    [`ProofWorkerHandle::results`], reveals account proofs locally, and queues storage proofs on
 ///    the corresponding address' [`StorageTrieState`].
 /// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
@@ -513,7 +513,7 @@ where
     /// proof in the trie, and records timing metrics.
     fn on_proof_results(
         &mut self,
-        message: ProofResultMessage,
+        message: ProofResult,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
         let mut result = self.on_proof_result_message(message)?;
@@ -728,9 +728,9 @@ where
 
     fn on_proof_result_message(
         &mut self,
-        message: ProofResultMessage,
+        message: ProofResult,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
-        let result = message.result?;
+        let result = message?;
         debug_assert!(
             self.in_flight_proof_batches > 0,
             "received proof result without an in-flight proof batch"
@@ -2505,11 +2505,7 @@ mod tests {
 
         assert!(task.ensure_not_stalled(false).is_ok());
 
-        let result = ProofResultMessage {
-            result: Ok(DecodedMultiProofV2::default()),
-            elapsed: std::time::Duration::ZERO,
-            state: HashedPostState::default(),
-        };
+        let result = Ok(DecodedMultiProofV2::default());
         task.on_proof_result_message(result).expect("proof result should be ok");
 
         assert_eq!(task.in_flight_proof_batches, 0);
