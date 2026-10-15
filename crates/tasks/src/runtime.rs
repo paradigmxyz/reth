@@ -41,7 +41,7 @@ pub const DEFAULT_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(15);
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 2;
 
 /// Default number of threads for the storage I/O pool.
-pub const DEFAULT_STORAGE_POOL_THREADS: usize = 16;
+pub const DEFAULT_STORAGE_POOL_THREADS: usize = 4;
 
 /// Default number of threads for the state trie overlay worker pool.
 #[cfg(feature = "rayon")]
