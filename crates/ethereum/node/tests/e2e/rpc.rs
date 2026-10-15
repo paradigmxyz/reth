@@ -919,30 +919,23 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
 async fn test_disable_auth_server_skips_jwt_secret() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let runtime = Runtime::test();
-    let chain_spec = Arc::new(test_chain_spec_builder().build());
-    let mut rpc = RpcServerArgs::default().with_unused_ports();
-    rpc.disable_auth_server = true;
-
-    // Without `--authrpc.jwtsecret`, the default secret file must not be created.
-    let node_config =
-        NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(rpc.clone());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-    assert!(!node.data_dir.jwt().exists());
-
-    // A configured secret path that doesn't exist must not fail the launch.
-    let missing = node.data_dir.data_dir().join("missing-jwt.hex");
-    rpc.auth_jwtsecret = Some(missing.clone());
-    let node_config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(rpc);
-    let _handle = NodeBuilder::new(node_config)
-        .testing_node(Runtime::test())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
+    let missing_dir = tempfile::tempdir()?;
+    let missing = missing_dir.path().join("missing-jwt.hex");
+    for auth_jwtsecret in [None, Some(missing.clone())] {
+        let mut rpc = RpcServerArgs::default().with_unused_ports();
+        rpc.disable_auth_server = true;
+        rpc.auth_jwtsecret = auth_jwtsecret;
+        let node_config = NodeConfig::test()
+            .with_chain(Arc::new(test_chain_spec_builder().build()))
+            .with_unused_ports()
+            .with_rpc(rpc);
+        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        assert!(!node.data_dir.jwt().exists());
+    }
     assert!(!missing.exists());
 
     Ok(())
