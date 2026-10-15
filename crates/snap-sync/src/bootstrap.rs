@@ -196,7 +196,7 @@ where
     }
 
     // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
-    // the pivot under `head`. Starting one reads the kept headers and writes a few records, cheap
+    // the pivot under `head`. Starting one reads the kept blocks and writes a few records, cheap
     // enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
@@ -301,7 +301,7 @@ where
         let pivot = self.pivot()?;
         let provider = self.factory.database_provider_ro()?;
         let Some(reorg) = provider.snap_reorg(write)? else {
-            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
+            info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept blocks, restarting");
             return Ok(Step::Restart)
         };
         let ancestor = reorg.ancestor();
@@ -712,11 +712,11 @@ mod tests {
 
     // Blocks `0..=tip`, each committing to an empty list and to `root`.
     fn chain(tip: u64, root: B256) -> Vec<SealedHeader> {
-        let commitment = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
+        let access_list_hash = compute_block_access_list_hash(&Vec::<AccountChanges>::new());
         let mut parent = B256::ZERO;
         (0..=tip)
             .map(|number| {
-                let mut header = header(number, parent, Some(commitment));
+                let mut header = header(number, parent, Some(access_list_hash));
                 header.state_root = root;
                 let sealed = SealedHeader::seal_slow(header);
                 parent = sealed.hash();
@@ -735,8 +735,8 @@ mod tests {
         lists
             .iter()
             .map(|list| {
-                let commitment = compute_block_access_list_hash(list);
-                let mut header = header(parent.number() + 1, parent.hash(), Some(commitment));
+                let access_list_hash = compute_block_access_list_hash(list);
+                let mut header = header(parent.number() + 1, parent.hash(), Some(access_list_hash));
                 header.state_root = root;
                 parent = SealedHeader::seal_slow(header);
                 parent.clone()
@@ -1077,7 +1077,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reorged_pivot_without_kept_headers_restarts_the_attempt() {
+    async fn a_reorged_pivot_without_kept_blocks_restarts_the_attempt() {
         let accounts = accounts();
         let factory = hashed_factory();
         insert_chain(&factory, 3, state_root(&accounts));

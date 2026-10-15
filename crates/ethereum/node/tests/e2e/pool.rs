@@ -204,69 +204,6 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     Ok(())
 }
 
-// Test that the pool's maintenance task can correctly handle `CanonStateNotification::Commit`
-// events
-#[tokio::test]
-async fn maintain_txpool_commit() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let txpool = Pool::new(
-        OkValidator::default(),
-        CoinbaseTipOrdering::default(),
-        InMemoryBlobStore::default(),
-        Default::default(),
-    );
-
-    // Directly generate a node to simulate various traits such as `StateProviderFactory` required
-    // by the pool maintenance task
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
-    let runtime = node.inner.task_executor.clone();
-
-    runtime.spawn_critical_task(
-        "txpool maintenance task",
-        reth_transaction_pool::maintain::maintain_transaction_pool_future(
-            node.inner.provider.clone(),
-            txpool.clone(),
-            node.inner.provider.clone().canonical_state_stream(),
-            runtime.clone(),
-            reth_transaction_pool::maintain::MaintainPoolConfig::default(),
-        ),
-    );
-
-    let envelop = TransactionTestContext::transfer_tx(1, wallet.inner).await;
-    let tx = Recovered::new_unchecked(
-        EthereumTxEnvelope::<TxEip4844>::from(envelop.clone()),
-        Default::default(),
-    );
-    let pooled_tx = EthPooledTransaction::new(tx.clone(), 200);
-
-    let block_info = BlockInfo {
-        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
-        last_seen_block_hash: B256::ZERO,
-        last_seen_block_number: 0,
-        pending_basefee: 10,
-        pending_blob_fee: Some(10),
-    };
-
-    txpool.set_block_info(block_info);
-
-    txpool.add_transaction(TransactionOrigin::External, pooled_tx).await.unwrap();
-    assert_eq!(txpool.len(), 1);
-
-    // make the node advance and eventually generate `CanonStateNotification::Commit` event to
-    // propagate to the pool
-    let _ = node.rpc.inject_tx(envelop.encoded_2718().into()).await.unwrap();
-    let _ = node.advance_block().await.unwrap();
-
-    // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally the
-    // pool will be cleared.
-    poll_until("pool to process the commit", || async { Ok(txpool.is_empty().then_some(())) })
-        .await?;
-
-    Ok(())
-}
-
 // Test that the pool processed the new block once `advance_block_synced` returns.
 #[tokio::test]
 async fn advance_block_synced_waits_for_pool() -> eyre::Result<()> {

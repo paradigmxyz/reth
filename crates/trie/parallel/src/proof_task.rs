@@ -957,6 +957,7 @@ struct ProofWorkerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossbeam_channel::RecvTimeoutError;
     use reth_chainspec::ChainSpec;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use std::sync::Arc;
@@ -969,8 +970,8 @@ mod tests {
     #[test]
     fn spawn_proof_workers_creates_handle() {
         let chain_spec = Arc::new(ChainSpec::default());
-        let anchor_hash = chain_spec.genesis_hash();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
             reth_storage_overlay::OverlayManager::<
@@ -978,16 +979,23 @@ mod tests {
             >::default()
             .overlay_builder(anchor_hash),
         );
-        let ctx = test_ctx(factory);
+        let ctx = test_ctx(factory.clone());
 
         let runtime = reth_tasks::Runtime::test();
         let proof_handle = ProofWorkerHandle::new(&runtime, ctx, ProofWorkerCounts::full(&runtime));
+        let proof_result_rx = proof_handle.results().clone();
 
-        // Verify handle can be cloned
-        let _cloned_handle = proof_handle.clone();
-
-        // Workers shut down automatically when handle is dropped
+        // Workers keep running until both handles have been dropped.
+        let cloned_handle = proof_handle.clone();
         drop(proof_handle);
+        drop(cloned_handle);
+
+        // Keep the database alive until both pools release their providers.
+        assert_eq!(
+            proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap_err(),
+            RecvTimeoutError::Disconnected
+        );
+        drop(factory);
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.

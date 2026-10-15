@@ -485,10 +485,9 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
         local_socket_stream,
     } = params;
 
-    let ipc = IpcConn(tokio_util::codec::Decoder::framed(
-        StreamCodec::stream_incoming(),
-        local_socket_stream,
-    ));
+    let codec =
+        StreamCodec::stream_incoming().with_max_length(server_cfg.max_request_body_size as usize);
+    let ipc = IpcConn(tokio_util::codec::Decoder::framed(codec, local_socket_stream));
 
     let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(server_cfg.message_buffer_capacity as usize);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);

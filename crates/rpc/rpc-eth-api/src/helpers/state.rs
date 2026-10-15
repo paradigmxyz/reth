@@ -477,7 +477,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {
