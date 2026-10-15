@@ -411,6 +411,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                if matches!(args.sync_mode, SyncMode::SafeNoSync) {
+                    inner_env.set_sync_period(std::time::Duration::from_secs(2));
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
