@@ -1,15 +1,11 @@
 //! Reusable multiproof generation over a fixed state snapshot.
 
-use super::{
-    metrics::{InstrumentedHashedCursor, InstrumentedTrieCursor},
-    DeferredValueEncoder, LeafValueEncoder, ProofCalculator, ProofCursorMetrics,
-    StorageProofCalculator,
-};
+use super::{DeferredValueEncoder, LeafValueEncoder, ProofCalculator, StorageProofCalculator};
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     prefix_set::{PrefixSet, TriePrefixSets},
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target, TrieType,
+    DecodedMultiProofV2, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::Encodable;
@@ -22,8 +18,8 @@ use std::{fmt, marker::PhantomPinned, pin::Pin, sync::Arc};
 ///
 /// The calculator owns its cursor factories and may be reused for any number of requests. It stays
 /// usable after an error, but must be dropped after a panic during a request. The factories must
-/// keep describing the same state for the lifetime of the calculator. Cursor metrics are recorded
-/// into the supplied handles when the calculator drops.
+/// keep describing the same state for the lifetime of the calculator. Cursor factories control
+/// whether their cursors are instrumented.
 ///
 /// `'a` is the lifetime of the cursors opened from the owned factories. It is not tied to a
 /// caller-supplied borrow; it only needs to be satisfied by `T` and `H`.
@@ -31,7 +27,6 @@ pub struct MultiProofCalculator<'a, T: TrieCursorFactory + 'a, H: HashedCursorFa
     account_calculator: Option<AccountCalculatorOf<'a, T, H>>,
     storage_calculator: Option<Arc<Mutex<StorageCalculatorOf<'a, T, H>>>>,
     prefix_sets: TriePrefixSets,
-    metrics: ProofCursorMetrics,
     // Cursors borrow these pinned factories. `Drop` releases them first.
     factories: Pin<Box<MultiProofCalculatorFactories<T, H>>>,
 }
@@ -40,18 +35,16 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
     /// Creates a calculator for the supplied factories and frozen changed-key prefixes.
     ///
     /// Prefixes invalidate cached branch hashes for keys whose leaf values have changed, and apply
-    /// to every request served by this calculator. Metric handles may be shared across calculators.
+    /// to every request served by this calculator.
     pub fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: TriePrefixSets,
-        metrics: ProofCursorMetrics,
     ) -> Self {
         Self {
             account_calculator: None,
             storage_calculator: None,
             prefix_sets,
-            metrics,
             factories: Box::pin(MultiProofCalculatorFactories {
                 trie_cursor_factory,
                 hashed_cursor_factory,
@@ -88,10 +81,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
                 // initialization can be retried.
                 let prefix_sets = std::mem::take(&mut self.prefix_sets.storage_prefix_sets);
                 slot.insert(Arc::new(Mutex::new(PrefixSetStorageCalculator {
-                    calculator: StorageProofCalculator::new_storage(
-                        self.metrics.instrument_trie_cursor(trie_cursor, TrieType::Storage),
-                        self.metrics.instrument_hashed_cursor(hashed_cursor, TrieType::Storage),
-                    ),
+                    calculator: StorageProofCalculator::new_storage(trie_cursor, hashed_cursor),
                     prefix_sets,
                     hashed_address: None,
                 })))
@@ -109,11 +99,8 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
                     let hashed_cursor = factories.hashed_cursor_factory.hashed_account_cursor()?;
                     let prefix_set = std::mem::take(&mut self.prefix_sets.account_prefix_set);
                     slot.insert(
-                        ProofCalculator::new(
-                            self.metrics.instrument_trie_cursor(trie_cursor, TrieType::State),
-                            self.metrics.instrument_hashed_cursor(hashed_cursor, TrieType::State),
-                        )
-                        .with_prefix_set(prefix_set),
+                        ProofCalculator::new(trie_cursor, hashed_cursor)
+                            .with_prefix_set(prefix_set),
                     )
                 }
             };
@@ -173,18 +160,18 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory> fmt::Debug for MultiProofCalc
 
 /// Account calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type AccountCalculatorOf<'a, T, H> = ProofCalculator<
-    InstrumentedTrieCursor<<T as TrieCursorFactory>::AccountTrieCursor<'a>>,
-    InstrumentedHashedCursor<<H as HashedCursorFactory>::AccountCursor<'a>>,
+    <T as TrieCursorFactory>::AccountTrieCursor<'a>,
+    <H as HashedCursorFactory>::AccountCursor<'a>,
     AccountValueEncoder<
-        InstrumentedTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
-        InstrumentedHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
+        <T as TrieCursorFactory>::StorageTrieCursor<'a>,
+        <H as HashedCursorFactory>::StorageCursor<'a>,
     >,
 >;
 
 /// Storage calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type StorageCalculatorOf<'a, T, H> = PrefixSetStorageCalculator<
-    InstrumentedTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
-    InstrumentedHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
+    <T as TrieCursorFactory>::StorageTrieCursor<'a>,
+    <H as HashedCursorFactory>::StorageCursor<'a>,
 >;
 
 /// Cursor factories owned by a [`MultiProofCalculator`] at a stable address.

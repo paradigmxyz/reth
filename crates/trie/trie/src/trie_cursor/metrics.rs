@@ -6,6 +6,8 @@ use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 
 #[cfg(feature = "metrics")]
+use super::TrieCursorFactory;
+#[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
@@ -198,3 +200,54 @@ impl<C, M: AsMut<TrieCursorMetricsCache>> Drop for InstrumentedTrieCursor<C, M> 
         }
     }
 }
+
+/// Instruments every account and storage cursor opened by the wrapped factory.
+///
+/// Counters are owned by each cursor and recorded into the supplied handles on drop. Wrap the
+/// outermost overlay factory to include both overlay and database operations in these counters.
+#[cfg(feature = "metrics")]
+#[derive(Clone, Debug)]
+pub struct InstrumentedTrieCursorFactory<F> {
+    factory: F,
+    account_metrics: TrieCursorMetrics,
+    storage_metrics: TrieCursorMetrics,
+}
+
+#[cfg(feature = "metrics")]
+impl<F> InstrumentedTrieCursorFactory<F> {
+    /// Wraps a factory with account and storage metric handles shared by its cursors.
+    pub const fn new(
+        factory: F,
+        account_metrics: TrieCursorMetrics,
+        storage_metrics: TrieCursorMetrics,
+    ) -> Self {
+        Self { factory, account_metrics, storage_metrics }
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl<F: TrieCursorFactory> TrieCursorFactory for InstrumentedTrieCursorFactory<F> {
+    type AccountTrieCursor<'a>
+        = InstrumentedTrieCursor<F::AccountTrieCursor<'a>>
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = InstrumentedTrieCursor<F::StorageTrieCursor<'a>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        Ok(self.account_metrics.instrument(self.factory.account_trie_cursor()?))
+    }
+
+    fn storage_trie_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        Ok(self.storage_metrics.instrument(self.factory.storage_trie_cursor(hashed_address)?))
+    }
+}
+
+/// Uses the underlying factory directly when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+pub type InstrumentedTrieCursorFactory<F> = F;

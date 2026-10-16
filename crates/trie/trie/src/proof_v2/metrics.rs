@@ -1,9 +1,11 @@
 //! Cursor metrics of multiproof calculators.
 
-use crate::TrieType;
+use crate::{
+    hashed_cursor::InstrumentedHashedCursorFactory, trie_cursor::InstrumentedTrieCursorFactory,
+};
 
 #[cfg(feature = "metrics")]
-use crate::{hashed_cursor::HashedCursorMetrics, trie_cursor::TrieCursorMetrics};
+use crate::{hashed_cursor::HashedCursorMetrics, trie_cursor::TrieCursorMetrics, TrieType};
 
 /// Cursor metric handles shared by multiproof calculators.
 #[cfg(feature = "metrics")]
@@ -30,30 +32,22 @@ impl Default for ProofCursorMetrics {
 
 #[cfg(feature = "metrics")]
 impl ProofCursorMetrics {
-    /// Wraps a trie cursor so its operations are recorded into the handles for `trie_type`.
-    pub(super) fn instrument_trie_cursor<C>(
-        &self,
-        cursor: C,
-        trie_type: TrieType,
-    ) -> InstrumentedTrieCursor<C> {
-        match trie_type {
-            TrieType::State => &self.account_trie_cursor,
-            TrieType::Storage | TrieType::Custom(_) => &self.storage_trie_cursor,
-        }
-        .instrument(cursor)
+    /// Instruments all account and storage cursors opened by `factory`.
+    pub fn instrument_trie_factory<F>(&self, factory: F) -> InstrumentedTrieCursorFactory<F> {
+        InstrumentedTrieCursorFactory::new(
+            factory,
+            self.account_trie_cursor.clone(),
+            self.storage_trie_cursor.clone(),
+        )
     }
 
-    /// Wraps a hashed cursor so its operations are recorded into the handles for `trie_type`.
-    pub(super) fn instrument_hashed_cursor<C>(
-        &self,
-        cursor: C,
-        trie_type: TrieType,
-    ) -> InstrumentedHashedCursor<C> {
-        match trie_type {
-            TrieType::State => &self.account_hashed_cursor,
-            TrieType::Storage | TrieType::Custom(_) => &self.storage_hashed_cursor,
-        }
-        .instrument(cursor)
+    /// Instruments all hashed account and storage cursors opened by `factory`.
+    pub fn instrument_hashed_factory<F>(&self, factory: F) -> InstrumentedHashedCursorFactory<F> {
+        InstrumentedHashedCursorFactory::new(
+            factory,
+            self.account_hashed_cursor.clone(),
+            self.storage_hashed_cursor.clone(),
+        )
     }
 }
 
@@ -64,37 +58,16 @@ pub struct ProofCursorMetrics;
 
 #[cfg(not(feature = "metrics"))]
 impl ProofCursorMetrics {
-    /// Returns the trie cursor unchanged.
-    pub(super) const fn instrument_trie_cursor<C>(
-        &self,
-        cursor: C,
-        _trie_type: TrieType,
-    ) -> InstrumentedTrieCursor<C> {
-        cursor
+    /// Returns the factory unchanged when cursor metrics are disabled.
+    pub const fn instrument_trie_factory<F>(&self, factory: F) -> InstrumentedTrieCursorFactory<F> {
+        factory
     }
 
-    /// Returns the hashed cursor unchanged.
-    pub(super) const fn instrument_hashed_cursor<C>(
+    /// Returns the factory unchanged when cursor metrics are disabled.
+    pub const fn instrument_hashed_factory<F>(
         &self,
-        cursor: C,
-        _trie_type: TrieType,
-    ) -> InstrumentedHashedCursor<C> {
-        cursor
+        factory: F,
+    ) -> InstrumentedHashedCursorFactory<F> {
+        factory
     }
 }
-
-/// Trie cursor counted into [`ProofCursorMetrics`].
-#[cfg(feature = "metrics")]
-pub(super) use crate::trie_cursor::InstrumentedTrieCursor;
-
-/// Trie cursor used as is when the `metrics` feature is disabled.
-#[cfg(not(feature = "metrics"))]
-pub(super) type InstrumentedTrieCursor<C> = C;
-
-/// Hashed cursor counted into [`ProofCursorMetrics`].
-#[cfg(feature = "metrics")]
-pub(super) use crate::hashed_cursor::InstrumentedHashedCursor;
-
-/// Hashed cursor used as is when the `metrics` feature is disabled.
-#[cfg(not(feature = "metrics"))]
-pub(super) type InstrumentedHashedCursor<C> = C;

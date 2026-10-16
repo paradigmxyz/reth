@@ -3,10 +3,10 @@
 use reth_db_api::transaction::DbTx;
 use reth_errors::ProviderResult;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedPostStateCursorFactory, InstrumentedHashedCursorFactory},
     prefix_set::TriePrefixSets,
     proof_v2::{MultiProofCalculator, ProofCursorMetrics},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, InstrumentedTrieCursorFactory},
     updates::TrieUpdatesSorted,
     DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, TrieInputSorted,
 };
@@ -77,13 +77,17 @@ unsafe impl<TX: DbTx + 'static> Send for OverlayMultiProofCalculator<TX> {}
 /// are extended to `'static` by [`OverlayMultiProofCalculator::new`].
 type TableMultiProofCalculator<TX, A> = MultiProofCalculator<
     'static,
-    InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'static TX, A>,
-        &'static TrieUpdatesSorted,
+    InstrumentedTrieCursorFactory<
+        InMemoryTrieCursorFactory<
+            DatabaseTrieCursorFactory<&'static TX, A>,
+            &'static TrieUpdatesSorted,
+        >,
     >,
-    HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'static TX>,
-        &'static HashedPostStateSorted,
+    InstrumentedHashedCursorFactory<
+        HashedPostStateCursorFactory<
+            DatabaseHashedCursorFactory<&'static TX>,
+            &'static HashedPostStateSorted,
+        >,
     >,
 >;
 
@@ -96,9 +100,14 @@ fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
     metrics: ProofCursorMetrics,
 ) -> TableMultiProofCalculator<TX, A> {
     MultiProofCalculator::new(
-        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
-        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
+        metrics.instrument_trie_factory(InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(tx),
+            nodes,
+        )),
+        metrics.instrument_hashed_factory(HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(tx),
+            state,
+        )),
         prefix_sets,
-        metrics,
     )
 }

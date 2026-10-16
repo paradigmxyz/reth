@@ -127,7 +127,6 @@ where
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
             self.prefix_sets.clone().freeze(),
-            Default::default(),
         );
         let multiproof = calculator.multiproof(proof_targets)?;
 
