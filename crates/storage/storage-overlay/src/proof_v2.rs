@@ -2,9 +2,12 @@
 
 use reth_db_api::transaction::DbTx;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, prefix_set::TriePrefixSets, proof_v2::ProofV2,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdatesSorted, HashedPostStateSorted,
-    TrieInputSorted,
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSets,
+    proof_v2::{ProofV2, ProofV2Metrics},
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdatesSorted,
+    HashedPostStateSorted, TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedKeyAdapter,
@@ -26,16 +29,21 @@ impl<TX: DbTx + 'static> DatabaseProofV2<TX> {
     /// The transaction and immutable overlay allocations must remain at stable addresses and
     /// outlive the generator. The generator must only move with its owning non-Sync provider,
     /// and the transaction must not be accessed concurrently elsewhere.
-    pub(crate) unsafe fn new(tx: &TX, input: &TrieInputSorted, is_v2: bool) -> Self {
+    pub(crate) unsafe fn new(
+        tx: &TX,
+        input: &TrieInputSorted,
+        is_v2: bool,
+        metrics: ProofV2Metrics,
+    ) -> Self {
         // SAFETY: The caller retains these stable allocations until the generator drops.
         let (tx, nodes, state) = unsafe {
             (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state))
         };
         let prefix_sets = input.prefix_sets.clone().freeze();
         if is_v2 {
-            Self::Packed(proof_with_overlay(tx, nodes, state, prefix_sets))
+            Self::Packed(proof_with_overlay(tx, nodes, state, prefix_sets, metrics))
         } else {
-            Self::Legacy(proof_with_overlay(tx, nodes, state, prefix_sets))
+            Self::Legacy(proof_with_overlay(tx, nodes, state, prefix_sets, metrics))
         }
     }
 }
@@ -61,10 +69,12 @@ fn proof_with_overlay<TX: DbTx + 'static, A: TrieTableAdapter>(
     nodes: &'static TrieUpdatesSorted,
     state: &'static HashedPostStateSorted,
     prefix_sets: TriePrefixSets,
+    metrics: ProofV2Metrics,
 ) -> ProofWithOverlay<TX, A> {
     ProofV2::new(
         InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
         HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
         prefix_sets,
+        metrics,
     )
 }

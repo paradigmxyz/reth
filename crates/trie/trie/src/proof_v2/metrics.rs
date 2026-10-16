@@ -5,22 +5,39 @@ use crate::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
-use std::{
-    ops::{Deref, DerefMut},
-    sync::OnceLock,
-};
+use std::ops::{Deref, DerefMut};
+
+/// Metric handles shared by proof generators and their cached cursors.
+#[derive(Clone, Debug)]
+pub struct ProofV2Metrics {
+    account_trie: TrieCursorMetrics,
+    storage_trie: TrieCursorMetrics,
+    account_hashed: HashedCursorMetrics,
+    storage_hashed: HashedCursorMetrics,
+}
+
+impl Default for ProofV2Metrics {
+    fn default() -> Self {
+        Self {
+            account_trie: TrieCursorMetrics::new(TrieType::State),
+            storage_trie: TrieCursorMetrics::new(TrieType::Storage),
+            account_hashed: HashedCursorMetrics::new(TrieType::State),
+            storage_hashed: HashedCursorMetrics::new(TrieType::Storage),
+        }
+    }
+}
 
 pub(super) type TrieCursor<C> = InstrumentedTrieCursor<C, TrieMetrics>;
 pub(super) type HashedCursor<C> = InstrumentedHashedCursor<C, HashedMetrics>;
 
-pub(super) fn instrument_trie<C>(cursor: C, trie_type: TrieType) -> TrieCursor<C> {
-    static STATE: OnceLock<TrieCursorMetrics> = OnceLock::new();
-    static STORAGE: OnceLock<TrieCursorMetrics> = OnceLock::new();
+pub(super) fn instrument_trie<C>(
+    cursor: C,
+    trie_type: TrieType,
+    metrics: &ProofV2Metrics,
+) -> TrieCursor<C> {
     let metrics = match trie_type {
-        TrieType::State => STATE.get_or_init(|| TrieCursorMetrics::new(TrieType::State)),
-        TrieType::Storage | TrieType::Custom(_) => {
-            STORAGE.get_or_init(|| TrieCursorMetrics::new(TrieType::Storage))
-        }
+        TrieType::State => &metrics.account_trie,
+        TrieType::Storage | TrieType::Custom(_) => &metrics.storage_trie,
     };
     InstrumentedTrieCursor::new(
         cursor,
@@ -28,14 +45,14 @@ pub(super) fn instrument_trie<C>(cursor: C, trie_type: TrieType) -> TrieCursor<C
     )
 }
 
-pub(super) fn instrument_hashed<C>(cursor: C, trie_type: TrieType) -> HashedCursor<C> {
-    static STATE: OnceLock<HashedCursorMetrics> = OnceLock::new();
-    static STORAGE: OnceLock<HashedCursorMetrics> = OnceLock::new();
+pub(super) fn instrument_hashed<C>(
+    cursor: C,
+    trie_type: TrieType,
+    metrics: &ProofV2Metrics,
+) -> HashedCursor<C> {
     let metrics = match trie_type {
-        TrieType::State => STATE.get_or_init(|| HashedCursorMetrics::new(TrieType::State)),
-        TrieType::Storage | TrieType::Custom(_) => {
-            STORAGE.get_or_init(|| HashedCursorMetrics::new(TrieType::Storage))
-        }
+        TrieType::State => &metrics.account_hashed,
+        TrieType::Storage | TrieType::Custom(_) => &metrics.storage_hashed,
     };
     InstrumentedHashedCursor::new(
         cursor,

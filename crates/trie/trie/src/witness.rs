@@ -127,6 +127,7 @@ where
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
             self.prefix_sets.clone().freeze(),
+            Default::default(),
         );
         let multiproof = proof.multiproof(proof_targets)?;
 

@@ -25,6 +25,7 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
+    proof_v2::ProofV2Metrics,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
@@ -69,6 +70,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_cache: StateTrieOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
+    proof_metrics: ProofV2Metrics,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -79,6 +81,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             overlay_builder,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
+            proof_metrics: Default::default(),
         }
     }
 
@@ -127,6 +130,7 @@ where
             self.overlay_builder.clone(),
             Arc::clone(&self.state_trie_overlay_cache),
             self.metrics.clone(),
+            self.proof_metrics.clone(),
             is_v2,
         ))
     }
@@ -145,6 +149,7 @@ where
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
+    proof_metrics: ProofV2Metrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
@@ -163,6 +168,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             overlay_builder,
             Default::default(),
             Default::default(),
+            Default::default(),
             is_v2,
         )
     }
@@ -172,6 +178,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
         metrics: OverlayStateProviderFactoryMetrics,
+        proof_metrics: ProofV2Metrics,
         is_v2: bool,
     ) -> Self {
         Self {
@@ -179,6 +186,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache,
             metrics,
+            proof_metrics,
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
@@ -198,6 +206,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
+            proof_metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::from(CachedExecutionOverlay {
@@ -222,6 +231,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
+            proof_metrics: Default::default(),
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
@@ -240,6 +250,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
+            proof_metrics: Default::default(),
             state_trie_overlay: OnceCell::from(state_trie_overlay.clone()),
             state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
@@ -731,8 +742,14 @@ where
                 // cache. Cached generators are dropped first and never escape the provider.
                 // The non-Sync provider moves with the cache and never accesses its tx
                 // concurrently.
-                let proof =
-                    unsafe { DatabaseProofV2::new(self.provider().tx(), input, self.is_v2) };
+                let proof = unsafe {
+                    DatabaseProofV2::new(
+                        self.provider().tx(),
+                        input,
+                        self.is_v2,
+                        self.proof_metrics.clone(),
+                    )
+                };
                 slot.insert((requires_masks, proof))
             }
         };

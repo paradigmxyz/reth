@@ -29,10 +29,18 @@ mod metrics;
 #[cfg(feature = "metrics")]
 use self::metrics::{instrument_hashed, instrument_trie, HashedCursor, TrieCursor};
 
+#[cfg(feature = "metrics")]
+pub use self::metrics::ProofV2Metrics;
+
 #[cfg(not(feature = "metrics"))]
 type TrieCursor<C> = C;
 #[cfg(not(feature = "metrics"))]
 type HashedCursor<C> = C;
+
+/// No-op proof metric handles when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+#[derive(Clone, Debug, Default)]
+pub struct ProofV2Metrics;
 
 /// Reuses proof calculators and open cursors for one immutable factory snapshot.
 ///
@@ -43,6 +51,7 @@ pub struct ProofV2<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> {
     account: Option<AccountCalculator<'a, T, H>>,
     storage: Option<Arc<Mutex<StorageCalculator<'a, T, H>>>>,
     prefix_sets: TriePrefixSets,
+    metrics: ProofV2Metrics,
     // Cursors borrow these pinned factories and must be dropped before them.
     factories: Pin<Box<Factories<T, H>>>,
 }
@@ -51,11 +60,13 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
     /// Creates a proof generator for the supplied factories and frozen changed-key prefixes.
     ///
     /// Prefixes invalidate cached branch hashes for keys whose leaf values have changed.
-    pub fn new(trie: T, hashed: H, prefix_sets: TriePrefixSets) -> Self {
+    /// Metric handles are supplied by the owner and may be shared across generators.
+    pub fn new(trie: T, hashed: H, prefix_sets: TriePrefixSets, metrics: ProofV2Metrics) -> Self {
         Self {
             account: None,
             storage: None,
             prefix_sets,
+            metrics,
             factories: Box::pin(Factories { trie, hashed, _pin: PhantomPinned }),
         }
     }
@@ -84,8 +95,8 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                 let prefix_sets = std::mem::take(&mut self.prefix_sets.storage_prefix_sets);
                 slot.insert(Arc::new(Mutex::new(CachedStorage {
                     calculator: StorageProofCalculator::new_storage(
-                        instrument_trie(trie, TrieType::Storage),
-                        instrument_hashed(hashed, TrieType::Storage),
+                        instrument_trie(trie, TrieType::Storage, &self.metrics),
+                        instrument_hashed(hashed, TrieType::Storage, &self.metrics),
                     ),
                     prefix_sets,
                     address: None,
@@ -102,8 +113,8 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                     let hashed = factories.hashed.hashed_account_cursor()?;
                     slot.insert(
                         ProofCalculator::new(
-                            instrument_trie(trie, TrieType::State),
-                            instrument_hashed(hashed, TrieType::State),
+                            instrument_trie(trie, TrieType::State, &self.metrics),
+                            instrument_hashed(hashed, TrieType::State, &self.metrics),
                         )
                         .with_prefix_set(std::mem::take(&mut self.prefix_sets.account_prefix_set)),
                     )
@@ -187,12 +198,12 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> CachedStorage
 }
 
 #[cfg(not(feature = "metrics"))]
-const fn instrument_trie<C>(cursor: C, _trie_type: TrieType) -> C {
+const fn instrument_trie<C>(cursor: C, _trie_type: TrieType, _metrics: &ProofV2Metrics) -> C {
     cursor
 }
 
 #[cfg(not(feature = "metrics"))]
-const fn instrument_hashed<C>(cursor: C, _trie_type: TrieType) -> C {
+const fn instrument_hashed<C>(cursor: C, _trie_type: TrieType, _metrics: &ProofV2Metrics) -> C {
     cursor
 }
 
