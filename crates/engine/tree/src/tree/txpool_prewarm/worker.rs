@@ -207,11 +207,13 @@ where
         // The environment is the head block's own, not a predicted next-block one, and execution
         // is out of context by design: transaction viability is the pool's business, so nonce,
         // balance and (one-block-stale) basefee checks must not gate which state gets warmed.
+        // Results are discarded, so logs are not collected either.
         let mut evm_env = job.evm_env.clone();
         evm_env.version_mut().features.remove(
             evm2::EvmFeatures::NONCE_CHECK |
                 evm2::EvmFeatures::BALANCE_CHECK |
-                evm2::EvmFeatures::BASE_FEE_CHECK,
+                evm2::EvmFeatures::BASE_FEE_CHECK |
+                evm2::EvmFeatures::LOG_COLLECTION,
         );
         let mut evm = self.evm_config.block_executor_factory().evm_with_database(&mut db, evm_env);
         let mut end = BatchEnd::GoAgain;
