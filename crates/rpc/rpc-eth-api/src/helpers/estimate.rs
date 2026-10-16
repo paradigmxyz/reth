@@ -37,6 +37,8 @@ pub trait EstimateCall: Call {
     ///  - `disable_base_fee` is set to `true`
     ///  - `disable_fee_charge` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// Logs are not collected, since only gas is returned.
     fn estimate_gas_with<S>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
@@ -59,6 +61,9 @@ pub trait EstimateCall: Call {
         // Disable additional fee charges (e.g. L2 operator fees) for gas estimation,
         // consistent with `prepare_call_env` for `eth_call`.
         evm_env.version_mut().features.remove(EvmFeatures::FEE_CHARGE);
+
+        // Only gas is returned, so nobody reads logs.
+        evm_env.version_mut().features.remove(EvmFeatures::LOG_COLLECTION);
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

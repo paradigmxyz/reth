@@ -483,12 +483,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
+            let (mut evm_env, mut tx_env) = this.prepare_call_env(
                 evm_env,
                 request,
                 &mut db,
                 EvmOverrides::state(state_override),
             )?;
+            // Only the access list and gas are returned, so nobody reads logs.
+            evm_env.version_mut().features.remove(evm2::EvmFeatures::LOG_COLLECTION);
             let chain_id = evm_env.chain_id();
 
             let mut evm =
@@ -626,6 +628,8 @@ pub trait Call:
     /// the call [`Self::transact`]. If the future is dropped before the (blocking) transact
     /// call is invoked, then the task is cancelled early, (for example if the request is terminated
     /// early client-side).
+    ///
+    /// Logs are not collected, since `eth_call` returns only the output.
     fn transact_call_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -645,12 +649,13 @@ pub trait Call:
             let this = self.clone();
 
             let res = self
-                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                .spawn_with_call_at(request, at, overrides, move |db, mut evm_env, tx_env| {
                     let _permit = permit;
                     if cancel.is_cancelled() {
                         // callsite dropped the guard
                         return Err(EthApiError::InternalEthError.into())
                     }
+                    evm_env.version_mut().features.remove(evm2::EvmFeatures::LOG_COLLECTION);
                     this.transact(db, evm_env, tx_env)
                 })
                 .await;

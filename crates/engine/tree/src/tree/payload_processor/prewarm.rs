@@ -620,8 +620,10 @@ where
             );
         }
 
-        let evm_env =
+        let mut evm_env =
             self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+        // Prewarm results are discarded, so nobody reads their logs.
+        evm_env.version_mut().features.remove(evm2::EvmFeatures::LOG_COLLECTION);
 
         Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
