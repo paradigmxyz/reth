@@ -163,10 +163,15 @@ pub trait StateProofProvider {
     ) -> ProviderResult<MultiProof>;
 
     /// Generate a V2 decoded multiproof for target hashed accounts and storage slots.
+    ///
+    /// Set `requires_masks` when the proof will populate a sparse trie that produces trie updates.
+    /// This preserves hash/tree masks using trie changesets where necessary. Otherwise, providers
+    /// may reconstruct proofs using prefix sets without loading trie changesets.
     fn multiproof_v2(
         &self,
         input: TrieInput,
         targets: MultiProofTargetsV2,
+        requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2>;
 
     /// Get trie witness for provided state using the given witness generation mode.

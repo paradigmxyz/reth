@@ -714,13 +714,16 @@ where
         &self,
         input: TrieInput,
         targets: MultiProofTargetsV2,
+        requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        if input.nodes.is_empty() && input.state.is_empty() && input.prefix_sets.is_empty() {
+        if requires_masks &&
+            input.nodes.is_empty() &&
+            input.state.is_empty() &&
+            input.prefix_sets.is_empty()
+        {
             if targets.is_empty() {
                 return Ok(DecodedMultiProofV2::default())
             }
-            // Worker proofs retain masks for trie updates, so their snapshot includes trie
-            // changesets.
             let overlay = self.state_trie_overlay(true)?;
             if overlay.skipped_for_reused_sparse_trie() {
                 return Err(ProviderError::UnsupportedProvider)
@@ -733,7 +736,7 @@ where
         }
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+                self.build_overlay(TrieInputSorted::from_unsorted(input), requires_masks)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
                 Arc::unwrap_or_clone(state).into(),

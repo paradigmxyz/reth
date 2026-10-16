@@ -223,7 +223,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 }
 
                 let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
+                    .multiproof_v2(Default::default(), proof_targets, false)
                     .map_err(Self::Error::from_eth_err)?;
 
                 targets

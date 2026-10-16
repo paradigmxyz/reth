@@ -1325,6 +1325,7 @@ where
         &self,
         _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }

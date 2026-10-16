@@ -517,6 +517,7 @@ where
                     account_targets: Vec::new(),
                     storage_targets: std::iter::once((hashed_address, targets)).collect(),
                 },
+                true,
             );
 
             trace!(
@@ -576,6 +577,7 @@ where
                     account_targets: targets,
                     storage_targets: Default::default(),
                 },
+                true,
             );
 
             trace!(

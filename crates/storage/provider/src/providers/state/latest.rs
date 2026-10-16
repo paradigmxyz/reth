@@ -232,6 +232,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         &self,
         input: TrieInput,
         targets: MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.0, |A| {
             let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());

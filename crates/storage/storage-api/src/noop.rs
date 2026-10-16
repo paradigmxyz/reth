@@ -558,6 +558,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         &self,
         _input: TrieInput,
         _targets: MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         Ok(DecodedMultiProofV2::default())
     }

@@ -146,6 +146,7 @@ impl StateProofProvider for StateProviderTest {
         &self,
         _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
+        _requires_masks: bool,
     ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
         unimplemented!("proof generation is not supported")
     }

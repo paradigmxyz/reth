@@ -1231,6 +1231,7 @@ mod tests {
                         account_targets: vec![keccak256(other_address).into()],
                         ..Default::default()
                     },
+                    false,
                 )?
                 .account_proof(other_address, &[])?
                 .verify(root)?;
