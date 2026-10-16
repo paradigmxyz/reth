@@ -5,7 +5,7 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
-use reth_chainspec::EthereumHardfork;
+use reth_chainspec::{EthereumHardfork, ForkCondition};
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
@@ -339,6 +339,104 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
 
     assert_eq!(err.code, -38026);
     assert_eq!(err.message, "too many blocks");
+
+    Ok(())
+}
+
+/// A `blockOverrides.time` that crosses the Cancun activation on a pre-Cancun parent must run the
+/// simulated block under Cancun rules, instead of failing with `EIP-4788 parent beacon block root
+/// missing for active Cancun block`.
+///
+/// Regression test for <https://github.com/paradigmxyz/reth/issues/27809>.
+#[tokio::test]
+async fn test_simulate_v1_block_override_time_crosses_cancun() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let cancun_time = 1000;
+    let chain_spec = Arc::new(
+        test_chain_spec_builder()
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(cancun_time))
+            .build(),
+    );
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let contract = Address::with_last_byte(0x33);
+    // PUSH1 0 TLOAD POP PUSH1 0 PUSH1 0 RETURN; TLOAD (EIP-1153) only exists from Cancun.
+    let state_overrides = StateOverride::from_iter([(
+        contract,
+        AccountOverride::default().with_code(bytes!("0x60005c5060006000f3")),
+    )]);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides { time: Some(1500), ..Default::default() })
+        .with_state_overrides(state_overrides)
+        .call(TransactionRequest::default().to(contract));
+    let payload = SimulatePayload::default().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].calls.len(), 1);
+    assert!(result[0].calls[0].status, "call failed: {:?}", result[0].calls[0].error);
+    assert_eq!(result[0].inner.header.timestamp, 1500);
+
+    Ok(())
+}
+
+/// Multi-block probe of #27809 Part 2: a four-block request whose times cross Cancun (1000) and
+/// Prague (2000) must switch opcodes and precompiles at the right blocks.
+#[tokio::test]
+async fn test_simulate_v1_multi_block_crosses_cancun_and_prague() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        test_chain_spec_builder()
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1000))
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(2000))
+            .build(),
+    );
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+
+    // TLOAD (EIP-1153) exists only from Cancun; 0x0a is the Cancun KZG precompile and 0x0b the
+    // Prague BLS12-381 precompile, so a call with empty input errors once each is a precompile.
+    let tload = Address::with_last_byte(0x33);
+    let kzg = Address::with_last_byte(0x0a);
+    let bls = Address::with_last_byte(0x0b);
+    let state_overrides = StateOverride::from_iter([(
+        tload,
+        AccountOverride::default().with_code(bytes!("0x60005c5060006000f3")),
+    )]);
+
+    let block = |time: u64| {
+        SimBlock::default()
+            .with_block_overrides(BlockOverrides { time: Some(time), ..Default::default() })
+            .with_state_overrides(state_overrides.clone())
+            .call(TransactionRequest::default().to(tload).gas_limit(100_000))
+            .call(TransactionRequest::default().to(kzg).gas_limit(100_000))
+            .call(TransactionRequest::default().to(bls).gas_limit(100_000))
+    };
+    let payload = SimulatePayload::default()
+        .extend(block(500))
+        .extend(block(1500))
+        .extend(block(1501))
+        .extend(block(2500));
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    let timestamps: Vec<u64> = result.iter().map(|b| b.inner.header.timestamp).collect();
+    assert_eq!(timestamps, vec![500, 1500, 1501, 2500]);
+
+    let statuses: Vec<Vec<bool>> =
+        result.iter().map(|b| b.calls.iter().map(|c| c.status).collect()).collect();
+    assert_eq!(statuses[0], vec![false, true, true], "pre-Cancun");
+    assert_eq!(statuses[1], vec![true, false, true], "Cancun");
+    assert_eq!(statuses[2], vec![true, false, true], "Cancun+1");
+    assert_eq!(statuses[3], vec![true, false, false], "Prague");
 
     Ok(())
 }

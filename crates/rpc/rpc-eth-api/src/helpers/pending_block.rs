@@ -543,24 +543,27 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
         parent: &SealedHeader<H>,
         block_overrides: Option<&BlockOverrides>,
     ) -> Self {
-        let mut attributes = Self {
-            timestamp: parent.timestamp().saturating_add(12),
+        // Honor an overridden timestamp so the fork rules are derived from the block being
+        // simulated instead of the parent. Other fork-dependent fields (beacon root, withdrawals)
+        // are gated on the resulting fork in `ConfigureEvm::context_for_next_block`.
+        let timestamp = block_overrides
+            .and_then(|overrides| overrides.time)
+            .unwrap_or_else(|| parent.timestamp().saturating_add(12));
+
+        Self {
+            timestamp,
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            // Carry the beacon root override; whether a root is actually required is decided from
+            // the target fork, not from whether the parent has one.
+            parent_beacon_block_root: block_overrides
+                .and_then(|overrides| overrides.beacon_root)
+                .or_else(|| parent.parent_beacon_block_root().map(|_| B256::ZERO)),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
             extra_data: parent.extra_data().clone(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
-        };
-
-        if attributes.parent_beacon_block_root.is_some() &&
-            let Some(beacon_root) = block_overrides.and_then(|overrides| overrides.beacon_root)
-        {
-            attributes.parent_beacon_block_root = Some(beacon_root);
         }
-
-        attributes
     }
 }
 
@@ -597,7 +600,31 @@ mod tests {
     }
 
     #[test]
-    fn pending_env_ignores_parent_beacon_root_override_before_fork() {
+    fn pending_env_uses_block_override_timestamp() {
+        let header = Header { timestamp: 100, ..Default::default() };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+        let block_overrides = BlockOverrides { time: Some(1500), ..Default::default() };
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, Some(&block_overrides));
+
+        assert_eq!(attrs.timestamp, 1500);
+    }
+
+    #[test]
+    fn pending_env_defaults_timestamp_without_override() {
+        let header = Header { timestamp: 100, ..Default::default() };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
+
+        assert_eq!(attrs.timestamp, 112);
+    }
+
+    #[test]
+    fn pending_env_carries_parent_beacon_root_override_without_parent_root() {
+        // Whether a beacon root is actually required is decided from the target fork in
+        // `context_for_next_block`; the builder must not drop an explicit override when the parent
+        // predates Cancun.
         let sealed = SealedHeader::new(Header::default(), B256::ZERO);
         let beacon_root = B256::repeat_byte(0x42);
         let block_overrides =
@@ -605,7 +632,20 @@ mod tests {
 
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, Some(&block_overrides));
 
-        assert_eq!(attrs.parent_beacon_block_root, None);
+        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
+    }
+
+    #[test]
+    fn pending_env_defaults_beacon_root_from_parent() {
+        let header = Header {
+            parent_beacon_block_root: Some(B256::repeat_byte(0x11)),
+            ..Default::default()
+        };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
+
+        assert_eq!(attrs.parent_beacon_block_root, Some(B256::ZERO));
     }
 
     #[test]

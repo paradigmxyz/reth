@@ -46,7 +46,7 @@ use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
-    alloy_primitives::{Bytes, U256},
+    alloy_primitives::{Bytes, B256, U256},
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
@@ -262,12 +262,25 @@ where
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
+        // Decide fork-dependent block fields from the block being built, not from the parent:
+        // block overrides can move a simulated block past a hardfork activation while the parent
+        // is still pre-fork.
+        let is_cancun_active =
+            self.chain_spec().is_cancun_active_at_timestamp(attributes.timestamp);
+        let is_shanghai_active =
+            self.chain_spec().is_shanghai_active_at_timestamp(attributes.timestamp);
+
         Ok(EthBlockExecutionCtx {
             tx_count_hint: None,
             parent_hash: parent.hash(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            // EIP-4788 requires a beacon root for Cancun+ blocks. Use the override when present,
+            // otherwise a zero root (matching other clients), rather than the parent's value.
+            parent_beacon_block_root: is_cancun_active
+                .then(|| attributes.parent_beacon_block_root.unwrap_or(B256::ZERO)),
             ommers: &[],
-            withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
+            // EIP-4895: Shanghai+ blocks always carry a withdrawals list, possibly empty.
+            withdrawals: is_shanghai_active
+                .then(|| Cow::Owned(attributes.withdrawals.unwrap_or_default().into_inner())),
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
@@ -426,7 +439,8 @@ mod tests {
         Database,
     };
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, ChainSpec};
+    use alloy_primitives::{Address, Bytes, B256};
+    use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, ForkCondition};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{
         context::{
@@ -462,6 +476,63 @@ mod tests {
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
         assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+    }
+
+    fn next_attrs(timestamp: u64, beacon_root: Option<B256>) -> NextBlockEnvAttributes {
+        NextBlockEnvAttributes {
+            timestamp,
+            suggested_fee_recipient: Address::ZERO,
+            prev_randao: B256::ZERO,
+            gas_limit: 0,
+            parent_beacon_block_root: beacon_root,
+            withdrawals: None,
+            extra_data: Bytes::new(),
+            slot_number: None,
+        }
+    }
+
+    #[test]
+    fn context_for_next_block_gates_beacon_root_on_target_fork() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1000))
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+        let parent = SealedHeader::new(Header::default(), B256::ZERO);
+
+        let pre = evm_config
+            .context_for_next_block(&parent, next_attrs(500, Some(B256::repeat_byte(0x42))))
+            .unwrap();
+        assert_eq!(pre.parent_beacon_block_root, None);
+
+        let cancun = evm_config.context_for_next_block(&parent, next_attrs(1500, None)).unwrap();
+        assert_eq!(cancun.parent_beacon_block_root, Some(B256::ZERO));
+
+        let cancun_override = evm_config
+            .context_for_next_block(&parent, next_attrs(1500, Some(B256::repeat_byte(0x42))))
+            .unwrap();
+        assert_eq!(cancun_override.parent_beacon_block_root, Some(B256::repeat_byte(0x42)));
+    }
+
+    #[test]
+    fn context_for_next_block_gates_withdrawals_on_target_fork() {
+        let chain_spec = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated()
+            .paris_activated()
+            .shanghai_activated()
+            .build();
+        let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
+        let parent = SealedHeader::new(Header::default(), B256::ZERO);
+
+        let ctx = evm_config.context_for_next_block(&parent, next_attrs(0, None)).unwrap();
+        assert!(ctx.withdrawals.is_some());
+        assert!(ctx.withdrawals.unwrap().is_empty());
     }
 
     #[test]
