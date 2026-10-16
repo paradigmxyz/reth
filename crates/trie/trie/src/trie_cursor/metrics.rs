@@ -104,7 +104,7 @@ impl TrieCursorMetricsCache {
     }
 }
 
-impl AsMut<TrieCursorMetricsCache> for TrieCursorMetricsCache {
+impl AsMut<Self> for TrieCursorMetricsCache {
     fn as_mut(&mut self) -> &mut Self {
         self
     }

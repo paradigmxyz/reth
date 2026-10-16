@@ -108,7 +108,7 @@ impl HashedCursorMetricsCache {
     }
 }
 
-impl AsMut<HashedCursorMetricsCache> for HashedCursorMetricsCache {
+impl AsMut<Self> for HashedCursorMetricsCache {
     fn as_mut(&mut self) -> &mut Self {
         self
     }
