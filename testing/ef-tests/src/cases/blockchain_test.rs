@@ -1,17 +1,20 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
+    case::load_json,
     models::{BlockchainTest, ForkSpec},
+    result::{FixtureResult, Rejection},
     Case, Error, Suite,
 };
 use alloy_eip7928::bal::Bal;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS,
 };
+use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_consensus::{Consensus, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
@@ -21,7 +24,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{GotExpected, ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     providers::{RocksDBBuilder, RocksDBProvider, StaticFileProviderBuilder},
     test_utils::MockNodeTypesWithDB,
@@ -37,7 +40,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 /// A handler for the blockchain test suite.
@@ -50,6 +53,67 @@ impl BlockchainTests {
     /// Create a new suite for tests with blockchain tests format.
     pub const fn new(suite_path: PathBuf) -> Self {
         Self { suite_path }
+    }
+
+    /// Runs every fixture in the JSON `files`, one file at a time on each of `workers` threads,
+    /// and passes one result per fixture to `on_result` as it completes.
+    ///
+    /// Unlike [`Suite::run`], this reports a file that fails to load as a failed result instead
+    /// of panicking.
+    ///
+    /// The files are not run on the rayon pool: a rayon thread waiting on block execution's own
+    /// parallel work would start other files meanwhile, with no bound on how many are open.
+    pub fn run_fixtures(
+        files: Vec<PathBuf>,
+        workers: usize,
+        on_result: &(dyn Fn(FixtureResult) + Sync),
+    ) {
+        let files = Mutex::new(files.into_iter());
+        // A closure, so the queue's lock is released before the file runs: a guard taken in the
+        // `while let` condition would be held until the end of the loop body.
+        let next_file = || files.lock().unwrap().next();
+        std::thread::scope(|scope| {
+            for _ in 0..workers.max(1) {
+                scope.spawn(|| {
+                    while let Some(path) = next_file() {
+                        Self::run_file(&path, on_result);
+                    }
+                });
+            }
+        });
+    }
+
+    /// Runs every fixture in the JSON file at `path` and passes one result per fixture to
+    /// `on_result`.
+    fn run_file(path: &Path, on_result: &dyn Fn(FixtureResult)) {
+        let case = match BlockchainTestCase::load(path) {
+            Ok(case) => case,
+            Err(err) => return on_result(FixtureResult::load_failed(path, err)),
+        };
+        for (name, test) in case.tests {
+            if BlockchainTestCase::excluded_fork(test.network) {
+                continue
+            }
+            let fork = format!("{:?}", test.network);
+            if case.skip {
+                on_result(FixtureResult::new(name, fork, Err(Error::Skipped)));
+                continue
+            }
+            let mut last_block_hash = test.genesis_block_header.hash;
+            let mut rejections = Vec::new();
+            let result = BlockchainTestCase::run_single_case_with(
+                &name,
+                &test,
+                &mut last_block_hash,
+                &mut rejections,
+            )
+            .and_then(|()| check_last_block_hash(&test, last_block_hash));
+            on_result(
+                FixtureResult::new(name, fork, result)
+                    .with_last_block_hash(last_block_hash)
+                    .with_rejections(rejections),
+            );
+        }
     }
 }
 
@@ -122,8 +186,28 @@ impl BlockchainTestCase {
     /// Execute a single `BlockchainTest`, validating the outcome against the
     /// expectations encoded in the JSON file.
     pub fn run_single_case(name: &str, case: &BlockchainTest) -> Result<(), Error> {
+        let mut last_block_hash = B256::ZERO;
+        Self::run_single_case_with(name, case, &mut last_block_hash, &mut Vec::new())
+    }
+
+    /// Like [`Self::run_single_case`], but `last_block_hash` is set to the hash of the last block
+    /// that was imported, or of genesis if none was, and the block that was rejected, if any, is
+    /// added to `rejections` with reth's error.
+    pub fn run_single_case_with(
+        name: &str,
+        case: &BlockchainTest,
+        last_block_hash: &mut B256,
+        rejections: &mut Vec<Rejection>,
+    ) -> Result<(), Error> {
         let expectation = Self::expected_failure(case);
-        match run_case(case) {
+        let result = run_case(case, last_block_hash);
+        // Block number 0 is the genesis setup, not a fixture block.
+        if let Err(Error::BlockProcessingFailed { block_number, err }) = &result &&
+            *block_number > 0
+        {
+            rejections.push(rejection(case, *block_number, err.to_string()));
+        }
+        match result {
             // All blocks executed successfully.
             Ok(()) => {
                 // Check if the test case specifies that it should have failed
@@ -170,15 +254,7 @@ impl BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(Self {
-            tests: {
-                let s = fs::read_to_string(path)
-                    .map_err(|error| Error::Io { path: path.into(), error })?;
-                serde_json::from_str(&s)
-                    .map_err(|error| Error::CouldNotDeserialize { path: path.into(), error })?
-            },
-            skip: should_skip(path),
-        })
+        Ok(Self { tests: load_json(path)?, skip: should_skip(path) })
     }
 
     /// Runs the test cases for the Ethereum Forks test suite.
@@ -215,7 +291,7 @@ impl Case for BlockchainTestCase {
 /// Returns:
 /// - `Ok(())` if all blocks execute successfully.
 /// - `Err(Error)` if any block fails to execute correctly.
-fn run_case(case: &BlockchainTest) -> Result<(), Error> {
+fn run_case(case: &BlockchainTest, last_block_hash: &mut B256) -> Result<(), Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec = case.network.to_chain_spec();
     let factory = create_test_provider_factory(chain_spec.clone());
@@ -230,6 +306,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .unwrap();
 
     provider.insert_block(&genesis_block).map_err(|err| Error::block_failed(0, err))?;
+    *last_block_hash = genesis_block.hash();
 
     // Increment block number for receipts static file
     provider
@@ -254,16 +331,16 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .map_err(|err| Error::block_failed(0, err))?;
     provider.write_trie_updates(trie_updates).map_err(|err| Error::block_failed(0, err))?;
 
-    // Decode blocks
-    let blocks = decode_blocks(&case.blocks)?;
-
     let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
     let mut bal_buf = Vec::new();
 
-    for (block_index, block) in blocks.iter().enumerate() {
-        // Note: same as the comment on `decode_blocks` as to why we cannot use block.number
+    for (block_index, fixture_block) in case.blocks.iter().enumerate() {
+        // The blocks do not include the genesis block which is why we have the plus one.
+        // We also cannot use block.number because for invalid blocks, this may be incorrect.
         let block_number = (block_index + 1) as u64;
+        // Decoded one at a time, so that the blocks before one that does not decode are imported.
+        let block = &decode_block(fixture_block, block_number)?;
 
         // Insert the block into the database
         provider.insert_block(block).map_err(|err| Error::block_failed(block_number, err))?;
@@ -316,7 +393,9 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         if computed_state_root != block.state_root {
             return Err(Error::block_failed(
                 block_number,
-                Error::Assertion("state root mismatch".to_string()),
+                ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: computed_state_root, expected: block.state_root }.into(),
+                ),
             ));
         }
 
@@ -341,6 +420,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Since there were no errors, update the parent block
+        *last_block_hash = block.hash();
         parent = block.clone()
     }
 
@@ -368,25 +448,39 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     Ok(())
 }
 
-fn decode_blocks(
-    test_case_blocks: &[crate::models::Block],
-) -> Result<Vec<RecoveredBlock<Block>>, Error> {
-    let mut blocks = Vec::with_capacity(test_case_blocks.len());
-    for (block_index, block) in test_case_blocks.iter().enumerate() {
-        // The blocks do not include the genesis block which is why we have the plus one.
-        // We also cannot use block.number because for invalid blocks, this may be incorrect.
-        let block_number = (block_index + 1) as u64;
-
-        let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
-            .map_err(|err| Error::block_failed(block_number, err))?;
-
-        let recovered_block =
-            decoded.try_recover().map_err(|err| Error::block_failed(block_number, err))?;
-
-        blocks.push(recovered_block);
+/// Checks that the chain ends on the fixture's `lastblockhash`, whether or not a block was
+/// rejected.
+fn check_last_block_hash(case: &BlockchainTest, last_block_hash: B256) -> Result<(), Error> {
+    if last_block_hash == case.lastblockhash {
+        return Ok(())
     }
+    Err(Error::Assertion(format!(
+        "last block hash mismatch: got {last_block_hash}, expected {}",
+        case.lastblockhash
+    )))
+}
 
-    Ok(blocks)
+/// The rejection of the fixture block with the given number, counted from 1, with its hash if
+/// it decodes.
+fn rejection(case: &BlockchainTest, block_number: u64, error: String) -> Rejection {
+    let index = (block_number - 1) as usize;
+    let hash = case
+        .blocks
+        .get(index)
+        .and_then(|block| SealedBlock::<Block>::decode(&mut block.rlp.as_ref()).ok())
+        .map(|block| block.hash());
+    Rejection { index, hash, error }
+}
+
+/// Decodes the fixture block with the given number, counted from 1, and recovers its senders.
+fn decode_block(
+    block: &crate::models::Block,
+    block_number: u64,
+) -> Result<RecoveredBlock<Block>, Error> {
+    SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
+        .map_err(|err| Error::block_failed(block_number, err))?
+        .try_recover()
+        .map_err(|err| Error::block_failed(block_number, err))
 }
 
 fn pre_execution_checks(
@@ -482,15 +576,34 @@ fn path_contains(path_str: &str, rhs: &[&str]) -> bool {
 /// Opening `RocksDB` is expensive and ef-tests never use it: the storage settings stay at v1, so
 /// everything is stored in MDBX and static files. A fresh instance per case dominates the runtime.
 ///
-/// The backing directory is created with [`reth_db::test_utils::tempdir_path`], which leaks it:
-/// statics are never dropped, so there is no point at which a temp dir guard could clean
-/// up. This costs one small, mostly empty directory in the system temp dir per test process.
-static SHARED_ROCKSDB: LazyLock<RocksDBProvider> = LazyLock::new(|| {
-    RocksDBBuilder::new(reth_db::test_utils::tempdir_path().join("rocksdb"))
-        .with_default_tables()
-        .build()
-        .expect("failed to create shared test RocksDB provider")
-});
+/// The backing directory is created with [`reth_db::test_utils::tempdir_path`]. Statics are never
+/// dropped, so the instance is never closed and no close can run while the process exits. A test
+/// process leaves its small, mostly empty directory in the system temp dir; `ef-test-runner`
+/// removes it with [`remove_shared_rocksdb`] once every fixture ran.
+static SHARED_ROCKSDB: OnceLock<(PathBuf, RocksDBProvider)> = OnceLock::new();
+
+/// Returns the [`SHARED_ROCKSDB`] instance, created on first use.
+pub fn shared_rocksdb() -> RocksDBProvider {
+    let (_, rocksdb) = SHARED_ROCKSDB.get_or_init(|| {
+        let path = reth_db::test_utils::tempdir_path();
+        let rocksdb = RocksDBBuilder::new(path.join("rocksdb"))
+            .with_default_tables()
+            .build()
+            .expect("failed to create shared test RocksDB provider");
+        (path, rocksdb)
+    });
+    rocksdb.clone()
+}
+
+/// Removes the directory of the [`SHARED_ROCKSDB`] instance, if one was created. Call it only once
+/// no case runs anymore.
+pub fn remove_shared_rocksdb() {
+    if let Some((path, _)) = SHARED_ROCKSDB.get() &&
+        let Err(err) = fs::remove_dir_all(path)
+    {
+        eprintln!("failed to remove {}: {err}", path.display());
+    }
+}
 
 /// Creates a provider factory for a single test case.
 ///
@@ -517,7 +630,7 @@ fn create_test_provider_factory(
             .with_genesis_block_number(genesis_block_number)
             .build()
             .expect("static file provider"),
-        SHARED_ROCKSDB.clone(),
+        shared_rocksdb(),
         Runtime::test(),
     )
     .expect("failed to create test provider factory");

@@ -865,6 +865,12 @@ impl RocksDBProvider {
         path.as_ref().join("CURRENT").exists()
     }
 
+    /// Returns `true` if this is the only handle to the database, so that dropping it closes the
+    /// database on the current thread.
+    pub fn is_last_handle(&self) -> bool {
+        Arc::strong_count(&self.0) == 1
+    }
+
     /// Returns `true` if this provider is in read-only mode.
     pub fn is_read_only(&self) -> bool {
         matches!(self.0.as_ref(), RocksDBProviderInner::Secondary { .. })

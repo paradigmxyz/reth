@@ -11,6 +11,43 @@ exclude.workspace = true
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 ef-tests.path = "../ef-tests"
+reth-chainspec.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-common.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-tree.workspace = true
+reth-eth-wire-types.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-evm-ethereum.workspace = true
+reth-network-api.workspace = true
+reth-network-p2p.workspace = true
+reth-node-core.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-types.workspace = true
+reth-payload-builder.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-rpc-api.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-stages-api.workspace = true
+reth-static-file.workspace = true
+reth-storage-overlay.workspace = true
+reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
+
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+futures.workspace = true
+jsonrpsee = { workspace = true, features = ["server-core"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "time"] }
+tokio-stream.workspace = true
+
+[dev-dependencies]
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 [lints]
 workspace = true

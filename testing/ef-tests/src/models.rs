@@ -3,7 +3,7 @@
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams};
-use alloy_genesis::GenesisAccount;
+use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -37,6 +37,59 @@ pub struct BlockchainTest {
     #[serde(default)]
     /// Engine spec.
     pub seal_engine: SealEngine,
+}
+
+/// A blockchain test in the engine format, whose blocks are Engine API payloads.
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineTest {
+    /// Genesis block header.
+    pub genesis_block_header: Header,
+    /// The test pre-state.
+    pub pre: State,
+    /// Hash of the best block.
+    pub lastblockhash: B256,
+    /// Network spec.
+    pub network: ForkSpec,
+    /// The payloads to send, in order.
+    pub engine_new_payloads: Vec<EngineNewPayload>,
+}
+
+impl EngineTest {
+    /// Returns the chain spec of the test's network, with the test's genesis block.
+    pub fn chain_spec(&self) -> ChainSpec {
+        let header = &self.genesis_block_header;
+        let genesis = Genesis::default()
+            .with_nonce(u64::from_be_bytes(header.nonce.0))
+            .with_timestamp(header.timestamp.to())
+            .with_extra_data(header.extra_data.clone())
+            .with_gas_limit(header.gas_limit.to())
+            .with_difficulty(header.difficulty)
+            .with_mix_hash(header.mix_hash)
+            .with_coinbase(header.coinbase)
+            .with_base_fee(header.base_fee_per_gas.map(|fee| fee.to()))
+            .with_excess_blob_gas(header.excess_blob_gas.map(|gas| gas.to()))
+            .with_blob_gas_used(header.blob_gas_used.map(|gas| gas.to()))
+            .with_slot_number(header.slot_number.map(|slot| slot.to()))
+            .extend_accounts(self.pre.clone().into_genesis_state());
+        self.network.chain_spec_on(genesis)
+    }
+}
+
+/// One `engine_newPayload` call of an [`EngineTest`].
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineNewPayload {
+    /// The call's parameters, sent to the client as they are.
+    pub params: Vec<serde_json::Value>,
+    /// The version of `engine_newPayload` to call.
+    pub new_payload_version: String,
+    /// The version of `engine_forkchoiceUpdated` to call once the payload is accepted.
+    pub forkchoice_updated_version: String,
+    /// The expected validation error, if the payload is invalid.
+    pub validation_error: Option<String>,
+    /// The expected JSON-RPC error code, if the call must fail.
+    pub error_code: Option<String>,
 }
 
 /// A block header in an Ethereum blockchain test.
@@ -342,9 +395,30 @@ impl ForkSpec {
     }
 
     fn to_chain_spec_inner(self) -> ChainSpec {
+        self.build_chain_spec(self.chain_spec_builder())
+    }
+
+    /// Returns the chain spec of this fork spec on the given genesis.
+    pub fn chain_spec_on(self, genesis: Genesis) -> ChainSpec {
+        self.build_chain_spec(self.chain_spec_builder().genesis(genesis))
+    }
+
+    fn build_chain_spec(self, builder: ChainSpecBuilder) -> ChainSpec {
+        let mut spec = builder.build();
+
+        // Amsterdam follows BPO1 and BPO2, so its fixtures use BPO2's blob parameters.
+        if self == Self::Amsterdam {
+            spec.blob_params = spec.blob_params.with_scheduled([(0, BlobParams::bpo2())]);
+        }
+        spec
+    }
+
+    /// Returns a builder of the chain spec with the hardforks of this fork spec, on the mainnet
+    /// genesis.
+    fn chain_spec_builder(self) -> ChainSpecBuilder {
         let spec_builder = ChainSpecBuilder::mainnet().reset();
 
-        let mut spec = match self {
+        match self {
             Self::Frontier => spec_builder.frontier_activated(),
             Self::FrontierToHomesteadAt5 => spec_builder
                 .frontier_activated()
@@ -394,13 +468,6 @@ impl ForkSpec {
             Self::Osaka => spec_builder.osaka_activated(),
             Self::Amsterdam => spec_builder.amsterdam_activated(),
         }
-        .build();
-
-        // Amsterdam follows BPO1 and BPO2, so its fixtures use BPO2's blob parameters.
-        if self == Self::Amsterdam {
-            spec.blob_params = spec.blob_params.with_scheduled([(0, BlobParams::bpo2())]);
-        }
-        spec
     }
 }
 
@@ -463,6 +530,17 @@ pub type AccessList = Vec<AccessListItem>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chainspec::EthChainSpec;
+
+    #[test]
+    fn amsterdam_uses_bpo2_blob_params_on_any_genesis() {
+        for spec in [
+            ForkSpec::Amsterdam.to_chain_spec(),
+            Arc::new(ForkSpec::Amsterdam.chain_spec_on(Genesis::default())),
+        ] {
+            assert_eq!(spec.blob_params_at_timestamp(0), Some(BlobParams::bpo2()));
+        }
+    }
 
     #[test]
     fn header_deserialize() {

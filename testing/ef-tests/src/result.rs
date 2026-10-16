@@ -1,7 +1,9 @@
 //! Test results and errors
 
+use alloy_primitives::B256;
 use reth_db::DatabaseError;
 use reth_provider::ProviderError;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -87,6 +89,83 @@ impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, desc: String, result: Result<(), Error>) -> Self {
         Self { desc, path: path.into(), result }
+    }
+}
+
+/// The result of one fixture, as printed by the runner's JSON output.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FixtureResult {
+    /// The fixture name, or the file path for a file that failed to load.
+    pub name: String,
+    /// Whether the fixture passed.
+    pub pass: bool,
+    /// The fixture's network, empty for a file that failed to load.
+    pub fork: String,
+    /// The hash of the client's head block once the fixture ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_block_hash: Option<B256>,
+    /// The status of the last `engine_newPayload` call, for engine tests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_payload_status: Option<String>,
+    /// Why the fixture failed, empty if it passed.
+    pub error: String,
+    /// Every block or payload the client rejected, in fixture order, whether or not the fixture
+    /// expected it.
+    pub rejections: Vec<Rejection>,
+    /// Whether this is the result of a file that could not be loaded, so none of its fixtures
+    /// ran.
+    #[serde(skip)]
+    pub load_failed: bool,
+}
+
+/// A block or payload the client rejected, with the client's own error, so that a consumer can
+/// check the reason against the fixture's expected exception.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rejection {
+    /// The block's position in the fixture's `blocks`, or the payload's in `engineNewPayloads`.
+    pub index: usize,
+    /// The rejected block's hash, when the client computed one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<B256>,
+    /// The client's error, verbatim.
+    pub error: String,
+}
+
+impl FixtureResult {
+    /// Creates the result of a fixture that ran.
+    pub fn new(name: String, fork: String, result: Result<(), Error>) -> Self {
+        let error = result.err().map(|err| err.to_string()).unwrap_or_default();
+        Self {
+            name,
+            pass: error.is_empty(),
+            fork,
+            last_block_hash: None,
+            last_payload_status: None,
+            error,
+            rejections: Vec::new(),
+            load_failed: false,
+        }
+    }
+
+    /// Creates the failed result of a file that could not be loaded.
+    pub fn load_failed(path: &Path, error: Error) -> Self {
+        Self {
+            load_failed: true,
+            ..Self::new(path.display().to_string(), String::new(), Err(error))
+        }
+    }
+
+    /// Sets the hash of the client's head block.
+    pub const fn with_last_block_hash(mut self, hash: B256) -> Self {
+        self.last_block_hash = Some(hash);
+        self
+    }
+
+    /// Sets the blocks or payloads the client rejected.
+    pub fn with_rejections(mut self, rejections: Vec<Rejection>) -> Self {
+        self.rejections = rejections;
+        self
     }
 }
 
