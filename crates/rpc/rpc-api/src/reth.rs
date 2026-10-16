@@ -37,7 +37,8 @@ pub trait RethApi {
     #[subscription(
         name = "subscribeChainNotifications",
         unsubscribe = "unsubscribeChainNotifications",
-        item = reth_chain_state::CanonStateNotification
+        item = reth_chain_state::CanonStateNotification,
+        with_extensions
     )]
     async fn reth_subscribe_chain_notifications(&self) -> jsonrpsee::core::SubscriptionResult;
 
@@ -47,7 +48,8 @@ pub trait RethApi {
     #[subscription(
         name = "subscribePersistedBlock",
         unsubscribe = "unsubscribePersistedBlock",
-        item = alloy_eips::BlockNumHash
+        item = alloy_eips::BlockNumHash,
+        with_extensions
     )]
     async fn reth_subscribe_persisted_block(&self) -> jsonrpsee::core::SubscriptionResult;
 
@@ -58,7 +60,8 @@ pub trait RethApi {
     #[subscription(
         name = "subscribeFinalizedChainNotifications",
         unsubscribe = "unsubscribeFinalizedChainNotifications",
-        item = Vec<reth_chain_state::CanonStateNotification>
+        item = Vec<reth_chain_state::CanonStateNotification>,
+        with_extensions
     )]
     async fn reth_subscribe_finalized_chain_notifications(
         &self,

@@ -11,6 +11,7 @@
 /// Common RPC constants.
 pub mod constants;
 pub mod result;
+pub mod subscriptions;
 
 mod module;
 pub use module::{

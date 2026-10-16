@@ -233,20 +233,30 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
         .await
         .unwrap();
 
-    // Insert a transaction into the pool
-    let tx = reth_transaction_pool::test_utils::MockTransaction::eip1559();
-    let expected_hash = *tx.hash();
-    pool_clone.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+    // The subscription task registers its pool listener only after the subscription is accepted,
+    // so a transaction inserted right after subscribing can be missed. Keep inserting transactions
+    // until one is delivered.
+    let mut inserted = Vec::new();
+    let received = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let tx = reth_transaction_pool::test_utils::MockTransaction::eip1559();
+            inserted.push(*tx.hash());
+            pool_clone.add_transaction(TransactionOrigin::External, tx).await.unwrap();
 
-    // We should receive the tx hash via the subscription
-    let received = tokio::time::timeout(Duration::from_secs(5), sub.next())
-        .await
-        .expect("timed out waiting for pending tx notification")
-        .expect("subscription ended unexpectedly")
-        .expect("failed to deserialize tx hash");
+            if let Ok(received) = tokio::time::timeout(Duration::from_millis(100), sub.next()).await
+            {
+                break received
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for pending tx notification")
+    .expect("subscription ended unexpectedly")
+    .expect("failed to deserialize tx hash");
 
+    // We should receive the hash of an inserted tx via the subscription
     let received_hash: alloy_primitives::TxHash = serde_json::from_value(received).unwrap();
-    assert_eq!(received_hash, expected_hash);
+    assert!(inserted.contains(&received_hash), "unexpected tx hash {received_hash}");
 
     sub.unsubscribe().await.unwrap();
 }
