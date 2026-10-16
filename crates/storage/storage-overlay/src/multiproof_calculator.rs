@@ -1,11 +1,11 @@
-//! Multiproof generators over database trie tables with an immutable in-memory overlay.
+//! Multiproof calculators over database trie tables with an immutable in-memory overlay.
 
 use reth_db_api::transaction::DbTx;
 use reth_errors::ProviderResult;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSets,
-    proof_v2::{MultiProofGenerator, ProofCursorMetrics},
+    proof_v2::{MultiProofCalculator, ProofCursorMetrics},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
     DecodedMultiProofV2, HashedPostStateSorted, MultiProofTargetsV2, TrieInputSorted,
@@ -16,43 +16,43 @@ use reth_trie_db::{
 };
 use std::sync::Arc;
 
-/// Multiproof generator for the database's trie table layout.
+/// Multiproof calculator for the database's trie table layout.
 ///
-/// The generator borrows a transaction and overlay it does not own, so its owner must keep both
-/// alive and at stable addresses for as long as the generator exists.
-pub(crate) enum OverlayMultiProofGenerator<TX: DbTx + 'static> {
-    /// Generator over legacy trie tables.
-    Legacy(TableMultiProofGenerator<TX, LegacyKeyAdapter>),
-    /// Generator over packed trie tables.
-    Packed(TableMultiProofGenerator<TX, PackedKeyAdapter>),
+/// The calculator borrows a transaction and overlay it does not own, so its owner must keep both
+/// alive and at stable addresses for as long as the calculator exists.
+pub(crate) enum OverlayMultiProofCalculator<TX: DbTx + 'static> {
+    /// Calculator over legacy trie tables.
+    Legacy(TableMultiProofCalculator<TX, LegacyKeyAdapter>),
+    /// Calculator over packed trie tables.
+    Packed(TableMultiProofCalculator<TX, PackedKeyAdapter>),
 }
 
-impl<TX: DbTx + 'static> OverlayMultiProofGenerator<TX> {
-    /// Creates a generator over `tx` with `input` layered on top.
+impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
+    /// Creates a calculator over `tx` with `input` layered on top.
     ///
     /// `is_v2` selects the packed trie tables used by v2 storage settings.
     ///
     /// # Safety
     ///
     /// The transaction and the `Arc` allocations in `input` must stay alive and at stable addresses
-    /// until the generator drops. Unless the transaction is `Sync`, the generator must not be sent
-    /// to another thread separately from the transaction, and the transaction must not be used from
-    /// another thread while the generator exists.
+    /// until the calculator drops. Unless the transaction is `Sync`, the calculator must not be
+    /// sent to another thread separately from the transaction, and the transaction must not be
+    /// used from another thread while the calculator exists.
     pub(crate) unsafe fn new(
         tx: &TX,
         input: &TrieInputSorted,
         is_v2: bool,
         metrics: ProofCursorMetrics,
     ) -> Self {
-        // SAFETY: The caller keeps these allocations alive and in place until the generator drops.
+        // SAFETY: The caller keeps these allocations alive and in place until the calculator drops.
         let (tx, nodes, state) = unsafe {
             (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state))
         };
         let prefix_sets = input.prefix_sets.clone().freeze();
         if is_v2 {
-            Self::Packed(table_multiproof_generator(tx, nodes, state, prefix_sets, metrics))
+            Self::Packed(table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics))
         } else {
-            Self::Legacy(table_multiproof_generator(tx, nodes, state, prefix_sets, metrics))
+            Self::Legacy(table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics))
         }
     }
 
@@ -62,20 +62,20 @@ impl<TX: DbTx + 'static> OverlayMultiProofGenerator<TX> {
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         Ok(match self {
-            Self::Legacy(generator) => generator.multiproof(targets)?,
-            Self::Packed(generator) => generator.multiproof(targets)?,
+            Self::Legacy(calculator) => calculator.multiproof(targets)?,
+            Self::Packed(calculator) => calculator.multiproof(targets)?,
         })
     }
 }
 
-// SAFETY: `new` requires the generator to move between threads only together with its
+// SAFETY: `new` requires the calculator to move between threads only together with its
 // transaction, or the transaction to be `Sync`, so the borrowed transaction is never shared across
 // threads without synchronization.
-unsafe impl<TX: DbTx + 'static> Send for OverlayMultiProofGenerator<TX> {}
+unsafe impl<TX: DbTx + 'static> Send for OverlayMultiProofCalculator<TX> {}
 
-/// Multiproof generator over trie table layout `A`, whose borrows of the transaction and overlay
-/// are extended to `'static` by [`OverlayMultiProofGenerator::new`].
-type TableMultiProofGenerator<TX, A> = MultiProofGenerator<
+/// Multiproof calculator over trie table layout `A`, whose borrows of the transaction and overlay
+/// are extended to `'static` by [`OverlayMultiProofCalculator::new`].
+type TableMultiProofCalculator<TX, A> = MultiProofCalculator<
     'static,
     InMemoryTrieCursorFactory<
         DatabaseTrieCursorFactory<&'static TX, A>,
@@ -87,15 +87,15 @@ type TableMultiProofGenerator<TX, A> = MultiProofGenerator<
     >,
 >;
 
-/// Creates a generator for trie table layout `A`.
-fn table_multiproof_generator<TX: DbTx + 'static, A: TrieTableAdapter>(
+/// Creates a calculator for trie table layout `A`.
+fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
     tx: &'static TX,
     nodes: &'static TrieUpdatesSorted,
     state: &'static HashedPostStateSorted,
     prefix_sets: TriePrefixSets,
     metrics: ProofCursorMetrics,
-) -> TableMultiProofGenerator<TX, A> {
-    MultiProofGenerator::new(
+) -> TableMultiProofCalculator<TX, A> {
+    MultiProofCalculator::new(
         InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
         HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
         prefix_sets,

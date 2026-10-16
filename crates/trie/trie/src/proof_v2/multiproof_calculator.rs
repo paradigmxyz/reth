@@ -20,27 +20,27 @@ use std::{fmt, marker::PhantomPinned, pin::Pin, sync::Arc};
 
 /// Generates account and storage multiproofs for one immutable state snapshot.
 ///
-/// The generator owns its cursor factories and may be reused for any number of requests. It stays
+/// The calculator owns its cursor factories and may be reused for any number of requests. It stays
 /// usable after an error, but must be dropped after a panic during a request. The factories must
-/// keep describing the same state for the lifetime of the generator. Cursor metrics are recorded
-/// into the supplied handles when the generator drops.
+/// keep describing the same state for the lifetime of the calculator. Cursor metrics are recorded
+/// into the supplied handles when the calculator drops.
 ///
 /// `'a` is the lifetime of the cursors opened from the owned factories. It is not tied to a
 /// caller-supplied borrow; it only needs to be satisfied by `T` and `H`.
-pub struct MultiProofGenerator<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> {
+pub struct MultiProofCalculator<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> {
     account_calculator: Option<AccountCalculatorOf<'a, T, H>>,
     storage_calculator: Option<Arc<Mutex<StorageCalculatorOf<'a, T, H>>>>,
     prefix_sets: TriePrefixSets,
     metrics: ProofCursorMetrics,
     // Cursors borrow these pinned factories. `Drop` releases them first.
-    factories: Pin<Box<MultiProofGeneratorFactories<T, H>>>,
+    factories: Pin<Box<MultiProofCalculatorFactories<T, H>>>,
 }
 
-impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofGenerator<'a, T, H> {
-    /// Creates a generator for the supplied factories and frozen changed-key prefixes.
+impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalculator<'a, T, H> {
+    /// Creates a calculator for the supplied factories and frozen changed-key prefixes.
     ///
     /// Prefixes invalidate cached branch hashes for keys whose leaf values have changed, and apply
-    /// to every request served by this generator. Metric handles may be shared across generators.
+    /// to every request served by this calculator. Metric handles may be shared across calculators.
     pub fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
@@ -52,7 +52,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofGener
             storage_calculator: None,
             prefix_sets,
             metrics,
-            factories: Box::pin(MultiProofGeneratorFactories {
+            factories: Box::pin(MultiProofCalculatorFactories {
                 trie_cursor_factory,
                 hashed_cursor_factory,
                 _pin: PhantomPinned,
@@ -78,7 +78,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofGener
         let storage_calculator = match &mut self.storage_calculator {
             Some(storage_calculator) => storage_calculator,
             slot @ None => {
-                // SAFETY: Cursors are private to this generator and released before factories.
+                // SAFETY: Cursors are private to this calculator and released before factories.
                 let factories = unsafe { Self::borrow_factories(self.factories.as_ref()) };
                 // Storage cursors are retargeted to each requested account before use.
                 let trie_cursor = factories.trie_cursor_factory.storage_trie_cursor(B256::ZERO)?;
@@ -142,18 +142,18 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofGener
     /// # Safety
     ///
     /// Every reference, cursor and encoder derived from the result must be dropped before the
-    /// factories, and none may escape this generator.
+    /// factories, and none may escape this calculator.
     const unsafe fn borrow_factories(
-        factories: Pin<&MultiProofGeneratorFactories<T, H>>,
-    ) -> &'a MultiProofGeneratorFactories<T, H> {
+        factories: Pin<&MultiProofCalculatorFactories<T, H>>,
+    ) -> &'a MultiProofCalculatorFactories<T, H> {
         // SAFETY: The factories are pinned and immutable, and the caller keeps every borrower
-        // inside this generator, which releases them before the factories.
-        unsafe { &*(factories.get_ref() as *const MultiProofGeneratorFactories<T, H>) }
+        // inside this calculator, which releases them before the factories.
+        unsafe { &*(factories.get_ref() as *const MultiProofCalculatorFactories<T, H>) }
     }
 }
 
 impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> Drop
-    for MultiProofGenerator<'a, T, H>
+    for MultiProofCalculator<'a, T, H>
 {
     fn drop(&mut self) {
         // Cursors borrow `factories`, so release them before the fields drop.
@@ -162,16 +162,16 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> Drop
     }
 }
 
-impl<T: TrieCursorFactory, H: HashedCursorFactory> fmt::Debug for MultiProofGenerator<'_, T, H> {
+impl<T: TrieCursorFactory, H: HashedCursorFactory> fmt::Debug for MultiProofCalculator<'_, T, H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MultiProofGenerator")
+        f.debug_struct("MultiProofCalculator")
             .field("account_initialized", &self.account_calculator.is_some())
             .field("storage_initialized", &self.storage_calculator.is_some())
             .finish_non_exhaustive()
     }
 }
 
-/// Account calculator opened from the cursor factories of a [`MultiProofGenerator`].
+/// Account calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type AccountCalculatorOf<'a, T, H> = ProofCalculator<
     MeteredTrieCursor<<T as TrieCursorFactory>::AccountTrieCursor<'a>>,
     MeteredHashedCursor<<H as HashedCursorFactory>::AccountCursor<'a>>,
@@ -181,14 +181,14 @@ type AccountCalculatorOf<'a, T, H> = ProofCalculator<
     >,
 >;
 
-/// Storage calculator opened from the cursor factories of a [`MultiProofGenerator`].
+/// Storage calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type StorageCalculatorOf<'a, T, H> = PrefixSetStorageCalculator<
     MeteredTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
     MeteredHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
 >;
 
-/// Cursor factories owned by a [`MultiProofGenerator`] at a stable address.
-struct MultiProofGeneratorFactories<T, H> {
+/// Cursor factories owned by a [`MultiProofCalculator`] at a stable address.
+struct MultiProofCalculatorFactories<T, H> {
     trie_cursor_factory: T,
     hashed_cursor_factory: H,
     _pin: PhantomPinned,
@@ -243,8 +243,8 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>>
 
 /// Account value encoder that computes storage roots with a shared storage calculator.
 struct AccountValueEncoder<TC, HC> {
-    // Arc<Mutex<_>> keeps the generator Send whenever its cursors are. The mutex never poisons,
-    // which is why the generator must not be reused after a panic.
+    // Arc<Mutex<_>> keeps the calculator Send whenever its cursors are. The mutex never poisons,
+    // which is why the calculator must not be reused after a panic.
     storage_calculator: Arc<Mutex<PrefixSetStorageCalculator<TC, HC>>>,
 }
 

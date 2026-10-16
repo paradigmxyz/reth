@@ -1,4 +1,4 @@
-//! Cursor metrics of multiproof generators.
+//! Cursor metrics of multiproof calculators.
 
 use crate::TrieType;
 
@@ -8,7 +8,7 @@ use crate::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorMetrics, TrieCursorMetricsRecorder},
 };
 
-/// Cursor metric handles shared by multiproof generators.
+/// Cursor metric handles shared by multiproof calculators.
 #[cfg(feature = "metrics")]
 #[derive(Clone, Debug)]
 pub struct ProofCursorMetrics {

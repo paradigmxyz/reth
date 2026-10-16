@@ -3,11 +3,11 @@
 mod calculator;
 pub use calculator::*;
 
-mod generator;
-pub use generator::*;
-
 mod metrics;
 pub use metrics::ProofCursorMetrics;
+
+mod multiproof_calculator;
+pub use multiproof_calculator::*;
 
 mod value;
 pub use value::*;

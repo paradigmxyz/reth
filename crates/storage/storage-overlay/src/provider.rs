@@ -1,5 +1,5 @@
 use crate::{
-    database_state_frontiers, multiproof_generator::OverlayMultiProofGenerator, ExecutionOverlay,
+    database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
     OverlayBuilder, StateTrieOverlay,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
@@ -70,7 +70,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_cache: StateTrieOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
-    /// Cursor metric handles shared by the multiproof generators of every provider.
+    /// Cursor metric handles shared by the multiproof calculators of every provider.
     proof_cursor_metrics: ProofCursorMetrics,
 }
 
@@ -150,13 +150,13 @@ where
     Provider: Deref,
     Provider::Target: DBProvider,
 {
-    /// Multiproof generator reused across requests with the same `requires_masks` flag.
+    /// Multiproof calculator reused across requests with the same `requires_masks` flag.
     ///
     /// It borrows `provider`'s transaction and the state trie overlays, so `Drop` releases it
     /// first.
-    multiproof_generator:
-        RefCell<Option<CachedMultiProofGenerator<<Provider::Target as DbTxProvider>::Tx>>>,
-    /// Pinned so the transaction borrowed by `multiproof_generator` keeps a stable address.
+    multiproof_calculator:
+        RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
+    /// Pinned so the transaction borrowed by `multiproof_calculator` keeps a stable address.
     provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
@@ -267,7 +267,7 @@ where
     Provider::Target: DBProvider,
 {
     /// Creates a provider whose overlays resolve lazily and that has no cached multiproof
-    /// generator.
+    /// calculator.
     fn from_parts(
         provider: Provider,
         overlay_builder: Option<OverlayBuilder<N>>,
@@ -277,7 +277,7 @@ where
         is_v2: bool,
     ) -> Self {
         Self {
-            multiproof_generator: RefCell::new(None),
+            multiproof_calculator: RefCell::new(None),
             provider: Box::pin(provider),
             overlay_builder,
             state_trie_overlay_cache,
@@ -445,8 +445,8 @@ where
     Provider::Target: DBProvider,
 {
     fn drop(&mut self) {
-        // The generator borrows the transaction and overlays, so release it before the fields.
-        self.multiproof_generator.get_mut().take();
+        // The calculator borrows the transaction and overlays, so release it before the fields.
+        self.multiproof_calculator.get_mut().take();
     }
 }
 
@@ -773,29 +773,30 @@ where
         if targets.is_empty() {
             return Ok(DecodedMultiProofV2::default())
         }
-        let mut generator_slot = self.multiproof_generator.borrow_mut();
-        let cached = match &mut *generator_slot {
+        let mut calculator_slot = self.multiproof_calculator.borrow_mut();
+        let cached = match &mut *calculator_slot {
             Some(cached) if cached.requires_masks == requires_masks => cached,
             slot => {
                 let input = self.state_trie_overlay(requires_masks)?.input();
                 // SAFETY: The transaction lives behind `provider`, which is pinned or borrowed for
                 // the provider's lifetime, and the overlay allocations live in `OnceCell`s that are
-                // never reset. `Drop` releases the generator before either, and the generator never
-                // leaves this provider, which is not `Sync`. An owned transaction therefore only
-                // moves between threads together with the generator. A borrowed provider is `Send`
-                // only if it is `Sync`, in which case its transaction may be shared.
-                let generator = unsafe {
-                    OverlayMultiProofGenerator::new(
+                // never reset. `Drop` releases the calculator before either, and the calculator
+                // never leaves this provider, which is not `Sync`. An owned
+                // transaction therefore only moves between threads together with
+                // the calculator. A borrowed provider is `Send` only if it is
+                // `Sync`, in which case its transaction may be shared.
+                let calculator = unsafe {
+                    OverlayMultiProofCalculator::new(
                         self.provider().tx(),
                         input,
                         self.is_v2,
                         self.proof_cursor_metrics.clone(),
                     )
                 };
-                slot.insert(CachedMultiProofGenerator { requires_masks, generator })
+                slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
             }
         };
-        cached.generator.multiproof(targets)
+        cached.calculator.multiproof(targets)
     }
 
     fn witness(
@@ -1102,11 +1103,11 @@ impl<Provider> Deref for OwnedProvider<Provider> {
     }
 }
 
-/// Multiproof generator cached by [`OverlayStateProvider`].
-struct CachedMultiProofGenerator<TX: DbTx + 'static> {
-    /// Whether the generator returns masks that match the stored trie.
+/// Multiproof calculator cached by [`OverlayStateProvider`].
+struct CachedMultiProofCalculator<TX: DbTx + 'static> {
+    /// Whether the calculator returns masks that match the stored trie.
     requires_masks: bool,
-    generator: OverlayMultiProofGenerator<TX>,
+    calculator: OverlayMultiProofCalculator<TX>,
 }
 
 fn into_database_error(error: ProviderError) -> DatabaseError {
