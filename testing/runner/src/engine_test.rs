@@ -78,10 +78,11 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// a tmpfs avoids disk syncs.
 pub(crate) fn run_fixtures(
     files: Vec<PathBuf>,
+    bal_sequential: bool,
     workers: usize,
     on_result: &(dyn Fn(FixtureResult) + Sync),
 ) {
-    let tree_config = tree_config();
+    let tree_config = tree_config(bal_sequential);
     let datadir_root = std::env::temp_dir();
     let files = Mutex::new(files.into_iter());
     // A closure, so the queue's lock is released before the file runs: a guard taken in the
@@ -114,8 +115,9 @@ pub(crate) fn run_fixtures(
 }
 
 /// Returns the engine tree configuration of the node with the runner's engine arguments.
-fn tree_config() -> TreeConfig {
+fn tree_config(bal_sequential: bool) -> TreeConfig {
     let engine_args = EngineArgs {
+        bal_parallel_execution_disabled: bal_sequential,
         // The default 4 GB cache would dominate the memory of concurrent workers.
         cross_block_cache_size: CROSS_BLOCK_CACHE_SIZE_MB,
         // Keep a fixture's blocks in memory instead of persisting them while it runs.
@@ -642,7 +644,7 @@ mod tests {
     fn run(test: &EngineTest) -> FixtureResult {
         let datadir_root = tempfile::tempdir().unwrap();
         let (result, remains) =
-            run_fixture("test".to_string(), test, &tree_config(), datadir_root.path());
+            run_fixture("test".to_string(), test, &tree_config(false), datadir_root.path());
         let mut cleanup = Cleanup::default();
         cleanup.remains.push(remains);
         cleanup.finish();
@@ -659,7 +661,7 @@ mod tests {
         let runtime = Runtime::test();
         let databases = runtime.handle().block_on(async {
             let engine =
-                Engine::start(Arc::new(test.chain_spec()), &datadir, &tree_config(), &runtime)
+                Engine::start(Arc::new(test.chain_spec()), &datadir, &tree_config(false), &runtime)
                     .unwrap();
             let settings =
                 engine.provider.database_provider_ro().unwrap().cached_storage_settings();

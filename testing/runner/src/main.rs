@@ -7,7 +7,7 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 use ef_tests::{
-    cases::blockchain_test::{remove_shared_rocksdb, BlockchainTests},
+    cases::blockchain_test::{remove_shared_rocksdb, BlockTestOptions, BlockchainTests},
     result::FixtureResult,
     suite::find_all_files_with_extension,
     Suite,
@@ -15,6 +15,7 @@ use ef_tests::{
 use reth_node_core::version::version_metadata;
 
 mod engine_test;
+mod report;
 
 /// Command-line arguments for the test runner.
 #[derive(Debug, Parser)]
@@ -38,7 +39,7 @@ enum Command {
     /// Run blockchain tests by importing their blocks. Exits 1 if any fixture fails, and 2 if a
     /// path cannot be read or a fixture file cannot be loaded.
     #[command(name = "blocktest", display_name = "ef-test-runner")]
-    BlockTest(RunArgs),
+    BlockTest(BlockTestArgs),
     /// Run blockchain tests in the engine format through reth's Engine API handler, each on a
     /// datadir in the system temporary directory (`TMPDIR`; a tmpfs avoids disk syncs). Exits 1
     /// if any fixture fails, and 2 if a path cannot be read or a fixture file cannot be loaded.
@@ -51,9 +52,28 @@ struct RunArgs {
     /// Fixture files, or directories searched for fixture files, all run in one process.
     #[arg(required = true)]
     paths: Vec<PathBuf>,
+    /// Run blocks on the sequential executor instead of the BAL-driven parallel one, as the
+    /// node's `--engine.disable-bal-parallel-execution` does. Block import has only the
+    /// sequential executor, so for `blocktest` this only changes the reported reason.
+    #[arg(long)]
+    bal_sequential: bool,
+    /// Print a `balExecution` JSON line on stderr for each executed block, saying which executor
+    /// ran it and, for the sequential one, why.
+    #[arg(long)]
+    bal_report: bool,
     /// How many fixture files run at once.
     #[arg(long, default_value_t = default_workers())]
     workers: usize,
+}
+
+#[derive(Debug, Args)]
+struct BlockTestArgs {
+    #[command(flatten)]
+    run: RunArgs,
+    /// Never deliver a block's access list, so every block executes without one, as a block
+    /// received without its list does.
+    #[arg(long)]
+    bal_withhold: bool,
 }
 
 fn default_workers() -> usize {
@@ -69,23 +89,27 @@ fn main() {
     };
 
     let args = match &command {
-        Command::BlockTest(run) | Command::EngineTest(run) => run,
+        Command::BlockTest(BlockTestArgs { run, .. }) | Command::EngineTest(run) => run,
     };
     exit_unless_readable(&args.paths);
+    if args.bal_report {
+        report::init();
+    }
     let results = Mutex::new(Vec::new());
     let on_result = |result: FixtureResult| results.lock().unwrap().push(result);
     match command {
-        Command::BlockTest(args) => {
+        Command::BlockTest(BlockTestArgs { run: args, bal_withhold }) => {
+            let options = BlockTestOptions { bal_sequential: args.bal_sequential, bal_withhold };
             let files = fixture_files(&args.paths, "blockchain_tests");
             exit_unless_readable(&files);
-            BlockchainTests::run_fixtures(files, args.workers, &on_result);
+            BlockchainTests::run_fixtures(files, options, args.workers, &on_result);
             // Every fixture ran, so nothing uses the shared RocksDB instance anymore.
             remove_shared_rocksdb();
         }
         Command::EngineTest(args) => {
             let files = fixture_files(&args.paths, "blockchain_tests_engine");
             exit_unless_readable(&files);
-            engine_test::run_fixtures(files, args.workers, &on_result);
+            engine_test::run_fixtures(files, args.bal_sequential, args.workers, &on_result);
         }
     }
     // A file that could not be loaded has no fixture results: it goes to stderr only, and means
@@ -185,14 +209,14 @@ mod tests {
     #[test]
     fn blocktest_workers_run_files_at_the_same_time() {
         check_files_run_at_once("blocktest_empty_block.json", |files, on_result| {
-            BlockchainTests::run_fixtures(files, 2, on_result)
+            BlockchainTests::run_fixtures(files, BlockTestOptions::default(), 2, on_result)
         });
     }
 
     #[test]
     fn enginetest_workers_run_files_at_the_same_time() {
         check_files_run_at_once("enginetest_empty_block.json", |files, on_result| {
-            engine_test::run_fixtures(files, 2, on_result)
+            engine_test::run_fixtures(files, false, 2, on_result)
         });
     }
 }

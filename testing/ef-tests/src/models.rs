@@ -199,6 +199,29 @@ pub struct Block {
     pub transaction_sequence: Option<Vec<TransactionSequence>>,
     /// Withdrawals
     pub withdrawals: Option<Withdrawals>,
+    /// The block's access list (EIP-7928), delivered beside the block. Kept as JSON so that a
+    /// malformed list is dropped instead of failing the whole file.
+    pub block_access_list: Option<serde_json::Value>,
+    /// The decoded fields of a block that is expected to be invalid.
+    #[serde(rename = "rlp_decoded")]
+    pub rlp_decoded: Option<RlpDecodedBlock>,
+}
+
+impl Block {
+    /// Returns the access list delivered with this block, if any.
+    pub fn access_list(&self) -> Option<&serde_json::Value> {
+        self.block_access_list
+            .as_ref()
+            .or_else(|| self.rlp_decoded.as_ref()?.block_access_list.as_ref())
+    }
+}
+
+/// The decoded fields of a block that is expected to be invalid.
+#[derive(Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RlpDecodedBlock {
+    /// The block's access list (EIP-7928).
+    pub block_access_list: Option<serde_json::Value>,
 }
 
 /// Transaction sequence in block
@@ -565,6 +588,21 @@ mod tests {
         }"#;
         let res = serde_json::from_str::<Header>(test);
         assert!(res.is_ok(), "Failed to deserialize Header with error: {res:?}");
+    }
+
+    #[test]
+    fn block_access_list_deserialize() {
+        let valid = r#"{"rlp": "0xc0", "blockAccessList": [{"address": "0x01"}]}"#;
+        let block = serde_json::from_str::<Block>(valid).unwrap();
+        assert_eq!(block.access_list(), Some(&serde_json::json!([{"address": "0x01"}])));
+
+        let invalid = r#"{
+            "rlp": "0xc0",
+            "expectException": "BlockException.INVALID_BLOCK_ACCESS_LIST",
+            "rlp_decoded": {"blockAccessList": []}
+        }"#;
+        let block = serde_json::from_str::<Block>(invalid).unwrap();
+        assert_eq!(block.access_list(), Some(&serde_json::json!([])));
     }
 
     #[test]
