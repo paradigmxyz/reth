@@ -222,9 +222,8 @@ pub trait EthState: LoadState + SpawnBlocking {
                         .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets, false)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()

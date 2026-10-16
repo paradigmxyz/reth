@@ -230,24 +230,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
         _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let nodes = input.nodes.into_sorted();
-            let state = input.state.into_sorted();
             Proof::new(
-                InMemoryTrieCursorFactory::new(
-                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                    &nodes,
-                ),
-                HashedPostStateCursorFactory::new(
-                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                    &state,
-                ),
+                reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
             )
-            .with_prefix_sets_mut(input.prefix_sets)
             .multiproof_v2(targets)
             .map_err(ProviderError::from)
         })

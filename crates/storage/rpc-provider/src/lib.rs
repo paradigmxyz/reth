@@ -1323,7 +1323,6 @@ where
 
     fn multiproof_v2(
         &self,
-        _input: TrieInput,
         _targets: reth_trie::MultiProofTargetsV2,
         _requires_masks: bool,
     ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {

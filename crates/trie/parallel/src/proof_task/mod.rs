@@ -34,7 +34,7 @@ use reth_provider::{
     DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider, StateProvider,
 };
 use reth_tasks::{Runtime, WorkerPool};
-use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target, TrieInput};
+use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -512,7 +512,6 @@ where
             let proof_start = Instant::now();
 
             let proof = provider.multiproof_v2(
-                TrieInput::default(),
                 MultiProofTargetsV2 {
                     account_targets: Vec::new(),
                     storage_targets: std::iter::once((hashed_address, targets)).collect(),
@@ -572,7 +571,6 @@ where
             let proof_start = Instant::now();
 
             let proof = provider.multiproof_v2(
-                TrieInput::default(),
                 MultiProofTargetsV2 {
                     account_targets: targets,
                     storage_targets: Default::default(),

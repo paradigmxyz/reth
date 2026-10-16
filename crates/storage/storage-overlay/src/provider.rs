@@ -709,15 +709,10 @@ where
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
         requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        if requires_masks &&
-            input.nodes.is_empty() &&
-            input.state.is_empty() &&
-            input.prefix_sets.is_empty()
-        {
+        if requires_masks {
             if targets.is_empty() {
                 return Ok(DecodedMultiProofV2::default())
             }
@@ -736,19 +731,18 @@ where
             return calculators.multiproof(self.provider().tx(), targets)
         }
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), requires_masks)?;
+            let input = self.state_trie_overlay(false)?.input();
             Proof::new(
                 InMemoryTrieCursorFactory::new(
                     DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
-                    &nodes,
+                    &input.nodes,
                 ),
                 HashedPostStateCursorFactory::new(
                     DatabaseHashedCursorFactory::new(self.provider().tx()),
-                    &state,
+                    &input.state,
                 ),
             )
-            .with_prefix_sets_mut(prefix_sets)
+            .with_prefix_sets_mut(input.prefix_sets.clone())
             .multiproof_v2(targets)
             .map_err(ProviderError::from)
         })

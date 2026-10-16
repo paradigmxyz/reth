@@ -169,7 +169,6 @@ pub trait StateProofProvider {
     /// may reconstruct proofs using prefix sets without loading trie changesets.
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
         requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2>;
