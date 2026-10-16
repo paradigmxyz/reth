@@ -645,6 +645,21 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &PendingSessionHandshakeError,
     ) {
+        if matches!(err, PendingSessionHandshakeError::Ecies(_)) ||
+            matches!(err, PendingSessionHandshakeError::Eth(error) if error.as_io().is_some())
+        {
+            // ACK parsing and transport errors can precede the first authenticated frame.
+            // Back off the attempt without penalizing that identity or its discovery record.
+            if self.peers.get(peer_id).is_some_and(|peer| peer.state.is_pending_out()) {
+                self.on_outgoing_pending_session_gracefully_closed(peer_id);
+                self.backoff_peer_until(
+                    *peer_id,
+                    std::time::Instant::now() + self.backoff_durations.low,
+                );
+                self.fill_outbound_slots();
+            }
+            return
+        }
         self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
     }
 
@@ -1549,6 +1564,7 @@ fn jitter_rotation_interval(mean: Duration) -> Duration {
 mod tests {
     use super::*;
     use alloy_primitives::B512;
+    use reth_ecies::ECIESErrorImpl;
     use reth_eth_wire::{
         errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
@@ -2029,12 +2045,10 @@ mod tests {
         })
         .await;
 
-        peers.on_outgoing_pending_session_dropped(
+        peers.on_outgoing_connection_failure(
             &socket_addr,
             &peer,
-            &PendingSessionHandshakeError::Eth(
-                io::Error::new(io::ErrorKind::ConnectionRefused, "peer unreachable").into(),
-            ),
+            &io::Error::new(io::ErrorKind::ConnectionRefused, "peer unreachable"),
         );
 
         match event!(peers) {
@@ -4155,6 +4169,40 @@ mod tests {
             assert_eq!(peers.has_inbound_capacity(peer_id), trusted);
             assert_eq!(peers.peers[&peer_id].state, PeerConnectionState::PendingOut);
             assert_eq!(peers.connection_info.num_pending_out, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unauthenticated_outbound_errors_do_not_ban_identity() {
+        for error in [
+            PendingSessionHandshakeError::Ecies(ECIESErrorImpl::InvalidAckData.into()),
+            PendingSessionHandshakeError::Ecies(ECIESErrorImpl::TagCheckDecryptFailed.into()),
+            PendingSessionHandshakeError::Eth(EthStreamError::P2PStreamError(P2PStreamError::Io(
+                io::Error::other("invalid frame MAC"),
+            ))),
+        ] {
+            let mut peers = PeersManager::new(PeersConfig::test());
+            let peer_id = PeerId::random();
+            let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+            peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+            peers.queued_actions.clear();
+            let reputation = peers.peers[&peer_id].reputation;
+            peers.on_outgoing_pending_session_dropped(&addr, &peer_id, &error);
+            let peer = &peers.peers[&peer_id];
+            assert_eq!(peer.state, PeerConnectionState::Idle);
+            assert_eq!(peer.reputation, reputation);
+            assert_eq!(peer.severe_backoff_counter, 0);
+            assert!(peer.backed_off);
+            assert!(!peers.ban_list.is_banned_peer(&peer_id));
+            assert!(peers.queued_actions.is_empty());
+            assert_eq!(peers.connection_info.num_pending_out, 0);
+
+            // Inbound errors remain attributable to the actual remote IP.
+            if matches!(&error, PendingSessionHandshakeError::Ecies(_)) {
+                peers.connection_info.inc_pending_in();
+                peers.on_incoming_pending_session_dropped(addr, &error);
+                assert!(peers.ban_list.is_banned_ip(&addr.ip()));
+            }
         }
     }
 }
