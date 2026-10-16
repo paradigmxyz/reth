@@ -5,10 +5,8 @@ mod provider;
 mod tree;
 
 pub use eip6466::{
-    receipts_from_block, AuthorizationOutcome, BasicReceipt, BlockAuthorizationOutcomes,
-    CreateReceipt, Eip6466ReceiptSnapshot, Eip6466SnapshotError, Log, Receipt,
-    ReceiptConstructionError, ReceiptSerializationError, Receipts, SetCodeReceipt,
-    TransactionAuthorizationOutcomes,
+    receipts_from_block, BasicReceipt, CreateReceipt, Eip6466ReceiptSnapshot, Eip6466SnapshotError,
+    Log, Receipt, ReceiptConstructionError, ReceiptSerializationError, Receipts, SetCodeReceipt,
 };
 pub use provider::{
     CanonicalityStatus, DeterministicProvider, HistoricalAcquisitionError, LookupError, ObjectKind,

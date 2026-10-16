@@ -1,7 +1,7 @@
 use crate::eip6466::{Eip6466ReceiptSnapshot, Eip6466SnapshotError};
 use alloy_consensus::{BlockHeader as _, Header, TxLegacy, TxType};
 use alloy_primitives::{Address, Bytes, Log as ExecutionLog, Signature, TxKind, B256};
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks, MAINNET};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt as StoredReceipt, Transaction as EthereumTransaction,
     TransactionSigned,
@@ -9,7 +9,8 @@ use reth_ethereum_primitives::{
 use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
-    BlockHashReader, BlockReader, ProviderError, ReceiptProvider, TransactionVariant,
+    BlockHashReader, BlockNumReader, BlockReader, ProviderError, ReceiptProvider,
+    TransactionVariant,
 };
 use std::fmt;
 
@@ -104,10 +105,16 @@ impl ProviderSnapshot {
                 .recovered_block(block_hash.into(), TransactionVariant::WithHash)
                 .map_err(HistoricalAcquisitionError::BlockRead)?
                 .ok_or(HistoricalAcquisitionError::BlockUnavailable)?;
-            let canonical_hash = view
-                .block_hash(block.number())
-                .map_err(HistoricalAcquisitionError::CanonicalHashRead)?;
-            let block_status = derive_canonicality(block_hash, canonical_hash);
+            let head =
+                view.best_block_number().map_err(HistoricalAcquisitionError::CanonicalHeadRead)?;
+            let block_status = if block.number() > head {
+                CanonicalityStatus::NonCanonical
+            } else {
+                let canonical_hash = view
+                    .block_hash(block.number())
+                    .map_err(HistoricalAcquisitionError::CanonicalHashRead)?;
+                derive_canonicality(block_hash, canonical_hash)
+            };
             let receipts = view
                 .receipts_by_block(block_hash.into())
                 .map_err(HistoricalAcquisitionError::ReceiptsRead)?
@@ -115,9 +122,8 @@ impl ProviderSnapshot {
             (block, block_status, receipts)
         };
 
-        let eip658_active = provider.chain_spec().is_byzantium_active_at_block(block.number());
         let receipt_snapshot =
-            Eip6466ReceiptSnapshot::from_block(&block, &receipts, eip658_active, None)
+            Eip6466ReceiptSnapshot::from_block(&block, &receipts, provider.chain_spec().as_ref())
                 .map_err(HistoricalAcquisitionError::Snapshot)?;
 
         Ok(Self {
@@ -147,6 +153,10 @@ impl ProviderSnapshot {
 
     pub const fn receipt_snapshot(&self) -> &Eip6466ReceiptSnapshot {
         &self.receipt_snapshot
+    }
+
+    pub fn into_receipt_snapshot(self) -> Eip6466ReceiptSnapshot {
+        self.receipt_snapshot
     }
 
     pub const fn root(&self) -> B256 {
@@ -227,6 +237,7 @@ impl std::error::Error for ProviderBuildError {
 pub enum HistoricalAcquisitionError {
     ConsistentView(ProviderError),
     BlockRead(ProviderError),
+    CanonicalHeadRead(ProviderError),
     CanonicalHashRead(ProviderError),
     ReceiptsRead(ProviderError),
     BlockUnavailable,
@@ -250,7 +261,9 @@ impl HistoricalAcquisitionError {
                 ProviderError::BlockExpired { .. } | ProviderError::ReceiptNotFound(_)
             ),
             Self::Snapshot(error) => matches!(error, Eip6466SnapshotError::MissingData(_)),
-            Self::ConsistentView(_) | Self::CanonicalHashRead(_) => false,
+            Self::ConsistentView(_) | Self::CanonicalHeadRead(_) | Self::CanonicalHashRead(_) => {
+                false
+            }
         }
     }
 }
@@ -262,6 +275,9 @@ impl fmt::Display for HistoricalAcquisitionError {
                 write!(formatter, "consistent provider view failed: {error}")
             }
             Self::BlockRead(error) => write!(formatter, "historical block read failed: {error}"),
+            Self::CanonicalHeadRead(error) => {
+                write!(formatter, "canonical head read failed: {error}")
+            }
             Self::CanonicalHashRead(error) => {
                 write!(formatter, "canonical hash read failed: {error}")
             }
@@ -282,6 +298,7 @@ impl std::error::Error for HistoricalAcquisitionError {
         match self {
             Self::ConsistentView(error) |
             Self::BlockRead(error) |
+            Self::CanonicalHeadRead(error) |
             Self::CanonicalHashRead(error) |
             Self::ReceiptsRead(error) => Some(error),
             Self::Snapshot(error) => Some(error),
@@ -387,13 +404,18 @@ fn build_snapshot(
     let senders = vec![Address::repeat_byte(0x66); transactions.len()];
     let block = RecoveredBlock::try_new_unhashed(
         Block {
-            header: Header { gas_used, gas_limit: gas_used, ..Default::default() },
+            header: Header {
+                number: 4_370_000,
+                gas_used,
+                gas_limit: gas_used,
+                ..Default::default()
+            },
             body: BlockBody { transactions, ..Default::default() },
         },
         senders,
     )
     .map_err(|_| ProviderBuildError::RecoveredBlock)?;
-    let receipt_snapshot = Eip6466ReceiptSnapshot::from_block(&block, &receipts, true, None)
+    let receipt_snapshot = Eip6466ReceiptSnapshot::from_block(&block, &receipts, MAINNET.as_ref())
         .map_err(ProviderBuildError::Snapshot)?;
 
     Ok(ProviderSnapshot {
@@ -409,6 +431,7 @@ fn transaction(nonce: u64) -> TransactionSigned {
     TransactionSigned::new_unhashed(
         EthereumTransaction::Legacy(TxLegacy {
             nonce,
+            gas_limit: 21_000,
             to: TxKind::Call(Address::ZERO),
             ..Default::default()
         }),
@@ -491,7 +514,32 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use crate::{ReceiptConstructionError, Receipts, TreeConstructionError};
-    use std::error::Error;
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_provider::{
+        BlockExecutionOutput, BlockWriter, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+        OriginalValuesKnown, StateWriteConfig, StateWriter,
+    };
+    use std::{error::Error, sync::Arc};
+
+    #[test]
+    fn historical_snapshot_transfers_the_original_receipt_tree_without_reconstruction() {
+        let (provider, block_hash) =
+            test_utils::historical_provider(Some(test_utils::singleton_receipts()));
+        let snapshot =
+            RethRootProvider::new(provider).lookup(block_hash, ObjectKind::Receipts).unwrap();
+        let source_hash = snapshot.block_hash();
+        let status = snapshot.block_status();
+        let context = snapshot.root_context();
+        let root = snapshot.root();
+        let children = snapshot.receipt_snapshot().tree().children().unwrap().as_ptr();
+        let receipts = snapshot.into_receipt_snapshot();
+        assert_eq!(source_hash, block_hash);
+        assert_eq!(status, CanonicalityStatus::Canonical);
+        assert_eq!(context, RootContext::RethExperimentalUnanchored);
+        assert_eq!(receipts.root(), root);
+        assert_eq!(receipts.tree().children().unwrap().as_ptr(), children);
+        assert_eq!(receipts.receipts().len(), 1);
+    }
 
     #[test]
     fn historical_provider_returns_a_coherent_eip_snapshot() {
@@ -662,5 +710,107 @@ mod tests {
             CanonicalityStatus::NonCanonical
         );
         assert_eq!(derive_canonicality(hash, None), CanonicalityStatus::Unknown);
+    }
+
+    #[test]
+    fn historical_canonicality_rejects_reorged_blocks_while_disk_cleanup_is_pending() {
+        let (provider, ancestor) =
+            test_utils::historical_provider(Some(test_utils::singleton_receipts()));
+        let base = provider
+            .recovered_block(ancestor.into(), TransactionVariant::WithHash)
+            .unwrap()
+            .unwrap();
+        let database = provider.database_provider_rw().unwrap();
+        let mut parent = ancestor;
+        let old = (1..=2)
+            .map(|number| {
+                let block = RecoveredBlock::try_new_unhashed(
+                    Block {
+                        header: Header { number, parent_hash: parent, ..base.header().clone() },
+                        body: base.body().clone(),
+                    },
+                    base.senders().to_vec(),
+                )
+                .unwrap();
+                database.insert_block(&block).unwrap();
+                parent = block.hash();
+                block
+            })
+            .collect::<Vec<_>>();
+        database
+            .write_state(
+                &ExecutionOutcome {
+                    first_block: 1,
+                    receipts: vec![test_utils::singleton_receipts(); 2],
+                    ..Default::default()
+                },
+                OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        database.commit().unwrap();
+        let executed = old
+            .iter()
+            .map(|block| {
+                ExecutedBlock::new(
+                    Arc::new(block.clone()),
+                    Arc::new(BlockExecutionOutput {
+                        result: reth_provider::BlockExecutionResult {
+                            receipts: test_utils::singleton_receipts(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                    Default::default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let memory = provider.canonical_in_memory_state();
+        memory.update_chain(NewCanonicalChain::Commit { new: executed.clone() });
+        let captured = provider.consistent_provider().unwrap();
+        let before = ProviderSnapshot::from_reth_historical(&provider, old[1].hash()).unwrap();
+        let root = before.root();
+        let bytes = before.receipt_snapshot().serialized().to_vec();
+        let replacement = RecoveredBlock::try_new_unhashed(
+            Block {
+                header: Header { extra_data: vec![1].into(), ..old[0].header().clone() },
+                body: old[0].body().clone(),
+            },
+            old[0].senders().to_vec(),
+        )
+        .unwrap();
+        let replacement_hash = replacement.hash();
+        memory.update_chain(NewCanonicalChain::Reorg {
+            old: executed.clone(),
+            new: vec![ExecutedBlock::new(
+                Arc::new(replacement),
+                Arc::new(executed[0].execution_outcome().clone()),
+                Default::default(),
+            )],
+        });
+        assert_eq!(captured.best_block_number().unwrap(), 2);
+        assert_eq!(captured.block_hash(1).unwrap(), Some(old[0].hash()));
+        assert_eq!(captured.block_hash(2).unwrap(), Some(old[1].hash()));
+        let current = provider.consistent_provider().unwrap();
+        assert_eq!(current.best_block_number().unwrap(), 1);
+        assert_eq!(current.block_hash(1).unwrap(), Some(replacement_hash));
+        assert_eq!(current.block_hash(2).unwrap(), Some(old[1].hash()));
+        for block in &old {
+            let snapshot = ProviderSnapshot::from_reth_historical(&provider, block.hash()).unwrap();
+            assert_eq!(snapshot.block_status(), CanonicalityStatus::NonCanonical);
+        }
+        assert_eq!(
+            ProviderSnapshot::from_reth_historical(&provider, replacement_hash)
+                .unwrap()
+                .block_status(),
+            CanonicalityStatus::Canonical
+        );
+        assert_eq!(before.block_status(), CanonicalityStatus::Canonical);
+        assert_eq!(before.root(), root);
+        assert_eq!(before.receipt_snapshot().serialized(), bytes.as_slice());
+        let error =
+            HistoricalAcquisitionError::CanonicalHeadRead(ProviderError::InvalidStorageOutput);
+        assert!(!error.is_unavailable());
+        assert!(error.source().unwrap().downcast_ref::<ProviderError>().is_some());
     }
 }

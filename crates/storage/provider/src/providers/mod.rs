@@ -23,7 +23,7 @@ mod blockchain_provider;
 pub use blockchain_provider::{BlockchainProvider, SNAPSHOT_STATE_RETENTION};
 
 mod consistent;
-pub use consistent::ConsistentProvider;
+pub use consistent::{CapturedBlockExecution, ConsistentProvider};
 
 pub(crate) mod rocksdb;
 

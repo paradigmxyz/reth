@@ -11,11 +11,11 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::RecoveredBlockAndExecutionOutput;
+use reth_execution_types::{BlockExecutionResult, RecoveredBlockAndExecutionOutput};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -71,6 +71,25 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let head_block = state.head_state();
         let storage_provider = storage_provider_factory.database_provider_ro()?;
         Ok(Self { storage_provider, head_block, canonical_in_memory_state: state })
+    }
+
+    #[allow(missing_docs)]
+    pub fn execution_source_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<CapturedBlockExecution<ReceiptTy<N>>>> {
+        self.get_in_memory_or_storage_by_block(
+            block_hash.into(),
+            |_| Ok(None),
+            |state| {
+                let block = state.block_ref();
+                Ok(Some(CapturedBlockExecution {
+                    block_hash: state.hash(),
+                    result: block.execution_outcome().result.clone(),
+                    block_access_list: block.bal().map(|bal| bal.as_raw().clone()),
+                }))
+            },
+        )
     }
 
     /// Consumes this consistent view and returns its database provider snapshot.
@@ -404,6 +423,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         fetch_from_db(&self.storage_provider)
     }
+}
+
+#[allow(missing_docs)]
+#[derive(Debug, Clone)]
+pub struct CapturedBlockExecution<R> {
+    pub block_hash: B256,
+    pub result: BlockExecutionResult<R>,
+    pub block_access_list: Option<Bytes>,
 }
 
 impl<N: ProviderNodeTypes> NodePrimitivesProvider for ConsistentProvider<N> {

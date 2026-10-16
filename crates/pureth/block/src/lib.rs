@@ -24,6 +24,14 @@ pub use primitives::{
     ExecutionBlock, ExecutionBody, ExecutionHeader, ExecutionPrimitives, PrimitiveError,
 };
 
+#[cfg(feature = "native-source")]
+mod source;
+#[cfg(feature = "native-source")]
+pub use source::{
+    PayloadSourceError, PayloadSourceInput, PayloadSourceKind, PayloadSourceMetadata,
+    SourcePayloadSnapshot, StateRootStatus,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct GasAmounts {
     pub regular: u64,

@@ -4,6 +4,7 @@ use crate::tree::{
 };
 use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_primitives::{Address, Bytes, Log as ExecutionLog, B256};
+use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::{Block, Receipt as StoredReceipt, TransactionSigned};
 use reth_primitives_traits::RecoveredBlock;
 use ssz::{SszEncoder, BYTES_PER_LENGTH_OFFSET, MAX_LENGTH_VALUE};
@@ -299,12 +300,10 @@ impl Eip6466ReceiptSnapshot {
     pub fn from_block(
         block: &RecoveredBlock<Block>,
         stored_receipts: &[StoredReceipt],
-        eip658_active: bool,
-        authorization_outcomes: Option<&BlockAuthorizationOutcomes>,
+        chain_spec: &impl EthereumHardforks,
     ) -> Result<Self, Eip6466SnapshotError> {
-        let receipts =
-            receipts_from_block(block, stored_receipts, eip658_active, authorization_outcomes)
-                .map_err(Eip6466SnapshotError::from_construction)?;
+        let receipts = receipts_from_block(block, stored_receipts, chain_spec)
+            .map_err(Eip6466SnapshotError::from_construction)?;
 
         Self::build(receipts)
     }
@@ -345,57 +344,21 @@ enum ReceiptKind {
     SetCode,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AuthorizationOutcome {
-    Accepted(Address),
-    Skipped,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TransactionAuthorizationOutcomes {
-    transaction_hash: B256,
-    outcomes: Vec<AuthorizationOutcome>,
-}
-
-impl TransactionAuthorizationOutcomes {
-    pub const fn new(transaction_hash: B256, outcomes: Vec<AuthorizationOutcome>) -> Self {
-        Self { transaction_hash, outcomes }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BlockAuthorizationOutcomes {
-    block_hash: B256,
-    transactions: Vec<Option<TransactionAuthorizationOutcomes>>,
-}
-
-impl BlockAuthorizationOutcomes {
-    pub const fn new(
-        block_hash: B256,
-        transactions: Vec<Option<TransactionAuthorizationOutcomes>>,
-    ) -> Self {
-        Self { block_hash, transactions }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReceiptConstructionError {
     InputCountMismatch { transactions: usize, receipts: usize },
+    SenderCountMismatch { transactions: usize, senders: usize },
     PreEip658Block,
     HeaderGasUsedExceedsLimit { gas_used: u64, gas_limit: u64 },
     TransactionTypeMismatch { index: usize, transaction: TxType, receipt: TxType },
     DecreasingCumulativeGas { index: usize, previous: u64, current: u64 },
     CumulativeGasExceedsBlockLimit { index: usize, cumulative: u64, gas_limit: u64 },
     BlockGasUsedMismatch { header: u64, receipts: u64 },
+    TransactionGasUsedExceedsLimit { index: usize, gas_used: u64, gas_limit: u64 },
     UnsupportedTransaction { tx_type: TxType, is_create: bool },
     MissingAuthorizationList,
+    EmptyAuthorizationList,
     TooManyTopics { actual: usize, max: usize },
-    MissingAuthorizationOutcomes { transaction_hash: B256 },
-    AuthorizationBlockMismatch { expected: B256, actual: B256 },
-    AuthorizationRecordCountMismatch { transactions: usize, records: usize },
-    AuthorizationTransactionMismatch { expected: B256, actual: B256 },
-    AuthorizationOutcomeCountMismatch { authorizations: usize, outcomes: usize },
-    UnexpectedAuthorizationOutcomes { transaction_hash: B256 },
 }
 
 impl fmt::Display for ReceiptConstructionError {
@@ -404,6 +367,10 @@ impl fmt::Display for ReceiptConstructionError {
             Self::InputCountMismatch { transactions, receipts } => write!(
                 formatter,
                 "input count mismatch: {transactions} transactions, {receipts} receipts"
+            ),
+            Self::SenderCountMismatch { transactions, senders } => write!(
+                formatter,
+                "sender count mismatch: {transactions} transactions, {senders} senders"
             ),
             Self::PreEip658Block => {
                 formatter.write_str("pre-EIP-658 receipts do not contain explicit status")
@@ -429,6 +396,10 @@ impl fmt::Display for ReceiptConstructionError {
                 formatter,
                 "block gas used mismatch: header {header}, final receipt cumulative gas {receipts}"
             ),
+            Self::TransactionGasUsedExceedsLimit { index, gas_used, gas_limit } => write!(
+                formatter,
+                "transaction gas used {gas_used} at index {index} exceeds signed limit {gas_limit}"
+            ),
             Self::UnsupportedTransaction { tx_type, is_create } => write!(
                 formatter,
                 "unsupported transaction type and kind: {tx_type:?}, create={is_create}"
@@ -436,33 +407,12 @@ impl fmt::Display for ReceiptConstructionError {
             Self::MissingAuthorizationList => {
                 formatter.write_str("set-code transaction is missing its authorization list")
             }
+            Self::EmptyAuthorizationList => {
+                formatter.write_str("set-code transaction has an empty authorization list")
+            }
             Self::TooManyTopics { actual, max } => {
                 write!(formatter, "log has {actual} topics, maximum is {max}")
             }
-            Self::MissingAuthorizationOutcomes { transaction_hash } => write!(
-                formatter,
-                "authorization outcomes are unavailable for transaction {transaction_hash}"
-            ),
-            Self::AuthorizationBlockMismatch { expected, actual } => write!(
-                formatter,
-                "authorization block mismatch: expected {expected}, actual {actual}"
-            ),
-            Self::AuthorizationRecordCountMismatch { transactions, records } => write!(
-                formatter,
-                "authorization record count mismatch: {transactions} transactions, {records} records"
-            ),
-            Self::AuthorizationTransactionMismatch { expected, actual } => write!(
-                formatter,
-                "authorization transaction mismatch: expected {expected}, actual {actual}"
-            ),
-            Self::AuthorizationOutcomeCountMismatch { authorizations, outcomes } => write!(
-                formatter,
-                "authorization outcome count mismatch: {authorizations} authorizations, {outcomes} outcomes"
-            ),
-            Self::UnexpectedAuthorizationOutcomes { transaction_hash } => write!(
-                formatter,
-                "unexpected authorization outcomes for transaction {transaction_hash}"
-            ),
         }
     }
 }
@@ -473,21 +423,9 @@ impl ReceiptConstructionError {
     fn is_missing_data(&self) -> bool {
         match self {
             Self::InputCountMismatch { transactions, receipts } => receipts < transactions,
-            Self::PreEip658Block |
-            Self::MissingAuthorizationList |
-            Self::MissingAuthorizationOutcomes { .. } => true,
-            Self::HeaderGasUsedExceedsLimit { .. } |
-            Self::TransactionTypeMismatch { .. } |
-            Self::DecreasingCumulativeGas { .. } |
-            Self::CumulativeGasExceedsBlockLimit { .. } |
-            Self::BlockGasUsedMismatch { .. } |
-            Self::UnsupportedTransaction { .. } |
-            Self::TooManyTopics { .. } |
-            Self::AuthorizationBlockMismatch { .. } |
-            Self::AuthorizationRecordCountMismatch { .. } |
-            Self::AuthorizationTransactionMismatch { .. } |
-            Self::AuthorizationOutcomeCountMismatch { .. } |
-            Self::UnexpectedAuthorizationOutcomes { .. } => false,
+            Self::SenderCountMismatch { transactions, senders } => senders < transactions,
+            Self::PreEip658Block | Self::MissingAuthorizationList => true,
+            _ => false,
         }
     }
 }
@@ -498,15 +436,9 @@ pub fn receipt_from_transaction(
     gas_used: u64,
     logs: Vec<Log>,
     status: bool,
-    authorization_outcomes: Option<&TransactionAuthorizationOutcomes>,
 ) -> Result<Receipt, ReceiptConstructionError> {
     let tx_type = transaction.tx_type();
     let kind = classify_receipt(tx_type, transaction.is_create())?;
-    let transaction_hash = *transaction.hash();
-
-    if kind != ReceiptKind::SetCode && authorization_outcomes.is_some() {
-        return Err(ReceiptConstructionError::UnexpectedAuthorizationOutcomes { transaction_hash });
-    }
 
     match kind {
         ReceiptKind::Basic => Ok(Receipt::Basic(BasicReceipt { from_, gas_used, logs, status })),
@@ -526,31 +458,12 @@ pub fn receipt_from_transaction(
                 .authorization_list()
                 .ok_or(ReceiptConstructionError::MissingAuthorizationList)?;
 
-            let outcomes = authorization_outcomes.ok_or(
-                ReceiptConstructionError::MissingAuthorizationOutcomes { transaction_hash },
-            )?;
-
-            if outcomes.transaction_hash != transaction_hash {
-                return Err(ReceiptConstructionError::AuthorizationTransactionMismatch {
-                    expected: transaction_hash,
-                    actual: outcomes.transaction_hash,
-                });
+            if authorizations.is_empty() {
+                return Err(ReceiptConstructionError::EmptyAuthorizationList);
             }
-
-            if outcomes.outcomes.len() != authorizations.len() {
-                return Err(ReceiptConstructionError::AuthorizationOutcomeCountMismatch {
-                    authorizations: authorizations.len(),
-                    outcomes: outcomes.outcomes.len(),
-                });
-            }
-
-            let authorities = outcomes
-                .outcomes
+            let authorities = authorizations
                 .iter()
-                .map(|outcome| match outcome {
-                    AuthorizationOutcome::Accepted(authority) => *authority,
-                    AuthorizationOutcome::Skipped => Address::ZERO,
-                })
+                .map(|authorization| authorization.recover_authority().unwrap_or(Address::ZERO))
                 .collect();
 
             Ok(Receipt::SetCode(SetCodeReceipt { from_, gas_used, logs, status, authorities }))
@@ -561,8 +474,7 @@ pub fn receipt_from_transaction(
 pub fn receipts_from_block(
     block: &RecoveredBlock<Block>,
     stored_receipts: &[StoredReceipt],
-    eip658_active: bool,
-    authorization_outcomes: Option<&BlockAuthorizationOutcomes>,
+    chain_spec: &impl EthereumHardforks,
 ) -> Result<Receipts, ReceiptConstructionError> {
     let transaction_count = block.body().transactions.len();
 
@@ -573,10 +485,18 @@ pub fn receipts_from_block(
         });
     }
 
-    if !eip658_active {
+    if transaction_count != block.senders().len() {
+        return Err(ReceiptConstructionError::SenderCountMismatch {
+            transactions: transaction_count,
+            senders: block.senders().len(),
+        });
+    }
+
+    if !chain_spec.is_byzantium_active_at_block(block.number()) {
         return Err(ReceiptConstructionError::PreEip658Block);
     }
 
+    let independent_block_gas = chain_spec.is_amsterdam_active_at_timestamp(block.timestamp());
     let block_gas_used = block.header().gas_used();
     let block_gas_limit = block.header().gas_limit();
 
@@ -585,24 +505,6 @@ pub fn receipts_from_block(
             gas_used: block_gas_used,
             gas_limit: block_gas_limit,
         });
-    }
-
-    if let Some(outcomes) = authorization_outcomes {
-        let block_hash = block.hash();
-
-        if outcomes.block_hash != block_hash {
-            return Err(ReceiptConstructionError::AuthorizationBlockMismatch {
-                expected: block_hash,
-                actual: outcomes.block_hash,
-            });
-        }
-
-        if outcomes.transactions.len() != transaction_count {
-            return Err(ReceiptConstructionError::AuthorizationRecordCountMismatch {
-                transactions: transaction_count,
-                records: outcomes.transactions.len(),
-            });
-        }
     }
 
     let mut previous_cumulative_gas = 0;
@@ -623,7 +525,7 @@ pub fn receipts_from_block(
 
         let cumulative_gas = stored_receipt.cumulative_gas_used;
 
-        if cumulative_gas > block_gas_limit {
+        if !independent_block_gas && cumulative_gas > block_gas_limit {
             return Err(ReceiptConstructionError::CumulativeGasExceedsBlockLimit {
                 index,
                 cumulative: cumulative_gas,
@@ -639,6 +541,13 @@ pub fn receipts_from_block(
             },
         )?;
 
+        if gas_used > transaction.gas_limit() {
+            return Err(ReceiptConstructionError::TransactionGasUsedExceedsLimit {
+                index,
+                gas_used,
+                gas_limit: transaction.gas_limit(),
+            });
+        }
         previous_cumulative_gas = cumulative_gas;
 
         let logs = stored_receipt.logs.iter().map(Log::try_from).collect::<Result<Vec<_>, _>>()?;
@@ -646,20 +555,18 @@ pub fn receipts_from_block(
         let from_ = transaction.signer();
         let signed_transaction = *transaction.inner();
 
-        let transaction_outcomes =
-            authorization_outcomes.and_then(|outcomes| outcomes.transactions[index].as_ref());
-
         converted.push(receipt_from_transaction(
             signed_transaction,
             from_,
             gas_used,
             logs,
             stored_receipt.success,
-            transaction_outcomes,
         )?);
     }
 
-    if previous_cumulative_gas != block_gas_used {
+    if (!independent_block_gas || transaction_count == 0) &&
+        previous_cumulative_gas != block_gas_used
+    {
         return Err(ReceiptConstructionError::BlockGasUsedMismatch {
             header: block_gas_used,
             receipts: previous_cumulative_gas,

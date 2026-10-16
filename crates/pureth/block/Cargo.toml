@@ -24,6 +24,19 @@ native-primitives = [
     "reth-primitives-traits/reth-codec",
     "reth-primitives-traits/serde",
 ]
+native-source = [
+    "dep:alloy-consensus",
+    "dep:alloy-eips",
+    "dep:reth-chainspec",
+    "dep:reth-consensus",
+    "dep:reth-consensus-common",
+    "dep:reth-ethereum-consensus",
+    "dep:reth-ethereum-primitives",
+    "dep:reth-evm",
+    "dep:reth-execution-types",
+    "dep:reth-primitives-traits",
+    "dep:reth-provider",
+]
 
 [dependencies]
 alloy-eip7928.workspace = true
@@ -37,13 +50,30 @@ ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 alloy-consensus = { workspace = true, optional = true }
 alloy-eips = { workspace = true, optional = true }
+reth-chainspec = { workspace = true, optional = true }
+reth-consensus = { workspace = true, optional = true }
+reth-consensus-common = { workspace = true, optional = true }
+reth-ethereum-consensus = { workspace = true, optional = true }
 reth-ethereum-primitives = { workspace = true, optional = true }
+reth-evm = { workspace = true, optional = true }
+reth-execution-types = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
 reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-genesis.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+reth-chain-state = { workspace = true, features = ["test-utils"] }
+reth-chainspec = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
 reth-db-api.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm.workspace = true
+revm.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true

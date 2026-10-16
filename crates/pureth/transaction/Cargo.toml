@@ -12,8 +12,10 @@ publish = false
 workspace = true
 
 [dependencies]
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+ethereum_ssz.workspace = true
 reth-pureth-ssz.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
