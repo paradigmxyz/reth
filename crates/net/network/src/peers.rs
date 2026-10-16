@@ -681,12 +681,19 @@ impl PeersManager {
 
     /// Called when a _pending_ outbound connection is successful.
     pub(crate) fn on_active_outgoing_established(&mut self, peer_id: PeerId) {
+        let at_capacity = self.connection_info.is_outbound_at_capacity();
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             trace!(target: "net::peers", ?peer_id, "established active outgoing connection");
             self.connection_info.decr_state(peer.state);
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
             peer.mark_connected();
+            if at_capacity && !peer.is_trusted() && !peer.is_static() {
+                self.queued_actions.push_back(PeerAction::Disconnect {
+                    peer_id,
+                    reason: Some(DisconnectReason::TooManyPeers),
+                });
+            }
         }
     }
 
@@ -1360,7 +1367,7 @@ impl ConnectionInfo {
     ///  Returns `true` if there's still capacity to perform an outgoing connection.
     const fn has_out_capacity(&self) -> bool {
         self.num_pending_out < self.config.max_concurrent_outbound_dials &&
-            self.num_outbound < self.config.max_outbound
+            self.num_pending_out < self.config.max_outbound.saturating_sub(self.num_outbound)
     }
 
     /// Returns `true` if all active outbound slots are occupied (ignoring pending dials).
@@ -4018,5 +4025,60 @@ mod tests {
         let peers = PeersManager::new(config);
         assert!(!peers.trusted_peer_ids.contains(&peer_id));
         assert!(!peers.peers.contains_key(&peer_id));
+    }
+    #[tokio::test]
+    async fn test_pending_dials_reserve_outbound_capacity() {
+        for max_outbound in [0, 1, 3] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(max_outbound));
+            let addr = PeerAddr::from_tcp("127.0.0.1:8008".parse().unwrap());
+            for _ in 0..30 {
+                peers.add_peer(PeerId::random(), addr, None);
+            }
+            peers.fill_outbound_slots();
+            let dialed = peers
+                .queued_actions
+                .iter()
+                .filter_map(|action| match action {
+                    PeerAction::Connect { peer_id, .. } => Some(*peer_id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(dialed.len(), max_outbound);
+            peers.queued_actions.clear();
+            for peer in dialed {
+                peers.on_active_outgoing_established(peer);
+                peers.fill_outbound_slots();
+                assert!(peers.queued_actions.is_empty());
+            }
+            assert_eq!(peers.connection_info.num_outbound, max_outbound);
+            assert_eq!(peers.connection_info.num_pending_out, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_surplus_outbound_completion() {
+        for kind in [PeerKind::Basic, PeerKind::Trusted, PeerKind::Static] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(0));
+            let peer = PeerId::random();
+            let addr = PeerAddr::from_tcp("127.0.0.1:8008".parse().unwrap());
+            peers.add_and_connect_kind(peer, kind, addr, None);
+            peers.queued_actions.clear();
+            peers.on_active_outgoing_established(peer);
+            if kind == PeerKind::Basic {
+                assert!(matches!(
+                    peers.queued_actions.pop_front(),
+                    Some(PeerAction::Disconnect {
+                        peer_id,
+                        reason: Some(DisconnectReason::TooManyPeers),
+                    }) if peer_id == peer
+                ));
+            } else {
+                assert!(peers.queued_actions.is_empty());
+            }
+            // The closing session releases the accounting reserved at establishment.
+            peers.on_active_session_gracefully_closed(peer);
+            assert_eq!(peers.connection_info.num_outbound, 0);
+            assert_eq!(peers.connection_info.num_pending_out, 0);
+        }
     }
 }
