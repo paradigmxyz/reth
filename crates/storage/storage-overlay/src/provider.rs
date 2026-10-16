@@ -318,9 +318,6 @@ where
             + StorageSettingsCache,
     {
         let overlay = self.state_trie_overlay(trie_changesets)?;
-        if overlay.skipped_for_reused_sparse_trie() {
-            return Err(ProviderError::UnsupportedProvider)
-        }
         let TrieInputSorted { nodes: input_nodes, state: input_state, mut prefix_sets } = input;
         let overlay_input = overlay.input();
         let mut nodes = Arc::clone(&overlay_input.nodes);
@@ -1271,28 +1268,6 @@ mod tests {
             account_keys(provider.state_trie_overlay(false).unwrap()),
             vec![B256::with_last_byte(3), B256::with_last_byte(4)]
         );
-    }
-
-    #[test]
-    fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
-        let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            factory,
-            manager
-                .overlay_builder(blocks[4].recovered_block().hash())
-                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
-        );
-
-        let provider = state_provider_factory.database_provider_ro().unwrap();
-        assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
-        assert!(matches!(
-            provider.state_root(HashedPostState::default()),
-            Err(ProviderError::UnsupportedProvider)
-        ));
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
     }
 
     #[test]
