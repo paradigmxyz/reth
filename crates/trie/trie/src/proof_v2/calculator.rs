@@ -8,7 +8,7 @@
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
 
-use super::{node::*, target::*, value::*};
+use super::{iter_sub_trie_targets, node::*, value::*, SubTrieTargets, TRACE_TARGET};
 use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
@@ -23,9 +23,6 @@ use reth_trie_common::{
 };
 use std::{cmp::Ordering, sync::Arc};
 use tracing::{error, instrument, trace};
-
-/// Target to use with the `tracing` crate.
-static TRACE_TARGET: &str = "trie::proof_v2";
 
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;

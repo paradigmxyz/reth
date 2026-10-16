@@ -21,6 +21,7 @@ pub use value::*;
 
 mod node;
 mod target;
+pub(crate) use target::*;
 
 #[cfg(feature = "metrics")]
 mod metrics;
@@ -236,11 +237,14 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValue
 }
 
 #[cfg(not(feature = "metrics"))]
-fn instrument_trie<C>(cursor: C, _trie_type: TrieType) -> C {
+const fn instrument_trie<C>(cursor: C, _trie_type: TrieType) -> C {
     cursor
 }
 
 #[cfg(not(feature = "metrics"))]
-fn instrument_hashed<C>(cursor: C, _trie_type: TrieType) -> C {
+const fn instrument_hashed<C>(cursor: C, _trie_type: TrieType) -> C {
     cursor
 }
+
+/// Target to use with the `tracing` crate.
+static TRACE_TARGET: &str = "trie::proof_v2";
