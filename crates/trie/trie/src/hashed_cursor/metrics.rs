@@ -9,6 +9,8 @@ use tracing::trace_span;
 #[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
+use core::ops::Deref;
+#[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
 /// Prometheus metrics for hashed cursor operations.
@@ -66,6 +68,17 @@ impl HashedCursorMetrics {
         self.is_storage_empty_histogram.record(cache.is_storage_empty_count as f64);
         self.overall_duration_seconds.record(cache.total_duration.as_secs_f64());
         cache.reset();
+    }
+
+    /// Wraps a cursor with owned counters that are recorded when the cursor is dropped.
+    pub fn instrument<C>(
+        &self,
+        cursor: C,
+    ) -> InstrumentedHashedCursor<C, HashedCursorMetricsRecorder> {
+        InstrumentedHashedCursor::new(
+            cursor,
+            HashedCursorMetricsRecorder { cache: Default::default(), metrics: self.clone() },
+        )
     }
 }
 
@@ -190,5 +203,35 @@ where
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address)
+    }
+}
+
+/// Owned hashed cursor counters recorded through their metric handles on drop.
+#[cfg(feature = "metrics")]
+#[derive(Debug)]
+pub struct HashedCursorMetricsRecorder {
+    cache: HashedCursorMetricsCache,
+    metrics: HashedCursorMetrics,
+}
+
+#[cfg(feature = "metrics")]
+impl Deref for HashedCursorMetricsRecorder {
+    type Target = HashedCursorMetricsCache;
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl DerefMut for HashedCursorMetricsRecorder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cache
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl Drop for HashedCursorMetricsRecorder {
+    fn drop(&mut self) {
+        self.metrics.record(&mut self.cache);
     }
 }

@@ -27,10 +27,18 @@ pub(crate) use target::*;
 mod metrics;
 
 #[cfg(feature = "metrics")]
-use self::metrics::{instrument_hashed, instrument_trie, HashedCursor, TrieCursor};
+use crate::{
+    hashed_cursor::{HashedCursorMetricsRecorder, InstrumentedHashedCursor},
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorMetricsRecorder},
+};
 
 #[cfg(feature = "metrics")]
 pub use self::metrics::ProofV2Metrics;
+
+#[cfg(feature = "metrics")]
+type TrieCursor<C> = InstrumentedTrieCursor<C, TrieCursorMetricsRecorder>;
+#[cfg(feature = "metrics")]
+type HashedCursor<C> = InstrumentedHashedCursor<C, HashedCursorMetricsRecorder>;
 
 #[cfg(not(feature = "metrics"))]
 type TrieCursor<C> = C;
@@ -95,8 +103,8 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                 let prefix_sets = std::mem::take(&mut self.prefix_sets.storage_prefix_sets);
                 slot.insert(Arc::new(Mutex::new(CachedStorage {
                     calculator: StorageProofCalculator::new_storage(
-                        instrument_trie(trie, TrieType::Storage, &self.metrics),
-                        instrument_hashed(hashed, TrieType::Storage, &self.metrics),
+                        self.metrics.instrument_trie(trie, TrieType::Storage),
+                        self.metrics.instrument_hashed(hashed, TrieType::Storage),
                     ),
                     prefix_sets,
                     address: None,
@@ -113,8 +121,8 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                     let hashed = factories.hashed.hashed_account_cursor()?;
                     slot.insert(
                         ProofCalculator::new(
-                            instrument_trie(trie, TrieType::State, &self.metrics),
-                            instrument_hashed(hashed, TrieType::State, &self.metrics),
+                            self.metrics.instrument_trie(trie, TrieType::State),
+                            self.metrics.instrument_hashed(hashed, TrieType::State),
                         )
                         .with_prefix_set(std::mem::take(&mut self.prefix_sets.account_prefix_set)),
                     )
@@ -198,13 +206,14 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> CachedStorage
 }
 
 #[cfg(not(feature = "metrics"))]
-const fn instrument_trie<C>(cursor: C, _trie_type: TrieType, _metrics: &ProofV2Metrics) -> C {
-    cursor
-}
+impl ProofV2Metrics {
+    const fn instrument_trie<C>(&self, cursor: C, _trie_type: TrieType) -> C {
+        cursor
+    }
 
-#[cfg(not(feature = "metrics"))]
-const fn instrument_hashed<C>(cursor: C, _trie_type: TrieType, _metrics: &ProofV2Metrics) -> C {
-    cursor
+    const fn instrument_hashed<C>(&self, cursor: C, _trie_type: TrieType) -> C {
+        cursor
+    }
 }
 
 /// Target to use with the `tracing` crate.
