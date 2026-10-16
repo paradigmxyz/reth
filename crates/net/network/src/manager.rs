@@ -1208,3 +1208,76 @@ struct NetworkManagerPollDurations {
     acc_network_handle: Duration,
     acc_swarm: Duration,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+    use futures::{future::poll_fn, task::noop_waker_ref};
+    use reth_network_types::{PeerAddr, PeerKind, SessionLimits};
+    use reth_storage_api::noop::NoopProvider;
+    use reth_tasks::Runtime;
+
+    #[tokio::test]
+    async fn rejected_dials_release_slots_and_refill() {
+        for limit in [Some(0), Some(1), None] {
+            let mut networks = Vec::new();
+            for index in 0..3 {
+                let sessions = SessionsConfig {
+                    limits: SessionLimits {
+                        max_pending_outbound: if index == 0 { limit } else { None },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
+                    SecretKey::new(&mut rand_08::thread_rng()),
+                    Runtime::test(),
+                )
+                .disable_discovery()
+                .listener_addr("127.0.0.1:0".parse().unwrap())
+                .peer_config(PeersConfig::test().with_max_outbound(2))
+                .sessions_config(sessions)
+                .build(NoopProvider::default());
+                networks.push(NetworkManager::new(config).await.unwrap());
+            }
+            let (local, remotes) = networks.split_first_mut().unwrap();
+            for remote in remotes.iter() {
+                local.swarm.peers_mut().add_and_connect_kind(
+                    *remote.peer_id(),
+                    PeerKind::Basic,
+                    PeerAddr::from_tcp(remote.swarm.listener().local_address()),
+                    None,
+                );
+            }
+            let mut cx = Context::from_waker(noop_waker_ref());
+            assert!(Pin::new(&mut *local).poll(&mut cx).is_pending());
+            assert_eq!(
+                local.swarm.peers().num_pending_outbound_connections(),
+                limit.map_or(2, |limit| limit as usize),
+            );
+            assert_eq!(local.swarm.peers().num_outbound_connections(), 0);
+            if limit == Some(0) {
+                continue
+            }
+
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                poll_fn(|cx| {
+                    assert!(Pin::new(&mut *local).poll(cx).is_pending());
+                    for remote in remotes.iter_mut() {
+                        assert!(Pin::new(remote).poll(cx).is_pending());
+                    }
+                    if local.swarm.peers().num_outbound_connections() == 2 {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                }),
+            )
+            .await
+            .expect("rejected peers must be retried after session capacity becomes available");
+            assert_eq!(local.swarm.peers().num_pending_outbound_connections(), 0);
+        }
+    }
+}

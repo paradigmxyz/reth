@@ -342,46 +342,57 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Starts a new pending session from the local node to the given remote node.
+    /// Skips the dial if the pending outbound session limit is reached.
     pub fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_peer_id: PeerId) {
-        // The error can be dropped because no dial will be made if it would exceed the limit
-        if self.counter.ensure_pending_outbound().is_ok() {
-            let session_id = self.next_id();
-            let (disconnect_tx, disconnect_rx) = oneshot::channel();
-            let pending_events = self.pending_sessions_tx.clone();
-            let secret_key = self.secret_key;
-            let hello_message = self.hello_message.clone();
-            let fork_filter = self.fork_filter.clone();
-            let status = self.status;
-            let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
-            self.spawn(pending_session_with_timeout(
-                self.pending_session_timeout,
+        if let Err(err) = self.try_dial_outbound(remote_addr, remote_peer_id) {
+            trace!(target: "net", %err, "Outgoing connection rejected, capacity already reached.");
+        }
+    }
+
+    /// Starts an outbound session or reports that no dial was made due to the session limit.
+    pub(crate) fn try_dial_outbound(
+        &mut self,
+        remote_addr: SocketAddr,
+        remote_peer_id: PeerId,
+    ) -> Result<(), ExceedsSessionLimit> {
+        self.counter.ensure_pending_outbound()?;
+        let session_id = self.next_id();
+        let (disconnect_tx, disconnect_rx) = oneshot::channel();
+        let pending_events = self.pending_sessions_tx.clone();
+        let secret_key = self.secret_key;
+        let hello_message = self.hello_message.clone();
+        let fork_filter = self.fork_filter.clone();
+        let status = self.status;
+        let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
+        self.spawn(pending_session_with_timeout(
+            self.pending_session_timeout,
+            session_id,
+            remote_addr,
+            Direction::Outgoing(remote_peer_id),
+            pending_events.clone(),
+            start_pending_outbound_session(
+                self.handshake.clone(),
+                self.eth_max_message_size,
+                disconnect_rx,
+                pending_events,
                 session_id,
                 remote_addr,
-                Direction::Outgoing(remote_peer_id),
-                pending_events.clone(),
-                start_pending_outbound_session(
-                    self.handshake.clone(),
-                    self.eth_max_message_size,
-                    disconnect_rx,
-                    pending_events,
-                    session_id,
-                    remote_addr,
-                    remote_peer_id,
-                    secret_key,
-                    hello_message,
-                    status,
-                    fork_filter,
-                    extra_handlers,
-                ),
-            ));
+                remote_peer_id,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                extra_handlers,
+            ),
+        ));
 
-            let handle = PendingSessionHandle {
-                disconnect_tx: Some(disconnect_tx),
-                direction: Direction::Outgoing(remote_peer_id),
-            };
-            self.pending_sessions.insert(session_id, handle);
-            self.counter.inc_pending_outbound();
-        }
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Outgoing(remote_peer_id),
+        };
+        self.pending_sessions.insert(session_id, handle);
+        self.counter.inc_pending_outbound();
+        Ok(())
     }
 
     /// Initiates a shutdown of the channel.
