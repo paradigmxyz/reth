@@ -693,14 +693,14 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::{address, B256};
+    use alloy_primitives::{address, b256, B256};
     use clap::{Args, Parser};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
     };
-    use std::str::FromStr;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -717,8 +717,7 @@ mod tests {
                 "\"0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac\""
             )
             .unwrap(),
-            B256::from_str("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
-                .unwrap()
+            b256!("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
         );
     }
 
@@ -736,10 +735,7 @@ mod tests {
             table_key::<StoragesHistory>(r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
             StorageShardedKey::new(
                 address!("0x01957911244e546ce519fbac6f798958fafadb41"),
-                B256::from_str(
-                    "0x0000000000000000000000000000000000000000000000000000000000000003"
-                )
-                .unwrap(),
+                B256::with_last_byte(3),
                 18446744073709551615
             )
         );

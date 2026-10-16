@@ -2,7 +2,7 @@
 
 use crate::{assert::assert_equal, Error};
 use alloy_consensus::Header as RethHeader;
-use alloy_eips::eip4895::Withdrawals;
+use alloy_eips::{eip4895::Withdrawals, eip7840::BlobParams};
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, map::HashMap, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
@@ -344,7 +344,7 @@ impl ForkSpec {
     fn to_chain_spec_inner(self) -> ChainSpec {
         let spec_builder = ChainSpecBuilder::mainnet().reset();
 
-        match self {
+        let mut spec = match self {
             Self::Frontier => spec_builder.frontier_activated(),
             Self::FrontierToHomesteadAt5 => spec_builder
                 .frontier_activated()
@@ -394,7 +394,13 @@ impl ForkSpec {
             Self::Osaka => spec_builder.osaka_activated(),
             Self::Amsterdam => spec_builder.amsterdam_activated(),
         }
-        .build()
+        .build();
+
+        // Amsterdam follows BPO1 and BPO2, so its fixtures use BPO2's blob parameters.
+        if self == Self::Amsterdam {
+            spec.blob_params = spec.blob_params.with_scheduled([(0, BlobParams::bpo2())]);
+        }
+        spec
     }
 }
 

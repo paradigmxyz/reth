@@ -51,13 +51,13 @@ mod tests {
 
     #[test]
     fn test_named_id() {
-        let chain = Chain::from_named(NamedChain::Holesky);
+        let chain = Chain::holesky();
         assert_eq!(chain.id(), 17000);
     }
 
     #[test]
     fn test_display_named_chain() {
-        let chain = Chain::from_named(NamedChain::Mainnet);
+        let chain = Chain::mainnet();
         assert_eq!(format!("{chain}"), "mainnet");
     }
 
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_into_u256() {
-        let chain = Chain::from_named(NamedChain::Holesky);
+        let chain = Chain::holesky();
         let n: U256 = U256::from(chain.id());
         let expected = U256::from(17000);
 
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_from_str_named_chain() {
         let result = Chain::from_str("mainnet");
-        let expected = Chain::from_named(NamedChain::Mainnet);
+        let expected = Chain::mainnet();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected);
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn test_default() {
         let default = Chain::default();
-        let expected = Chain::from_named(NamedChain::Mainnet);
+        let expected = Chain::mainnet();
 
         assert_eq!(default, expected);
     }
@@ -128,14 +128,14 @@ mod tests {
     #[test]
     fn test_dns_main_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.mainnet.ethdisco.net";
-        let chain: Chain = NamedChain::Mainnet.into();
+        let chain = Chain::mainnet();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 
     #[test]
     fn test_dns_holesky_network() {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
-        let chain: Chain = NamedChain::Holesky.into();
+        let chain = Chain::holesky();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
     }
 

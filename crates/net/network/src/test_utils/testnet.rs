@@ -14,6 +14,7 @@ use crate::{
     },
     NetworkConfigBuilder, NetworkHandle, NetworkManager, PeersConfig,
 };
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
@@ -111,7 +112,7 @@ impl Testnet<NoopProvider, TestPool> {
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: BlockReader + HeaderProvider + Clone + 'static,
+    C: BlockReader + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Return a mutable slice of all peers.
@@ -184,12 +185,14 @@ where
     ) -> Testnet<C, EthTransactionPool<C, InMemoryBlobStore, EthEvmConfig>> {
         self.map_pool(|peer| {
             let blob_store = InMemoryBlobStore::default();
-            let validator = TransactionValidationTaskExecutor::eth(
+            // Test peers usually sit on mainnet's genesis, whose 5,000 gas limit would reject
+            // every transaction.
+            let validator = TransactionValidationTaskExecutor::eth_builder(
                 peer.client.clone(),
                 EthEvmConfig::mainnet(),
-                blob_store.clone(),
-                Runtime::test(),
-            );
+            )
+            .set_block_gas_limit(ETHEREUM_BLOCK_GAS_LIMIT_30M)
+            .build_with_tasks(Runtime::test(), blob_store.clone());
             let pool = EthTransactionPool::eth_pool(validator, blob_store, Default::default());
             peer.map_transactions_manager(pool, tx_manager_config.clone(), policy)
         })
@@ -325,7 +328,7 @@ pub struct Peer<C, Pool = TestPool> {
 
 impl<C, Pool> Peer<C, Pool>
 where
-    C: BlockReader + HeaderProvider + Clone + 'static,
+    C: BlockReader + Clone + 'static,
     Pool: TransactionPool,
 {
     /// Returns the number of connected peers.
@@ -675,8 +678,7 @@ pub trait TestnetProvider:
         Block = reth_ethereum_primitives::Block,
         Receipt = reth_ethereum_primitives::Receipt,
         Header = alloy_consensus::Header,
-    > + HeaderProvider
-    + BalProvider
+    > + BalProvider
     + StateProviderFactory
     + StateRangeProviderFactory
     + Unpin
@@ -689,8 +691,7 @@ impl<T> TestnetProvider for T where
             Block = reth_ethereum_primitives::Block,
             Receipt = reth_ethereum_primitives::Receipt,
             Header = alloy_consensus::Header,
-        > + HeaderProvider
-        + BalProvider
+        > + BalProvider
         + StateProviderFactory
         + StateRangeProviderFactory
         + Unpin

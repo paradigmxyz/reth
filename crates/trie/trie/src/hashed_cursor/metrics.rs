@@ -16,8 +16,8 @@ use reth_metrics::metrics::{self, Histogram};
 #[cfg(feature = "metrics")]
 #[derive(Clone, Debug)]
 pub struct HashedCursorMetrics {
-    /// Histogram tracking overall time spent in database operations
-    overall_duration: Histogram,
+    /// Histogram tracking overall time spent in database operations, in seconds.
+    overall_duration_seconds: Histogram,
     /// Histogram for `next()` operations
     next_histogram: Histogram,
     /// Histogram for `seek()` operations
@@ -33,8 +33,8 @@ impl HashedCursorMetrics {
         let trie_type_str = trie_type.as_str();
 
         Self {
-            overall_duration: metrics::histogram!(
-                "trie.hashed_cursor.overall_duration",
+            overall_duration_seconds: metrics::histogram!(
+                "trie.hashed_cursor.overall_duration_seconds",
                 "type" => trie_type_str
             ),
             next_histogram: metrics::histogram!(
@@ -59,11 +59,11 @@ impl HashedCursorMetrics {
     ///
     /// This method adds the current counter values from the cache to the Prometheus metrics
     /// and then resets all cache counters to zero.
-    pub fn record(&mut self, cache: &mut HashedCursorMetricsCache) {
+    pub fn record(&self, cache: &mut HashedCursorMetricsCache) {
         self.next_histogram.record(cache.next_count as f64);
         self.seek_histogram.record(cache.seek_count as f64);
         self.is_storage_empty_histogram.record(cache.is_storage_empty_count as f64);
-        self.overall_duration.record(cache.total_duration.as_secs_f64());
+        self.overall_duration_seconds.record(cache.total_duration.as_secs_f64());
         cache.reset();
     }
 }
@@ -114,7 +114,7 @@ impl HashedCursorMetricsCache {
     /// Record the span for metrics.
     pub fn record_span(&self, name: &'static str) {
         let _span = trace_span!(
-            target: "trie::trie_cursor",
+            target: "trie::hashed_cursor",
             "Hashed cursor metrics",
             name,
             next_count = self.next_count,

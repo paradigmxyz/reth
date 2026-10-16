@@ -171,7 +171,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         &self,
     ) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
     where
-        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
+        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());

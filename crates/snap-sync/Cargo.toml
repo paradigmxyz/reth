@@ -19,7 +19,8 @@ reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits = { workspace = true, features = ["eip7928"] }
-reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-prune-types.workspace = true
+reth-storage-api = { workspace = true, features = ["db-api", "std"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks.workspace = true
@@ -27,7 +28,7 @@ reth-trie-common.workspace = true
 
 # alloy
 alloy-eip7928.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
 
 # revm

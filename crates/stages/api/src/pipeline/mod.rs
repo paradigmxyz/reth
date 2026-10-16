@@ -758,7 +758,7 @@ mod tests {
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             // No execution is queued for B, so running it would panic on the empty script.
             .add_stage(TestStage::new(StageId::Other("B")))
@@ -801,12 +801,12 @@ mod tests {
         let provider_factory = create_test_provider_factory();
 
         let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }));
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(20))));
         let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
         let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
 
         let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }));
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))));
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
@@ -844,7 +844,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(20)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -861,7 +861,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
             ]
         );
@@ -879,19 +879,19 @@ mod tests {
         let provider_factory = create_test_provider_factory();
 
         let stage_a = TestStage::new(StageId::Other("A"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(100))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_a, post_execute_commit_counter_a) = stage_a.with_post_execute_commit_counter();
         let (stage_a, post_unwind_commit_counter_a) = stage_a.with_post_unwind_commit_counter();
 
         let stage_b = TestStage::new(StageId::Other("B"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
         let stage_c = TestStage::new(StageId::Other("C"))
-            .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(20), done: true }))
+            .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(20))))
             .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(1) }));
         let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
         let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
@@ -936,7 +936,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 3 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(100)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
@@ -953,7 +953,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 3 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
@@ -970,7 +970,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 3, total: 3 },
                     stage_id: StageId::Other("C"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(20), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(20)),
                 },
                 // Unwinding
                 PipelineEvent::Unwind {
@@ -1030,12 +1030,12 @@ mod tests {
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(100))))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(50) })),
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(
@@ -1073,7 +1073,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(100), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(100)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -1090,7 +1090,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 // Unwinding
                 // Nothing to unwind in stage "B"
@@ -1130,9 +1130,9 @@ mod tests {
         let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10))))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .add_stage(
                 TestStage::new(StageId::Other("B"))
@@ -1145,7 +1145,7 @@ mod tests {
                         error: BlockErrorKind::Validation(ConsensusError::BaseFeeMissing),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(
@@ -1178,7 +1178,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -1220,7 +1220,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 1, total: 2 },
                     stage_id: StageId::Other("A"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
                 PipelineEvent::Prepare {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
@@ -1237,7 +1237,7 @@ mod tests {
                 PipelineEvent::Ran {
                     pipeline_stages_progress: PipelineStagesProgress { current: 2, total: 2 },
                     stage_id: StageId::Other("B"),
-                    result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
+                    result: ExecOutput::done(StageCheckpoint::new(10)),
                 },
             ]
         );
@@ -1252,7 +1252,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
-                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+                    .add_exec(Ok(ExecOutput::done(StageCheckpoint::new(10)))),
             )
             .with_max_block(10)
             .build(

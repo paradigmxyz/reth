@@ -265,21 +265,13 @@ fn holesky_deposit_contract_proof() {
     let factory = create_test_provider_factory();
     let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
 
-    let target = address!("0x4242424242424242424242424242424242424242");
+    let target = Address::repeat_byte(0x42);
     // existent
-    let slot_22 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022")
-            .unwrap();
-    let slot_23 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000023")
-            .unwrap();
-    let slot_24 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000024")
-            .unwrap();
+    let slot_22 = B256::with_last_byte(0x22);
+    let slot_23 = B256::with_last_byte(0x23);
+    let slot_24 = B256::with_last_byte(0x24);
     // non-existent
-    let slot_100 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000100")
-            .unwrap();
+    let slot_100 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
     let slots = Vec::from([slot_22, slot_23, slot_24, slot_100]);
 
     // `cast proof 0x4242424242424242424242424242424242424242 0x22 0x23 0x24 0x100 --block 0`
@@ -363,7 +355,7 @@ fn extension_only_genesis_account_proof() {
     let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x82, 0xaa]);
     let mut spec = ChainSpec::default();
     spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
-    spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::from(1);
+    spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::ONE;
     let expected_root =
         reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
     let factory = create_test_provider_factory();
@@ -407,7 +399,7 @@ fn extension_only_genesis_account_proof() {
             assert_eq!(restored.verify(root), Ok(()));
 
             let mut tampered = proof.into_eip1186_response(Vec::new());
-            tampered.balance = U256::from(1);
+            tampered.balance = U256::ONE;
             assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
         }
 

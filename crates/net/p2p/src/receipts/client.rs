@@ -12,10 +12,14 @@ pub type ReceiptsFut<R = reth_ethereum_primitives::Receipt> =
 
 /// Response from a receipts request.
 ///
-/// **Note for [`ReceiptsClient`] callers:** the network layer handles eth/70
-/// continuation rounds internally, so `last_block_incomplete` is always `false`
-/// by the time this response reaches a [`ReceiptsClient`] consumer. The field
-/// exists for internal use by the fetcher during multi-round assembly.
+/// Eth/70 responses may contain an incomplete last block, indicated by
+/// [`last_block_incomplete`](Self::last_block_incomplete). The network layer forwards this flag
+/// without fetching the remaining receipts.
+///
+/// [`ReceiptsClient`] does not expose a receipt offset. Resuming an incomplete block requires a
+/// lower-level eth/70 [`GetReceipts70`](reth_eth_wire_types::GetReceipts70) request with that block
+/// first in `block_hashes` and `first_block_receipt_index` set to the number of receipts already
+/// received for it. Responses from eth/69 and older peers always set this flag to `false`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptsResponse<R> {
     /// Receipts grouped by block, in the same order as the requested hashes.
@@ -23,9 +27,8 @@ pub struct ReceiptsResponse<R> {
     /// When `true`, the **last** block in [`receipts`](Self::receipts) was
     /// truncated by the remote peer (eth/70 `Receipts70.last_block_incomplete`).
     ///
-    /// This is used internally by the fetcher to drive continuation rounds.
-    /// Responses surfaced through [`ReceiptsClient`] always have this set to
-    /// `false`.
+    /// The remaining receipts of that block have to be requested separately. Responses from
+    /// eth/69 and older peers always have this set to `false`.
     pub last_block_incomplete: bool,
 }
 

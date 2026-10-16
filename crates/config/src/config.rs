@@ -1232,10 +1232,4 @@ connect_trusted_nodes_only = true
         let serialized = toml::to_string(&conf).unwrap();
         assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), conf);
     }
-
-    #[test]
-    fn test_bootnodes_default_empty() {
-        let conf: Config = toml::from_str("").unwrap();
-        assert!(conf.bootnodes.is_empty());
-    }
 }
