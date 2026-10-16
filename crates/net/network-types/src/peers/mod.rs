@@ -39,6 +39,9 @@ pub struct Peer {
     /// Counts number of times the peer was backed off due to a severe
     /// [`BackoffKind`](crate::BackoffKind).
     pub severe_backoff_counter: u8,
+    /// Whether `addr` is only an inbound source address, not a known listening address.
+    /// Cleared when discovery, resolution, or an explicit request supplies a listening address.
+    pub inbound_only: bool,
 }
 
 // === impl Peer ===
@@ -87,6 +90,7 @@ impl Peer {
             kind: Default::default(),
             backed_off: false,
             severe_backoff_counter: 0,
+            inbound_only: false,
         }
     }
 
