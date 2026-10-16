@@ -58,6 +58,13 @@ pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 /// The default maximum number of total storage slots for `eth_getStorageValues`.
 pub const DEFAULT_MAX_STORAGE_VALUES_SLOTS: usize = 1024;
 
+/// The default maximum number of storage slots (and, for multi-proofs, targets) accepted by a
+/// single `eth_getProof` or multi-proof request.
+///
+/// Bounds the work a request holds a proof permit for, since proof node selection scales with
+/// the number of requested slots.
+pub const DEFAULT_MAX_PROOF_SLOTS: usize = 1024;
+
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
