@@ -6,6 +6,7 @@
 
 use crate::metrics::WorkerThreadMetrics;
 use dashmap::DashMap;
+use tracing::error;
 use std::{
     panic::AssertUnwindSafe,
     sync::{
@@ -18,6 +19,17 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
+
+/// Extracts a displayable message from a panic payload without assuming the payload is `'static`.
+fn panic_payload(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
 
 /// A single-thread worker that processes closures sequentially on a dedicated OS thread.
 struct WorkerThread {
@@ -39,7 +51,20 @@ impl WorkerThread {
             .name(name.to_string())
             .spawn(move || {
                 while let Some(task) = rx.blocking_recv() {
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
+                    // A task that panics must not take the worker thread down: the worker
+                    // is shared by name, and killing it would drop every queued task and
+                    // strand their receivers. But the panic must not be swallowed silently
+                    // either: a task that unwinds before publishing its result leaves waiters
+                    // blocked on a value that will never arrive (e.g. OnceLock::wait). Surface
+                    // the panic with the worker name so it is attributable and observable.
+                    if let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(task)) {
+                        error!(
+                            target: "tasks::worker",
+                            worker = name,
+                            panic = %panic_payload(payload.as_ref()),
+                            "task panicked on named worker; waiters on its result will not resolve"
+                        );
+                    }
                 }
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
@@ -303,6 +328,23 @@ mod tests {
 
         let third = map.try_spawn_on("busy-worker", || 3).expect("worker should be idle");
         assert_eq!(third.await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn worker_map_panicking_task_does_not_kill_worker() {
+        let map = WorkerMap::new();
+
+        // First task panics. Its receiver will never resolve.
+        let _panicked_rx = map.spawn_on("panic-worker", || -> u64 {
+            panic!("boom: deferred computation failed");
+        });
+
+        // Give the worker a moment to run (and survive) the panicking task.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // The same named worker must still be alive and process new tasks.
+        let after = map.spawn_on("panic-worker", || 7u64).await.unwrap();
+        assert_eq!(after, 7, "worker should keep processing tasks after a panic");
     }
 
     #[test]
