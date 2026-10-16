@@ -4,7 +4,6 @@ use core::ops::DerefMut;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
-use tracing::trace_span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -114,30 +113,6 @@ impl HashedCursorMetricsCache {
         self.is_storage_empty_count = 0;
         self.total_duration = Duration::ZERO;
     }
-
-    /// Extend this cache by adding the counts from another cache.
-    ///
-    /// This accumulates the counter values from `other` into this cache.
-    pub fn extend(&mut self, other: &Self) {
-        self.next_count += other.next_count;
-        self.seek_count += other.seek_count;
-        self.is_storage_empty_count += other.is_storage_empty_count;
-        self.total_duration += other.total_duration;
-    }
-
-    /// Record the span for metrics.
-    pub fn record_span(&self, name: &'static str) {
-        let _span = trace_span!(
-            target: "trie::hashed_cursor",
-            "Hashed cursor metrics",
-            name,
-            next_count = self.next_count,
-            seek_count = self.seek_count,
-            is_storage_empty_count = self.is_storage_empty_count,
-            total_duration = self.total_duration.as_secs_f64(),
-        )
-        .entered();
-    }
 }
 
 /// A wrapper around a [`HashedCursor`] that tracks metrics for cursor operations.
@@ -153,8 +128,10 @@ pub struct InstrumentedHashedCursor<C, M> {
     metrics: M,
 }
 
-impl<C, M> InstrumentedHashedCursor<C, M> {
+impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> InstrumentedHashedCursor<C, M> {
     /// Wraps a cursor with owned or borrowed metrics counters.
+    ///
+    /// Counters accumulate in `metrics`; recording them is the responsibility of its owner.
     pub const fn new(cursor: C, metrics: M) -> Self {
         Self { cursor, metrics }
     }

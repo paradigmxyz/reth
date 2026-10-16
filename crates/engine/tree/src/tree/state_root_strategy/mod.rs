@@ -67,9 +67,9 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateRootProvider,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProofProvider, StateRootProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
@@ -536,7 +536,7 @@ impl DefaultStateRootStrategy {
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: StateProvider> + Clone + Send + Sync + 'static,
+        F: DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -838,7 +838,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory + Clone + 'static,
     P::Provider: BlockNumReader
-        + HistoryReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader

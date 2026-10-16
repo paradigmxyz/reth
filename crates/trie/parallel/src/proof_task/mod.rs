@@ -30,9 +30,7 @@ use crate::error::StateRootTaskError;
 use alloy_primitives::B256;
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_primitives_traits::FastInstant as Instant;
-use reth_provider::{
-    DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider, StateProvider,
-};
+use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult, StateProofProvider};
 use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{DecodedMultiProofV2, MultiProofTargetsV2, ProofV2Target};
 use std::{
@@ -130,7 +128,8 @@ impl ProofWorkerHandle {
     ///
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
-    /// - `task_ctx`: Shared context with database view and prefix sets
+    /// - `task_ctx`: Shared context with the factory of providers that serve the proofs. Workers
+    ///   request proofs with exact masks, as needed to produce trie updates from them.
     /// - `worker_counts`: How many workers of each pool to spawn for this block, with a minimum of
     ///   one worker of each kind
     /// - `metrics`: Idle-time metric handles shared across blocks (with the metrics feature).
@@ -147,7 +146,8 @@ impl ProofWorkerHandle {
         #[cfg(feature = "metrics")] metrics: ProofWorkerIdleMetrics,
     ) -> Self
     where
-        Factory: DatabaseProviderROFactory<Provider: StateProvider> + Clone + Send + Sync + 'static,
+        Factory:
+            DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
     {
         let (result_tx, result_rx) = unbounded();
         let (storage_work_tx, storage_work_rx) = unbounded();
@@ -308,7 +308,7 @@ impl ProofWorkerCounts {
     }
 }
 
-/// Data used for initializing cursor factories that is shared across all proof worker instances.
+/// Data used for opening proof providers that is shared across all proof worker instances.
 #[derive(Clone, Debug)]
 pub struct ProofTaskCtx<Factory> {
     /// The factory for creating state providers.
@@ -488,7 +488,7 @@ impl<Factory, J> ProofWorker<Factory, J> {
 
 impl<Factory> ProofWorker<Factory, StorageProofJob>
 where
-    Factory: DatabaseProviderROFactory<Provider: StateProvider>,
+    Factory: DatabaseProviderROFactory<Provider: StateProofProvider>,
 {
     /// Opens a database transaction and serves storage proof jobs until the handle is dropped.
     fn run(&self, worker_id: usize) -> ProviderResult<()> {
@@ -548,7 +548,7 @@ where
 
 impl<Factory> ProofWorker<Factory, AccountProofJob>
 where
-    Factory: DatabaseProviderROFactory<Provider: StateProvider>,
+    Factory: DatabaseProviderROFactory<Provider: StateProofProvider>,
 {
     /// Opens a database transaction and serves account proof jobs until the handle is dropped.
     fn run(&self, worker_id: usize) -> ProviderResult<()> {
