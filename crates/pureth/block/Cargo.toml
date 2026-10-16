@@ -11,6 +11,39 @@ description = "Composed execution block commitments"
 [lints]
 workspace = true
 
+[features]
+native-primitives = [
+    "dep:alloy-consensus",
+    "dep:alloy-eips",
+    "dep:reth-codecs",
+    "dep:reth-ethereum-primitives",
+    "dep:reth-primitives-traits",
+    "dep:serde",
+    "dep:thiserror",
+    "alloy-consensus/serde",
+    "reth-primitives-traits/reth-codec",
+    "reth-primitives-traits/serde",
+]
+
 [dependencies]
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+pureth-withdrawal-root.workspace = true
+reth-pureth-receipt.workspace = true
 reth-pureth-ssz.workspace = true
+reth-pureth-transaction.workspace = true
+ethereum_ssz.workspace = true
+ethereum_ssz_derive.workspace = true
+alloy-consensus = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true }
+reth-ethereum-primitives = { workspace = true, optional = true }
+reth-primitives-traits = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
+serde = { workspace = true, optional = true, features = ["derive"] }
+thiserror = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-db-api.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+serde_json.workspace = true

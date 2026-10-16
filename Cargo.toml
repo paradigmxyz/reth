@@ -323,6 +323,7 @@ incremental = false
 
 [workspace.dependencies]
 pureth-withdrawal-root = { path = "crates/pureth/withdrawal-root" }
+reth-pureth-block = { path = "crates/pureth/block" }
 # reth
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-chain-state = { path = "crates/chain-state" }

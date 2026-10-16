@@ -10061,8 +10061,25 @@ dependencies = [
 name = "reth-pureth-block"
 version = "2.7.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eip7928",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "pureth-withdrawal-root",
+ "reth-codecs",
+ "reth-db-api",
+ "reth-ethereum-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-pureth-receipt",
  "reth-pureth-ssz",
+ "reth-pureth-transaction",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
