@@ -824,6 +824,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             SwarmEvent::IncomingTcpConnection { remote_addr, session_id } => {
                 trace!(target: "net", ?session_id, ?remote_addr, "Incoming connection");
                 self.metrics.total_incoming_connections.increment(1);
+                self.update_pending_connection_metrics();
                 self.metrics
                     .incoming_connections
                     .set(self.swarm.peers().num_inbound_connections() as f64);
@@ -868,6 +869,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 }
 
                 self.update_active_connection_metrics();
+                self.update_pending_connection_metrics();
 
                 let peer_kind = self
                     .swarm
@@ -967,6 +969,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                         .on_incoming_pending_session_gracefully_closed();
                 }
                 self.closed_sessions_metrics.incoming_pending.increment(1);
+                self.update_pending_connection_metrics();
                 self.metrics
                     .incoming_connections
                     .set(self.swarm.peers().num_inbound_connections() as f64);
@@ -1214,9 +1217,11 @@ mod tests {
     use super::*;
     use crate::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
     use futures::{future::poll_fn, task::noop_waker_ref};
+    use metrics::{atomics::AtomicU64, Gauge};
     use reth_network_types::{PeerAddr, PeerKind, SessionLimits};
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
+    use tokio::net::{TcpListener, TcpStream};
 
     #[tokio::test]
     async fn rejected_dials_release_slots_and_refill() {
@@ -1279,5 +1284,102 @@ mod tests {
             .expect("rejected peers must be retried after session capacity becomes available");
             assert_eq!(local.swarm.peers().num_pending_outbound_connections(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn inbound_replacement_refreshes_pending_connection_metrics() {
+        let config = || {
+            NetworkConfigBuilder::<EthNetworkPrimitives>::new(
+                SecretKey::new(&mut rand_08::thread_rng()),
+                Runtime::test(),
+            )
+            .disable_discovery()
+            .listener_addr("127.0.0.1:0".parse().unwrap())
+            .peer_config(PeersConfig::test())
+            .build(NoopProvider::default())
+        };
+        let mut local = NetworkManager::new(config()).await.unwrap();
+        let mut remote = NetworkManager::new(config()).await.unwrap();
+        let stalled = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let pending_outgoing = Arc::new(AtomicU64::new(0));
+        let total_pending = Arc::new(AtomicU64::new(0));
+        local.metrics.pending_outgoing_connections = Gauge::from_arc(pending_outgoing.clone());
+        local.metrics.total_pending_connections = Gauge::from_arc(total_pending.clone());
+        local.swarm.peers_mut().add_and_connect_kind(
+            *remote.peer_id(),
+            PeerKind::Basic,
+            PeerAddr::from_tcp(stalled.local_addr().unwrap()),
+            None,
+        );
+        assert!(futures::poll!(Pin::new(&mut local)).is_pending());
+        assert_eq!(f64::from_bits(pending_outgoing.load(Ordering::Relaxed)), 1.0);
+        remote.swarm.peers_mut().add_and_connect_kind(
+            *local.peer_id(),
+            PeerKind::Basic,
+            PeerAddr::from_tcp(local.local_addr()),
+            None,
+        );
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_fn(|cx| {
+                assert!(Pin::new(&mut local).poll(cx).is_pending());
+                assert!(Pin::new(&mut remote).poll(cx).is_pending());
+                if local.swarm.peers().num_inbound_connections() == 1 {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(local.swarm.peers().num_pending_outbound_connections(), 0);
+        assert_eq!(f64::from_bits(pending_outgoing.load(Ordering::Relaxed)), 0.0);
+        assert_eq!(f64::from_bits(total_pending.load(Ordering::Relaxed)), 0.0);
+    }
+
+    #[tokio::test]
+    async fn incoming_handshake_failure_refreshes_pending_connection_metrics() {
+        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
+            SecretKey::new(&mut rand_08::thread_rng()),
+            Runtime::test(),
+        )
+        .disable_discovery()
+        .listener_addr("127.0.0.1:0".parse().unwrap())
+        .peer_config(PeersConfig::test())
+        .build(NoopProvider::default());
+        let mut network = NetworkManager::new(config).await.unwrap();
+        let total_pending = Arc::new(AtomicU64::new(0));
+        network.metrics.total_pending_connections = Gauge::from_arc(total_pending.clone());
+        let stream = TcpStream::connect(network.local_addr()).await.unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_fn(|cx| {
+                assert!(Pin::new(&mut network).poll(cx).is_pending());
+                if network.swarm.sessions().num_pending_connections() == 1 {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(f64::from_bits(total_pending.load(Ordering::Relaxed)), 1.0);
+        drop(stream);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_fn(|cx| {
+                assert!(Pin::new(&mut network).poll(cx).is_pending());
+                if network.swarm.sessions().num_pending_connections() == 0 {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(f64::from_bits(total_pending.load(Ordering::Relaxed)), 0.0);
     }
 }

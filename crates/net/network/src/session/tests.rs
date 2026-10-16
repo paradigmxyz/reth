@@ -470,7 +470,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
             })
             .await
             .unwrap();
-        assert!(sessions.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
         assert!(sessions.pending_sessions.contains_key(&new_id));
     }
     sessions
@@ -483,7 +483,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(sessions.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+    assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
     sessions
         .pending_sessions_tx
         .send(PendingSessionEvent::Disconnected {
@@ -494,7 +494,7 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop())),
+    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true),
         Poll::Ready(SessionEvent::OutgoingPendingSessionClosed { peer_id: id, error: None, .. }) if id == peer_id));
     assert!(sessions.pending_sessions.is_empty());
 }
@@ -508,7 +508,7 @@ async fn cancellation_interrupts_stalled_ecies() {
     let (_remote, _) = listener.accept().await.unwrap();
     let (disconnect_tx, disconnect_rx) = oneshot::channel();
     let (events, mut rx) = mpsc::channel(1);
-    let auth = tokio::spawn(authenticate::<EthNetworkPrimitives>(
+    let mut auth = Box::pin(authenticate::<EthNetworkPrimitives>(
         Arc::new(EthHandshake::default()),
         MAX_MESSAGE_SIZE,
         disconnect_rx,
@@ -523,10 +523,120 @@ async fn cancellation_interrupts_stalled_ecies() {
         fork_filter(),
         RlpxSubProtocolHandlers::default(),
     ));
+    assert!(futures::poll!(auth.as_mut()).is_pending());
     disconnect_tx.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(1), auth).await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(1), auth).await.unwrap();
     assert!(matches!(
         rx.recv().await.unwrap(),
         PendingSessionEvent::Disconnected { error: None, .. }
     ));
+}
+
+async fn pending_connection_pair(
+) -> (SessionManager<EthNetworkPrimitives>, SessionManager<EthNetworkPrimitives>) {
+    let mut incoming = session_manager();
+    let mut outgoing = session_manager();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    outgoing.dial_outbound(listener.local_addr().unwrap(), incoming.hello_message.id);
+    let (stream, addr) =
+        tokio::time::timeout(Duration::from_secs(5), listener.accept()).await.unwrap().unwrap();
+    incoming.on_incoming(stream, addr).unwrap();
+    (incoming, outgoing)
+}
+
+#[tokio::test]
+async fn canceled_completed_dial_sends_disconnect() {
+    let (mut incoming, mut outgoing) = pending_connection_pair().await;
+    let event = tokio::time::timeout(Duration::from_secs(5), outgoing.pending_session_rx.next())
+        .await
+        .unwrap()
+        .unwrap();
+    let PendingSessionEvent::Established { peer_id, .. } = &event else {
+        panic!("expected established")
+    };
+    let peer_id = *peer_id;
+    let remote = tokio::time::timeout(Duration::from_secs(5), incoming.pending_session_rx.next())
+        .await
+        .unwrap()
+        .unwrap();
+    let PendingSessionEvent::Established { conn, .. } = remote else {
+        panic!("expected established")
+    };
+    let mut conn = conn.into_inner();
+    outgoing.cancel_pending_outbound(peer_id);
+    let replacement = outgoing.next_id();
+    let (tx, _rx) = oneshot::channel();
+    outgoing.pending_sessions.insert(
+        replacement,
+        PendingSessionHandle { disconnect_tx: Some(tx), direction: Direction::Outgoing(peer_id) },
+    );
+    outgoing.counter.inc_pending_outbound();
+    outgoing.pending_sessions_tx.send(event).await.unwrap();
+    assert!(outgoing.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+    assert!(outgoing.pending_sessions.contains_key(&replacement));
+    assert!(outgoing.active_sessions.is_empty());
+    let error = tokio::time::timeout(Duration::from_secs(5), conn.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(error, P2PStreamError::Disconnected(DisconnectReason::AlreadyConnected)));
+}
+
+#[tokio::test]
+async fn inbound_capacity_rejection_preserves_outbound_attempt() {
+    for allow in [false, true] {
+        let (mut incoming, mut outgoing) = pending_connection_pair().await;
+        let peer_id = outgoing.hello_message.id;
+        let outbound_id = incoming.next_id();
+        let (tx, mut rx) = oneshot::channel();
+        incoming.pending_sessions.insert(
+            outbound_id,
+            PendingSessionHandle {
+                disconnect_tx: Some(tx),
+                direction: Direction::Outgoing(peer_id),
+            },
+        );
+        incoming.counter.inc_pending_outbound();
+        let event = tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::poll_fn(|cx| {
+                incoming.poll(cx, |id| {
+                    assert_eq!(id, peer_id);
+                    allow
+                })
+            }),
+        )
+        .await
+        .unwrap();
+        if allow {
+            assert!(matches!(event, SessionEvent::SessionEstablished { .. }));
+            assert_eq!(rx.await, Ok(()));
+            assert!(!incoming.pending_sessions.contains_key(&outbound_id));
+            assert!(incoming.active_sessions.contains_key(&peer_id));
+        } else {
+            assert!(matches!(
+                event,
+                SessionEvent::IncomingPendingSessionClosed { error: None, .. }
+            ));
+            assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+            assert!(incoming.pending_sessions.contains_key(&outbound_id));
+            assert!(incoming.active_sessions.is_empty());
+            let remote =
+                tokio::time::timeout(Duration::from_secs(5), outgoing.pending_session_rx.next())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let PendingSessionEvent::Established { conn, .. } = remote else {
+                panic!("expected established")
+            };
+            let mut conn = conn.into_inner();
+            let error = tokio::time::timeout(Duration::from_secs(5), conn.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert!(matches!(error, P2PStreamError::Disconnected(DisconnectReason::TooManyPeers)));
+        }
+    }
 }

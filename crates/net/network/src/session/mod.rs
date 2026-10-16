@@ -455,6 +455,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         });
     }
 
+    /// Closes a completed handshake that will not become an active session.
+    fn disconnect_pending_connection(&self, conn: EthRlpxConnection<N>, reason: DisconnectReason) {
+        self.spawn(async move {
+            let _ =
+                tokio::time::timeout(HANDSHAKE_TIMEOUT, conn.into_inner().disconnect(reason)).await;
+        });
+    }
+
     /// Removes the [`PendingSessionHandle`] if it exists.
     fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle<N>> {
         let session = self.active_sessions.remove(id)?;
@@ -494,7 +502,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// This polls all the session handles and returns [`SessionEvent`].
     ///
     /// Active sessions are prioritized.
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<SessionEvent<N>> {
+    pub(crate) fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+        has_inbound_capacity: impl Fn(PeerId) -> bool,
+    ) -> Poll<SessionEvent<N>> {
         // Poll events from active sessions
         match self.active_session_rx.poll_next_unpin(cx) {
             Poll::Pending => {}
@@ -555,6 +567,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             if self.remove_pending_session(session_id).is_some() {
                 break event
             }
+            if let PendingSessionEvent::Established { conn, .. } = event {
+                self.disconnect_pending_connection(conn, DisconnectReason::AlreadyConnected);
+            }
         };
         match event {
             PendingSessionEvent::Established {
@@ -580,11 +595,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                         "already connected"
                     );
 
-                    self.spawn(async move {
-                        // send a disconnect message
-                        let _ =
-                            conn.into_inner().disconnect(DisconnectReason::AlreadyConnected).await;
-                    });
+                    self.disconnect_pending_connection(conn, DisconnectReason::AlreadyConnected);
 
                     return Poll::Ready(SessionEvent::AlreadyConnected {
                         peer_id,
@@ -594,6 +605,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
 
                 if direction.is_incoming() {
+                    if !has_inbound_capacity(peer_id) {
+                        self.disconnect_pending_connection(conn, DisconnectReason::TooManyPeers);
+                        return Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
+                            remote_addr,
+                            error: None,
+                        })
+                    }
                     self.cancel_pending_outbound(peer_id);
                 }
 

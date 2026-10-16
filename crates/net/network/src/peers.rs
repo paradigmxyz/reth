@@ -433,7 +433,7 @@ impl PeersManager {
         }
 
         // check if the peer is trustable or not
-        let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
+        let is_trusted = self.trusted_peer_ids.contains(&peer_id);
         if self.trusted_nodes_only && !is_trusted {
             self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
             return
@@ -457,8 +457,6 @@ impl PeersManager {
 
                 peer.state = PeerConnectionState::In;
                 peer.mark_connected();
-
-                is_trusted = is_trusted || peer.is_trusted();
             }
             Entry::Vacant(entry) => {
                 // peer is missing in the table, we add it but mark it as to be removed after
@@ -471,17 +469,24 @@ impl PeersManager {
             }
         }
 
-        let has_in_capacity = self.connection_info.has_in_capacity();
+        let has_in_capacity = self.has_inbound_capacity(peer_id);
         // increment new incoming connection
         self.connection_info.inc_in();
 
         // disconnect the peer if we don't have capacity for more inbound connections
-        if !is_trusted && !has_in_capacity {
+        if !has_in_capacity {
             self.queued_actions.push_back(PeerAction::Disconnect {
                 peer_id,
                 reason: Some(DisconnectReason::TooManyPeers),
             });
         }
+    }
+
+    /// Checks capacity before an incoming session can supersede an outbound attempt.
+    pub(crate) fn has_inbound_capacity(&self, peer_id: PeerId) -> bool {
+        self.connection_info.has_in_capacity() ||
+            self.trusted_peer_ids.contains(&peer_id) ||
+            self.peers.get(&peer_id).is_some_and(|peer| peer.is_trusted())
     }
 
     /// Bans the peer temporarily with the configured ban timeout
@@ -4135,5 +4140,21 @@ mod tests {
         assert_eq!(peers.peers[&peer_id].connected_at, connected_at);
         assert_eq!(peers.connection_info.num_inbound, 1);
         assert_eq!(peers.num_pending_outbound_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_inbound_capacity_preserves_pending_outbound_and_trusted_exemption() {
+        for trusted in [false, true] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(0));
+            let peer_id = PeerId::random();
+            let addr = "127.0.0.1:8008".parse().unwrap();
+            peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+            if trusted {
+                peers.add_trusted_peer_id(peer_id);
+            }
+            assert_eq!(peers.has_inbound_capacity(peer_id), trusted);
+            assert_eq!(peers.peers[&peer_id].state, PeerConnectionState::PendingOut);
+            assert_eq!(peers.connection_info.num_pending_out, 1);
+        }
     }
 }
