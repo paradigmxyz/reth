@@ -1134,27 +1134,36 @@ impl PeersManager {
     /// equal, a peer with a discovered `fork_id` is preferred since it indicates a compatible fork.
     ///
     /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
-    /// `trusted` peers.
+    /// `trusted` peers, including registered trusted IDs whose addresses were discovered before
+    /// hostname resolution. The same restriction applies when `trusted_only` is set.
     ///
     /// Returns `None` if no peer is available.
-    fn best_unconnected(&mut self) -> Option<(PeerId, &mut Peer)> {
-        let mut unconnected = self.peers.iter_mut().filter(|(_, peer)| {
+    fn best_unconnected(&mut self, trusted_only: bool) -> Option<(PeerId, &mut Peer)> {
+        let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
                 peer.state.is_unconnected() &&
-                (!self.trusted_nodes_only || peer.is_trusted())
+                (!(self.trusted_nodes_only || trusted_only) ||
+                    peer.is_trusted() ||
+                    self.trusted_peer_ids.contains(*peer_id))
         });
 
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
-        if best_peer.1.is_trusted() || best_peer.1.is_static() {
+        if best_peer.1.is_trusted() ||
+            best_peer.1.is_static() ||
+            self.trusted_peer_ids.contains(best_peer.0)
+        {
             return Some((*best_peer.0, best_peer.1))
         }
 
         for maybe_better in unconnected {
             // if the peer is trusted or static, return it immediately
-            if maybe_better.1.is_trusted() || maybe_better.1.is_static() {
+            if maybe_better.1.is_trusted() ||
+                maybe_better.1.is_static() ||
+                self.trusted_peer_ids.contains(maybe_better.0)
+            {
                 return Some((*maybe_better.0, maybe_better.1))
             }
 
@@ -1238,10 +1247,7 @@ impl PeersManager {
             // peers can never crowd them out; only the concurrent dial limit applies to them.
             let has_out_capacity = self.connection_info.has_out_capacity();
             let action = {
-                let Some((peer_id, peer)) = self.best_unconnected() else { break };
-                if !has_out_capacity && !peer.is_trusted() {
-                    break
-                }
+                let Some((peer_id, peer)) = self.best_unconnected(!has_out_capacity) else { break };
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
@@ -1596,7 +1602,7 @@ mod tests {
     use reth_network_api::Direction;
     use reth_network_peers::{NodeRecord, PeerId, TrustedPeer};
     use reth_network_types::{
-        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, ReputationChangeKind,
+        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, PeerKind, ReputationChangeKind,
     };
     use std::{
         future::{poll_fn, Future},
@@ -2857,6 +2863,16 @@ mod tests {
         assert!(!peers.connection_info.has_out_capacity());
         peers.queued_actions.clear();
 
+        let static_peer = PeerId::random();
+        peers.add_peer_kind(
+            static_peer,
+            Some(PeerKind::Static),
+            PeerAddr::from_tcp(basic_sock),
+            None,
+        );
+        assert!(peers.best_unconnected(true).is_none());
+        peers.queued_actions.clear();
+
         // a trusted peer is dialed regardless
         let trusted_peer = PeerId::random();
         let trusted_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 3)), 8008);
@@ -3703,7 +3719,7 @@ mod tests {
         peers.add_peer(with_fork, PeerAddr::from_tcp(addr), None);
         peers.peers.get_mut(&with_fork).unwrap().fork_id = Some(Box::new(fork_id));
 
-        let (best_id, _) = peers.best_unconnected().unwrap();
+        let (best_id, _) = peers.best_unconnected(false).unwrap();
         assert_eq!(best_id, with_fork, "fork_id should break tie when reputation is equal");
     }
 
@@ -4305,5 +4321,56 @@ mod tests {
         assert!(until >= before + Duration::from_secs(1));
         assert!(until <= after + Duration::from_secs(1));
         assert_eq!(peers.peers[&peer_id].severe_backoff_counter, 3);
+    }
+
+    #[tokio::test]
+    async fn test_dns_trusted_ids_bypass_outbound_capacity() {
+        for register_first in [false, true] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(0));
+            let peer_id = PeerId::random();
+            let addr = "127.0.0.1:30303".parse::<SocketAddr>().unwrap();
+            let trusted =
+                TrustedPeer::new(Host::Domain("trusted.invalid".into()), addr.port(), peer_id);
+            if register_first {
+                peers.add_trusted_peer_node(trusted.clone());
+            }
+            peers.add_peer(peer_id, PeerAddr::from_tcp(addr), None);
+            if !register_first {
+                peers.add_trusted_peer_node(trusted);
+            }
+            assert_eq!(peers.peers[&peer_id].kind, PeerKind::Basic);
+            peers.queued_actions.clear();
+            peers.fill_outbound_slots();
+            assert!(
+                matches!(peers.queued_actions.pop_front(), Some(PeerAction::Connect { peer_id: id, remote_addr }) if id == peer_id && remote_addr == addr)
+            );
+            assert!(peers.queued_actions.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trusted_bypass_respects_shared_dial_limit() {
+        let mut peers = PeersManager::new(
+            PeersConfig::test().with_max_outbound(1).with_max_concurrent_dials(1),
+        );
+        let addr = "127.0.0.1:30303".parse().unwrap();
+        let basic = PeerId::random();
+        peers.add_peer(basic, PeerAddr::from_tcp(addr), None);
+        peers.fill_outbound_slots();
+        assert_eq!(peers.connection_info.num_pending_out, 1);
+        for _ in 0..2 {
+            peers.add_trusted_peer(PeerId::random(), PeerAddr::from_tcp(addr));
+        }
+        peers.queued_actions.clear();
+        peers.fill_outbound_slots();
+        assert!(peers.queued_actions.is_empty());
+        peers.on_active_outgoing_established(basic);
+        peers.fill_outbound_slots();
+        assert!(
+            matches!(peers.queued_actions.pop_front(), Some(PeerAction::Connect { peer_id, .. }) if peers.peers[&peer_id].is_trusted())
+        );
+        assert!(peers.queued_actions.is_empty());
+        assert_eq!(peers.connection_info.num_pending_out, 1);
+        assert_eq!(peers.connection_info.num_outbound, 1);
     }
 }
