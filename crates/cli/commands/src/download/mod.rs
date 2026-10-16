@@ -670,7 +670,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let tx = db.tx_mut()?;
 
             if should_write_prune {
-                config_gen::write_prune_checkpoints_tx(&tx, &config, manifest.block)?;
+                config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
             }
 
             if should_reset_indices {
