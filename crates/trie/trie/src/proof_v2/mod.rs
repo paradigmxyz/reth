@@ -1,5 +1,6 @@
 //! Reusable V2 account and storage proof generation for a fixed state snapshot.
 
+use self::value::AccountValueEncoder;
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     prefix_set::{PrefixSet, TriePrefixSets},
@@ -7,10 +8,8 @@ use crate::{
     DecodedMultiProofV2, MultiProofTargetsV2, TrieType,
 };
 use alloy_primitives::{map::B256Map, B256, U256};
-use alloy_rlp::Encodable;
 use parking_lot::Mutex;
 use reth_execution_errors::StateProofError;
-use reth_primitives_traits::Account;
 use std::{fmt, marker::PhantomPinned, pin::Pin, sync::Arc};
 
 mod calculator;
@@ -183,51 +182,6 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> CachedStorage
             self.address = Some(address);
         }
         &mut self.calculator
-    }
-}
-
-struct AccountValueEncoder<TC, HC> {
-    // Arc<Mutex<_>> is needed only to keep the provider Send;
-    // otherwise Rc<RefCell<_>> would suffice.
-    storage_calculator: Arc<Mutex<CachedStorage<TC, HC>>>,
-}
-
-impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> LeafValueEncoder
-    for AccountValueEncoder<TC, HC>
-{
-    type Value = Account;
-    type DeferredEncoder = AccountDeferredValueEncoder<TC, HC>;
-
-    fn deferred_encoder(
-        &mut self,
-        hashed_address: B256,
-        account: Account,
-    ) -> Self::DeferredEncoder {
-        AccountDeferredValueEncoder {
-            storage_calculator: self.storage_calculator.clone(),
-            hashed_address,
-            account,
-        }
-    }
-}
-
-struct AccountDeferredValueEncoder<TC, HC> {
-    storage_calculator: Arc<Mutex<CachedStorage<TC, HC>>>,
-    hashed_address: B256,
-    account: Account,
-}
-
-impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValueEncoder
-    for AccountDeferredValueEncoder<TC, HC>
-{
-    fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let root = self
-            .storage_calculator
-            .lock()
-            .calculator(self.hashed_address)
-            .storage_root(self.hashed_address)?;
-        self.account.into_trie_account(root).encode(buf);
-        Ok(())
     }
 }
 

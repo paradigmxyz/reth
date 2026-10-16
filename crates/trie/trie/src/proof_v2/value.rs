@@ -1,8 +1,13 @@
 //! Generic value encoder types for proof calculation with lazy evaluation.
 
+use super::CachedStorage;
+use crate::{hashed_cursor::HashedStorageCursor, trie_cursor::TrieStorageCursor};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
+use parking_lot::Mutex;
 use reth_execution_errors::trie::StateProofError;
+use reth_primitives_traits::Account;
+use std::sync::Arc;
 
 /// A trait for deferred RLP-encoding of leaf values.
 pub trait DeferredValueEncoder {
@@ -65,5 +70,50 @@ impl LeafValueEncoder for StorageValueEncoder {
 
     fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
+    }
+}
+
+pub(super) struct AccountValueEncoder<TC, HC> {
+    // Arc<Mutex<_>> is needed only to keep the provider Send;
+    // otherwise Rc<RefCell<_>> would suffice.
+    pub(super) storage_calculator: Arc<Mutex<CachedStorage<TC, HC>>>,
+}
+
+impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> LeafValueEncoder
+    for AccountValueEncoder<TC, HC>
+{
+    type Value = Account;
+    type DeferredEncoder = AccountDeferredValueEncoder<TC, HC>;
+
+    fn deferred_encoder(
+        &mut self,
+        hashed_address: B256,
+        account: Account,
+    ) -> Self::DeferredEncoder {
+        AccountDeferredValueEncoder {
+            storage_calculator: self.storage_calculator.clone(),
+            hashed_address,
+            account,
+        }
+    }
+}
+
+pub(super) struct AccountDeferredValueEncoder<TC, HC> {
+    storage_calculator: Arc<Mutex<CachedStorage<TC, HC>>>,
+    hashed_address: B256,
+    account: Account,
+}
+
+impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValueEncoder
+    for AccountDeferredValueEncoder<TC, HC>
+{
+    fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
+        let root = self
+            .storage_calculator
+            .lock()
+            .calculator(self.hashed_address)
+            .storage_root(self.hashed_address)?;
+        self.account.into_trie_account(root).encode(buf);
+        Ok(())
     }
 }
