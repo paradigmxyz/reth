@@ -5,10 +5,10 @@
 //!
 //! # Model
 //!
-//! Every tracked hash is in exactly one of two states:
+//! Every tracked hash is pending or reserved by a fetch attempt:
 //!
 //! - _pending_: waiting for one of the peers that announced it, its _candidates_, to become idle
-//! - _fetching_: part of exactly one inflight request
+//! - _fetching_: part of exactly one inflight request, or awaiting blob sidecar validation
 //!
 //! A hash remembers the peers that announced it as candidates. Each peer keeps a FIFO queue of
 //! hashes to request, and the first peers to announce a hash get it queued right away. Later
@@ -20,7 +20,8 @@
 //! total number of pending hashes. FIFO refers to the fetcher's input order; callers may
 //! reorder or deduplicate hashes within a wire announcement.
 //!
-//! When a request resolves, delivered hashes are dropped from tracking. Undelivered hashes go back
+//! When a request resolves, delivered hashes are dropped after blob sidecar validation, if needed.
+//! Undelivered hashes go back
 //! to pending and are queued for their remaining candidates, most recent announcers first, or are
 //! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
 //! hash that precedes the last delivered hash of the request, treating it as skipped, and for
@@ -61,6 +62,7 @@ use super::{
 };
 use crate::metrics::TransactionFetcherMetrics;
 use alloy_consensus::transaction::PooledTransaction;
+use alloy_eips::Typed2718;
 use alloy_primitives::{
     map::{B256Map, B256Set, Entry, FbBuildHasher, HashMap},
     TxHash,
@@ -71,7 +73,7 @@ use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{transaction::TxHashRef, SignedTransaction};
 use smallvec::SmallVec;
 use std::{
     collections::{BinaryHeap, VecDeque},
@@ -113,7 +115,7 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     ready: VecDeque<PeerKey>,
     /// All inflight `GetPooledTransactions` requests.
     inflight: FuturesUnordered<InflightRequest<N::PooledTransaction>>,
-    /// Number of tracked hashes that are part of an inflight request.
+    /// Number of tracked hashes reserved by a request or blob sidecar validation.
     num_fetching: usize,
     /// Reused when verifying responses, so no sets are allocated per response.
     scratch_requested: B256Set,
@@ -166,7 +168,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.hashes.len().saturating_sub(self.num_fetching)
     }
 
-    /// Returns the number of hashes that are part of an inflight request.
+    /// Returns the number of hashes reserved by a request or blob sidecar validation.
     pub const fn num_fetching_hashes(&self) -> usize {
         self.num_fetching
     }
@@ -241,9 +243,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         let replace = (MAX_COUNT_EAGER_CANDIDATE_PEERS_PER_HASH..
                             entry.candidates.len())
                             .find(|&idx| {
-                                entry.fetching_by.is_none_or(|(fetching, _)| {
-                                    entry.candidates[idx].peer != fetching
-                                })
+                                entry
+                                    .fetching_by
+                                    .is_none_or(|fetch| entry.candidates[idx].peer != fetch.peer())
                             })
                             .expect("only one candidate can be fetching");
                         let removed = entry.candidates.remove(replace);
@@ -439,6 +441,17 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn on_transactions_received<'a>(&mut self, hashes: impl IntoIterator<Item = &'a TxHash>) {
         for hash in hashes {
             self.remove_hash(hash);
+        }
+    }
+
+    /// Retries an invalid blob sidecar using the original attempt's remaining candidates.
+    /// Untracked hashes are ignored; the original supplier and attempt budget are preserved.
+    pub(crate) fn on_bad_blob_sidecar(&mut self, hash: TxHash) {
+        if let Some(entry) = self.hashes.get_mut(&hash) &&
+            let Some(FetchPhase::Validation(key, request_id)) = entry.fetching_by
+        {
+            entry.fetching_by = Some(FetchPhase::Request(key, request_id));
+            self.on_delivery(key, request_id, &[hash], &B256Set::default(), false);
         }
     }
 
@@ -727,7 +740,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 break
             }
 
-            entry.fetching_by = Some((key, request_id));
+            entry.fetching_by = Some(FetchPhase::Request(key, request_id));
             entry.attempts += 1;
             self.num_fetching += 1;
             bytes = bytes.saturating_add(size);
@@ -746,7 +759,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     fn unpack_request(&mut self, key: PeerKey, request_id: u64, hashes: Vec<TxHash>) {
         for hash in hashes.into_iter().rev() {
             if let Some(entry) = self.hashes.get_mut(&hash) &&
-                entry.fetching_by == Some((key, request_id))
+                entry.fetching_by == Some(FetchPhase::Request(key, request_id))
             {
                 entry.fetching_by = None;
                 entry.attempts -= 1;
@@ -815,6 +828,14 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let unsolicited =
                     verify_response(&mut transactions, &requested_set, &mut delivered);
                 self.scratch_requested = requested_set;
+                for tx in transactions.iter() {
+                    if tx.is_eip4844() &&
+                        let Some(entry) = self.hashes.get_mut(tx.tx_hash()) &&
+                        entry.fetching_by == Some(FetchPhase::Request(key, request_id))
+                    {
+                        entry.fetching_by = Some(FetchPhase::Validation(key, request_id));
+                    }
+                }
                 Ok((transactions, unsolicited))
             }
             Err(error) => Err(error),
@@ -860,8 +881,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
-    /// Settles the requested hashes of a resolved request: delivered hashes are dropped and
-    /// undelivered hashes are rescheduled for their remaining candidates.
+    /// Settles a request: delivered blobs remain reserved for validation, other delivered hashes
+    /// are dropped, and undelivered hashes are rescheduled for their remaining candidates.
     fn on_delivery(
         &mut self,
         key: PeerKey,
@@ -890,14 +911,18 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         // iterate in reverse so that queueing at the front of a queue preserves the request order
         for (idx, hash) in requested.iter().enumerate().rev() {
             if delivered.contains(hash) {
-                self.remove_hash(hash);
+                if !self.hashes.get(hash).is_some_and(|entry| {
+                    matches!(entry.fetching_by, Some(FetchPhase::Validation(..)))
+                }) {
+                    self.remove_hash(hash);
+                }
                 continue
             }
 
             // the hash was received elsewhere in the meantime, or was even announced and assigned
             // to another peer again
             let Some(entry) = self.hashes.get_mut(hash) else { continue };
-            if entry.fetching_by != Some((key, request_id)) {
+            if entry.fetching_by != Some(FetchPhase::Request(key, request_id)) {
                 continue
             }
             entry.fetching_by = None;
@@ -959,7 +984,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Returns the peer the hash is currently fetched from, if any.
     fn fetching_peer(&self, hash: &TxHash) -> Option<PeerId> {
-        let (key, _) = self.hashes.get(hash)?.fetching_by?;
+        let key = self.hashes.get(hash)?.fetching_by?.peer();
         self.peers.get(&key).map(|peer| peer.peer_id)
     }
 
@@ -1010,7 +1035,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             unique.dedup();
             assert_eq!(unique.len(), entry.candidates.len(), "{hash} has duplicate candidates");
             assert!(ordered.contains(hash), "{hash} is missing from the eviction order");
-            if let Some((peer, request_id)) = entry.fetching_by {
+            if let Some(FetchPhase::Request(peer, request_id)) = entry.fetching_by {
                 assert!(
                     self.inflight.iter().any(|request| request.peer == peer &&
                         request.request_id == request_id &&
@@ -1229,8 +1254,8 @@ struct TxEntry {
     candidates: SmallVec<[Candidate; MAX_COUNT_CANDIDATE_PEERS_PER_HASH]>,
     /// Identity of this tracking lifetime, also stored in lazy queue entries.
     generation: u64,
-    /// The peer and request currently fetching the transaction, if any.
-    fetching_by: Option<(PeerKey, u64)>,
+    /// The attempt fetching or validating this transaction, if any.
+    fetching_by: Option<FetchPhase>,
     /// Sent requests for this entry, bounded independently of candidate replacement.
     attempts: usize,
 }
@@ -1258,6 +1283,21 @@ impl TxEntry {
 
     fn candidate_mut(&mut self, key: PeerKey) -> Option<&mut Candidate> {
         self.candidates.iter_mut().find(|candidate| candidate.peer == key)
+    }
+}
+
+/// Keeps a delivered blob attempt reserved until its sidecar is validated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FetchPhase {
+    Request(PeerKey, u64),
+    Validation(PeerKey, u64),
+}
+
+impl FetchPhase {
+    const fn peer(self) -> PeerKey {
+        match self {
+            Self::Request(peer, _) | Self::Validation(peer, _) => peer,
+        }
     }
 }
 
@@ -1437,8 +1477,9 @@ fn verify_response<T: SignedTransaction>(
 mod tests {
     use super::*;
     use crate::test_utils::transactions::new_mock_session_with_capacity;
-    use alloy_consensus::transaction::Recovered;
-    use alloy_primitives::B256;
+    use alloy_consensus::{transaction::Recovered, Signed, TxEip4844, TxEip4844WithSidecar};
+    use alloy_eips::eip4844::BlobTransactionSidecar;
+    use alloy_primitives::{Signature, B256, U256};
     use futures::task::noop_waker_ref;
     use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
     use reth_eth_wire::EthVersion;
@@ -2993,5 +3034,41 @@ mod tests {
 
         rig.fail(peer_a, RequestError::Timeout);
         assert_eq!(rig.fetcher.queued_hashes(&peer_b), hashes[1..], "no duplicates");
+    }
+
+    #[test]
+    fn invalid_blob_sidecar_retries_retained_candidates() {
+        let mut rig = Rig::new();
+        let peer_a = peer(1);
+        let peer_b = peer(2);
+        rig.add_peer(peer_a);
+        rig.add_peer(peer_b);
+        let blob = PooledTransactionVariant::Eip4844(Signed::new_unhashed(
+            TxEip4844WithSidecar::from_tx_and_sidecar(
+                TxEip4844::default(),
+                BlobTransactionSidecar::default().into(),
+            ),
+            Signature::new(U256::from(1), U256::from(2), false),
+        ));
+        let hash = *blob.tx_hash();
+        rig.announce(peer_a, &[hash]);
+        rig.announce(peer_b, &[hash]);
+        assert_eq!(rig.dispatch(), 1);
+        rig.respond(peer_a, vec![blob.clone()]);
+        rig.verify();
+        assert_eq!(rig.fetcher.candidate_peers(&hash), vec![peer_a, peer_b]);
+        assert_eq!(rig.dispatch(), 0, "validation must prevent concurrent fetching");
+        rig.fetcher.on_bad_blob_sidecar(hash);
+        rig.verify();
+        assert_eq!(rig.fetcher.candidate_peers(&hash), vec![peer_b]);
+        assert_eq!(rig.dispatch(), 1, "retry without a fresh announcement");
+        let (requested, response) = rig.take_request(peer_b).unwrap();
+        assert_eq!(requested, vec![hash]);
+        response.send(Ok(PooledTransactions(vec![blob]))).unwrap();
+        rig.next_event().unwrap();
+        rig.fetcher.on_transactions_received([&hash]);
+        rig.verify();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
     }
 }

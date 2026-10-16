@@ -264,8 +264,8 @@ pub struct TransactionFetcherMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_inflight_requests: Counter,
-    /// Hashes in currently active outgoing
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) requests.
+    /// Hashes reserved by outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
+    /// requests or awaiting blob sidecar validation.
     pub(crate) hashes_inflight_transaction_requests: Gauge,
     /// How often we failed to send a request to the peer because the channel was full.
     pub(crate) egress_peer_channel_full: Counter,

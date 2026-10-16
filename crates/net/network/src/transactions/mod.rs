@@ -532,6 +532,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
+        self.transaction_fetcher.on_transactions_received([&hash]);
     }
 
     /// Handles a failed transaction import.
@@ -567,6 +568,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         let peers = self.transactions_by_peers.remove(&err.hash);
 
         if err.is_bad_blob_sidecar() {
+            self.transaction_fetcher.on_bad_blob_sidecar(err.hash);
             // Blob sidecar errors: penalize but do NOT cache the hash as bad.
             // The transaction may be valid — only the sidecar from this peer was wrong.
             // Using regular penalties means repeated offenders still get disconnected.
@@ -574,13 +576,14 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             // Eth/72 peers cannot reach this path with an elided sidecar: their blob
             // transactions are dropped before import in `import_transactions`, so any sidecar
             // failure here means actual blob data failed validation.
-            if let Some(peers) = peers {
-                for peer_id in peers {
-                    self.report_peer_bad_transactions(peer_id);
-                }
+            // Only the first sender supplied the sidecar being validated; duplicates did not.
+            if let Some(peer_id) = peers.and_then(|peers| peers.first().copied()) {
+                self.report_peer_bad_transactions(peer_id);
             }
             return
         }
+
+        self.transaction_fetcher.on_transactions_received([&err.hash]);
 
         // if we're _currently_ syncing, we ignore a bad transaction
         if !err.is_bad_transaction() || self.network.is_syncing() {
@@ -1332,9 +1335,13 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
+            self.transaction_fetcher
+                .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
             return
         }
         if self.network.tx_gossip_disabled() {
+            self.transaction_fetcher
+                .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
             return
         }
 
@@ -1368,9 +1375,18 @@ where
 
         let start = Instant::now();
 
-        // Stop fetching transactions received through either broadcasts or responses.
-        self.transaction_fetcher
-            .on_transactions_received(transactions.iter().map(|tx| tx.tx_hash()));
+        // Blob sidecars must validate before their fallback candidates can be released.
+        let blob_hashes = transactions
+            .iter()
+            .filter(|tx| tx.is_eip4844())
+            .map(|tx| *tx.tx_hash())
+            .collect::<Vec<_>>();
+        self.transaction_fetcher.on_transactions_received(
+            transactions
+                .iter()
+                .filter(|tx| !tx.is_eip4844() || version.is_eth72())
+                .map(|tx| tx.tx_hash()),
+        );
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
         // If we received the transactions as the response to our `GetPooledTransactions``
@@ -1467,6 +1483,11 @@ where
         for tx in &new_txs {
             self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
         }
+
+        // Pool-known, invalid-signature, and otherwise filtered blobs have no pending import.
+        self.transaction_fetcher.on_transactions_received(
+            blob_hashes.iter().filter(|hash| !self.transactions_by_peers.contains_key(*hash)),
+        );
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
         // pool
@@ -2348,7 +2369,11 @@ mod tests {
         NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{Transaction as _, TxEip1559, TxLegacy};
-    use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionValidationError};
+    use alloy_eips::{
+        eip2718::Encodable2718,
+        eip4844::{BlobTransactionSidecar, BlobTransactionValidationError},
+        eip7594::BlobTransactionSidecarVariant,
+    };
     use alloy_primitives::{address, hex, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
@@ -3538,5 +3563,90 @@ mod tests {
         );
 
         network_service_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_blob_validation_preserves_and_settles_fallbacks() {
+        for outcome in ["sidecar", "success", "terminal", "eth72", "sync"] {
+            let (mut manager, _network) = new_tx_manager().await;
+            manager.network.update_sync_state(SyncState::Idle);
+            let peer_a = PeerId::repeat_byte(1);
+            let peer_b = PeerId::repeat_byte(2);
+            let version = if outcome == "eth72" { EthVersion::Eth72 } else { EthVersion::Eth68 };
+            let (peer, mut requests_a) = new_mock_session(peer_a, version);
+            let (fallback, mut requests_b) = new_mock_session(peer_b, EthVersion::Eth68);
+            manager.peers.insert(peer_a, peer);
+            manager.peers.insert(peer_b, fallback);
+            let blob = TransactionGenerator::new(rand::rng())
+                .gen_eip4844()
+                .try_into_pooled_eip4844::<BlobTransactionSidecarVariant>(
+                    BlobTransactionSidecar::default().into(),
+                )
+                .unwrap();
+            let hash = *blob.tx_hash();
+            buffer_hash_to_tx_fetcher(&mut manager.transaction_fetcher, hash, peer_a, None);
+            buffer_hash_to_tx_fetcher(&mut manager.transaction_fetcher, hash, peer_b, None);
+            assert_eq!(manager.transaction_fetcher.dispatch(&manager.peers, 1), 1);
+            let PeerRequest::GetPooledTransactions { response, .. } =
+                requests_a.try_recv().unwrap()
+            else {
+                panic!("expected request")
+            };
+            response.send(Ok(PooledTransactions(vec![blob.clone()]))).unwrap();
+            let event = manager.transaction_fetcher.next().await.unwrap();
+            if outcome == "sync" {
+                manager.network.update_sync_state(SyncState::Syncing);
+            }
+            manager.on_fetch_event(event);
+            if matches!(outcome, "eth72" | "sync") {
+                assert_eq!(manager.transaction_fetcher.num_hashes(), 0);
+                assert!(!manager.transactions_by_peers.contains_key(&hash));
+                continue
+            }
+            assert_eq!(manager.transaction_fetcher.num_hashes(), 1);
+            assert!(manager.transactions_by_peers.contains_key(&hash));
+            // A duplicate sender did not supply the sidecar undergoing validation.
+            manager.import_transactions(
+                peer_b,
+                PooledTransactions(vec![blob]),
+                TransactionSource::Response {
+                    version: EthVersion::Eth68,
+                    client_version: Arc::from(""),
+                },
+            );
+            assert_eq!(manager.transactions_by_peers[&hash].as_slice(), &[peer_a, peer_b]);
+            match outcome {
+                "success" => manager.on_good_import(hash),
+                "terminal" => manager.on_bad_import(PoolError::new(
+                    hash,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
+                )),
+                "sidecar" => {
+                    manager.on_bad_import(PoolError::new(
+                        hash,
+                        InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::InvalidEip4844Blob(
+                                BlobTransactionValidationError::InvalidProof,
+                            ),
+                        ),
+                    ));
+                    assert_eq!(manager.transaction_fetcher.candidate_peers(&hash), vec![peer_b]);
+                    assert!(!manager.bad_imports.contains(&hash));
+                    assert_eq!(manager.transaction_fetcher.dispatch(&manager.peers, 1), 1);
+                    let PeerRequest::GetPooledTransactions { request, .. } =
+                        requests_b.try_recv().unwrap()
+                    else {
+                        panic!("expected fallback request")
+                    };
+                    assert_eq!(request.0, vec![hash]);
+                    continue
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(manager.transaction_fetcher.num_hashes(), 0);
+            assert_eq!(manager.transaction_fetcher.num_fetching_hashes(), 0);
+        }
     }
 }
