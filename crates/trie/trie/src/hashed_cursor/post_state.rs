@@ -4,6 +4,7 @@ use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostStateSorted;
+use std::{marker::PhantomData, ops::Deref};
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
@@ -25,11 +26,15 @@ where
     T: AsRef<HashedPostStateSorted>,
 {
     type AccountCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::AccountCursor<'cursor>, Option<Account>>
+        = HashedPostStateCursor<
+        CF::AccountCursor<'cursor>,
+        Option<Account>,
+        &'overlay HashedPostStateSorted,
+    >
     where
         Self: 'cursor;
     type StorageCursor<'cursor>
-        = HashedPostStateCursor<'overlay, CF::StorageCursor<'cursor>, U256>
+        = HashedPostStateCursor<CF::StorageCursor<'cursor>, U256, &'overlay HashedPostStateSorted>
     where
         Self: 'cursor;
 
@@ -65,6 +70,9 @@ pub trait HashedPostStateCursorValue: Clone {
 
     /// Returns `Some(&NonZero)` if the value is present, `None` if deleted.
     fn into_option(self) -> Option<Self::NonZero>;
+
+    /// Returns the sorted overlay entries for this value type and storage address.
+    fn overlay_entries(state: &HashedPostStateSorted, hashed_address: B256) -> &[(B256, Self)];
 }
 
 impl HashedPostStateCursorValue for Option<Account> {
@@ -72,6 +80,10 @@ impl HashedPostStateCursorValue for Option<Account> {
 
     fn into_option(self) -> Option<Self::NonZero> {
         self
+    }
+
+    fn overlay_entries(state: &HashedPostStateSorted, _hashed_address: B256) -> &[(B256, Self)] {
+        &state.accounts
     }
 }
 
@@ -81,12 +93,21 @@ impl HashedPostStateCursorValue for U256 {
     fn into_option(self) -> Option<Self::NonZero> {
         (!self.is_zero()).then_some(self)
     }
+
+    fn overlay_entries(state: &HashedPostStateSorted, hashed_address: B256) -> &[(B256, Self)] {
+        state
+            .storages
+            .get(&hashed_address)
+            .map(|storage| storage.storage_slots_ref())
+            .unwrap_or(&[])
+    }
 }
 
 /// A cursor to iterate over state updates and corresponding database entries.
 /// It will always give precedence to the data from the post state updates.
+/// The post state can be borrowed or owned, for example through an `Arc`.
 #[derive(Debug)]
-pub struct HashedPostStateCursor<'a, C, V>
+pub struct HashedPostStateCursor<C, V, T>
 where
     V: HashedPostStateCursorValue,
 {
@@ -95,15 +116,13 @@ where
     /// Tracks whether the DB cursor is available, positioned, or exhausted.
     db_cursor_state: DbCursorState<V::NonZero>,
     /// Forward-only in-memory cursor over underlying V.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, V>,
+    post_state_cursor: ForwardInMemoryCursor<PostStateOverlay<T, V>>,
     /// The last hashed key that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_key: Option<B256>,
     #[cfg(debug_assertions)]
     /// Tracks whether `seek` has been called.
     seeked: bool,
-    /// Reference to the full post state.
-    post_state: &'a HashedPostStateSorted,
 }
 
 #[derive(Debug)]
@@ -129,13 +148,17 @@ impl<V> DbCursorState<V> {
     }
 }
 
-impl<'a, C> HashedPostStateCursor<'a, C, Option<Account>>
+impl<C, T: AsRef<HashedPostStateSorted>> HashedPostStateCursor<C, Option<Account>, T>
 where
     C: HashedCursor<Value = Account>,
 {
     /// Create new account cursor which combines a DB cursor and the post state.
-    pub fn new_account(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state.accounts);
+    pub const fn new_account(cursor: C, post_state: T) -> Self {
+        let post_state_cursor = ForwardInMemoryCursor::from_entries(PostStateOverlay {
+            post_state,
+            hashed_address: B256::ZERO,
+            value: PhantomData,
+        });
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -143,23 +166,22 @@ where
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
-            post_state,
         }
     }
 }
 
-impl<'a, C> HashedPostStateCursor<'a, C, U256>
+impl<C, T: AsRef<HashedPostStateSorted>> HashedPostStateCursor<C, U256, T>
 where
     C: HashedStorageCursor<Value = U256>,
 {
     /// Create new storage cursor with full post state reference.
     /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
-    pub fn new_storage(
-        cursor: C,
-        post_state: &'a HashedPostStateSorted,
-        hashed_address: B256,
-    ) -> Self {
-        let post_state_cursor = Self::get_storage_overlay(post_state, hashed_address);
+    pub const fn new_storage(cursor: C, post_state: T, hashed_address: B256) -> Self {
+        let post_state_cursor = ForwardInMemoryCursor::from_entries(PostStateOverlay {
+            post_state,
+            hashed_address,
+            value: PhantomData,
+        });
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -167,23 +189,11 @@ where
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
-            post_state,
         }
-    }
-
-    /// Returns the storage overlay for `hashed_address`.
-    fn get_storage_overlay(
-        post_state: &'a HashedPostStateSorted,
-        hashed_address: B256,
-    ) -> ForwardInMemoryCursor<'a, B256, U256> {
-        let post_state_storage = post_state.storages.get(&hashed_address);
-        let storage_slots = post_state_storage.map(|u| u.storage_slots_ref()).unwrap_or(&[]);
-
-        ForwardInMemoryCursor::new(storage_slots)
     }
 }
 
-impl<'a, C, V> HashedPostStateCursor<'a, C, V>
+impl<C, V, T: AsRef<HashedPostStateSorted>> HashedPostStateCursor<C, V, T>
 where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
@@ -283,7 +293,7 @@ where
     }
 }
 
-impl<C, V> HashedCursor for HashedPostStateCursor<'_, C, V>
+impl<C, V, T: AsRef<HashedPostStateSorted>> HashedCursor for HashedPostStateCursor<C, V, T>
 where
     C: HashedCursor<Value = V::NonZero>,
     V: HashedPostStateCursorValue,
@@ -395,7 +405,7 @@ where
 
 /// The cursor to iterate over post state hashed values and corresponding database entries.
 /// It will always give precedence to the data from the post state.
-impl<C> HashedStorageCursor for HashedPostStateCursor<'_, C, U256>
+impl<C, T: AsRef<HashedPostStateSorted>> HashedStorageCursor for HashedPostStateCursor<C, U256, T>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -412,10 +422,26 @@ where
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let post_state_cursor =
-            HashedPostStateCursor::<C, U256>::get_storage_overlay(self.post_state, hashed_address);
-        self.post_state_cursor = post_state_cursor;
+        self.post_state_cursor.entries.hashed_address = hashed_address;
         self.db_cursor_state = DbCursorState::NeedsPosition;
+    }
+}
+
+/// An owned or borrowed post state and the storage address selected within it.
+#[derive(Debug)]
+struct PostStateOverlay<T, V> {
+    post_state: T,
+    hashed_address: B256,
+    value: PhantomData<V>,
+}
+
+impl<T: AsRef<HashedPostStateSorted>, V: HashedPostStateCursorValue> Deref
+    for PostStateOverlay<T, V>
+{
+    type Target = [(B256, V)];
+
+    fn deref(&self) -> &Self::Target {
+        V::overlay_entries(self.post_state.as_ref(), self.hashed_address)
     }
 }
 

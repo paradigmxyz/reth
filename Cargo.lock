@@ -10759,6 +10759,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "metrics",
  "parking_lot",
  "rayon",
@@ -10767,6 +10768,7 @@ dependencies = [
  "reth-db-api",
  "reth-errors",
  "reth-ethereum-primitives",
+ "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
@@ -11044,7 +11046,6 @@ version = "2.7.0"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
- "alloy-rlp",
  "crossbeam-channel",
  "crossbeam-utils",
  "metrics",

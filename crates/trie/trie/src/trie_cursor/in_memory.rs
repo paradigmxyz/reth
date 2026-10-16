@@ -3,6 +3,7 @@ use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
+use std::ops::Deref;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -26,12 +27,12 @@ where
     T: AsRef<TrieUpdatesSorted>,
 {
     type AccountTrieCursor<'cursor>
-        = InMemoryTrieCursor<'overlay, CF::AccountTrieCursor<'cursor>>
+        = InMemoryTrieCursor<CF::AccountTrieCursor<'cursor>, &'overlay TrieUpdatesSorted>
     where
         Self: 'cursor;
 
     type StorageTrieCursor<'cursor>
-        = InMemoryTrieCursor<'overlay, CF::StorageTrieCursor<'cursor>>
+        = InMemoryTrieCursor<CF::StorageTrieCursor<'cursor>, &'overlay TrieUpdatesSorted>
     where
         Self: 'cursor;
 
@@ -52,21 +53,20 @@ where
 
 /// A cursor to iterate over trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
+/// The updates can be borrowed or owned, for example through an `Arc`.
 #[derive(Debug)]
-pub struct InMemoryTrieCursor<'a, C> {
+pub struct InMemoryTrieCursor<C, T> {
     /// The underlying cursor.
     cursor: C,
     /// Tracks whether the DB cursor is available, positioned, or exhausted.
     db_cursor_state: DbCursorState,
     /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
+    in_memory_cursor: ForwardInMemoryCursor<TrieOverlay<T>>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
     #[cfg(debug_assertions)]
     /// Whether an initial seek was called.
     seeked: bool,
-    /// Reference to the full trie updates.
-    trie_updates: &'a TrieUpdatesSorted,
 }
 
 #[derive(Debug)]
@@ -92,10 +92,11 @@ impl DbCursorState {
     }
 }
 
-impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
+impl<C: TrieCursor, T: AsRef<TrieUpdatesSorted>> InMemoryTrieCursor<C, T> {
     /// Create new account trie cursor which combines a DB cursor and the trie updates.
-    pub fn new_account(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates.account_nodes_ref());
+    pub const fn new_account(cursor: C, trie_updates: T) -> Self {
+        let in_memory_cursor =
+            ForwardInMemoryCursor::from_entries(TrieOverlay { trie_updates, hashed_address: None });
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -103,18 +104,16 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
-            trie_updates,
         }
     }
 
     /// Create new storage trie cursor with full trie updates reference.
     /// This allows the cursor to switch between storage tries when `set_hashed_address` is called.
-    pub fn new_storage(
-        cursor: C,
-        trie_updates: &'a TrieUpdatesSorted,
-        hashed_address: B256,
-    ) -> Self {
-        let in_memory_cursor = Self::get_storage_overlay(trie_updates, hashed_address);
+    pub const fn new_storage(cursor: C, trie_updates: T, hashed_address: B256) -> Self {
+        let in_memory_cursor = ForwardInMemoryCursor::from_entries(TrieOverlay {
+            trie_updates,
+            hashed_address: Some(hashed_address),
+        });
         Self {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
@@ -122,19 +121,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             last_key: None,
             #[cfg(debug_assertions)]
             seeked: false,
-            trie_updates,
         }
-    }
-
-    /// Returns the storage overlay for `hashed_address`.
-    fn get_storage_overlay(
-        trie_updates: &'a TrieUpdatesSorted,
-        hashed_address: B256,
-    ) -> ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>> {
-        let storage_trie_updates = trie_updates.storage_tries_ref().get(&hashed_address);
-        let storage_nodes = storage_trie_updates.map(|u| u.storage_nodes_ref()).unwrap_or(&[]);
-
-        ForwardInMemoryCursor::new(storage_nodes)
     }
 
     const fn get_cursor_mut(&mut self) -> &mut C {
@@ -233,7 +220,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 }
 
-impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
+impl<C: TrieCursor, T: AsRef<TrieUpdatesSorted>> TrieCursor for InMemoryTrieCursor<C, T> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -377,13 +364,37 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
     }
 }
 
-impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
+impl<C: TrieStorageCursor, T: AsRef<TrieUpdatesSorted>> TrieStorageCursor
+    for InMemoryTrieCursor<C, T>
+{
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.reset();
         self.cursor.set_hashed_address(hashed_address);
-        let in_memory_cursor = Self::get_storage_overlay(self.trie_updates, hashed_address);
-        self.in_memory_cursor = in_memory_cursor;
+        self.in_memory_cursor.entries.hashed_address = Some(hashed_address);
         self.db_cursor_state = DbCursorState::NeedsPosition;
+    }
+}
+
+/// An owned or borrowed overlay and the trie selected within it.
+#[derive(Debug)]
+struct TrieOverlay<T> {
+    trie_updates: T,
+    hashed_address: Option<B256>,
+}
+
+impl<T: AsRef<TrieUpdatesSorted>> Deref for TrieOverlay<T> {
+    type Target = [(Nibbles, Option<BranchNodeCompact>)];
+
+    fn deref(&self) -> &Self::Target {
+        let updates = self.trie_updates.as_ref();
+        match self.hashed_address {
+            None => updates.account_nodes_ref(),
+            Some(address) => updates
+                .storage_tries_ref()
+                .get(&address)
+                .map(|updates| updates.storage_nodes_ref())
+                .unwrap_or(&[]),
+        }
     }
 }
 

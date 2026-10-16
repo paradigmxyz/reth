@@ -1,6 +1,7 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
+use core::ops::DerefMut;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
@@ -129,21 +130,23 @@ impl TrieCursorMetricsCache {
 /// - `seek()` - Seek to a key or the next greater key
 /// - `seek_exact()` - Seek to an exact key match
 #[derive(Debug)]
-pub struct InstrumentedTrieCursor<'metrics, C> {
+pub struct InstrumentedTrieCursor<C, M> {
     /// The underlying cursor being wrapped
     cursor: C,
     /// Cached metrics counters
-    metrics: &'metrics mut TrieCursorMetricsCache,
+    metrics: M,
 }
 
-impl<'metrics, C> InstrumentedTrieCursor<'metrics, C> {
-    /// Create a new metrics cursor wrapping the given cursor.
-    pub const fn new(cursor: C, metrics: &'metrics mut TrieCursorMetricsCache) -> Self {
+impl<C, M> InstrumentedTrieCursor<C, M> {
+    /// Wraps a cursor with owned or borrowed metrics counters.
+    pub const fn new(cursor: C, metrics: M) -> Self {
         Self { cursor, metrics }
     }
 }
 
-impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C> {
+impl<C: TrieCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieCursor
+    for InstrumentedTrieCursor<C, M>
+{
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -183,7 +186,9 @@ impl<'metrics, C: TrieCursor> TrieCursor for InstrumentedTrieCursor<'metrics, C>
     }
 }
 
-impl<'metrics, C: TrieStorageCursor> TrieStorageCursor for InstrumentedTrieCursor<'metrics, C> {
+impl<C: TrieStorageCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieStorageCursor
+    for InstrumentedTrieCursor<C, M>
+{
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.cursor.set_hashed_address(hashed_address)
     }

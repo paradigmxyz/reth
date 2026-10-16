@@ -13,5 +13,7 @@ pub use manager::*;
 
 mod manager_metrics;
 
+mod proof;
+
 mod provider;
 pub use provider::*;

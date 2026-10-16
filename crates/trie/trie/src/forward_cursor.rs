@@ -1,15 +1,17 @@
+use core::ops::Deref;
+
 /// The implementation of forward-only in memory cursor over the entries.
 ///
 /// The cursor operates under the assumption that the supplied collection is pre-sorted.
 #[derive(Debug)]
-pub struct ForwardInMemoryCursor<'a, K, V> {
-    /// The reference to the pre-sorted collection of entries.
-    entries: &'a [(K, V)],
+pub struct ForwardInMemoryCursor<T> {
+    /// An owned or borrowed source of pre-sorted entries.
+    pub(crate) entries: T,
     /// Current index in the collection.
     idx: usize,
 }
 
-impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
+impl<'a, K, V> ForwardInMemoryCursor<&'a [(K, V)]> {
     /// Create new forward cursor positioned at the beginning of the collection.
     ///
     /// The cursor expects all of the entries to have been sorted in advance.
@@ -17,10 +19,16 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     pub const fn new(entries: &'a [(K, V)]) -> Self {
         Self { entries, idx: 0 }
     }
+}
+
+impl<K, V, T: Deref<Target = [(K, V)]>> ForwardInMemoryCursor<T> {
+    pub(crate) const fn from_entries(entries: T) -> Self {
+        Self { entries, idx: 0 }
+    }
 
     /// Returns `true` if the cursor is empty, regardless of its position.
     #[inline]
-    pub const fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -50,7 +58,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
 /// For small slices, linear scan has better cache locality and lower overhead.
 const BINARY_SEARCH_THRESHOLD: usize = 128;
 
-impl<K: Ord, V> ForwardInMemoryCursor<'_, K, V> {
+impl<K: Ord, V, T: Deref<Target = [(K, V)]>> ForwardInMemoryCursor<T> {
     /// Returns the first entry from the current cursor position that's greater or equal to the
     /// provided key. This method advances the cursor forward.
     pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {

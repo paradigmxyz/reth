@@ -67,15 +67,13 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateRootProvider,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState,
-};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
@@ -535,11 +533,7 @@ impl DefaultStateRootStrategy {
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
+        F: DatabaseProviderROFactory<Provider: StateProvider> + Clone + Send + Sync + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -836,6 +830,7 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory + Clone + 'static,
     P::Provider: BlockNumReader
+        + HistoryReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader

@@ -1,5 +1,6 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
+use core::ops::DerefMut;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
@@ -132,21 +133,22 @@ impl HashedCursorMetricsCache {
 /// - `next()` - Move to the next entry
 /// - `seek()` - Seek to a key or the next greater key
 #[derive(Debug)]
-pub struct InstrumentedHashedCursor<'metrics, C> {
+pub struct InstrumentedHashedCursor<C, M> {
     /// The underlying cursor being wrapped
     cursor: C,
     /// Cached metrics counters
-    metrics: &'metrics mut HashedCursorMetricsCache,
+    metrics: M,
 }
 
-impl<'metrics, C> InstrumentedHashedCursor<'metrics, C> {
-    /// Create a new metrics cursor wrapping the given cursor.
-    pub const fn new(cursor: C, metrics: &'metrics mut HashedCursorMetricsCache) -> Self {
+impl<C, M> InstrumentedHashedCursor<C, M> {
+    /// Wraps a cursor with owned or borrowed metrics counters.
+    pub const fn new(cursor: C, metrics: M) -> Self {
         Self { cursor, metrics }
     }
 }
 
-impl<'metrics, C> HashedCursor for InstrumentedHashedCursor<'metrics, C>
+impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> HashedCursor
+    for InstrumentedHashedCursor<C, M>
 where
     C: HashedCursor,
 {
@@ -173,7 +175,8 @@ where
     }
 }
 
-impl<'metrics, C> HashedStorageCursor for InstrumentedHashedCursor<'metrics, C>
+impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> HashedStorageCursor
+    for InstrumentedHashedCursor<C, M>
 where
     C: HashedStorageCursor,
 {
