@@ -342,7 +342,10 @@ mod read_transactions {
             txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
             MaxReadTransactionDuration,
         };
-        use std::{thread::sleep, time::Duration};
+        use std::{
+            thread::sleep,
+            time::{Duration, Instant},
+        };
         use tempfile::tempdir;
 
         #[test]
@@ -393,7 +396,11 @@ mod read_transactions {
                 assert!(read_transactions.active.contains_key(&tx_ptr));
 
                 // Wait until the transaction is timed out by the manager.
-                sleep(MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL);
+                let deadline = Instant::now() + MAX_DURATION + READ_TRANSACTIONS_CHECK_INTERVAL;
+                while !read_transactions.timed_out_not_aborted.contains(&tx_ptr) {
+                    assert!(Instant::now() < deadline, "transaction was not timed out");
+                    sleep(Duration::from_millis(10));
+                }
 
                 // Ensure that the transaction is not in the list of active transactions anymore,
                 // and is in the list of timed out but not aborted transactions.
@@ -434,7 +441,6 @@ mod read_transactions {
             assert!(env.txn_manager().read_transactions.is_none());
 
             let tx = env.begin_ro_txn().unwrap();
-            sleep(READ_TRANSACTIONS_CHECK_INTERVAL);
             assert!(tx.commit().is_ok())
         }
     }
