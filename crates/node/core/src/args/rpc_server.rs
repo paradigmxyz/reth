@@ -94,7 +94,7 @@ pub struct DefaultRpcServerArgs {
     rpc_forwarder: Option<Url>,
     builder_disallow: Option<AddressSet>,
     rpc_state_cache: RpcStateCacheArgs,
-    gas_price_oracle: GasPriceOracleArgs,
+    pub(super) gas_price_oracle: GasPriceOracleArgs,
     rpc_send_raw_transaction_sync_timeout: Duration,
 }
 
