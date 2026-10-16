@@ -1,0 +1,49 @@
+[package]
+name = "reth-qmdb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Opt-in QMDb state root support for Reth SDK chains"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-chain-state.workspace = true
+reth-primitives-traits.workspace = true
+reth-stages-api.workspace = true
+reth-storage-api = { workspace = true, features = ["std", "chain-state"] }
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+
+# commonware
+commonware-cryptography = "=2026.9.0"
+commonware-parallel = "=2026.9.0"
+commonware-runtime = "=2026.9.0"
+commonware-storage = "=2026.9.0"
+commonware-utils = "=2026.9.0"
+
+# async
+futures-util.workspace = true
+
+# revm
+reth-revm.workspace = true
+
+# misc
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alloy-rlp.workspace = true
+reth-ethereum-primitives.workspace = true
+tempfile.workspace = true
