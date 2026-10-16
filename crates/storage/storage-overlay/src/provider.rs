@@ -1,7 +1,6 @@
 use crate::{
-    database_state_frontiers,
-    proof::{CachedProof, ProofCache},
-    ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
+    database_state_frontiers, proof::ProviderProofV2, ExecutionOverlay, OverlayBuilder,
+    StateTrieOverlay,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -43,7 +42,14 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, ops::Deref, pin::Pin, sync::Arc, time::Instant};
+use std::{
+    cell::{OnceCell, RefCell},
+    fmt,
+    ops::Deref,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -129,7 +135,7 @@ where
 /// State provider with lazily resolved state trie and execution overlays.
 pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     /// Cached cursors are released before their backing provider.
-    proof_cache: ProofCache,
+    proof_cache: RefCell<Option<ProviderProofV2>>,
     provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
@@ -172,7 +178,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_cache: ProofCache::new(None),
+            proof_cache: RefCell::new(None),
         }
     }
 
@@ -194,7 +200,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
                 historical_fallback: None,
             }),
             is_v2,
-            proof_cache: ProofCache::new(None),
+            proof_cache: RefCell::new(None),
         }
     }
 }
@@ -215,7 +221,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_cache: ProofCache::new(None),
+            proof_cache: RefCell::new(None),
         }
     }
 
@@ -233,7 +239,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_cache: ProofCache::new(None),
+            proof_cache: RefCell::new(None),
         }
     }
 }
@@ -719,7 +725,7 @@ where
                 // SAFETY: The pinned provider keeps its transaction at a stable address. This
                 // private cache moves with the non-Sync provider and is dropped before its tx.
                 slot.insert(unsafe {
-                    CachedProof::new(self.provider().tx(), input, self.is_v2, requires_masks)
+                    ProviderProofV2::new(self.provider().tx(), input, self.is_v2, requires_masks)
                 })
                 .multiproof(targets)
             }
