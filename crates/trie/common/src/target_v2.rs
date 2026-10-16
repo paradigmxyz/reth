@@ -1,8 +1,8 @@
 //! V2 proof targets and chunking.
 
-use crate::Nibbles;
+use crate::{KeccakKeyHasher, KeyHasher, Nibbles};
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256};
 use revm::state::EvmState;
 
 /// Target describes a proof target. For every proof target given, a proof calculator will calculate
@@ -127,40 +127,39 @@ impl MultiProofTargetsV2 {
         targets.account_targets.reserve(state.len());
         targets.storage_targets.reserve(state.len());
         let mut storage_target_count = 0;
-        for (addr, account) in state {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
-            if !account.is_touched() || account.is_selfdestructed() {
-                continue
-            }
-
-            let hashed_address = keccak256(addr);
-
-            if account.info != account.original_info() {
-                targets.account_targets.push(hashed_address.into());
-            }
-
-            let mut storage_slots = Vec::with_capacity(account.storage.len());
-            for (key, slot) in &account.storage {
-                // do nothing if unchanged
-                if !slot.is_changed() {
-                    continue
+        // If the account was not touched, or if the account was selfdestructed, do not fetch
+        // proofs for it.
+        //
+        // Since selfdestruct can only happen in the same transaction, we can skip prefetching
+        // proofs for selfdestructed accounts.
+        //
+        // See: https://eips.ethereum.org/EIPS/eip-6780
+        let accounts = state
+            .iter()
+            .filter(|(_, account)| account.is_touched() && !account.is_selfdestructed());
+        KeccakKeyHasher::hash_keys(
+            accounts,
+            |(addr, _)| **addr,
+            |(_, account), hashed_address| {
+                if account.info != account.original_info() {
+                    targets.account_targets.push(hashed_address.into());
                 }
 
-                let hashed_slot = keccak256(B256::from(*key));
-                storage_slots.push(ProofV2Target::from(hashed_slot));
-            }
+                // Do nothing for unchanged slots.
+                let changed = account.storage.iter().filter(|(_, slot)| slot.is_changed());
+                let mut storage_slots = Vec::with_capacity(account.storage.len());
+                KeccakKeyHasher::hash_keys(
+                    changed,
+                    |(key, _)| B256::from(**key),
+                    |_, hashed_slot| storage_slots.push(ProofV2Target::from(hashed_slot)),
+                );
 
-            storage_target_count += storage_slots.len();
-            if !storage_slots.is_empty() {
-                targets.storage_targets.insert(hashed_address, storage_slots);
-            }
-        }
+                storage_target_count += storage_slots.len();
+                if !storage_slots.is_empty() {
+                    targets.storage_targets.insert(hashed_address, storage_slots);
+                }
+            },
+        );
 
         (targets, storage_target_count)
     }

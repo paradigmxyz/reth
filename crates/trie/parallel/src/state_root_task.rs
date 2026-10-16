@@ -9,9 +9,10 @@
 
 use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256};
 use reth_trie::{
-    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
+    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher,
+    MultiProofTargetsV2, ProofV2Target,
 };
 use revm::state::EvmState;
 use std::{fmt, sync::Arc};
@@ -521,9 +522,11 @@ impl StateRootSink for SparseTrieStateRootSink {
 pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
+    let touched = update.into_iter().filter(|(_, account)| account.is_touched());
+    KeccakKeyHasher::hash_keys(
+        touched,
+        |(address, _)| *address,
+        |(address, account), hashed_address| {
             trace!(target: "trie::parallel::sparse", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
@@ -542,20 +545,24 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 hashed_state.accounts.insert(hashed_address, Some(account.info.into()));
             }
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if !destroyed && changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(changed_storage_iter));
+            if destroyed {
+                return
             }
-        }
-    }
+            let mut storage = HashedStorage::default();
+            let changed_storage =
+                account.storage.into_iter().filter(|(_slot, value)| value.is_changed());
+            KeccakKeyHasher::hash_keys(
+                changed_storage,
+                |(slot, _)| B256::from(*slot),
+                |(_, value), hashed_slot| {
+                    storage.storage.insert(hashed_slot, value.present_value);
+                },
+            );
+            if !storage.is_empty() {
+                hashed_state.storages.insert(hashed_address, storage);
+            }
+        },
+    );
 
     hashed_state
 }
@@ -563,7 +570,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use revm::state::{Account, EvmStorageSlot, TransactionId};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},

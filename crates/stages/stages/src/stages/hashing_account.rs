@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::B256;
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -17,6 +17,7 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{KeccakKeyHasher, KeyHasher};
 use std::{
     collections::BTreeSet,
     fmt::Debug,
@@ -196,10 +197,13 @@ where
                 channels.push(rx);
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    for (address, account) in chunk {
-                        let address = address.key().unwrap();
-                        let _ = tx.send((RawKey::new(keccak256(address)), account));
-                    }
+                    KeccakKeyHasher::hash_keys(
+                        chunk,
+                        |(address, _)| address.key().unwrap(),
+                        |(_, account), hashed_address| {
+                            let _ = tx.send((RawKey::new(hashed_address), account));
+                        },
+                    );
                 });
 
                 // Flush to ETL when channels length reaches MAXIMUM_CHANNELS
@@ -411,7 +415,7 @@ mod tests {
     mod test_utils {
         use super::*;
         use crate::test_utils::TestStageDB;
-        use alloy_primitives::Address;
+        use alloy_primitives::{keccak256, Address};
         use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {

@@ -9,8 +9,8 @@ use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader, Stor
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress,
-    TrieInputSorted,
+    updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, KeccakKeyHasher, KeyHasher,
+    StateRoot, StateRootProgress, TrieInputSorted,
 };
 use std::{
     collections::HashSet,
@@ -292,12 +292,17 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         // Iterate over account changesets and record value before first occurring account change
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
-        for entry in provider.account_changesets_range(start..end)? {
-            let (_, AccountBeforeTx { address, info }) = entry;
-            if seen_accounts.insert(address) {
-                accounts.push((keccak256(address), info));
-            }
-        }
+        let first_changes = provider
+            .account_changesets_range(start..end)?
+            .into_iter()
+            .filter(|(_, AccountBeforeTx { address, .. })| seen_accounts.insert(*address));
+        KeccakKeyHasher::hash_keys(
+            first_changes,
+            |(_, AccountBeforeTx { address, .. })| *address,
+            |(_, AccountBeforeTx { info, .. }), hashed_address| {
+                accounts.push((hashed_address, info));
+            },
+        );
         accounts.sort_unstable_by_key(|(hash, _)| *hash);
 
         // Read storages into B256Map<Vec<_>> with HashSet to track seen keys.
@@ -310,10 +315,16 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive
             // consecutively and the address hash can be reused across them.
             let mut last_address: Option<(Address, B256)> = None;
-            for (BlockNumberAddress((_, address)), storage) in
-                provider.storage_changesets_range(start..=end_inclusive)?
-            {
-                if seen_storage_keys.insert((address, storage.key)) {
+            let first_changes = provider
+                .storage_changesets_range(start..=end_inclusive)?
+                .into_iter()
+                .filter(|(BlockNumberAddress((_, address)), storage)| {
+                    seen_storage_keys.insert((*address, storage.key))
+                });
+            KeccakKeyHasher::hash_keys(
+                first_changes,
+                |(_, storage)| storage.key,
+                |(BlockNumberAddress((_, address)), storage), hashed_slot| {
                     let hashed_address = match last_address {
                         Some((last, hashed)) if last == address => hashed,
                         _ => {
@@ -322,12 +333,9 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                             hashed
                         }
                     };
-                    storages
-                        .entry(hashed_address)
-                        .or_default()
-                        .push((keccak256(storage.key), storage.value));
-                }
-            }
+                    storages.entry(hashed_address).or_default().push((hashed_slot, storage.value));
+                },
+            );
         }
 
         // Sort storage slots and convert to HashedStorageSorted
