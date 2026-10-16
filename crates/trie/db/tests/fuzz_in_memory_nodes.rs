@@ -4,10 +4,7 @@ use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
 use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
 use reth_primitives_traits::{Account, StorageEntry};
-use reth_provider::{
-    test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-    ProviderFactory,
-};
+use reth_provider::test_utils::create_test_provider_factory;
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
     test_utils::{state_root_prehashed, storage_root_prehashed},
@@ -18,29 +15,23 @@ use reth_trie::{
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory,
 };
-use std::{collections::BTreeMap, sync::LazyLock};
+use std::collections::BTreeMap;
 
 type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
-/// Proptest cases share one factory: each case drops its provider without committing, so the
-/// next case starts from an empty database.
-fn shared_factory() -> &'static ProviderFactory<MockNodeTypesWithDB> {
-    static FACTORY: LazyLock<ProviderFactory<MockNodeTypesWithDB>> =
-        LazyLock::new(create_test_provider_factory);
-    &FACTORY
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig {
-        cases: 128, ..ProptestConfig::default()
-    })]
-
-    #[test]
-    fn fuzz_in_memory_account_nodes(mut init_state: BTreeMap<B256, U256>, state_updates: [BTreeMap<B256, Option<U256>>; 10]) {
-        let provider = shared_factory().provider_rw().unwrap();
+#[test]
+fn fuzz_in_memory_account_nodes() {
+    // The cases share one factory: each drops its provider without committing, so the next case
+    // starts from an empty database.
+    let factory = create_test_provider_factory();
+    proptest!(ProptestConfig::with_cases(128), |(
+        init_state in any::<BTreeMap<B256, U256>>(),
+        state_updates in any::<[BTreeMap<B256, Option<U256>>; 10]>(),
+    )| {
+        let provider = factory.provider_rw().unwrap();
         let mut hashed_account_cursor = provider.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
         // Insert init state into database
@@ -88,12 +79,20 @@ proptest! {
                 assert_eq!(expected_root, state_root);
             }
         });
-    }
+    });
+}
 
-    #[test]
-    fn fuzz_in_memory_storage_nodes(mut init_storage: BTreeMap<B256, U256>, storage_updates: [BTreeMap<B256, U256>; 10]) {
+#[test]
+fn fuzz_in_memory_storage_nodes() {
+    // The cases share one factory: each drops its provider without committing, so the next case
+    // starts from an empty database.
+    let factory = create_test_provider_factory();
+    proptest!(ProptestConfig::with_cases(128), |(
+        init_storage in any::<BTreeMap<B256, U256>>(),
+        storage_updates in any::<[BTreeMap<B256, U256>; 10]>(),
+    )| {
         let hashed_address = B256::random();
-        let provider = shared_factory().provider_rw().unwrap();
+        let provider = factory.provider_rw().unwrap();
         let mut hashed_storage_cursor =
             provider.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
 
@@ -141,5 +140,5 @@ proptest! {
                 assert_eq!(expected_root, storage_root);
             }
         });
-    }
+    });
 }
