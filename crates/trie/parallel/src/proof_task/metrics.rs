@@ -1,10 +1,7 @@
 //! Proof worker metrics.
 
 use reth_metrics::{metrics::Histogram, Metrics};
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::time::Duration;
 
 /// Idle time metrics of the proof workers.
 #[derive(Clone, Metrics)]
@@ -25,13 +22,5 @@ impl ProofWorkerIdleMetrics {
     /// Record account worker idle time.
     pub fn record_account_worker_idle_time(&self, duration: Duration) {
         self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
-    }
-}
-
-impl ProofWorkerIdleMetrics {
-    /// Returns shared process-wide worker idle metrics.
-    pub(crate) fn shared() -> Arc<Self> {
-        static METRICS: OnceLock<Arc<ProofWorkerIdleMetrics>> = OnceLock::new();
-        METRICS.get_or_init(Default::default).clone()
     }
 }

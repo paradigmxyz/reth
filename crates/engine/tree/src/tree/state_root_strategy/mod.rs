@@ -74,7 +74,9 @@ use reth_provider::{
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle};
+use reth_trie_parallel::proof_task::{
+    metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
+};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -467,6 +469,7 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    proof_worker_metrics: ProofWorkerIdleMetrics,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -563,7 +566,12 @@ impl DefaultStateRootStrategy {
                 gas_used,
             ),
         );
-        let proof_worker_handle = ProofWorkerHandle::new(executor, task_ctx, worker_counts);
+        let proof_worker_handle = ProofWorkerHandle::new(
+            executor,
+            task_ctx,
+            worker_counts,
+            self.proof_worker_metrics.clone(),
+        );
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();

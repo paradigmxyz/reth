@@ -133,6 +133,7 @@ impl ProofWorkerHandle {
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `worker_counts`: How many workers of each pool to spawn for this block, with a minimum of
     ///   one worker of each kind
+    /// - `metrics`: Idle-time metric handles shared across blocks (with the metrics feature).
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -143,6 +144,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         worker_counts: ProofWorkerCounts,
+        #[cfg(feature = "metrics")] metrics: ProofWorkerIdleMetrics,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: StateProvider> + Clone + Send + Sync + 'static,
@@ -165,11 +167,6 @@ impl ProofWorkerHandle {
             account_worker_count,
             "Spawning proof worker pools"
         );
-
-        // Registered once per process and shared by all workers of both pools, which record into
-        // the same metric series.
-        #[cfg(feature = "metrics")]
-        let metrics = ProofWorkerIdleMetrics::shared();
 
         spawn_workers(
             runtime,
@@ -437,7 +434,7 @@ struct ProofWorker<Factory, J> {
     availability: Arc<AvailabilitySheet>,
     /// Metrics shared by all workers of the handle.
     #[cfg(feature = "metrics")]
-    metrics: Arc<ProofWorkerIdleMetrics>,
+    metrics: ProofWorkerIdleMetrics,
 }
 
 impl<Factory, J> ProofWorker<Factory, J> {
@@ -681,8 +678,13 @@ mod tests {
         let ctx = test_ctx(factory.clone());
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_worker_handle =
-            ProofWorkerHandle::new(&runtime, ctx, ProofWorkerCounts::full(&runtime));
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ctx,
+            ProofWorkerCounts::full(&runtime),
+            #[cfg(feature = "metrics")]
+            Default::default(),
+        );
         let proof_result_rx = proof_worker_handle.results().clone();
 
         // Workers shut down automatically when the handle is dropped.
@@ -726,7 +728,13 @@ mod tests {
             ProofWorkerCounts::full(&runtime),
             ProofWorkerCounts::new(pool_threads + 1, pool_threads + 2),
         ] {
-            let proof_worker_handle = ProofWorkerHandle::new(&runtime, ctx.clone(), counts);
+            let proof_worker_handle = ProofWorkerHandle::new(
+                &runtime,
+                ctx.clone(),
+                counts,
+                #[cfg(feature = "metrics")]
+                Default::default(),
+            );
             assert_eq!(
                 proof_worker_handle.total_storage_workers(),
                 counts.storage.max(1).min(pool_threads)
