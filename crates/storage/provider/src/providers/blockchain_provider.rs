@@ -1021,8 +1021,6 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let provider = self.database.provider()?;
         let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
 
-        let from_transaction_num = block_body.first_tx_num();
-        let to_transaction_num = block_body.last_tx_num();
         let account_changeset = provider.account_changesets_range(block..=block)?;
         let storage_changeset = provider.storage_changeset(block)?;
 
@@ -1037,7 +1035,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             |address| state_provider.basic_account(&address),
             |address, storage_key| state_provider.storage(address, storage_key),
         )?;
-        let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+        let receipts = provider.receipts_by_tx_range(block_body.tx_num_range())?;
 
         Ok(Some(ExecutionOutcome::new_init(
             state,
@@ -1054,7 +1052,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
 #[cfg(test)]
 #[allow(clippy::clone_on_copy)]
 mod tests {
-    use super::SNAPSHOT_STATE_RETENTION;
+    use super::*;
     use crate::{
         providers::BlockchainProvider,
         test_utils::{
@@ -3614,6 +3612,55 @@ mod tests {
             .expect("account must have storage");
         assert_eq!(storage_range.items, vec![(hashed_slot, value_a)]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn get_state_preserves_empty_block_receipts() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let factory = create_test_provider_factory();
+        let writer = factory.provider_rw()?;
+        let mut parent = B256::ZERO;
+        let mut expected = Vec::new();
+        // Persist empty blocks before receipt zero, between transactions and at the tip.
+        for (number, tx_count) in [0, 0, 1, 0, 1, 0].into_iter().enumerate() {
+            let block = random_block(
+                &mut rng,
+                number as u64,
+                BlockParams {
+                    parent: Some(parent),
+                    tx_count: Some(tx_count),
+                    ..Default::default()
+                },
+            )
+            .try_recover()
+            .expect("failed to recover test block");
+            parent = block.hash();
+            expected.push(
+                block
+                    .body()
+                    .transactions
+                    .iter()
+                    .map(|tx| random_receipt(&mut rng, tx, Some(0), Some(0)))
+                    .collect::<Vec<_>>(),
+            );
+            writer.insert_block(&block)?;
+        }
+        writer.write_state(
+            &ExecutionOutcome { first_block: 0, receipts: expected.clone(), ..Default::default() },
+            OriginalValuesKnown::No,
+            StateWriteConfig::default(),
+        )?;
+        writer.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(5))?;
+        writer.commit()?;
+
+        let provider = BlockchainProvider::new(factory)?;
+        assert!(provider.canonical_in_memory_state.head_state().is_none());
+        assert!(provider.receipt(0)?.is_some());
+        for (number, receipts) in expected.into_iter().enumerate() {
+            let outcome = provider.get_state(number as u64)?.expect("persisted block state");
+            assert_eq!(outcome.receipts, vec![receipts], "block {number}");
+        }
         Ok(())
     }
 }
