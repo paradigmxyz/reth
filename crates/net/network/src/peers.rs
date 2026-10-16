@@ -623,7 +623,9 @@ impl PeersManager {
 
     /// Gracefully disconnected a pending _outgoing_ session
     pub(crate) fn on_outgoing_pending_session_gracefully_closed(&mut self, peer_id: &PeerId) {
-        if let Some(peer) = self.peers.get_mut(peer_id) {
+        if let Some(peer) = self.peers.get_mut(peer_id) &&
+            peer.state.is_pending_out()
+        {
             self.connection_info.decr_state(peer.state);
             peer.state = PeerConnectionState::Idle;
             peer.mark_disconnected();
@@ -688,7 +690,11 @@ impl PeersManager {
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
             peer.mark_connected();
-            if at_capacity && !peer.is_trusted() && !peer.is_static() {
+            if at_capacity &&
+                !peer.is_trusted() &&
+                !peer.is_static() &&
+                !self.trusted_peer_ids.contains(&peer_id)
+            {
                 self.queued_actions.push_back(PeerAction::Disconnect {
                     peer_id,
                     reason: Some(DisconnectReason::TooManyPeers),
@@ -4080,5 +4086,54 @@ mod tests {
             assert_eq!(peers.connection_info.num_outbound, 0);
             assert_eq!(peers.connection_info.num_pending_out, 0);
         }
+    }
+
+    #[tokio::test]
+    async fn test_surplus_outbound_preserves_id_trusted_peers() {
+        for hostname in [false, true] {
+            let mut peers = PeersManager::new(PeersConfig::test().with_max_outbound(0));
+            let peer_id = PeerId::random();
+            let addr = PeerAddr::from_tcp("127.0.0.1:8008".parse().unwrap());
+            if hostname {
+                peers.add_peer(peer_id, addr, None);
+                peers.add_trusted_peer_node(TrustedPeer {
+                    host: Host::Domain("example.invalid".to_string()),
+                    tcp_port: 8008,
+                    udp_port: 8008,
+                    id: peer_id,
+                });
+            } else {
+                peers.add_trusted_peer_id(peer_id);
+            }
+            peers.add_and_connect_kind(peer_id, PeerKind::Basic, addr, None);
+            assert_eq!(peers.peers[&peer_id].kind, PeerKind::Basic);
+            peers.queued_actions.clear();
+
+            peers.on_active_outgoing_established(peer_id);
+
+            assert!(peers.queued_actions.is_empty());
+            assert_eq!(peers.num_outbound_connections(), 1);
+            peers.on_active_session_gracefully_closed(peer_id);
+            assert_eq!(peers.num_outbound_connections(), 0);
+            assert_eq!(peers.num_pending_outbound_connections(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pending_outbound_cleanup_preserves_incoming_session() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let peer_id = PeerId::random();
+        let addr = "127.0.0.1:8008".parse::<SocketAddr>().unwrap();
+        peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.on_incoming_session_established(peer_id, addr);
+        let connected_at = peers.peers[&peer_id].connected_at;
+
+        peers.on_outgoing_pending_session_gracefully_closed(&peer_id);
+
+        assert_eq!(peers.peers[&peer_id].state, PeerConnectionState::In);
+        assert_eq!(peers.peers[&peer_id].connected_at, connected_at);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.num_pending_outbound_connections(), 0);
     }
 }
