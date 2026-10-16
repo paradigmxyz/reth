@@ -131,7 +131,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider
+        P: DBProvider<Tx: 'static>
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -156,7 +156,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         finish: BlockNumHash,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider
+        P: DBProvider<Tx: 'static>
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -179,7 +179,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         block_number: BlockNumber,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
-        P: DBProvider
+        P: DBProvider<Tx: 'static>
             + ChangeSetReader
             + StorageChangeSetReader
             + PruneCheckpointReader

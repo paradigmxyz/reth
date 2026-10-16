@@ -386,7 +386,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + PruneCheckpointReader
             + ChangeSetReader
             + StorageChangeSetReader
-            + DBProvider
+            + DBProvider<Tx: 'static>
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -424,7 +424,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     where
         Provider: ChangeSetReader
             + StorageChangeSetReader
-            + DBProvider
+            + DBProvider<Tx: 'static>
             + BlockNumReader
             + StageCheckpointReader
             + PruneCheckpointReader

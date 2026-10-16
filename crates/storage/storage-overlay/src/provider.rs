@@ -1,7 +1,4 @@
-use crate::{
-    database_state_frontiers, proof::ProviderProofV2, ExecutionOverlay, OverlayBuilder,
-    StateTrieOverlay,
-};
+use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
@@ -25,11 +22,12 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
+    proof_v2::ProofV2,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
     },
-    updates::TrieUpdates,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     witness::TrieWitness,
     AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
     HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
@@ -40,7 +38,7 @@ use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
-    PackedStoragesTrie,
+    PackedStoragesTrie, TrieTableAdapter,
 };
 use std::{
     cell::{OnceCell, RefCell},
@@ -133,9 +131,13 @@ where
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
-pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
-    /// Cached cursors are released before their backing provider.
-    proof_cache: RefCell<Option<ProviderProofV2>>,
+pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider<Tx: 'static>,
+{
+    /// Cached cursors are released before their backing transaction and overlays.
+    proof_cache: ProofCache<<Provider::Target as DbTxProvider>::Tx>,
     provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
@@ -146,7 +148,9 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     is_v2: bool,
 }
 
-impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
+impl<Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
+    OverlayStateProvider<OwnedProvider<Provider>, N>
+{
     /// Creates an overlay state provider over an already-open database provider.
     pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
@@ -205,7 +209,9 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
     }
 }
 
-impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+impl<'a, Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
+    OverlayStateProvider<&'a Provider, N>
+{
     /// Creates an overlay state provider over a borrowed database provider.
     pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
@@ -247,7 +253,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider,
+    Provider::Target: DBProvider<Tx: 'static>,
 {
     fn provider(&self) -> &Provider::Target {
         &self.provider
@@ -398,7 +404,7 @@ where
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + fmt::Debug,
+    Provider::Target: DBProvider<Tx: 'static> + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayStateProvider")
@@ -413,7 +419,7 @@ where
 impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -454,7 +460,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider<Tx: 'static> + StorageSettingsCache,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
@@ -475,7 +481,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -512,7 +518,7 @@ where
 impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -538,7 +544,7 @@ where
 impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -597,7 +603,7 @@ where
 impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -664,7 +670,7 @@ where
 impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -718,17 +724,25 @@ where
             return Ok(DecodedMultiProofV2::default())
         }
         let mut cache = self.proof_cache.borrow_mut();
-        match &mut *cache {
-            Some(proof) if proof.requires_masks == requires_masks => proof.multiproof(targets),
+        let (_, proof) = match &mut *cache {
+            Some(entry) if entry.0 == requires_masks => entry,
             slot => {
-                let input = self.state_trie_overlay(requires_masks)?.input().clone();
-                // SAFETY: The pinned provider keeps its transaction at a stable address. This
-                // private cache moves with the non-Sync provider and is dropped before its tx.
-                slot.insert(unsafe {
-                    ProviderProofV2::new(self.provider().tx(), input, self.is_v2, requires_masks)
-                })
-                .multiproof(targets)
+                let input = self.state_trie_overlay(requires_masks)?.input();
+                // SAFETY: The pinned transaction and overlay allocations outlive this private
+                // cache. Cached generators are dropped first and never escape the provider.
+                let proof = unsafe {
+                    if self.is_v2 {
+                        ProofV2Cache::Packed(cached_proof_v2(self.provider().tx(), input))
+                    } else {
+                        ProofV2Cache::Legacy(cached_proof_v2(self.provider().tx(), input))
+                    }
+                };
+                slot.insert((requires_masks, proof))
             }
+        };
+        match proof {
+            ProofV2Cache::Legacy(proof) => Ok(proof.multiproof(targets)?),
+            ProofV2Cache::Packed(proof) => Ok(proof.multiproof(targets)?),
         }
     }
 
@@ -767,7 +781,7 @@ where
 impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -805,7 +819,7 @@ where
 impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -852,7 +866,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider<Tx: 'static> + StorageSettingsCache,
 {
     fn storage_from_db(
         &self,
@@ -884,7 +898,7 @@ where
 impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -939,7 +953,7 @@ where
 impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider
+    Provider::Target: DBProvider<Tx: 'static>
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1023,6 +1037,50 @@ type DbStorageProof<'a, TX, A> = TrieStorageProof<
 >;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
+
+// SAFETY: The cache borrows only this provider's pinned transaction and immutable overlays.
+// Moving them together preserves those references. RefCell prevents shared concurrent access,
+// and requiring Provider: Send also prevents moving borrowed non-Sync database providers.
+unsafe impl<Provider, N: NodePrimitives> Send for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref + Send,
+    Provider::Target: DBProvider<Tx: 'static>,
+{
+}
+
+type ProofCache<TX> = RefCell<Option<(bool, ProofV2Cache<TX>)>>;
+
+enum ProofV2Cache<TX: DbTx + 'static> {
+    Legacy(DbProofV2<TX, LegacyKeyAdapter>),
+    Packed(DbProofV2<TX, PackedKeyAdapter>),
+}
+
+type DbProofV2<TX, A> = ProofV2<
+    'static,
+    InMemoryTrieCursorFactory<
+        DatabaseTrieCursorFactory<&'static TX, A>,
+        &'static TrieUpdatesSorted,
+    >,
+    HashedPostStateCursorFactory<
+        DatabaseHashedCursorFactory<&'static TX>,
+        &'static HashedPostStateSorted,
+    >,
+>;
+
+/// The caller must retain the pinned transaction and overlay allocations until the proof drops.
+unsafe fn cached_proof_v2<TX: DbTx + 'static, A: TrieTableAdapter>(
+    tx: &TX,
+    input: &TrieInputSorted,
+) -> DbProofV2<TX, A> {
+    // SAFETY: The caller guarantees these allocations remain stable and outlive the generator.
+    let (tx, nodes, state) =
+        unsafe { (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state)) };
+    ProofV2::new(
+        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
+        input.prefix_sets.clone().freeze(),
+    )
+}
 
 #[doc(hidden)]
 #[derive(Debug)]
