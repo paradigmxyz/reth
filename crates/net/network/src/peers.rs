@@ -959,7 +959,7 @@ impl PeersManager {
                     peer.kind = kind;
                 }
 
-                if peer.state.is_incoming() {
+                if peer.state.is_incoming() || peer.state.is_idle() {
                     // now that we have an actual discovered address, for that peer and not just the
                     // ip of the incoming connection, we don't need to remove the peer after
                     // disconnecting, See `on_incoming_session_established`
@@ -1090,6 +1090,11 @@ impl PeersManager {
                 peer.kind = kind;
                 peer.fork_id = fork_id.map(Box::new);
                 peer.addr = addr;
+
+                if peer.state.is_incoming() || peer.state.is_idle() {
+                    // A supplied listening address replaces the transient inbound address.
+                    peer.remove_after_disconnect = false;
+                }
 
                 if peer.state.is_idle() {
                     // Try connecting again.
@@ -1293,6 +1298,10 @@ impl PeersManager {
         );
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            if peer.state.is_incoming() || peer.state.is_idle() {
+                // A resolved listening address replaces the transient inbound address.
+                peer.remove_after_disconnect = false;
+            }
             if peer.addr != new_addr {
                 peer.addr = new_addr;
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
@@ -4496,6 +4505,51 @@ mod tests {
             assert_eq!(peers.best_unconnected().map(|(id, _)| id), Some(peer_id));
             peers.add_and_connect_kind(peer_id, kind, PeerAddr::from_tcp(addr), None);
             assert!(peers.can_activate_outbound(peer_id, addr));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trusted_transient_peer_recovers_with_listening_address() {
+        for update in 0..3 {
+            let mut peers = PeersManager::new(PeersConfig::test());
+            let peer_id = PeerId::random();
+            let incoming = "127.0.0.1:8008".parse::<SocketAddr>().unwrap();
+            let listening = "127.0.0.1:30303".parse::<SocketAddr>().unwrap();
+            peers.on_incoming_pending_session(incoming.ip()).unwrap();
+            peers.on_incoming_session_established(peer_id, incoming);
+            peers.add_trusted_peer_id(peer_id);
+            peers.on_active_session_dropped(
+                &incoming,
+                &peer_id,
+                &EthStreamError::P2PStreamError(P2PStreamError::Io(
+                    io::ErrorKind::ConnectionReset.into(),
+                )),
+            );
+            assert!(peers.peers[&peer_id].remove_after_disconnect);
+            assert!(peers.best_unconnected().is_none());
+            peers.peers.get_mut(&peer_id).unwrap().backed_off = false;
+            match update {
+                0 => peers.add_peer(peer_id, PeerAddr::from_tcp(listening), None),
+                1 => peers.on_resolved_peer(peer_id, NodeRecord::new(listening, peer_id)),
+                2 => peers.add_and_connect_kind(
+                    peer_id,
+                    PeerKind::Trusted,
+                    PeerAddr::from_tcp(listening),
+                    None,
+                ),
+                _ => unreachable!(),
+            }
+            assert!(!peers.peers[&peer_id].remove_after_disconnect);
+            if update != 2 {
+                assert_eq!(peers.best_unconnected().map(|(id, _)| id), Some(peer_id));
+                peers.add_and_connect_kind(
+                    peer_id,
+                    PeerKind::Trusted,
+                    PeerAddr::from_tcp(listening),
+                    None,
+                );
+            }
+            assert!(peers.can_activate_outbound(peer_id, listening));
         }
     }
 }

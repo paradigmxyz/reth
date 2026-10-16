@@ -443,7 +443,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         Some(session)
     }
 
-    /// Cancels outgoing attempts superseded by an incoming session for this peer.
+    /// Cancels all pending outgoing attempts for this peer.
     pub(crate) fn cancel_pending_outbound(&mut self, peer_id: PeerId) {
         self.pending_sessions.retain(|_, session| {
             if session.direction == Direction::Outgoing(peer_id) {
