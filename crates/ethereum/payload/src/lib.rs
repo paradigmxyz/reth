@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
 use reth_basic_payload_builder::{
@@ -39,10 +39,11 @@ use reth_transaction_pool::{
     ValidPoolTransaction,
 };
 use revm::context_interface::{Block as _, Cfg as _};
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tracing::{debug, trace, warn};
 
 mod config;
+mod recovery;
 pub use config::*;
 
 pub mod validator;
@@ -143,25 +144,64 @@ where
 /// Given build arguments including an Ethereum client, transaction pool,
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
+///
+/// Unwinding transaction panics discard the entire build attempt and retry from the parent,
+/// evicting the panicking transactions and their descendants from the pool. The transaction
+/// iterator factory must return a fresh iterator on each call. Recovery does not apply to `panic =
+/// "abort"` builds or to block validation. At most eight rebuilds are attempted per call.
 #[inline]
 pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
     client: Client,
     pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
-    best_txs: F,
+    mut args: BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
+    mut best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
+    F: FnMut(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
+{
+    recovery::rebuild_after_panic(&pool, |excluded, retry| {
+        if retry {
+            // Cached reads and the trie pipeline may have observed partial commits. Start fresh.
+            args.cached_reads = Default::default();
+            args.execution_cache = None;
+            args.state_root_handle = None;
+        }
+        build_ethereum_payload_attempt(
+            &evm_config,
+            &client,
+            &pool,
+            &builder_config,
+            &mut args,
+            &mut best_txs,
+            excluded,
+        )
+    })
+}
+
+fn build_ethereum_payload_attempt<EvmConfig, Client, Pool, F>(
+    evm_config: &EvmConfig,
+    client: &Client,
+    pool: &Pool,
+    builder_config: &EthereumBuilderConfig,
+    args: &mut BuildArguments<EthPayloadAttributes, EthBuiltPayload>,
+    best_txs: &mut F,
+    excluded: &HashSet<B256>,
+) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
+where
+    EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    F: FnMut(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments {
-        mut cached_reads,
+        cached_reads,
         execution_cache,
-        mut state_root_handle,
+        state_root_handle,
         config,
         cancel,
         best_payload,
@@ -171,7 +211,7 @@ where
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let evm_state_provider = (&state_provider).into_evm_state_provider();
-    let cached_state_provider = execution_cache.map(|execution_cache| {
+    let cached_state_provider = execution_cache.as_ref().map(|execution_cache| {
         CachedStateProvider::new(
             &evm_state_provider,
             execution_cache.cache().clone(),
@@ -194,11 +234,11 @@ where
         .with_bal_builder_if(is_amsterdam)
         .build();
 
-    let evm_config = evm_config.with_jit_support();
+    let evm_config = evm_config.clone().with_jit_support();
     let mut builder = evm_config
         .builder_for_next_block(
             &mut db,
-            &parent_header,
+            parent_header,
             NextBlockEnvAttributes {
                 timestamp: attributes.timestamp(),
                 suggested_fee_recipient: attributes.suggested_fee_recipient,
@@ -261,6 +301,16 @@ where
         attributes.withdrawals.as_ref().map(|withdrawals| withdrawals.length()).unwrap_or(0);
 
     while let Some(pool_tx) = best_txs.next() {
+        if excluded.contains(pool_tx.hash()) {
+            // This is local builder policy, not a consensus-invalid transaction.
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::Other(Box::new(recovery::excluded_transaction(
+                    *pool_tx.hash(),
+                ))),
+            );
+            continue
+        }
         // ensure we still have capacity for this transaction
         let exceeds_gas_limit = if is_amsterdam {
             let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
@@ -375,9 +425,11 @@ where
         let tx_hash = *tx.tx_hash();
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = match builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-        }) {
+        let gas_output = match recovery::catch_transaction_panic(tx_hash, || {
+            builder.execute_transaction_with_result_closure(tx, |result| {
+                tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+            })
+        })? {
             Ok(gas_output) => gas_output,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
@@ -451,7 +503,11 @@ where
         // Release db
         drop(builder);
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
+        drop(db);
+        return Ok(BuildOutcome::Aborted {
+            fees: total_fees,
+            cached_reads: std::mem::take(cached_reads),
+        })
     }
 
     let BlockBuilderOutcome { execution_result, block, block_access_list, .. } = if skip_state_root
@@ -466,7 +522,7 @@ where
             state_provider.as_ref(),
             Some((parent_header.state_root(), Default::default())),
         )?
-    } else if let Some(mut task) = state_root_handle {
+    } else if let Some(mut task) = state_root_handle.take() {
         // Drop the state hook, which signals the state-root task to finalize.
         builder.evm_mut().db_mut().set_state_hook(None);
 
@@ -508,5 +564,6 @@ where
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);
 
-    Ok(BuildOutcome::Better { payload, cached_reads })
+    drop(db);
+    Ok(BuildOutcome::Better { payload, cached_reads: std::mem::take(cached_reads) })
 }
