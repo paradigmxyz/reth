@@ -1382,4 +1382,50 @@ mod tests {
         .unwrap();
         assert_eq!(f64::from_bits(total_pending.load(Ordering::Relaxed)), 0.0);
     }
+
+    #[tokio::test]
+    async fn rejected_policy_dials_do_not_emit_connection_events() {
+        for banned in [false, true] {
+            let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(
+                SecretKey::new(&mut rand_08::thread_rng()),
+                Runtime::test(),
+            )
+            .disable_discovery()
+            .listener_addr("127.0.0.1:0".parse().unwrap())
+            .peer_config(PeersConfig::test())
+            .build(NoopProvider::default());
+            let mut network = NetworkManager::new(config).await.unwrap();
+            let peer_id = PeerId::random();
+            let addr = "127.0.0.1:8008".parse().unwrap();
+            network.swarm.peers_mut().add_and_connect_kind(
+                peer_id,
+                PeerKind::Basic,
+                PeerAddr::from_tcp(addr),
+                None,
+            );
+            if banned {
+                network.swarm.peers_mut().ban_peer_by_admin(peer_id);
+            }
+            let event = loop {
+                let event =
+                    network.swarm.poll_next_unpin(&mut Context::from_waker(noop_waker_ref()));
+                if matches!(
+                    event,
+                    Poll::Ready(Some(SwarmEvent::PeerAdded(_) | SwarmEvent::PeerRemoved(_)))
+                ) {
+                    continue
+                }
+                break event
+            };
+            if banned {
+                assert!(event.is_pending());
+                assert_eq!(network.swarm.peers().num_pending_outbound_connections(), 0);
+            } else {
+                assert!(
+                    matches!(event, Poll::Ready(Some(SwarmEvent::OutgoingTcpConnection { peer_id: id, remote_addr })) if id == peer_id && remote_addr == addr)
+                );
+                assert_eq!(network.swarm.peers().num_pending_outbound_connections(), 1);
+            }
+        }
+    }
 }
