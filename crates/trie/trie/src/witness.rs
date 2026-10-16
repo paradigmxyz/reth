@@ -52,30 +52,6 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
-        TrieWitness {
-            trie_cursor_factory,
-            hashed_cursor_factory: self.hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            always_include_root_node: self.always_include_root_node,
-            mode: self.mode,
-            witness: self.witness,
-        }
-    }
-
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
-        TrieWitness {
-            trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            always_include_root_node: self.always_include_root_node,
-            mode: self.mode,
-            witness: self.witness,
-        }
-    }
-
     /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
     pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
         self.prefix_sets = prefix_sets;
@@ -371,8 +347,7 @@ where
             if !state.accounts.contains_key(&hashed_address) {
                 targets.account_targets.push(ProofV2Target::new(hashed_address));
             }
-            // Skip accounts with no storage slot changes — an empty target set would produce
-            // an empty proof vec which cannot be revealed (no root node).
+            // Accounts without storage slot changes need only an account proof.
             if storage.storage.is_empty() {
                 continue;
             }

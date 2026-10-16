@@ -215,11 +215,13 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
                 let multiproof =

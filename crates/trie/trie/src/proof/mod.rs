@@ -52,28 +52,6 @@ impl<T, H> Proof<T, H> {
 }
 
 impl<T, H, K> Proof<T, H, K> {
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> Proof<TF, H, K> {
-        Proof {
-            trie_cursor_factory,
-            hashed_cursor_factory: self.hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            collect_branch_node_masks: self.collect_branch_node_masks,
-            added_removed_keys: self.added_removed_keys,
-        }
-    }
-
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<T, HF, K> {
-        Proof {
-            trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
-            prefix_sets: self.prefix_sets,
-            collect_branch_node_masks: self.collect_branch_node_masks,
-            added_removed_keys: self.added_removed_keys,
-        }
-    }
-
     /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
     pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
         self.prefix_sets = prefix_sets;
@@ -254,33 +232,6 @@ impl<T, H> StorageProof<T, H> {
 }
 
 impl<T, H, K> StorageProof<T, H, K> {
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H, K> {
-        StorageProof {
-            trie_cursor_factory,
-            hashed_cursor_factory: self.hashed_cursor_factory,
-            hashed_address: self.hashed_address,
-            prefix_set: self.prefix_set,
-            collect_branch_node_masks: self.collect_branch_node_masks,
-            added_removed_keys: self.added_removed_keys,
-        }
-    }
-
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(
-        self,
-        hashed_cursor_factory: HF,
-    ) -> StorageProof<T, HF, K> {
-        StorageProof {
-            trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
-            hashed_address: self.hashed_address,
-            prefix_set: self.prefix_set,
-            collect_branch_node_masks: self.collect_branch_node_masks,
-            added_removed_keys: self.added_removed_keys,
-        }
-    }
-
     /// Set the changed prefixes.
     pub fn with_prefix_set_mut(mut self, prefix_set: PrefixSetMut) -> Self {
         self.prefix_set = prefix_set;
