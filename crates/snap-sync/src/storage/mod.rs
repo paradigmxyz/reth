@@ -5,6 +5,7 @@ mod store;
 
 pub use download::{
     StorageRangeDownload, StorageRangeStep, DEFAULT_REPAIR_SLOTS, DEFAULT_STORAGE_ACCOUNTS,
+    DEFAULT_STORAGE_REQUESTS,
 };
 pub(crate) use store::{persisted_storage_root, StoredProgress};
 pub use store::{SnapStorageStore, StorageChunk, StorageProgress};

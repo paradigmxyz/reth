@@ -45,6 +45,6 @@ pub use repair::StateRepairs;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
 pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
-    DEFAULT_REPAIR_SLOTS, DEFAULT_STORAGE_ACCOUNTS,
+    DEFAULT_REPAIR_SLOTS, DEFAULT_STORAGE_ACCOUNTS, DEFAULT_STORAGE_REQUESTS,
 };
 pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

@@ -10,7 +10,9 @@ use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
 use reth_tasks::Runtime;
-use std::fmt;
+use std::{fmt, sync::Arc};
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 /// Default number of code hashes asked for per request.
 pub const DEFAULT_CODE_HASHES: usize = 128;
@@ -43,6 +45,12 @@ impl<C, F> BytecodeDownload<C, F> {
     /// Returns this download asking for at most `max_hashes` code hashes per request, at least one.
     pub const fn with_max_hashes(mut self, max_hashes: usize) -> Self {
         self.max_hashes = if max_hashes == 0 { 1 } else { max_hashes };
+        self
+    }
+
+    // Shares the database writer with another concurrently downloading domain.
+    pub(crate) fn with_commit_lock(mut self, lock: Arc<Mutex<()>>) -> Self {
+        self.context = self.context.with_commit_lock(lock);
         self
     }
 }
@@ -94,6 +102,24 @@ where
         let persisted =
             self.context.commit(move |provider| provider.commit_bytecodes(write, codes)).await?;
         Ok(BytecodeStep::Committed { persisted })
+    }
+
+    /// Downloads every missing code blob of `range`, retaining each committed response.
+    pub async fn download(
+        &mut self,
+        range: &VerifiedRange,
+        cancel: &CancellationToken,
+    ) -> Result<BytecodeStep, SnapSyncError> {
+        loop {
+            if cancel.is_cancelled() {
+                return Err(SnapSyncError::Cancelled)
+            }
+            // Finish each response's commit before observing cancellation.
+            match self.next(range).await? {
+                BytecodeStep::Committed { .. } => {}
+                step => return Ok(step),
+            }
+        }
     }
 }
 
