@@ -17,7 +17,9 @@ pub mod mock;
 
 /// Metrics tracking hashed cursor implementations.
 pub mod metrics;
-pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
+pub use metrics::{
+    HashedCursorMetricsCache, InstrumentedHashedCursor, InstrumentedHashedCursorFactory,
+};
 
 #[cfg(feature = "metrics")]
 pub use metrics::HashedCursorMetrics;

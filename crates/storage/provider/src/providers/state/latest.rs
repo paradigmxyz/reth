@@ -11,7 +11,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
-    proof_v2::MultiProofCalculator,
+    proof_v2::{MultiProofCalculator, ProofCursorMetrics},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
@@ -237,10 +237,14 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         // The latest database trie is consistent with its hashed state, so masks are always exact
         // and `requires_masks` needs no special handling.
         reth_trie_db::with_adapter!(self.0, |A| {
+            let metrics = ProofCursorMetrics::default();
             MultiProofCalculator::new(
-                reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
-                reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-                Default::default(),
+                metrics.instrument_trie_factory(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                ),
+                metrics.instrument_hashed_factory(reth_trie_db::DatabaseHashedCursorFactory::new(
+                    self.tx(),
+                )),
                 Default::default(),
             )
             .multiproof(targets)

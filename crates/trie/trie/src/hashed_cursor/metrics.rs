@@ -5,6 +5,8 @@ use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 
 #[cfg(feature = "metrics")]
+use super::HashedCursorFactory;
+#[cfg(feature = "metrics")]
 use crate::TrieType;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
@@ -200,3 +202,54 @@ impl<C, M: AsMut<HashedCursorMetricsCache>> Drop for InstrumentedHashedCursor<C,
         }
     }
 }
+
+/// Instruments every account and storage cursor opened by the wrapped factory.
+///
+/// Counters are owned by each cursor and recorded into the supplied handles on drop. Wrap the
+/// outermost overlay factory to include both overlay and database operations in these counters.
+#[cfg(feature = "metrics")]
+#[derive(Clone, Debug)]
+pub struct InstrumentedHashedCursorFactory<F> {
+    factory: F,
+    account_metrics: HashedCursorMetrics,
+    storage_metrics: HashedCursorMetrics,
+}
+
+#[cfg(feature = "metrics")]
+impl<F> InstrumentedHashedCursorFactory<F> {
+    /// Wraps a factory with account and storage metric handles shared by its cursors.
+    pub const fn new(
+        factory: F,
+        account_metrics: HashedCursorMetrics,
+        storage_metrics: HashedCursorMetrics,
+    ) -> Self {
+        Self { factory, account_metrics, storage_metrics }
+    }
+}
+
+#[cfg(feature = "metrics")]
+impl<F: HashedCursorFactory> HashedCursorFactory for InstrumentedHashedCursorFactory<F> {
+    type AccountCursor<'a>
+        = InstrumentedHashedCursor<F::AccountCursor<'a>>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = InstrumentedHashedCursor<F::StorageCursor<'a>>
+    where
+        Self: 'a;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        Ok(self.account_metrics.instrument(self.factory.hashed_account_cursor()?))
+    }
+
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        Ok(self.storage_metrics.instrument(self.factory.hashed_storage_cursor(hashed_address)?))
+    }
+}
+
+/// Uses the underlying factory directly when cursor metrics are disabled.
+#[cfg(not(feature = "metrics"))]
+pub type InstrumentedHashedCursorFactory<F> = F;
