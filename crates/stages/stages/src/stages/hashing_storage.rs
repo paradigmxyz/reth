@@ -17,6 +17,7 @@ use reth_stages_api::{
 };
 use reth_storage_api::StorageSettingsCache;
 use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{KeccakKeyHasher, KeyHasher};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -127,16 +128,20 @@ where
                 rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
                     let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
-                    for (address, slot) in chunk {
-                        if address != last_addr {
-                            last_addr = address;
-                            hashed_addr = keccak256(address);
-                        }
-                        let mut addr_key = Vec::with_capacity(64);
-                        addr_key.put_slice(hashed_addr.as_slice());
-                        addr_key.put_slice(keccak256(slot.key).as_slice());
-                        let _ = tx.send((addr_key, CompactU256::from(slot.value)));
-                    }
+                    KeccakKeyHasher::hash_keys(
+                        chunk,
+                        |(_, slot)| slot.key,
+                        |(address, slot), hashed_slot| {
+                            if address != last_addr {
+                                last_addr = address;
+                                hashed_addr = keccak256(address);
+                            }
+                            let mut addr_key = Vec::with_capacity(64);
+                            addr_key.put_slice(hashed_addr.as_slice());
+                            addr_key.put_slice(hashed_slot.as_slice());
+                            let _ = tx.send((addr_key, CompactU256::from(slot.value)));
+                        },
+                    );
                 });
 
                 // Flush to ETL when channels length reaches MAXIMUM_CHANNELS

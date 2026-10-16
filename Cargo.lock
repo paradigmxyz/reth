@@ -459,8 +459,7 @@ dependencies = [
 [[package]]
 name = "alloy-primitives"
 version = "1.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5e9dbd49258ac3ab893a481d46be29b58be7f734dcac46cd80b6b13ee36566c"
+source = "git+https://github.com/alloy-rs/core?branch=dani%2Fkeccak256-batch#eec49662e79763f1dc45990367a3c64ac5fb16a5"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -5806,8 +5805,7 @@ dependencies = [
 [[package]]
 name = "keccak-asm"
 version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f32890f646914a263e39064295005972f0e95b928254061b2aca98445f304ee9"
+source = "git+https://github.com/DaniPopes/keccak-asm?branch=digest-batch#33543b94acb0a6a5a2b54592ea49f8906876b89b"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
@@ -12171,8 +12169,7 @@ dependencies = [
 [[package]]
 name = "sha3-asm"
 version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "471668161349031e3d415412f996b030c477488eec267cc3cadae3d06c0a367f"
+source = "git+https://github.com/DaniPopes/keccak-asm?branch=digest-batch#33543b94acb0a6a5a2b54592ea49f8906876b89b"
 dependencies = [
  "cc",
  "cfg-if",

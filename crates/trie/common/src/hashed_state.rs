@@ -1,11 +1,10 @@
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
-    KeyHasher, MultiProofTargets, Nibbles,
+    KeccakKeyHasher, KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -44,25 +43,22 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        state
-            .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_iter(
-                    account
-                        .storage
-                        .iter()
-                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
+        let state = state.into_iter();
+        let mut hashed_state = Self::with_capacity(state.size_hint().0);
+        KH::hash_keys(
+            state,
+            |(address, _)| **address,
+            |(_, account), hashed_address| {
+                hashed_state.accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
+                let hashed_storage = HashedStorage::from_plain_storage(
+                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
-
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
+                if !hashed_storage.is_empty() {
+                    hashed_state.storages.insert(hashed_address, hashed_storage);
+                }
+            },
+        );
+        hashed_state
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -372,9 +368,17 @@ impl HashedStorage {
 
     /// Create new hashed storage from plain storage.
     pub fn from_plain_storage<'a>(storage: impl IntoIterator<Item = (&'a U256, &'a U256)>) -> Self {
-        Self::from_iter(
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
-        )
+        let storage = storage.into_iter();
+        let mut hashed =
+            B256Map::with_capacity_and_hasher(storage.size_hint().0, Default::default());
+        KeccakKeyHasher::hash_keys(
+            storage,
+            |(slot, _)| B256::from(**slot),
+            |(_, value), hashed_slot| {
+                hashed.insert(hashed_slot, *value);
+            },
+        );
+        Self { storage: hashed }
     }
 
     /// Construct [`PrefixSetMut`] from hashed storage.
@@ -828,8 +832,7 @@ impl Iterator for ChunkedHashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::KeccakKeyHasher;
-    use alloy_primitives::Bytes;
+    use alloy_primitives::{keccak256, Bytes};
     use revm::{
         database::{states::StorageSlot, AccountStatus, StorageWithOriginalValues},
         state::{AccountInfo, Bytecode},

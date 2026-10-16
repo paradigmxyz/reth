@@ -14,7 +14,7 @@ use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    Nibbles,
+    KeccakKeyHasher, KeyHasher, Nibbles,
 };
 
 /// Load prefix sets using a provider that implements [`ChangeSetReader`]. This function can read
@@ -39,14 +39,22 @@ where
     // We still need direct access to HashedAccounts table
     let mut account_hashed_state_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
-    for (_, AccountBeforeTx { address, .. }) in account_changesets {
-        let hashed_address = keccak256(address);
-        account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-        if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
-            destroyed_accounts.insert(hashed_address);
-        }
-    }
+    let mut seek = Ok(());
+    KeccakKeyHasher::hash_keys(
+        account_changesets,
+        |(_, AccountBeforeTx { address, .. })| *address,
+        |_, hashed_address| {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if seek.is_ok() {
+                seek = account_hashed_state_cursor.seek_exact(hashed_address).map(|entry| {
+                    if entry.is_none() {
+                        destroyed_accounts.insert(hashed_address);
+                    }
+                });
+            }
+        },
+    );
+    seek?;
 
     // Walk storage changesets using the provider (handles static files + database)
     let storage_changesets = provider.storage_changesets_range(range)?;
@@ -54,21 +62,25 @@ where
     // Memoizing the last address avoids re-hashing it once per slot; the repeated account prefix
     // insert can be skipped because `PrefixSetMut::freeze` deduplicates anyway.
     let mut last_address: Option<(Address, B256)> = None;
-    for (BlockNumberAddress((_, address)), storage_entry) in storage_changesets {
-        let hashed_address = match last_address {
-            Some((last, hashed)) if last == address => hashed,
-            _ => {
-                let hashed = keccak256(address);
-                account_prefix_set.insert(Nibbles::unpack(hashed));
-                last_address = Some((address, hashed));
-                hashed
-            }
-        };
-        storage_prefix_sets
-            .entry(hashed_address)
-            .or_default()
-            .insert(Nibbles::unpack(keccak256(storage_entry.key)));
-    }
+    KeccakKeyHasher::hash_keys(
+        storage_changesets,
+        |(_, storage_entry)| storage_entry.key,
+        |(BlockNumberAddress((_, address)), _), hashed_slot| {
+            let hashed_address = match last_address {
+                Some((last, hashed)) if last == address => hashed,
+                _ => {
+                    let hashed = keccak256(address);
+                    account_prefix_set.insert(Nibbles::unpack(hashed));
+                    last_address = Some((address, hashed));
+                    hashed
+                }
+            };
+            storage_prefix_sets
+                .entry(hashed_address)
+                .or_default()
+                .insert(Nibbles::unpack(hashed_slot));
+        },
+    );
 
     Ok(TriePrefixSets {
         account_prefix_set: account_prefix_set.freeze(),

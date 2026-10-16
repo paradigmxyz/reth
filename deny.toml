@@ -101,4 +101,6 @@ allow-git = [
     "https://github.com/paradigmxyz/revmc",
     "https://github.com/paradigmxyz/revmc?branch=main",
     "https://github.com/TheDan64/inkwell",
+    "https://github.com/alloy-rs/core",
+    "https://github.com/DaniPopes/keccak-asm",
 ]
