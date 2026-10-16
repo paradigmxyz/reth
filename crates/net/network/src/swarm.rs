@@ -335,7 +335,8 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
             }
 
             // poll all sessions
-            match this.sessions.poll(cx) {
+            match this.sessions.poll(cx, |peer_id| this.state.peers().has_inbound_capacity(peer_id))
+            {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {
