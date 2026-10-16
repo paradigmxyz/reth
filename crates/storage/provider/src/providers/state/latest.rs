@@ -235,8 +235,21 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
+            let nodes = input.nodes.into_sorted();
+            let state = input.state.into_sorted();
+            Proof::new(
+                InMemoryTrieCursorFactory::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
+                    &nodes,
+                ),
+                HashedPostStateCursorFactory::new(
+                    reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                    &state,
+                ),
+            )
+            .with_prefix_sets_mut(input.prefix_sets)
+            .multiproof_v2(targets)
+            .map_err(ProviderError::from)
         })
     }
 

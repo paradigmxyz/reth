@@ -8,8 +8,7 @@ use reth_primitives_traits::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::{
-    proof::Proof, AccountProof, MultiProofTargetsV2, Nibbles, ProofV2Target, StorageProof,
-    TrieInput, TrieNode,
+    proof::Proof, AccountProof, MultiProofTargetsV2, Nibbles, ProofV2Target, StorageProof, TrieNode,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use std::{
@@ -155,13 +154,10 @@ fn multiproof_v2_includes_branch_after_terminal_extension() {
 
         let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref());
         let multiproof = proof
-            .overlay_multiproof_v2(
-                TrieInput::default(),
-                MultiProofTargetsV2 {
-                    account_targets: vec![ProofV2Target::new(keccak256(target))],
-                    ..Default::default()
-                },
-            )
+            .multiproof_v2(MultiProofTargetsV2 {
+                account_targets: vec![ProofV2Target::new(keccak256(target))],
+                ..Default::default()
+            })
             .unwrap();
         let account_proof = multiproof.account_proof(target, &[]).unwrap();
 
@@ -379,13 +375,10 @@ fn extension_only_genesis_account_proof() {
         assert_eq!(witness_proof.verify(root), Ok(()));
 
         let multiproof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
-            .overlay_multiproof_v2(
-                TrieInput::default(),
-                MultiProofTargetsV2 {
-                    account_targets: vec![ProofV2Target::new(keccak256(target))],
-                    ..Default::default()
-                },
-            )
+            .multiproof_v2(MultiProofTargetsV2 {
+                account_targets: vec![ProofV2Target::new(keccak256(target))],
+                ..Default::default()
+            })
             .unwrap();
         let multiproof = multiproof.account_proof(target, &[]).unwrap();
         assert_eq!(multiproof.info, proof.info);

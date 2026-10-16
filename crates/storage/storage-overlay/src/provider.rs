@@ -738,13 +738,19 @@ where
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), requires_masks)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
+            Proof::new(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
+                    &nodes,
+                ),
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(self.provider().tx()),
+                    &state,
+                ),
+            )
+            .with_prefix_sets_mut(prefix_sets)
+            .multiproof_v2(targets)
+            .map_err(ProviderError::from)
         })
     }
 
