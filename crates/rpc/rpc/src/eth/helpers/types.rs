@@ -114,15 +114,19 @@ mod tests {
             let tx = converter.tx_env(request.clone(), &env).unwrap();
             assert_eq!(tx.effective_gas_price(Some(30)), 100);
 
-            // An explicit zero priority fee still opts into base-fee pricing.
-            let request = TransactionRequest {
-                gas_price: None,
-                max_fee_per_gas: Some(100),
-                max_priority_fee_per_gas: Some(0),
-                ..request
-            };
-            let tx = converter.tx_env(request, &env).unwrap();
-            assert_eq!(tx.effective_gas_price(Some(30)), 30);
+            // An explicit or omitted zero priority fee opts into base-fee pricing, while the
+            // call is still funded at its fee cap.
+            for max_priority_fee_per_gas in [Some(0), None] {
+                let request = TransactionRequest {
+                    gas_price: None,
+                    max_fee_per_gas: Some(100),
+                    max_priority_fee_per_gas,
+                    ..request.clone()
+                };
+                let tx = converter.tx_env(request, &env).unwrap();
+                assert_eq!(tx.effective_gas_price(Some(30)), 30);
+                assert_eq!(tx.max_fee_per_gas(), 100);
+            }
         }
     }
 }

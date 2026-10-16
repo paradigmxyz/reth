@@ -401,8 +401,8 @@ where
 
 /// Fills missing fields for simulation using the selected EVM environment.
 ///
-/// Explicit fee caps and flat `gasPrice` values are preserved. The returned fees describe
-/// execution pricing, which may be lower than the request's maximum fee cap. No state lookup,
+/// Explicit fee caps and flat `gasPrice` values are preserved. The returned fees carry the fee
+/// cap, from which the EVM derives the execution price with the priority fee. No state lookup,
 /// gas estimation, or fee suggestion is performed; callers should resolve the account nonce
 /// before calling this helper when it is needed.
 ///
