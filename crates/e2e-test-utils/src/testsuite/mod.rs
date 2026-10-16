@@ -5,7 +5,7 @@ use crate::{
     NodeBuilderHelper,
 };
 use alloy_primitives::{Bytes, B256};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use jsonrpsee::http_client::HttpClient;
 use reth_node_api::{EngineTypes, PayloadAttrTy, PayloadTypes};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
@@ -110,8 +110,7 @@ where
     /// Unlike the RPC endpoints, the view only contains blocks that were persisted to disk, not
     /// canonical blocks that the engine still holds in memory.
     pub fn database_provider_ro(&self) -> Result<Box<dyn BlockNumReader>> {
-        let open =
-            self.database.as_ref().ok_or_else(|| eyre::eyre!("Node database is not accessible"))?;
+        let open = self.database.as_ref().ok_or_eyre("Node database is not accessible")?;
         Ok(open()?)
     }
 }

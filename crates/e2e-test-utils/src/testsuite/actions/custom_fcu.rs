@@ -3,7 +3,7 @@
 use crate::testsuite::{Action, Environment};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::EngineApiClient;
@@ -36,9 +36,8 @@ pub fn resolve_block_reference<Engine: EngineTypes>(
             Ok(block_info.hash)
         }
         BlockReference::Latest => {
-            let block_info = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+            let block_info =
+                env.current_block_info().ok_or_eyre("No current block information available")?;
             Ok(block_info.hash)
         }
     }

@@ -72,12 +72,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 .notify(|err, _| tracing::warn!(target: "reth::cli", error = %err, "Error requesting block. Retrying..."))
                 .await?
                 .split();
-                if result.len() != 1 {
-                    eyre::bail!(
-                        "Invalid number of bodies received. Expected: 1. Received: {}",
-                        result.len()
-                    );
-                }
+                eyre::ensure!(
+                    result.len() == 1,
+                    "Invalid number of bodies received. Expected: 1. Received: {}",
+                    result.len()
+                );
                 let body = result.into_iter().next().unwrap();
                 tracing::info!(target: "reth::cli", ?body, "Successfully downloaded body")
             }
@@ -182,11 +181,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
 
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
-        if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
-            eyre::bail!(
-                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
-            );
-        }
+        eyre::ensure!(!config.peers.trusted_nodes.is_empty() || !self.network.trusted_only, "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`");
 
         config.peers.trusted_nodes_only |= self.network.trusted_only;
 

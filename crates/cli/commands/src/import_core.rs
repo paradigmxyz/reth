@@ -295,9 +295,7 @@ where
     C: FullConsensus<N::Primitives> + 'static,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
-    if !file_client.has_canonical_blocks() {
-        eyre::bail!("unable to import non canonical blocks");
-    }
+    eyre::ensure!(file_client.has_canonical_blocks(), "unable to import non canonical blocks");
 
     // Retrieve latest header found in the database.
     let last_block_number = provider_factory.last_block_number()?;

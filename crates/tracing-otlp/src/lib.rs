@@ -264,9 +264,10 @@ fn otlp_auth_header_from_endpoint(endpoint: &Url) -> eyre::Result<Option<String>
     let Some(password) = endpoint.password() else {
         eyre::bail!("OTLP endpoint credentials must include both username and password");
     };
-    if username.is_empty() {
-        eyre::bail!("OTLP endpoint credentials must include both username and password");
-    }
+    eyre::ensure!(
+        !username.is_empty(),
+        "OTLP endpoint credentials must include both username and password"
+    );
 
     let credentials = format!("{username}:{password}");
     let encoded = BASE64_STANDARD.encode(credentials.as_bytes());

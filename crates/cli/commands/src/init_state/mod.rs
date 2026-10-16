@@ -4,6 +4,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
 use alloy_primitives::{Sealable, B256};
 use clap::Parser;
+use eyre::OptionExt;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
@@ -83,7 +84,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
             let provider_rw = provider_factory.database_provider_rw()?;
 
             // ensure header, total difficulty and header hash are provided
-            let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
+            let header = self.header.ok_or_eyre("Header file must be provided")?;
             let header = without_evm::read_header_from_file::<
                 <N::Primitives as NodePrimitives>::BlockHeader,
             >(&header)?;

@@ -3,6 +3,7 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_consensus::BlockHeader;
 use clap::Parser;
+use eyre::OptionExt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_provider::BlockHashReader;
@@ -29,7 +30,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitComman
         let genesis_block_number = provider_factory.chain_spec().genesis_header().number();
         let hash = provider_factory
             .block_hash(genesis_block_number)?
-            .ok_or_else(|| eyre::eyre!("Genesis hash not found."))?;
+            .ok_or_eyre("Genesis hash not found.")?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

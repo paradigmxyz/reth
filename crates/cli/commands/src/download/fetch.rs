@@ -6,7 +6,7 @@ use super::{
     session::DownloadSession,
     RETRY_BACKOFF_SECS,
 };
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use reqwest::{blocking::Client as BlockingClient, header::RANGE, StatusCode};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
@@ -185,7 +185,7 @@ impl ArchiveFetcher {
         };
 
         Ok(RemoteArchiveProbe {
-            total_size: total_size.ok_or_else(|| eyre::eyre!("Server did not return file size"))?,
+            total_size: total_size.ok_or_eyre("Server did not return file size")?,
             supports_ranges,
         })
     }
@@ -281,9 +281,8 @@ impl ArchiveFetcher {
                 }
             }
 
-            let current_total = total_size.ok_or_else(|| {
-                eyre::eyre!("Server did not provide Content-Length or Content-Range header")
-            })?;
+            let current_total = total_size
+                .ok_or_eyre("Server did not provide Content-Length or Content-Range header")?;
 
             let file = if is_partial && existing_size > 0 {
                 OpenOptions::new()

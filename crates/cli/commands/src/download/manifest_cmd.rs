@@ -1,6 +1,6 @@
 use crate::download::manifest::generate_manifest;
 use clap::Parser;
-use eyre::{Result, WrapErr};
+use eyre::{ensure, OptionExt, Result, WrapErr};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, tables, Database};
 use reth_db_api::transaction::DbTx;
 use reth_primitives_traits::FastInstant as Instant;
@@ -135,7 +135,7 @@ fn infer_snapshot_block_from_headers(source_datadir: &std::path::Path) -> Result
         .into_iter()
         .map(|(_, end)| end)
         .max()
-        .ok_or_else(|| eyre::eyre!("No header static files found to infer --block"))?;
+        .ok_or_eyre("No header static files found to infer --block")?;
     Ok(max_end)
 }
 
@@ -149,11 +149,10 @@ fn infer_blocks_per_file(source_datadir: &std::path::Path) -> Result<u64> {
         }
 
         if let Some(existing) = inferred {
-            if existing != span {
-                eyre::bail!(
-                    "Inconsistent header static file ranges; pass --blocks-per-file manually"
-                );
-            }
+            ensure!(
+                existing == span,
+                "Inconsistent header static file ranges; pass --blocks-per-file manually"
+            );
         } else {
             inferred = Some(span);
         }

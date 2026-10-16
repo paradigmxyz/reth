@@ -1,4 +1,5 @@
 use clap::Parser;
+use eyre::OptionExt;
 use reth_db::mdbx::{self, ffi};
 use std::path::PathBuf;
 
@@ -37,10 +38,7 @@ impl Command {
             flags |= ffi::MDBX_CP_THROTTLE_MVCC;
         }
 
-        let dest = self
-            .dest
-            .to_str()
-            .ok_or_else(|| eyre::eyre!("destination path must be valid UTF-8"))?;
+        let dest = self.dest.to_str().ok_or_eyre("destination path must be valid UTF-8")?;
         let dest_cstr = std::ffi::CString::new(dest)?;
 
         println!("Copying database to {} ...", self.dest.display());
@@ -49,11 +47,9 @@ impl Command {
             ffi::mdbx_env_copy(env_ptr, dest_cstr.as_ptr(), flags)
         });
 
-        if rc != 0 {
-            eyre::bail!("mdbx_env_copy failed with error code {rc}: {}", unsafe {
-                std::ffi::CStr::from_ptr(ffi::mdbx_strerror(rc)).to_string_lossy()
-            });
-        }
+        eyre::ensure!(rc == 0, "mdbx_env_copy failed with error code {rc}: {}", unsafe {
+            std::ffi::CStr::from_ptr(ffi::mdbx_strerror(rc)).to_string_lossy()
+        });
 
         println!("Done.");
         Ok(())

@@ -303,35 +303,32 @@ where
 
             // Writing the segment under a config that routes receipts to the database would leave
             // two sources and keep data the prune config wants dropped.
-            if !matches!(
-                EitherWriter::receipts_destination(&provider),
-                EitherWriterDestination::StaticFile
-            ) {
-                eyre::bail!(
-                    "receipt import writes the Receipts static file segment, but this node's \
+            eyre::ensure!(
+                matches!(
+                    EitherWriter::receipts_destination(&provider),
+                    EitherWriterDestination::StaticFile
+                ),
+                "receipt import writes the Receipts static file segment, but this node's \
                      prune configuration keeps receipts elsewhere. Remove the receipt pruning \
                      configuration, or import without receipts"
-                );
-            }
+            );
 
             let target = provider
                 .get_stage_checkpoint(StageId::Execution)?
                 .map(|checkpoint| checkpoint.block_number)
                 .unwrap_or(genesis_block_number);
 
-            if target <= genesis_block_number {
-                eyre::bail!(
-                    "receipt import repairs the receipt static files of an already-executed \
+            eyre::ensure!(
+                target > genesis_block_number,
+                "receipt import repairs the receipt static files of an already-executed \
                      range, but this database has executed no blocks. Sync the node first, or \
                      import without receipts"
-                );
-            }
-            if height >= target {
-                eyre::bail!(
-                    "receipts already cover the executed range up to block {target}, nothing to \
+            );
+            eyre::ensure!(
+                height < target,
+                "receipts already cover the executed range up to block {target}, nothing to \
                      repair"
-                );
-            }
+            );
             if let Some(to_block) = to_block &&
                 to_block != target
             {
@@ -343,15 +340,14 @@ where
             }
             // Such a repair can never complete, so fail before committing the empty blocks that
             // precede the first pre-Byzantium receipt.
-            if !is_receipt_verifiable(height + 1) {
-                eyre::bail!(
-                    "receipt repair would start at block {}, which predates Byzantium. Those \
+            eyre::ensure!(
+                is_receipt_verifiable(height + 1),
+                "receipt repair would start at block {}, which predates Byzantium. Those \
                      receipts commit to a post-state root this node's receipt type cannot \
                      represent, so the Receipts segment has to already cover the pre-Byzantium \
                      range",
-                    height + 1,
-                );
-            }
+                height + 1,
+            );
 
             Ok(target)
         })
@@ -579,13 +575,12 @@ fn receipts_from_envelopes<R: RlpDecodableReceipt>(
     envelopes: Vec<ReceiptEnvelope>,
 ) -> eyre::Result<Vec<R>> {
     for envelope in &envelopes {
-        if envelope.status_or_post_state().is_post_state() {
-            eyre::bail!(
-                "block {number} has pre-Byzantium receipts, which commit to a post-state root \
+        eyre::ensure!(
+            !envelope.status_or_post_state().is_post_state(),
+            "block {number} has pre-Byzantium receipts, which commit to a post-state root \
                  rather than a success status and so cannot be represented by this node's receipt \
                  type. Receipt import is only supported from Byzantium onwards"
-            );
-        }
+        );
     }
 
     let encoded = alloy_rlp::encode(&envelopes);
@@ -668,14 +663,13 @@ where
 
         // Reject gaps: the import marks the Headers/Bodies stages complete up to `height`, so a
         // non-contiguous append would leave earlier blocks missing while the stages report done.
-        if number != last_header_number + 1 {
-            eyre::bail!(
-                "non-contiguous ERA import: expected block {}, got {number}; the execution \
+        eyre::ensure!(
+            number == last_header_number + 1,
+            "non-contiguous ERA import: expected block {}, got {number}; the execution \
                  database must be synced up to block {} before importing this file",
-                last_header_number + 1,
-                number - 1,
-            );
-        }
+            last_header_number + 1,
+            number - 1,
+        );
 
         last_header_number = number;
 
@@ -686,10 +680,11 @@ where
             writer.append_header(&header, &hash)?;
             provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
             hash_collector.insert(hash, number)?;
-        } else if provider.block_hash(number)? != Some(header.hash_slow()) {
+        } else {
             // Receipts are verified against the source header, so it must be the block already
             // persisted at this height, not merely a self-consistent one.
-            eyre::bail!(
+            eyre::ensure!(
+                provider.block_hash(number)? == Some(header.hash_slow()),
                 "block {number} in this ERA file does not match the block already imported at \
                  that height"
             );
@@ -718,19 +713,20 @@ where
     let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let logs_bloom = with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
 
-    if logs_bloom != header.logs_bloom() {
-        eyre::bail!("logs bloom mismatch for block {}", header.number());
-    }
+    eyre::ensure!(
+        logs_bloom == header.logs_bloom(),
+        "logs bloom mismatch for block {}",
+        header.number()
+    );
 
     if check_root {
         let receipts_root = calculate_receipt_root(&with_bloom);
-        if receipts_root != header.receipts_root() {
-            eyre::bail!(
-                "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
-                header.number(),
-                header.receipts_root(),
-            );
-        }
+        eyre::ensure!(
+            receipts_root == header.receipts_root(),
+            "receipts root mismatch for block {}: computed {receipts_root}, header has {}",
+            header.number(),
+            header.receipts_root(),
+        );
     }
 
     Ok(())
@@ -775,13 +771,12 @@ impl<P: BlockBodyIndicesProvider> BlockReceiptsWriterExt for P {
             .block_body_indices(number)?
             .ok_or_else(|| eyre::eyre!("missing block body indices for block {number}"))?;
 
-        if block_receipts.len() as u64 != indices.tx_count {
-            eyre::bail!(
-                "receipt count mismatch for block {number}: {} receipt(s) for {} transaction(s)",
-                block_receipts.len(),
-                indices.tx_count,
-            );
-        }
+        eyre::ensure!(
+            block_receipts.len() as u64 == indices.tx_count,
+            "receipt count mismatch for block {number}: {} receipt(s) for {} transaction(s)",
+            block_receipts.len(),
+            indices.tx_count,
+        );
 
         receipts_writer.increment_block(number)?;
         receipts_writer.append_receipts(

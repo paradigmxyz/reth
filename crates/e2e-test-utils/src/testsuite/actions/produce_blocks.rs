@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::{
     payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadKind, PayloadTypes};
@@ -86,7 +86,7 @@ where
             )
             .await?;
 
-            let latest_block = latest_block.ok_or_else(|| eyre::eyre!("Latest block not found"))?;
+            let latest_block = latest_block.ok_or_eyre("Latest block not found")?;
             let parent_hash = latest_block.header.hash;
 
             debug!("Latest block hash: {parent_hash}");
@@ -181,9 +181,8 @@ where
                 return Err(eyre::eyre!("No node clients available"));
             }
 
-            let latest_info = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let latest_info =
+                env.current_block_info().ok_or_eyre("No latest block information available")?;
 
             // simple round-robin selection based on next block number
             let next_producer_idx = ((latest_info.number + 1) % num_clients as u64) as usize;
@@ -211,9 +210,8 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let latest_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let latest_block =
+                env.current_block_info().ok_or_eyre("No latest block information available")?;
             let block_number = latest_block.number;
             let timestamp =
                 env.active_node_state()?.latest_header_time + env.block_timestamp_increment;
@@ -247,9 +245,8 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let latest_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let latest_block =
+                env.current_block_info().ok_or_eyre("No latest block information available")?;
 
             let parent_hash = latest_block.hash;
             debug!("Latest block hash: {parent_hash}");
@@ -261,10 +258,9 @@ where
                 .payload_attributes
                 .get(&(latest_block.number + 1))
                 .cloned()
-                .ok_or_else(|| eyre::eyre!("No payload attributes found for next block"))?;
+                .ok_or_eyre("No payload attributes found for next block")?;
 
-            let producer_idx =
-                env.last_producer_idx.ok_or_else(|| eyre::eyre!("No block producer selected"))?;
+            let producer_idx = env.last_producer_idx.ok_or_eyre("No block producer selected")?;
 
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
                 &env.node_clients[producer_idx].engine.http_client(),
@@ -397,7 +393,7 @@ where
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
                 )
                 .await?
-                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+                .ok_or_eyre("No latest block found from RPC")?;
                 debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
                 current_head_block.header.hash
             };
@@ -434,7 +430,7 @@ where
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
             .await?
-            .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+            .ok_or_eyre("No latest block found from RPC")?;
 
             // update environment with the new block information
             env.set_current_block_info(BlockInfo {
@@ -476,7 +472,7 @@ where
                 .active_node_state()?
                 .latest_payload_envelope
                 .as_ref()
-                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
+                .ok_or_eyre("No execution payload envelope available")?;
 
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
                 payload_envelope.clone().into();
@@ -519,15 +515,14 @@ where
         Box::pin(async move {
             let mut accepted_check: bool = false;
 
-            let latest_block = env
-                .current_block_info()
-                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let latest_block =
+                env.current_block_info().ok_or_eyre("No latest block information available")?;
 
             let payload_id = *env
                 .active_node_state()?
                 .payload_id_history
                 .get(&(latest_block.number + 1))
-                .ok_or_else(|| eyre::eyre!("Cannot find payload_id"))?;
+                .ok_or_eyre("Cannot find payload_id")?;
 
             let node_clients = env.node_clients.clone();
             for (idx, client) in node_clients.iter().enumerate() {
@@ -545,14 +540,14 @@ where
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest
                 )
                 .await?
-                .ok_or_else(|| eyre::eyre!("No latest header found from rpc"))?;
+                .ok_or_eyre("No latest header found from rpc")?;
 
                 // perform several checks
                 let next_new_payload = env
                     .active_node_state()?
                     .latest_payload_built
                     .as_ref()
-                    .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
+                    .ok_or_eyre("No next built payload found")?;
 
                 let built_payload = EngineApiClient::<Engine>::get_payload_v3(
                     &client.engine.http_client(),
@@ -652,17 +647,17 @@ where
                 .active_node_state()?
                 .latest_payload_built
                 .as_ref()
-                .ok_or_else(|| eyre::eyre!("No next built payload found"))?
+                .ok_or_eyre("No next built payload found")?
                 .clone();
             let parent_beacon_block_root = next_new_payload
                 .parent_beacon_block_root
-                .ok_or_else(|| eyre::eyre!("No parent beacon block root for next new payload"))?;
+                .ok_or_eyre("No parent beacon block root for next new payload")?;
 
             let payload_envelope = env
                 .active_node_state()?
                 .latest_payload_envelope
                 .as_ref()
-                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?
+                .ok_or_eyre("No execution payload envelope available")?
                 .clone();
 
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
@@ -1041,10 +1036,11 @@ where
                     sequence.execute(env).await?;
 
                     // get the latest payload and corrupt it
-                    let latest_envelope =
-                        env.active_node_state()?.latest_payload_envelope.as_ref().ok_or_else(
-                            || eyre::eyre!("No payload envelope available to corrupt"),
-                        )?;
+                    let latest_envelope = env
+                        .active_node_state()?
+                        .latest_payload_envelope
+                        .as_ref()
+                        .ok_or_eyre("No payload envelope available to corrupt")?;
 
                     let envelope_v3: ExecutionPayloadEnvelopeV3 = latest_envelope.clone().into();
                     let mut corrupted_payload = envelope_v3.execution_payload;
