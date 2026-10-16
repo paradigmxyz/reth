@@ -1,4 +1,8 @@
-use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
+use crate::{
+    database_state_frontiers,
+    proof_v2::{cached_proof_v2, DatabaseProofV2},
+    ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
@@ -22,12 +26,11 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
-    proof_v2::ProofV2,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
     },
-    updates::{TrieUpdates, TrieUpdatesSorted},
+    updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
     HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
@@ -38,7 +41,7 @@ use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
-    PackedStoragesTrie, TrieTableAdapter,
+    PackedStoragesTrie,
 };
 use std::{
     cell::{OnceCell, RefCell},
@@ -137,7 +140,8 @@ where
     Provider::Target: DBProvider<Tx: 'static>,
 {
     /// Cached cursors are released before their backing transaction and overlays.
-    proof_cache: ProofCache<<Provider::Target as DbTxProvider>::Tx>,
+    #[expect(clippy::type_complexity, reason = "Keep the concrete cache layout visible.")]
+    proof_cache: RefCell<Option<(bool, DatabaseProofV2<<Provider::Target as DbTxProvider>::Tx>)>>,
     provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
@@ -732,17 +736,17 @@ where
                 // cache. Cached generators are dropped first and never escape the provider.
                 let proof = unsafe {
                     if self.is_v2 {
-                        ProofV2Cache::Packed(cached_proof_v2(self.provider().tx(), input))
+                        DatabaseProofV2::Packed(cached_proof_v2(self.provider().tx(), input))
                     } else {
-                        ProofV2Cache::Legacy(cached_proof_v2(self.provider().tx(), input))
+                        DatabaseProofV2::Legacy(cached_proof_v2(self.provider().tx(), input))
                     }
                 };
                 slot.insert((requires_masks, proof))
             }
         };
         match proof {
-            ProofV2Cache::Legacy(proof) => Ok(proof.multiproof(targets)?),
-            ProofV2Cache::Packed(proof) => Ok(proof.multiproof(targets)?),
+            DatabaseProofV2::Legacy(proof) => Ok(proof.multiproof(targets)?),
+            DatabaseProofV2::Packed(proof) => Ok(proof.multiproof(targets)?),
         }
     }
 
@@ -1046,40 +1050,6 @@ where
     Provider: Deref + Send,
     Provider::Target: DBProvider<Tx: 'static>,
 {
-}
-
-type ProofCache<TX> = RefCell<Option<(bool, ProofV2Cache<TX>)>>;
-
-enum ProofV2Cache<TX: DbTx + 'static> {
-    Legacy(DbProofV2<TX, LegacyKeyAdapter>),
-    Packed(DbProofV2<TX, PackedKeyAdapter>),
-}
-
-type DbProofV2<TX, A> = ProofV2<
-    'static,
-    InMemoryTrieCursorFactory<
-        DatabaseTrieCursorFactory<&'static TX, A>,
-        &'static TrieUpdatesSorted,
-    >,
-    HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'static TX>,
-        &'static HashedPostStateSorted,
-    >,
->;
-
-/// The caller must retain the pinned transaction and overlay allocations until the proof drops.
-unsafe fn cached_proof_v2<TX: DbTx + 'static, A: TrieTableAdapter>(
-    tx: &TX,
-    input: &TrieInputSorted,
-) -> DbProofV2<TX, A> {
-    // SAFETY: The caller guarantees these allocations remain stable and outlive the generator.
-    let (tx, nodes, state) =
-        unsafe { (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state)) };
-    ProofV2::new(
-        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
-        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
-        input.prefix_sets.clone().freeze(),
-    )
 }
 
 #[doc(hidden)]

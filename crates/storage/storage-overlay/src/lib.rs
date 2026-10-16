@@ -15,3 +15,5 @@ mod manager_metrics;
 
 mod provider;
 pub use provider::*;
+
+mod proof_v2;
