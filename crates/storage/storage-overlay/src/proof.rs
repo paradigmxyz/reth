@@ -42,23 +42,22 @@ pub(super) enum ProofCalculators<TX: DbTx> {
 }
 
 impl<TX: DbTx> ProofCalculators<TX> {
-    pub(super) fn new(is_v2: bool) -> Self {
+    pub(super) fn new(is_v2: bool, overlay: TrieInputSorted) -> Self {
         if is_v2 {
-            Self::Packed(Calculators::default())
+            Self::Packed(Calculators::new(overlay))
         } else {
-            Self::Legacy(Calculators::default())
+            Self::Legacy(Calculators::new(overlay))
         }
     }
 
     pub(super) fn multiproof(
         &mut self,
         tx: &TX,
-        overlay: &TrieInputSorted,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         match self {
-            Self::Legacy(calculators) => calculators.multiproof(tx, overlay, targets),
-            Self::Packed(calculators) => calculators.multiproof(tx, overlay, targets),
+            Self::Legacy(calculators) => calculators.multiproof(tx, targets),
+            Self::Packed(calculators) => calculators.multiproof(tx, targets),
         }
     }
 }
@@ -107,36 +106,34 @@ type AccountCalculator<TX, A> = ProofCalculator<
 pub(super) struct Calculators<TX: DbTx, A: TrieTableAdapter> {
     account: Option<AccountCalculator<TX, A>>,
     storage: Option<Arc<Mutex<StorageCalculator<TX, A>>>>,
-}
-
-impl<TX: DbTx, A: TrieTableAdapter> Default for Calculators<TX, A> {
-    fn default() -> Self {
-        Self { account: None, storage: None }
-    }
+    overlay: TrieInputSorted,
 }
 
 impl<TX: DbTx, A: TrieTableAdapter> Calculators<TX, A> {
+    fn new(overlay: TrieInputSorted) -> Self {
+        Self { account: None, storage: None, overlay }
+    }
+
     fn multiproof(
         &mut self,
         tx: &TX,
-        overlay: &TrieInputSorted,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
         let mut proof = DecodedMultiProofV2::default();
-        let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let hashed_factory = DatabaseHashedCursorFactory::new(tx);
         let storage = match &mut self.storage {
             Some(storage) => storage,
             slot @ None => {
+                let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+                let hashed_factory = DatabaseHashedCursorFactory::new(tx);
                 let trie_cursor = InMemoryTrieCursor::new_storage(
                     trie_factory.storage_trie_cursor(B256::ZERO)?,
-                    overlay.nodes.clone(),
+                    self.overlay.nodes.clone(),
                     B256::ZERO,
                 );
                 let hashed_cursor = HashedPostStateCursor::new_storage(
                     hashed_factory.hashed_storage_cursor(B256::ZERO)?,
-                    overlay.state.clone(),
+                    self.overlay.state.clone(),
                     B256::ZERO,
                 );
                 slot.insert(Arc::new(Mutex::new(StorageProofCalculator::new_storage(
@@ -150,13 +147,15 @@ impl<TX: DbTx, A: TrieTableAdapter> Calculators<TX, A> {
             let calculator = match &mut self.account {
                 Some(calculator) => calculator,
                 slot @ None => {
+                    let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
+                    let hashed_factory = DatabaseHashedCursorFactory::new(tx);
                     let trie_cursor = InMemoryTrieCursor::new_account(
                         trie_factory.account_trie_cursor()?,
-                        overlay.nodes.clone(),
+                        self.overlay.nodes.clone(),
                     );
                     let hashed_cursor = HashedPostStateCursor::new_account(
                         hashed_factory.hashed_account_cursor()?,
-                        overlay.state.clone(),
+                        self.overlay.state.clone(),
                     );
                     slot.insert(ProofCalculator::new(
                         instrument_trie(trie_cursor, TrieType::State),

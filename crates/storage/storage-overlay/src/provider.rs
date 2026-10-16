@@ -721,13 +721,19 @@ where
             if targets.is_empty() {
                 return Ok(DecodedMultiProofV2::default())
             }
-            // A reused sparse trie already covers any intentionally skipped overlay.
-            let overlay = self.state_trie_overlay(true)?;
-            return self
-                .proof_calculators
-                .borrow_mut()
-                .get_or_insert_with(|| Box::new(ProofCalculators::new(self.is_v2)))
-                .multiproof(self.provider().tx(), overlay.input(), targets);
+            let mut cache = self.proof_calculators.borrow_mut();
+            let calculators = match &mut *cache {
+                Some(calculators) => calculators,
+                slot @ None => {
+                    // A reused sparse trie already covers any intentionally skipped overlay.
+                    let overlay = self.state_trie_overlay(true)?;
+                    slot.insert(Box::new(ProofCalculators::new(
+                        self.is_v2,
+                        overlay.input().clone(),
+                    )))
+                }
+            };
+            return calculators.multiproof(self.provider().tx(), targets)
         }
         reth_trie_db::with_adapter!(self.provider(), |A| {
             let TrieInputSorted { nodes, state, prefix_sets } =
