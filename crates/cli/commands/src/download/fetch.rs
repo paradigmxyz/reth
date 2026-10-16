@@ -870,7 +870,7 @@ impl SegmentedDownloadState {
     fn requeue(&self, piece: DownloadPiece) -> bool {
         if self
             .requeues_left
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(1))
             .is_err()
         {
             return false
