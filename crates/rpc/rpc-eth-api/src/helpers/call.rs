@@ -44,13 +44,10 @@ use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use revm::{
     context::Block,
-    context_interface::{
-        result::{ExecutionResult, ResultAndState},
-        Cfg, Transaction,
-    },
+    context_interface::{result::ResultAndState, Cfg, Transaction},
     Database, DatabaseCommit,
 };
-use revm_inspectors::access_list::AccessListInspector;
+use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use std::collections::BTreeMap;
 use tracing::{debug, trace};
 
@@ -230,7 +227,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             evm_env.cfg_env.is_eip7708_disabled());
                     let (result, results) = if trace_transfers {
                         // Synthetic transfer logs belong only to the RPC result, not the receipts.
-                        let inspector = simulate::SimulateInspector::default();
+                        let inspector = TransferInspector::new(false);
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
@@ -244,6 +241,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
                         }
 
+                        let mut next_transfer = 0;
                         simulate::execute_transactions(
                             builder,
                             &*state_provider,
@@ -253,9 +251,11 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
                             |inspector, result| {
-                                if let ExecutionResult::Success { logs, .. } = result {
-                                    std::mem::swap(logs, &mut inspector.logs);
-                                }
+                                simulate::append_transfer_logs(
+                                    inspector,
+                                    result,
+                                    &mut next_transfer,
+                                );
                             },
                         )
                         .map_err(map_err)?
