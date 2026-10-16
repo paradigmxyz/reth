@@ -494,6 +494,23 @@ impl ChunkedArchive {
         self.chunk_files.is_empty() || self.chunk_files.len() as u64 == self.num_chunks()
     }
 
+    /// Returns the name and length of the first non-empty per-chunk list whose length does not
+    /// match [`Self::num_chunks`].
+    ///
+    /// Empty lists are allowed because older manifests omit them. A non-empty list of the wrong
+    /// length would make size totals and per-archive lookups disagree about which chunk is which.
+    pub fn chunk_lengths_mismatch(&self) -> Option<(&'static str, usize)> {
+        let num_chunks = self.num_chunks() as usize;
+        [
+            ("chunk_sizes", self.chunk_sizes.len()),
+            ("chunk_decompressed_sizes", self.chunk_decompressed_sizes.len()),
+            ("chunk_files", self.chunk_files.len()),
+            ("chunk_output_files", self.chunk_output_files.len()),
+        ]
+        .into_iter()
+        .find(|(_, len)| *len != 0 && *len != num_chunks)
+    }
+
     /// Returns the archive path for chunk `index`, relative to the manifest base URL.
     ///
     /// Uses [`Self::chunk_files`] when it has exactly one entry per chunk; otherwise the
@@ -1589,5 +1606,24 @@ mod tests {
             "mismatched chunk_files must not partially apply"
         );
         assert_eq!(urls[1], "https://example.com/mainnet/headers-500000-999999.tar.zst");
+    }
+
+    #[test]
+    fn chunk_lengths_mismatch_reports_short_per_chunk_lists() {
+        let chunked = ChunkedArchive {
+            blocks_per_file: 500_000,
+            total_blocks: 1_000_000,
+            chunk_sizes: vec![40_000],
+            chunk_decompressed_sizes: vec![],
+            chunk_files: vec![],
+            chunk_output_files: vec![vec![], vec![]],
+        };
+        assert_eq!(chunked.chunk_lengths_mismatch(), Some(("chunk_sizes", 1)));
+
+        let chunked = ChunkedArchive { chunk_sizes: vec![40_000, 50_000], ..chunked };
+        assert_eq!(chunked.chunk_lengths_mismatch(), None, "empty lists are allowed");
+
+        let chunked = ChunkedArchive { chunk_decompressed_sizes: vec![1, 2, 3], ..chunked };
+        assert_eq!(chunked.chunk_lengths_mismatch(), Some(("chunk_decompressed_sizes", 3)));
     }
 }
