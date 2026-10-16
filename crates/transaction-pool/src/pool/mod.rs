@@ -779,8 +779,14 @@ where
         // Notify event listeners
         self.notify_event_listeners(&meta.added);
 
+        let promoted = match &mut meta.added {
+            AddedTransaction::Pending(pending) => std::mem::take(&mut pending.promoted),
+            AddedTransaction::Parked { .. } => Vec::new(),
+        };
+
         // Notify new transaction listeners
         self.on_new_transaction(meta.added.into_new_transaction_event());
+        self.on_promoted_transactions(&promoted);
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -840,6 +846,35 @@ where
         }
 
         // Clean up dead listeners if we detected any closed channels
+        if needs_cleanup {
+            self.transaction_listener.write().retain(|listener| !listener.sender.is_closed());
+        }
+    }
+
+    /// Notify all new transaction listeners about transactions promoted to the pending pool.
+    fn on_promoted_transactions(&self, promoted: &[Arc<ValidPoolTransaction<T::Transaction>>]) {
+        if promoted.is_empty() {
+            return
+        }
+
+        let mut needs_cleanup = false;
+
+        {
+            let listeners = self.transaction_listener.read();
+            for listener in listeners.iter() {
+                let promoted_txs = promoted.iter().filter_map(|tx| {
+                    if listener.kind.is_propagate_only() && !tx.propagate {
+                        None
+                    } else {
+                        Some(NewTransactionEvent::pending(tx.clone()))
+                    }
+                });
+                if !listener.send_all(promoted_txs) {
+                    needs_cleanup = true;
+                }
+            }
+        }
+
         if needs_cleanup {
             self.transaction_listener.write().retain(|listener| !listener.sender.is_closed());
         }
@@ -955,26 +990,7 @@ where
                 self.pending_transaction_listener.write().retain(|l| !l.sender.is_closed());
             }
 
-            // in this case we should also emit promoted transactions in full
-            let mut needs_tx_cleanup = false;
-            {
-                let listeners = self.transaction_listener.read();
-                for listener in listeners.iter() {
-                    let promoted_txs = promoted.iter().filter_map(|tx| {
-                        if listener.kind.is_propagate_only() && !tx.propagate {
-                            None
-                        } else {
-                            Some(NewTransactionEvent::pending(tx.clone()))
-                        }
-                    });
-                    if !listener.send_all(promoted_txs) {
-                        needs_tx_cleanup = true;
-                    }
-                }
-            }
-            if needs_tx_cleanup {
-                self.transaction_listener.write().retain(|l| !l.sender.is_closed());
-            }
+            self.on_promoted_transactions(&promoted);
         }
 
         self.with_event_listener(|listener| {
@@ -1980,6 +1996,42 @@ mod tests {
                 [B256::repeat_byte(1), B256::repeat_byte(2), B256::repeat_byte(3)]
             );
         }
+    }
+
+    #[test]
+    fn filling_nonce_gap_emits_promotions_in_full() {
+        let test_pool = testing_pool();
+        let pool = &test_pool.pool;
+        insert_with_state_nonce(&test_pool, 1, 0, true);
+        insert_with_state_nonce(&test_pool, 2, 0, false);
+
+        let mut full_network =
+            pool.add_new_transaction_listener(TransactionListenerKind::PropagateOnly);
+        let mut full_all = pool.add_new_transaction_listener(TransactionListenerKind::All);
+        let mut pending_pool = test_pool.new_pending_pool_transactions_listener();
+
+        insert_with_state_nonce(&test_pool, 0, 0, true);
+        let txs = test_pool.all_transactions_by_sender(Address::with_last_byte(1));
+        assert_eq!(transaction_nonces(&txs.pending), [0, 1, 2]);
+
+        for (listener, expected) in
+            [(&mut full_network, vec![0, 1]), (&mut full_all, vec![0, 1, 2])]
+        {
+            let mut received = Vec::new();
+            while let Ok(event) = listener.try_recv() {
+                assert_eq!(event.subpool, SubPool::Pending);
+                received.push(event.transaction.nonce());
+            }
+            received.sort_unstable();
+            assert_eq!(received, expected);
+        }
+
+        let mut received = Vec::new();
+        while let Some(Some(event)) = pending_pool.next().now_or_never() {
+            received.push(event.transaction.nonce());
+        }
+        received.sort_unstable();
+        assert_eq!(received, [0, 1]);
     }
 
     #[test]
