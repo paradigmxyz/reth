@@ -13,7 +13,7 @@ pub use manager::*;
 
 mod manager_metrics;
 
+mod multiproof_generator;
+
 mod provider;
 pub use provider::*;
-
-mod proof_v2;

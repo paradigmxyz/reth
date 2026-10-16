@@ -1,42 +1,103 @@
-//! Metric handles for reusable account and storage proof calculators.
+//! Cursor metrics of multiproof generators.
 
-use super::{HashedCursor, TrieCursor};
-use crate::{hashed_cursor::HashedCursorMetrics, trie_cursor::TrieCursorMetrics, TrieType};
+use crate::TrieType;
 
-/// Metric handles shared by proof generators and their cached cursors.
+#[cfg(feature = "metrics")]
+use crate::{
+    hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsRecorder, InstrumentedHashedCursor},
+    trie_cursor::{InstrumentedTrieCursor, TrieCursorMetrics, TrieCursorMetricsRecorder},
+};
+
+/// Cursor metric handles shared by multiproof generators.
+#[cfg(feature = "metrics")]
 #[derive(Clone, Debug)]
-pub struct ProofV2Metrics {
-    account_trie: TrieCursorMetrics,
-    storage_trie: TrieCursorMetrics,
-    account_hashed: HashedCursorMetrics,
-    storage_hashed: HashedCursorMetrics,
+pub struct ProofCursorMetrics {
+    account_trie_cursor: TrieCursorMetrics,
+    storage_trie_cursor: TrieCursorMetrics,
+    account_hashed_cursor: HashedCursorMetrics,
+    storage_hashed_cursor: HashedCursorMetrics,
 }
 
-impl Default for ProofV2Metrics {
+#[cfg(feature = "metrics")]
+impl Default for ProofCursorMetrics {
+    /// Registers cursor metric handles with the installed metrics recorder.
     fn default() -> Self {
         Self {
-            account_trie: TrieCursorMetrics::new(TrieType::State),
-            storage_trie: TrieCursorMetrics::new(TrieType::Storage),
-            account_hashed: HashedCursorMetrics::new(TrieType::State),
-            storage_hashed: HashedCursorMetrics::new(TrieType::Storage),
+            account_trie_cursor: TrieCursorMetrics::new(TrieType::State),
+            storage_trie_cursor: TrieCursorMetrics::new(TrieType::Storage),
+            account_hashed_cursor: HashedCursorMetrics::new(TrieType::State),
+            storage_hashed_cursor: HashedCursorMetrics::new(TrieType::Storage),
         }
     }
 }
 
-impl ProofV2Metrics {
-    pub(super) fn instrument_trie<C>(&self, cursor: C, trie_type: TrieType) -> TrieCursor<C> {
+#[cfg(feature = "metrics")]
+impl ProofCursorMetrics {
+    /// Wraps a trie cursor so its operations are recorded into the handles for `trie_type`.
+    pub(super) fn instrument_trie_cursor<C>(
+        &self,
+        cursor: C,
+        trie_type: TrieType,
+    ) -> MeteredTrieCursor<C> {
         match trie_type {
-            TrieType::State => &self.account_trie,
-            TrieType::Storage | TrieType::Custom(_) => &self.storage_trie,
+            TrieType::State => &self.account_trie_cursor,
+            TrieType::Storage | TrieType::Custom(_) => &self.storage_trie_cursor,
         }
         .instrument(cursor)
     }
 
-    pub(super) fn instrument_hashed<C>(&self, cursor: C, trie_type: TrieType) -> HashedCursor<C> {
+    /// Wraps a hashed cursor so its operations are recorded into the handles for `trie_type`.
+    pub(super) fn instrument_hashed_cursor<C>(
+        &self,
+        cursor: C,
+        trie_type: TrieType,
+    ) -> MeteredHashedCursor<C> {
         match trie_type {
-            TrieType::State => &self.account_hashed,
-            TrieType::Storage | TrieType::Custom(_) => &self.storage_hashed,
+            TrieType::State => &self.account_hashed_cursor,
+            TrieType::Storage | TrieType::Custom(_) => &self.storage_hashed_cursor,
         }
         .instrument(cursor)
     }
 }
+
+/// No-op cursor metric handles used when the `metrics` feature is disabled.
+#[cfg(not(feature = "metrics"))]
+#[derive(Clone, Debug, Default)]
+pub struct ProofCursorMetrics;
+
+#[cfg(not(feature = "metrics"))]
+impl ProofCursorMetrics {
+    /// Returns the trie cursor unchanged.
+    pub(super) const fn instrument_trie_cursor<C>(
+        &self,
+        cursor: C,
+        _trie_type: TrieType,
+    ) -> MeteredTrieCursor<C> {
+        cursor
+    }
+
+    /// Returns the hashed cursor unchanged.
+    pub(super) const fn instrument_hashed_cursor<C>(
+        &self,
+        cursor: C,
+        _trie_type: TrieType,
+    ) -> MeteredHashedCursor<C> {
+        cursor
+    }
+}
+
+/// Trie cursor counted into [`ProofCursorMetrics`].
+#[cfg(feature = "metrics")]
+pub(super) type MeteredTrieCursor<C> = InstrumentedTrieCursor<C, TrieCursorMetricsRecorder>;
+
+/// Trie cursor used as is when the `metrics` feature is disabled.
+#[cfg(not(feature = "metrics"))]
+pub(super) type MeteredTrieCursor<C> = C;
+
+/// Hashed cursor counted into [`ProofCursorMetrics`].
+#[cfg(feature = "metrics")]
+pub(super) type MeteredHashedCursor<C> = InstrumentedHashedCursor<C, HashedCursorMetricsRecorder>;
+
+/// Hashed cursor used as is when the `metrics` feature is disabled.
+#[cfg(not(feature = "metrics"))]
+pub(super) type MeteredHashedCursor<C> = C;

@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::HashedCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof_v2::{self, ProofV2},
+    proof_v2::{self, MultiProofGenerator},
     trie_cursor::TrieCursorFactory,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -123,13 +123,13 @@ where
         } else {
             Self::get_proof_targets(&state)
         };
-        let mut proof = ProofV2::new(
+        let mut generator = MultiProofGenerator::new(
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
             self.prefix_sets.clone().freeze(),
             Default::default(),
         );
-        let multiproof = proof.multiproof(proof_targets)?;
+        let multiproof = generator.multiproof(proof_targets)?;
 
         // No need to reconstruct the rest of the trie, we just need to include
         // the root node and return.
@@ -213,7 +213,7 @@ where
                     break;
                 }
 
-                let multiproof = proof.multiproof(targets)?;
+                let multiproof = generator.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
@@ -282,7 +282,7 @@ where
                     break;
                 }
 
-                let multiproof = proof.multiproof(targets)?;
+                let multiproof = generator.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
