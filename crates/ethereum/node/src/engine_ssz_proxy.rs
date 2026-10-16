@@ -2,10 +2,16 @@
 //!
 //! Implements the [EIP-8178] SSZ Engine API routes under `/engine/v1`.
 //!
+//! Bogota uses `engine_newPayloadV6`, `engine_forkchoiceUpdatedV5`, and
+//! `engine_getInclusionListV1`. Inclusion-list transactions are carried in the submission
+//! sidecar and payload-build attributes; the engine supplies the satisfaction result.
+//!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
 use crate::engine_ssz_witness::{
-    EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
+    EngineSszWitness, EngineSszWitnessError, ExecutionPayloadEnvelopeBogota,
+    ForkchoiceUpdateBogota, ForkchoiceUpdateResponseBogota, InclusionListResponse,
+    PayloadStatusBogota, PayloadStatusWithWitness,
 };
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
@@ -234,6 +240,8 @@ pub enum EngineSszFork {
     Osaka,
     /// Amsterdam fork.
     Amsterdam,
+    /// Bogota fork.
+    Bogota,
 }
 
 impl EngineSszFork {
@@ -244,6 +252,7 @@ impl EngineSszFork {
             Self::Cancun => 3,
             Self::Prague | Self::Osaka => 4,
             Self::Amsterdam => 5,
+            Self::Bogota => 6,
         }
     }
 
@@ -253,6 +262,7 @@ impl EngineSszFork {
             Self::Shanghai => 2,
             Self::Cancun | Self::Prague | Self::Osaka => 3,
             Self::Amsterdam => 4,
+            Self::Bogota => 5,
         }
     }
 }
@@ -268,6 +278,7 @@ impl std::str::FromStr for EngineSszFork {
             "prague" => Ok(Self::Prague),
             "osaka" => Ok(Self::Osaka),
             "amsterdam" => Ok(Self::Amsterdam),
+            "bogota" => Ok(Self::Bogota),
             _ => Err(()),
         }
     }
@@ -351,6 +362,11 @@ pub trait EngineSszApi: Clone + Send + Sync + 'static {
         async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
     }
 
+    /// Handles the Bogota inclusion-list request.
+    fn get_inclusion_list(&self) -> impl Future<Output = HttpResponse> + Send {
+        async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
+    }
+
     /// Handles a getBlobs request.
     fn get_blobs(&self, _version: u8, _body: Bytes) -> impl Future<Output = HttpResponse> + Send {
         async { problem_response(STATUS_NOT_FOUND, "method-not-found", None) }
@@ -380,6 +396,12 @@ where
             Ok(payload) => payload,
             Err(err) => return err.into_response(),
         };
+
+        if fork == EngineSszFork::Bogota {
+            return bogota_ssz_response::<_, PayloadStatusBogota>(
+                self.new_payload_v6_metered(payload).await,
+            )
+        }
 
         match submit_payload(self, fork, payload).await {
             Ok(status) => ssz_response(status),
@@ -473,7 +495,7 @@ where
                 .await
                 .map(BuiltPayloadOsaka::from)
                 .map_or_else(engine_error_response, get_payload_response),
-            EngineSszFork::Amsterdam => self
+            EngineSszFork::Amsterdam | EngineSszFork::Bogota => self
                 .get_payload_v6_metered(payload_id)
                 .await
                 .map(BuiltPayloadAmsterdam::from)
@@ -491,6 +513,12 @@ where
             !timestamp_matches_fork(self.chain_spec().as_ref(), fork, attrs.timestamp)
         }) {
             return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+        }
+
+        if fork == EngineSszFork::Bogota {
+            return bogota_ssz_response::<_, ForkchoiceUpdateResponseBogota>(
+                self.fork_choice_updated_v5_metered(state, attrs, custody_columns).await,
+            )
         }
 
         let response = match fork.forkchoice_version() {
@@ -530,6 +558,23 @@ where
     ) -> HttpResponse {
         handle_get_payload_bodies(self.clone(), fork, PayloadBodiesRequest::Range { start, count })
             .await
+    }
+
+    async fn get_inclusion_list(&self) -> HttpResponse {
+        match self.get_inclusion_list_v1_metered() {
+            Ok(transactions) => {
+                let response = InclusionListResponse { transactions };
+                match response.validate() {
+                    Ok(()) => ssz_response(response),
+                    Err(error) => problem_response(
+                        STATUS_INTERNAL_SERVER_ERROR,
+                        "internal",
+                        Some(format!("{error:?}")),
+                    ),
+                }
+            }
+            Err(error) => engine_error_response(error),
+        }
     }
 
     async fn get_blobs(&self, version: u8, body: Bytes) -> HttpResponse {
@@ -696,6 +741,15 @@ where
             };
             engine_api.get_payload_bodies_by_range(fork, start, count).await
         }
+        EngineSszEndpoint::InclusionList => {
+            if request_fork(&request) != Some(EngineSszFork::Bogota) {
+                return problem_response(STATUS_BAD_REQUEST, "unsupported-fork", None)
+            }
+            let Some(engine_api) = handle.engine_api().await else {
+                return problem_response(STATUS_SERVICE_UNAVAILABLE, "service-unavailable", None)
+            };
+            engine_api.get_inclusion_list().await
+        }
         EngineSszEndpoint::Blobs(version) => {
             let body = match read_ssz_body(request, MAX_BLOB_REQUEST_BYTES).await {
                 Ok(body) => body,
@@ -748,6 +802,9 @@ fn parse_engine_path(path: &str) -> Option<EngineSszEndpoint> {
         (Some("engine"), Some("v1"), Some("bodies"), None, None) => {
             Some(EngineSszEndpoint::PayloadBodiesByRange)
         }
+        (Some("engine"), Some("v1"), Some("inclusion-list"), None, None) => {
+            Some(EngineSszEndpoint::InclusionList)
+        }
         _ => None,
     }
 }
@@ -763,6 +820,7 @@ enum EngineSszEndpoint {
     PayloadBodiesByHash,
     PayloadBodiesByRange,
     Blobs(u8),
+    InclusionList,
 }
 
 impl EngineSszEndpoint {
@@ -771,7 +829,8 @@ impl EngineSszEndpoint {
             Self::Capabilities |
             Self::Identity |
             Self::GetPayload(_) |
-            Self::PayloadBodiesByRange => "GET",
+            Self::PayloadBodiesByRange |
+            Self::InclusionList => "GET",
             Self::NewPayload |
             Self::PayloadsWithWitness |
             Self::Forkchoice |
@@ -782,12 +841,12 @@ impl EngineSszEndpoint {
 }
 
 fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
-    let mut fork_scoped_endpoints = vec!["payloads", "forkchoice", "bodies"];
+    let mut fork_scoped_endpoints = vec!["payloads", "forkchoice", "bodies", "inclusion-list"];
     if witness_enabled {
         fork_scoped_endpoints.push("payloads/witness");
     }
     json_response(serde_json::json!({
-        "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"],
+        "supported_forks": ["paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"],
         "fork_scoped_endpoints": fork_scoped_endpoints,
         "independently_versioned": {
             "blobs": ["v1", "v2", "v3", "v4"],
@@ -861,7 +920,7 @@ where
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    let include_bal = fork == EngineSszFork::Amsterdam;
+    let include_bal = matches!(fork, EngineSszFork::Amsterdam | EngineSszFork::Bogota);
     let response = match request {
         PayloadBodiesRequest::Hash(hashes) => {
             engine_api.get_payload_bodies_by_hash_with_timestamps_metered(hashes, include_bal).await
@@ -874,7 +933,7 @@ where
     };
     let chain_spec = engine_api.chain_spec().as_ref();
     match fork {
-        EngineSszFork::Amsterdam => payload_bodies_http_response(
+        EngineSszFork::Amsterdam | EngineSszFork::Bogota => payload_bodies_http_response(
             response,
             |body| ExecutionPayloadBodyAmsterdam::try_from(body).ok(),
             fork,
@@ -973,7 +1032,10 @@ fn timestamp_matches_fork<ChainSpec: EthereumHardforks>(
         EngineSszFork::Osaka => {
             active(EthereumHardfork::Osaka) && !active(EthereumHardfork::Amsterdam)
         }
-        EngineSszFork::Amsterdam => active(EthereumHardfork::Amsterdam),
+        EngineSszFork::Amsterdam => {
+            active(EthereumHardfork::Amsterdam) && !active(EthereumHardfork::Bogota)
+        }
+        EngineSszFork::Bogota => active(EthereumHardfork::Bogota),
     }
 }
 
@@ -1061,6 +1123,7 @@ fn decode_new_payload_request(
     fork: EngineSszFork,
     body: &[u8],
 ) -> Result<ExecutionData, PayloadDecodeError> {
+    let mut inclusion_list = None;
     let (payload, parent_root, requests): (ExecutionPayload, _, Option<Requests>) = match fork {
         EngineSszFork::Paris => {
             let envelope = ExecutionPayloadEnvelopeParis::from_ssz_bytes(body)?;
@@ -1092,6 +1155,16 @@ fn decode_new_payload_request(
         }
         EngineSszFork::Amsterdam => {
             let envelope = ExecutionPayloadEnvelopeAmsterdam::from_ssz_bytes(body)?;
+            (
+                ExecutionPayload::V4(envelope.payload),
+                Some(envelope.parent_beacon_block_root),
+                Some(envelope.execution_requests),
+            )
+        }
+        EngineSszFork::Bogota => {
+            let envelope = ExecutionPayloadEnvelopeBogota::from_ssz_bytes(body)?;
+            check_transaction_list_bounds(&envelope.inclusion_list_transactions)?;
+            inclusion_list = Some(envelope.inclusion_list_transactions);
             (
                 ExecutionPayload::V4(envelope.payload),
                 Some(envelope.parent_beacon_block_root),
@@ -1134,6 +1207,10 @@ fn decode_new_payload_request(
         }
         None => ExecutionPayloadSidecar::none(),
     };
+    let sidecar = match inclusion_list {
+        Some(transactions) => sidecar.with_inclusion_list(transactions),
+        None => sidecar,
+    };
     Ok(ExecutionData::new(payload, sidecar))
 }
 
@@ -1152,7 +1229,7 @@ fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, Paylo
 fn decode_forkchoice_request(
     fork: EngineSszFork,
     body: &[u8],
-) -> Result<(ForkchoiceState, Option<PayloadAttributes>, Option<B128>), ssz::DecodeError> {
+) -> Result<DecodedForkchoice, ssz::DecodeError> {
     let (state, attrs, custody) = match fork {
         EngineSszFork::Paris => {
             let ForkchoiceUpdateParis { forkchoice_state, payload_attributes } =
@@ -1184,11 +1261,21 @@ fn decode_forkchoice_request(
                 ForkchoiceUpdateAmsterdam::from_ssz_bytes(body)?;
             (forkchoice_state, optional_attrs(payload_attributes), custody_columns.into_option())
         }
+        EngineSszFork::Bogota => {
+            let request = ForkchoiceUpdateBogota::from_ssz_bytes(body)?;
+            let attrs = optional_attrs(request.payload_attributes);
+            (request.forkchoice_state, attrs, request.custody_columns.into_option())
+        }
     };
     if let Some(withdrawals) =
         attrs.as_ref().and_then(|attrs: &PayloadAttributes| attrs.withdrawals.as_ref())
     {
         check_ssz_bound(withdrawals.len(), 16, "withdrawals")?;
+    }
+    if let Some(transactions) =
+        attrs.as_ref().and_then(|attrs| attrs.inclusion_list_transactions.as_ref())
+    {
+        check_transaction_list_bounds(transactions)?;
     }
     Ok((state, attrs, custody))
 }
@@ -1252,12 +1339,43 @@ fn problem_response(
         .expect("valid response")
 }
 
+/// Decoded forkchoice state, payload-build attributes, and custody selection.
+type DecodedForkchoice = (ForkchoiceState, Option<PayloadAttributes>, Option<B128>);
+
+fn check_transaction_list_bounds(transactions: &[Bytes]) -> Result<(), ssz::DecodeError> {
+    check_ssz_bound(transactions.len(), 1 << 20, "inclusion_list_transactions")?;
+    for transaction in transactions {
+        check_ssz_bound(transaction.len(), 1 << 30, "inclusion_list_transaction")?;
+    }
+    Ok(())
+}
+
+fn bogota_ssz_response<T, S>(response: Result<T, EngineApiError>) -> HttpResponse
+where
+    S: TryFrom<T> + ssz::Encode,
+    S::Error: std::fmt::Display,
+{
+    match response {
+        Ok(response) => match S::try_from(response) {
+            Ok(response) => ssz_response(response),
+            Err(error) => {
+                problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
+            }
+        },
+        Err(error) => engine_error_response(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rpc_types_engine::ssz_engine_types::{
-        PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
-        PayloadAttributesShanghai,
+    use crate::engine_ssz_witness::PayloadAttributesBogota;
+    use alloy_rpc_types_engine::{
+        ssz_engine_types::{
+            PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
+            PayloadAttributesShanghai,
+        },
+        ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4,
     };
     use ssz::Encode;
 
@@ -1717,5 +1835,111 @@ mod tests {
         assert!(decoded_attrs.withdrawals.as_ref().unwrap().is_empty());
         assert_eq!(decoded_attrs.parent_beacon_block_root, Some(B256::with_last_byte(3)));
         assert!(custody_columns.is_none());
+    }
+
+    #[test]
+    fn bogota_payload_retains_inclusion_lists_larger_than_single_list_limit() {
+        let envelope = ExecutionPayloadEnvelopeBogota {
+            payload: ExecutionPayloadV4 {
+                payload_inner: ExecutionPayloadV3 {
+                    payload_inner: ExecutionPayloadV2 {
+                        payload_inner: ExecutionPayloadV1::from_block_unchecked(
+                            B256::ZERO,
+                            &reth_ethereum_primitives::Block::default(),
+                        ),
+                        withdrawals: vec![],
+                    },
+                    blob_gas_used: 0,
+                    excess_blob_gas: 0,
+                },
+                block_access_list: Bytes::new(),
+                slot_number: 42,
+            },
+            parent_beacon_block_root: B256::repeat_byte(1),
+            execution_requests: Default::default(),
+            inclusion_list_transactions: vec![Bytes::from(vec![1; 8192]); 2],
+        };
+        let bytes = envelope.as_ssz_bytes();
+        assert_eq!(&bytes[..4], &44u32.to_le_bytes());
+        let data = decode_new_payload_request(EngineSszFork::Bogota, &bytes).unwrap();
+        assert_eq!(
+            data.sidecar.inclusion_list_transactions(),
+            Some(&envelope.inclusion_list_transactions)
+        );
+        assert_eq!(
+            data.sidecar.parent_beacon_block_root(),
+            Some(envelope.parent_beacon_block_root)
+        );
+        assert_eq!(data.payload, ExecutionPayload::V4(envelope.payload));
+    }
+
+    #[test]
+    fn bogota_forkchoice_preserves_build_list_and_custody_columns() {
+        let transactions = vec![Bytes::from_static(&[1, 2])];
+        let request = ForkchoiceUpdateBogota {
+            forkchoice_state: ForkchoiceState::default(),
+            payload_attributes: Optional::some(PayloadAttributesBogota {
+                timestamp: 10,
+                inclusion_list_transactions: transactions.clone(),
+                ..Default::default()
+            }),
+            custody_columns: Optional::some(B128::with_last_byte(1)),
+        };
+        let (_, attrs, custody) =
+            decode_forkchoice_request(EngineSszFork::Bogota, &request.as_ssz_bytes()).unwrap();
+        let attrs = attrs.unwrap();
+        assert_eq!(attrs.inclusion_list_transactions, Some(transactions));
+        assert_eq!(attrs.timestamp, 10);
+        assert_eq!(custody, Some(B128::with_last_byte(1)));
+        assert_eq!(EngineSszFork::Bogota.payloads_version(), 6);
+        assert_eq!(EngineSszFork::Bogota.forkchoice_version(), 5);
+        assert_eq!("bogota".parse(), Ok(EngineSszFork::Bogota));
+        assert_eq!(
+            parse_engine_path("/engine/v1/inclusion-list"),
+            Some(EngineSszEndpoint::InclusionList)
+        );
+    }
+
+    #[tokio::test]
+    async fn inclusion_list_route_requires_bogota_and_get() {
+        #[derive(Clone)]
+        struct Api;
+        impl EngineSszApi for Api {
+            async fn get_inclusion_list(&self) -> HttpResponse {
+                ssz_response(InclusionListResponse {
+                    transactions: vec![Bytes::from_static(&[1, 2])],
+                })
+            }
+        }
+        let handle = EngineSszProxyHandle::with_engine_api(Api);
+        for (method, fork, status, error) in [
+            ("GET", Some("bogota"), 200, None),
+            ("GET", Some("amsterdam"), 400, Some("unsupported-fork")),
+            ("GET", Some("unknown"), 400, Some("unsupported-fork")),
+            ("GET", None, 400, Some("unsupported-fork")),
+            ("POST", Some("bogota"), 405, Some("method-not-allowed")),
+        ] {
+            let mut builder =
+                HttpRequest::builder().method(method).uri("/engine/v1/inclusion-list");
+            if let Some(fork) = fork {
+                builder = builder.header(ETH_EXECUTION_VERSION, fork);
+            }
+            let response =
+                handle_engine_ssz_request(handle.clone(), builder.body(HttpBody::empty()).unwrap())
+                    .await;
+            assert_eq!(response.status(), status);
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            if let Some(error) = error {
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                    serde_json::json!({"type": format!("/engine-api/errors/{error}")})
+                );
+            } else {
+                assert_eq!(
+                    InclusionListResponse::from_ssz_bytes(&body).unwrap().transactions,
+                    vec![Bytes::from_static(&[1, 2])]
+                );
+            }
+        }
     }
 }
