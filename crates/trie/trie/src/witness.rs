@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::HashedCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof_v2::{self, MultiProofCalculator, ProofCursorMetrics},
+    proof_v2::{self, MultiProofCalculator},
     trie_cursor::TrieCursorFactory,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -123,10 +123,9 @@ where
         } else {
             Self::get_proof_targets(&state)
         };
-        let metrics = ProofCursorMetrics::default();
         let mut calculator = MultiProofCalculator::new(
-            metrics.instrument_trie_factory(self.trie_cursor_factory.clone()),
-            metrics.instrument_hashed_factory(self.hashed_cursor_factory.clone()),
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
             self.prefix_sets.clone().freeze(),
         );
         let multiproof = calculator.multiproof(proof_targets)?;
