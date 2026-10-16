@@ -41,7 +41,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
     Ok(cors)
 }
 
-/// Rejects WebSocket upgrades from origins outside the configured allowlist.
+/// Rejects `WebSocket` upgrades from origins outside the configured allowlist.
 #[derive(Clone, Debug)]
 pub(crate) struct WsOriginValidator {
     origins: Option<Vec<HeaderValue>>,
