@@ -502,6 +502,9 @@ impl DatabaseEnv {
         // because we want to prioritize freelist lookup speed over database growth.
         // https://github.com/paradigmxyz/reth/blob/fa2b9b685ed9787636d962f4366caf34a9186e66/crates/storage/libmdbx-rs/mdbx-sys/libmdbx/mdbx.c#L16017.
         inner_env.set_rp_augment_limit(256 * 1024);
+        // MDBX v0.14 raised the default merge threshold from 25% to 33%, which slows down
+        // persistence by merging pages more often. Keep the previous 25% (16384 / 65536).
+        inner_env.set_merge_threshold(16384);
 
         if let Some(log_level) = args.log_level {
             // Levels higher than [LogLevel::Notice] require libmdbx built with `MDBX_DEBUG` option.
