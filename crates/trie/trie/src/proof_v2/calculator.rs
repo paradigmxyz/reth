@@ -8,9 +8,7 @@
 //! - Re-uses cursors across calculations
 //! - Supports generic value types with lazy evaluation
 
-use super::{
-    iter_sub_trie_targets, known_parent_prefix, node::*, value::*, SubTrieTargets, TRACE_TARGET,
-};
+use super::{iter_sub_trie_targets, node::*, value::*, SubTrieTargets, TRACE_TARGET};
 use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
