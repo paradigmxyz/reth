@@ -425,7 +425,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
         let transaction_fetcher =
-            TransactionFetcher::new(transactions_manager_config.transaction_fetcher_config.clone());
+            TransactionFetcher::new(transactions_manager_config.transaction_fetcher_config.clone())
+                .with_blob_validation();
 
         // install a listener for new __pending__ transactions that are allowed to be propagated
         // over the network

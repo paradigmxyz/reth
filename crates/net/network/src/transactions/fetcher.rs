@@ -20,8 +20,8 @@
 //! total number of pending hashes. FIFO refers to the fetcher's input order; callers may
 //! reorder or deduplicate hashes within a wire announcement.
 //!
-//! When a request resolves, delivered hashes are dropped after blob sidecar validation, if needed.
-//! Undelivered hashes go back
+//! When a request resolves, delivered hashes are dropped. The transactions manager opts into
+//! retaining blob hashes until its pool validates their sidecars. Undelivered hashes go back
 //! to pending and are queued for their remaining candidates, most recent announcers first, or are
 //! dropped if none remain. The responding peer is dropped as a candidate for every undelivered
 //! hash that precedes the last delivered hash of the request, treating it as skipped, and for
@@ -125,6 +125,8 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     scratch_queue: Vec<(TxHash, u64)>,
     /// Configured limits.
     config: TransactionFetcherConfig,
+    /// Whether the owner settles blob fetches after pool validation.
+    retain_blobs_for_validation: bool,
     metrics: TransactionFetcherMetrics,
 }
 
@@ -149,8 +151,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             scratch_delivered: Default::default(),
             scratch_queue: Default::default(),
             config,
+            retain_blobs_for_validation: false,
             metrics,
         }
+    }
+
+    /// Retains delivered blobs until the pool reports success or a terminal failure through
+    /// `on_transactions_received`, or a sidecar failure through `on_bad_blob_sidecar`.
+    pub(crate) const fn with_blob_validation(mut self) -> Self {
+        self.retain_blobs_for_validation = true;
+        self
     }
 
     /// Returns the fetcher's config.
@@ -829,7 +839,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     verify_response(&mut transactions, &requested_set, &mut delivered);
                 self.scratch_requested = requested_set;
                 for tx in transactions.iter() {
-                    if tx.is_eip4844() &&
+                    if self.retain_blobs_for_validation &&
+                        tx.is_eip4844() &&
                         let Some(entry) = self.hashes.get_mut(tx.tx_hash()) &&
                         entry.fetching_by == Some(FetchPhase::Request(key, request_id))
                     {
@@ -3039,6 +3050,7 @@ mod tests {
     #[test]
     fn invalid_blob_sidecar_retries_retained_candidates() {
         let mut rig = Rig::new();
+        rig.fetcher = rig.fetcher.with_blob_validation();
         let peer_a = peer(1);
         let peer_b = peer(2);
         rig.add_peer(peer_a);
@@ -3067,6 +3079,27 @@ mod tests {
         response.send(Ok(PooledTransactions(vec![blob]))).unwrap();
         rig.next_event().unwrap();
         rig.fetcher.on_transactions_received([&hash]);
+        rig.verify();
+        assert_eq!(rig.fetcher.num_hashes(), 0);
+        assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
+    }
+
+    #[test]
+    fn standalone_fetcher_releases_delivered_blobs() {
+        let mut rig = Rig::new();
+        let peer = peer(1);
+        rig.add_peer(peer);
+        let blob = PooledTransactionVariant::Eip4844(Signed::new_unhashed(
+            TxEip4844WithSidecar::from_tx_and_sidecar(
+                TxEip4844::default(),
+                BlobTransactionSidecar::default().into(),
+            ),
+            Signature::new(U256::from(1), U256::from(2), false),
+        ));
+        let hash = *blob.tx_hash();
+        rig.announce(peer, &[hash]);
+        assert_eq!(rig.dispatch(), 1);
+        rig.respond(peer, vec![blob]);
         rig.verify();
         assert_eq!(rig.fetcher.num_hashes(), 0);
         assert_eq!(rig.fetcher.num_fetching_hashes(), 0);
