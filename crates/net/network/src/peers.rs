@@ -168,6 +168,9 @@ impl PeersManager {
             }
             let NodeRecord { address, tcp_port, udp_port, id } = record;
             peers.entry(id).or_insert_with(|| {
+                if kind.is_trusted() {
+                    trusted_peer_ids.insert(id);
+                }
                 let mut peer = Peer::with_kind(
                     PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)),
                     kind,
@@ -3967,5 +3970,53 @@ mod tests {
             peers.ban_peer_by_admin(peer_id);
             assert!(peers.ban_list.is_banned_peer(&peer_id));
         }
+    }
+
+    #[tokio::test]
+    async fn test_persisted_trust_controls_inbound_admission() {
+        for kind in [PeerKind::Basic, PeerKind::Static, PeerKind::Trusted] {
+            for trusted_only in [false, true] {
+                let peer_id = PeerId::random();
+                let addr = "127.0.0.1:8008".parse::<SocketAddr>().unwrap();
+                let mut config = PeersConfig::test().with_trusted_nodes_only(trusted_only);
+                config.connection_info.max_inbound = 0;
+                config.persisted_peers.push(PersistedPeerInfo {
+                    record: NodeRecord::new(addr, peer_id),
+                    kind,
+                    fork_id: None,
+                    reputation: 0,
+                });
+                let mut peers = PeersManager::new(config);
+                assert_eq!(peers.trusted_peer_ids.contains(&peer_id), kind.is_trusted());
+                peers.connection_info.inc_pending_in();
+                peers.on_incoming_session_established(peer_id, addr);
+                if kind.is_trusted() {
+                    assert!(peers.queued_actions.is_empty());
+                    assert_eq!(peers.connection_info.num_inbound, 1);
+                } else if trusted_only {
+                    assert!(matches!(peers.queued_actions.pop_front(),
+                        Some(PeerAction::DisconnectUntrustedIncoming { peer_id: id }) if id == peer_id));
+                } else {
+                    assert!(matches!(peers.queued_actions.pop_front(),
+                        Some(PeerAction::Disconnect { peer_id: id, reason: Some(DisconnectReason::TooManyPeers) }) if id == peer_id));
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_filtered_persisted_peer_does_not_restore_trust() {
+        let peer_id = PeerId::random();
+        let mut config = PeersConfig::test();
+        config.enforce_enr_fork_id = true;
+        config.persisted_peers.push(PersistedPeerInfo {
+            record: NodeRecord::new("127.0.0.1:8008".parse().unwrap(), peer_id),
+            kind: PeerKind::Trusted,
+            fork_id: None,
+            reputation: 0,
+        });
+        let peers = PeersManager::new(config);
+        assert!(!peers.trusted_peer_ids.contains(&peer_id));
+        assert!(!peers.peers.contains_key(&peer_id));
     }
 }
