@@ -4,8 +4,8 @@ use crate::{
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ExecutionData, ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+    ExecutionData, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PayloadStatusEnum,
 };
 use core::{
     fmt::{self, Display},
@@ -25,9 +25,12 @@ use tracing::Span;
 #[deprecated(note = "Use ConsensusEngineHandle instead")]
 pub type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
 
+/// The result of a forkchoice update, or the error to return to the consensus client.
+pub type OnForkChoiceUpdatedResult = Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError>;
+
 /// Represents the outcome of forkchoice update.
 ///
-/// This is a future that resolves to [`ForkChoiceUpdateResult`]
+/// This is a future that resolves to [`OnForkChoiceUpdatedResult`]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
@@ -37,7 +40,7 @@ pub struct OnForkChoiceUpdated {
     /// depending on the payload attributes, even if the forkchoice update itself is valid.
     forkchoice_status: ForkchoiceStatus,
     /// Returns the result of the forkchoice update.
-    fut: Either<futures::future::Ready<ForkChoiceUpdateResult>, PendingPayloadId>,
+    fut: Either<futures::future::Ready<OnForkChoiceUpdatedResult>, PendingPayloadId>,
 }
 
 // === impl OnForkChoiceUpdated ===
@@ -80,7 +83,9 @@ impl OnForkChoiceUpdated {
     pub fn invalid_state() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
-            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
+            fut: Either::Left(futures::future::ready(Err(
+                ForkchoiceUpdateError::InvalidState.into()
+            ))),
         }
     }
 
@@ -89,7 +94,9 @@ impl OnForkChoiceUpdated {
     pub fn too_deep_reorg() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
-            fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::TooDeepReorg))),
+            fut: Either::Left(futures::future::ready(Err(
+                ForkchoiceUpdateError::TooDeepReorg.into()
+            ))),
         }
     }
 
@@ -100,12 +107,14 @@ impl OnForkChoiceUpdated {
             // This is valid because this is only reachable if the state and payload is valid
             forkchoice_status: ForkchoiceStatus::Valid,
             fut: Either::Left(futures::future::ready(Err(
-                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
+                ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes.into(),
             ))),
         }
     }
 
-    /// If the forkchoice update was successful and no payload attributes were provided, this method
+    /// Creates a new instance of `OnForkChoiceUpdated` that resolves to the id of the payload job
+    /// started for the payload attributes, or to [`BeaconForkChoiceUpdateError::PayloadJob`] if the
+    /// job cannot be started.
     pub const fn updated_with_pending_payload_id(
         payload_status: PayloadStatus,
         pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
@@ -121,7 +130,7 @@ impl OnForkChoiceUpdated {
 }
 
 impl Future for OnForkChoiceUpdated {
-    type Output = ForkChoiceUpdateResult;
+    type Output = OnForkChoiceUpdatedResult;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.get_mut().fut.poll_unpin(cx)
@@ -137,7 +146,7 @@ struct PendingPayloadId {
 }
 
 impl Future for PendingPayloadId {
-    type Output = ForkChoiceUpdateResult;
+    type Output = OnForkChoiceUpdatedResult;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -147,10 +156,10 @@ impl Future for PendingPayloadId {
                 payload_status: this.payload_status.take().expect("Polled after completion"),
                 payload_id: Some(payload_id),
             })),
-            Err(_) | Ok(Err(_)) => {
-                // failed to initiate a payload build job
-                Poll::Ready(Err(ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes))
-            }
+            Ok(Err(err)) => Poll::Ready(Err(BeaconForkChoiceUpdateError::PayloadJob(err))),
+            Err(_) => Poll::Ready(Err(BeaconForkChoiceUpdateError::PayloadJob(
+                PayloadBuilderError::ChannelClosed,
+            ))),
         }
     }
 }
@@ -396,12 +405,11 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<Payload::PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs)
+        self.send_fork_choice_updated(state, payload_attrs)
             .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
             .await?
             .map_err(BeaconForkChoiceUpdateError::internal)?
-            .await?)
+            .await
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
@@ -419,5 +427,46 @@ where
             tx,
         });
         rx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn on_payload_job(
+        pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
+    ) -> OnForkChoiceUpdatedResult {
+        OnForkChoiceUpdated::updated_with_pending_payload_id(
+            PayloadStatus::from_status(PayloadStatusEnum::Valid),
+            pending_payload_id,
+        )
+        .now_or_never()
+        .expect("payload job result is ready")
+    }
+
+    fn started(result: Result<PayloadId, PayloadBuilderError>) -> OnForkChoiceUpdatedResult {
+        let (tx, rx) = oneshot::channel();
+        tx.send(result).unwrap();
+        on_payload_job(rx)
+    }
+
+    #[test]
+    fn payload_job_start_errors_are_returned() {
+        let id = PayloadId::new([1; 8]);
+        assert_eq!(started(Ok(id)).unwrap().payload_id, Some(id));
+
+        let err = started(Err(PayloadBuilderError::MissingParentHeader(B256::ZERO))).unwrap_err();
+        assert!(matches!(
+            err,
+            BeaconForkChoiceUpdateError::PayloadJob(PayloadBuilderError::MissingParentHeader(_))
+        ));
+
+        let (_, dropped) = oneshot::channel();
+        let err = on_payload_job(dropped).unwrap_err();
+        assert!(matches!(
+            err,
+            BeaconForkChoiceUpdateError::PayloadJob(PayloadBuilderError::ChannelClosed)
+        ));
     }
 }
