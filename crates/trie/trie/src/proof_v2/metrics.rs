@@ -3,10 +3,7 @@
 use crate::TrieType;
 
 #[cfg(feature = "metrics")]
-use crate::{
-    hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsRecorder, InstrumentedHashedCursor},
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorMetrics, TrieCursorMetricsRecorder},
-};
+use crate::{hashed_cursor::HashedCursorMetrics, trie_cursor::TrieCursorMetrics};
 
 /// Cursor metric handles shared by multiproof calculators.
 #[cfg(feature = "metrics")]
@@ -38,7 +35,7 @@ impl ProofCursorMetrics {
         &self,
         cursor: C,
         trie_type: TrieType,
-    ) -> MeteredTrieCursor<C> {
+    ) -> InstrumentedTrieCursor<C> {
         match trie_type {
             TrieType::State => &self.account_trie_cursor,
             TrieType::Storage | TrieType::Custom(_) => &self.storage_trie_cursor,
@@ -51,7 +48,7 @@ impl ProofCursorMetrics {
         &self,
         cursor: C,
         trie_type: TrieType,
-    ) -> MeteredHashedCursor<C> {
+    ) -> InstrumentedHashedCursor<C> {
         match trie_type {
             TrieType::State => &self.account_hashed_cursor,
             TrieType::Storage | TrieType::Custom(_) => &self.storage_hashed_cursor,
@@ -72,7 +69,7 @@ impl ProofCursorMetrics {
         &self,
         cursor: C,
         _trie_type: TrieType,
-    ) -> MeteredTrieCursor<C> {
+    ) -> InstrumentedTrieCursor<C> {
         cursor
     }
 
@@ -81,23 +78,23 @@ impl ProofCursorMetrics {
         &self,
         cursor: C,
         _trie_type: TrieType,
-    ) -> MeteredHashedCursor<C> {
+    ) -> InstrumentedHashedCursor<C> {
         cursor
     }
 }
 
 /// Trie cursor counted into [`ProofCursorMetrics`].
 #[cfg(feature = "metrics")]
-pub(super) type MeteredTrieCursor<C> = InstrumentedTrieCursor<C, TrieCursorMetricsRecorder>;
+pub(super) use crate::trie_cursor::InstrumentedTrieCursor;
 
 /// Trie cursor used as is when the `metrics` feature is disabled.
 #[cfg(not(feature = "metrics"))]
-pub(super) type MeteredTrieCursor<C> = C;
+pub(super) type InstrumentedTrieCursor<C> = C;
 
 /// Hashed cursor counted into [`ProofCursorMetrics`].
 #[cfg(feature = "metrics")]
-pub(super) type MeteredHashedCursor<C> = InstrumentedHashedCursor<C, HashedCursorMetricsRecorder>;
+pub(super) use crate::hashed_cursor::InstrumentedHashedCursor;
 
 /// Hashed cursor used as is when the `metrics` feature is disabled.
 #[cfg(not(feature = "metrics"))]
-pub(super) type MeteredHashedCursor<C> = C;
+pub(super) type InstrumentedHashedCursor<C> = C;

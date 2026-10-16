@@ -1,14 +1,11 @@
 use super::{HashedCursor, HashedStorageCursor};
 use alloy_primitives::B256;
-use core::ops::DerefMut;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
-#[cfg(feature = "metrics")]
-use core::ops::Deref;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
@@ -70,14 +67,8 @@ impl HashedCursorMetrics {
     }
 
     /// Wraps a cursor with owned counters that are recorded when the cursor is dropped.
-    pub fn instrument<C>(
-        &self,
-        cursor: C,
-    ) -> InstrumentedHashedCursor<C, HashedCursorMetricsRecorder> {
-        InstrumentedHashedCursor::new(
-            cursor,
-            HashedCursorMetricsRecorder { cache: Default::default(), metrics: self.clone() },
-        )
+    pub fn instrument<C>(&self, cursor: C) -> InstrumentedHashedCursor<C> {
+        InstrumentedHashedCursor { cursor, cache: Default::default(), metrics: Some(self.clone()) }
     }
 }
 
@@ -115,30 +106,49 @@ impl HashedCursorMetricsCache {
     }
 }
 
+impl AsMut<HashedCursorMetricsCache> for HashedCursorMetricsCache {
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
 /// A wrapper around a [`HashedCursor`] that tracks metrics for cursor operations.
+///
+/// When constructed through `HashedCursorMetrics::instrument`, counters are recorded on drop.
+/// The `new` constructor instead accumulates counters for the caller to record.
 ///
 /// This implementation counts the number of times each cursor operation is called:
 /// - `next()` - Move to the next entry
 /// - `seek()` - Seek to a key or the next greater key
 #[derive(Debug)]
-pub struct InstrumentedHashedCursor<C, M> {
+pub struct InstrumentedHashedCursor<
+    C,
+    M: AsMut<HashedCursorMetricsCache> = HashedCursorMetricsCache,
+> {
     /// The underlying cursor being wrapped
     cursor: C,
-    /// Cached metrics counters
-    metrics: M,
+    /// Owned or borrowed counters for cursor operations.
+    cache: M,
+    /// Metric handles used to record owned counters when the cursor is dropped.
+    #[cfg(feature = "metrics")]
+    metrics: Option<HashedCursorMetrics>,
 }
 
-impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> InstrumentedHashedCursor<C, M> {
+impl<C, M: AsMut<HashedCursorMetricsCache>> InstrumentedHashedCursor<C, M> {
     /// Wraps a cursor with owned or borrowed metrics counters.
     ///
-    /// Counters accumulate in `metrics`; recording them is the responsibility of its owner.
-    pub const fn new(cursor: C, metrics: M) -> Self {
-        Self { cursor, metrics }
+    /// Counters accumulate in `cache`; recording them is the caller's responsibility.
+    pub const fn new(cursor: C, cache: M) -> Self {
+        Self {
+            cursor,
+            cache,
+            #[cfg(feature = "metrics")]
+            metrics: None,
+        }
     }
 }
 
-impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> HashedCursor
-    for InstrumentedHashedCursor<C, M>
+impl<C, M: AsMut<HashedCursorMetricsCache>> HashedCursor for InstrumentedHashedCursor<C, M>
 where
     C: HashedCursor,
 {
@@ -146,17 +156,17 @@ where
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let start = Instant::now();
-        self.metrics.seek_count += 1;
+        self.cache.as_mut().seek_count += 1;
         let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let start = Instant::now();
-        self.metrics.next_count += 1;
+        self.cache.as_mut().next_count += 1;
         let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
@@ -165,16 +175,15 @@ where
     }
 }
 
-impl<C, M: DerefMut<Target = HashedCursorMetricsCache>> HashedStorageCursor
-    for InstrumentedHashedCursor<C, M>
+impl<C, M: AsMut<HashedCursorMetricsCache>> HashedStorageCursor for InstrumentedHashedCursor<C, M>
 where
     C: HashedStorageCursor,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         let start = Instant::now();
-        self.metrics.is_storage_empty_count += 1;
+        self.cache.as_mut().is_storage_empty_count += 1;
         let result = self.cursor.is_storage_empty();
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
@@ -183,32 +192,11 @@ where
     }
 }
 
-/// Owned hashed cursor counters recorded through their metric handles on drop.
 #[cfg(feature = "metrics")]
-#[derive(Debug)]
-pub struct HashedCursorMetricsRecorder {
-    cache: HashedCursorMetricsCache,
-    metrics: HashedCursorMetrics,
-}
-
-#[cfg(feature = "metrics")]
-impl Deref for HashedCursorMetricsRecorder {
-    type Target = HashedCursorMetricsCache;
-    fn deref(&self) -> &Self::Target {
-        &self.cache
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl DerefMut for HashedCursorMetricsRecorder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cache
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl Drop for HashedCursorMetricsRecorder {
+impl<C, M: AsMut<HashedCursorMetricsCache>> Drop for InstrumentedHashedCursor<C, M> {
     fn drop(&mut self) {
-        self.metrics.record(&mut self.cache);
+        if let Some(metrics) = &self.metrics {
+            metrics.record(self.cache.as_mut());
+        }
     }
 }

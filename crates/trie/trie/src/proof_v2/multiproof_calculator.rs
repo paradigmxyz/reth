@@ -1,7 +1,7 @@
 //! Reusable multiproof generation over a fixed state snapshot.
 
 use super::{
-    metrics::{MeteredHashedCursor, MeteredTrieCursor},
+    metrics::{InstrumentedHashedCursor, InstrumentedTrieCursor},
     DeferredValueEncoder, LeafValueEncoder, ProofCalculator, ProofCursorMetrics,
     StorageProofCalculator,
 };
@@ -173,18 +173,18 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory> fmt::Debug for MultiProofCalc
 
 /// Account calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type AccountCalculatorOf<'a, T, H> = ProofCalculator<
-    MeteredTrieCursor<<T as TrieCursorFactory>::AccountTrieCursor<'a>>,
-    MeteredHashedCursor<<H as HashedCursorFactory>::AccountCursor<'a>>,
+    InstrumentedTrieCursor<<T as TrieCursorFactory>::AccountTrieCursor<'a>>,
+    InstrumentedHashedCursor<<H as HashedCursorFactory>::AccountCursor<'a>>,
     AccountValueEncoder<
-        MeteredTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
-        MeteredHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
+        InstrumentedTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
+        InstrumentedHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
     >,
 >;
 
 /// Storage calculator opened from the cursor factories of a [`MultiProofCalculator`].
 type StorageCalculatorOf<'a, T, H> = PrefixSetStorageCalculator<
-    MeteredTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
-    MeteredHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
+    InstrumentedTrieCursor<<T as TrieCursorFactory>::StorageTrieCursor<'a>>,
+    InstrumentedHashedCursor<<H as HashedCursorFactory>::StorageCursor<'a>>,
 >;
 
 /// Cursor factories owned by a [`MultiProofCalculator`] at a stable address.

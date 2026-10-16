@@ -1,15 +1,12 @@
 use super::{TrieCursor, TrieStorageCursor};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
-use core::ops::DerefMut;
 use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
-#[cfg(feature = "metrics")]
-use core::ops::Deref;
 #[cfg(feature = "metrics")]
 use reth_metrics::metrics::{self, Histogram};
 
@@ -71,11 +68,8 @@ impl TrieCursorMetrics {
     }
 
     /// Wraps a cursor with owned counters that are recorded when the cursor is dropped.
-    pub fn instrument<C>(&self, cursor: C) -> InstrumentedTrieCursor<C, TrieCursorMetricsRecorder> {
-        InstrumentedTrieCursor::new(
-            cursor,
-            TrieCursorMetricsRecorder { cache: Default::default(), metrics: self.clone() },
-        )
+    pub fn instrument<C>(&self, cursor: C) -> InstrumentedTrieCursor<C> {
+        InstrumentedTrieCursor { cursor, cache: Default::default(), metrics: Some(self.clone()) }
     }
 }
 
@@ -108,40 +102,55 @@ impl TrieCursorMetricsCache {
     }
 }
 
+impl AsMut<TrieCursorMetricsCache> for TrieCursorMetricsCache {
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
 /// A wrapper around a [`TrieCursor`] that tracks metrics for cursor operations.
+///
+/// When constructed through `TrieCursorMetrics::instrument`, counters are recorded on drop.
+/// The `new` constructor instead accumulates counters for the caller to record.
 ///
 /// This implementation counts the number of times each cursor operation is called:
 /// - `next()` - Move to the next entry
 /// - `seek()` - Seek to a key or the next greater key
 /// - `seek_exact()` - Seek to an exact key match
 #[derive(Debug)]
-pub struct InstrumentedTrieCursor<C, M> {
+pub struct InstrumentedTrieCursor<C, M: AsMut<TrieCursorMetricsCache> = TrieCursorMetricsCache> {
     /// The underlying cursor being wrapped
     cursor: C,
-    /// Cached metrics counters
-    metrics: M,
+    /// Owned or borrowed counters for cursor operations.
+    cache: M,
+    /// Metric handles used to record owned counters when the cursor is dropped.
+    #[cfg(feature = "metrics")]
+    metrics: Option<TrieCursorMetrics>,
 }
 
-impl<C, M: DerefMut<Target = TrieCursorMetricsCache>> InstrumentedTrieCursor<C, M> {
+impl<C, M: AsMut<TrieCursorMetricsCache>> InstrumentedTrieCursor<C, M> {
     /// Wraps a cursor with owned or borrowed metrics counters.
     ///
-    /// Counters accumulate in `metrics`; recording them is the responsibility of its owner.
-    pub const fn new(cursor: C, metrics: M) -> Self {
-        Self { cursor, metrics }
+    /// Counters accumulate in `cache`; recording them is the caller's responsibility.
+    pub const fn new(cursor: C, cache: M) -> Self {
+        Self {
+            cursor,
+            cache,
+            #[cfg(feature = "metrics")]
+            metrics: None,
+        }
     }
 }
 
-impl<C: TrieCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieCursor
-    for InstrumentedTrieCursor<C, M>
-{
+impl<C: TrieCursor, M: AsMut<TrieCursorMetricsCache>> TrieCursor for InstrumentedTrieCursor<C, M> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let start = Instant::now();
-        self.metrics.seek_exact_count += 1;
+        self.cache.as_mut().seek_exact_count += 1;
         let result = self.cursor.seek_exact(key);
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
@@ -150,17 +159,17 @@ impl<C: TrieCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieCursor
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let start = Instant::now();
-        self.metrics.seek_count += 1;
+        self.cache.as_mut().seek_count += 1;
         let result = self.cursor.seek(key);
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let start = Instant::now();
-        self.metrics.next_count += 1;
+        self.cache.as_mut().next_count += 1;
         let result = self.cursor.next();
-        self.metrics.total_duration += start.elapsed();
+        self.cache.as_mut().total_duration += start.elapsed();
         result
     }
 
@@ -173,7 +182,7 @@ impl<C: TrieCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieCursor
     }
 }
 
-impl<C: TrieStorageCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieStorageCursor
+impl<C: TrieStorageCursor, M: AsMut<TrieCursorMetricsCache>> TrieStorageCursor
     for InstrumentedTrieCursor<C, M>
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
@@ -181,32 +190,11 @@ impl<C: TrieStorageCursor, M: DerefMut<Target = TrieCursorMetricsCache>> TrieSto
     }
 }
 
-/// Owned trie cursor counters recorded through their metric handles on drop.
 #[cfg(feature = "metrics")]
-#[derive(Debug)]
-pub struct TrieCursorMetricsRecorder {
-    cache: TrieCursorMetricsCache,
-    metrics: TrieCursorMetrics,
-}
-
-#[cfg(feature = "metrics")]
-impl Deref for TrieCursorMetricsRecorder {
-    type Target = TrieCursorMetricsCache;
-    fn deref(&self) -> &Self::Target {
-        &self.cache
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl DerefMut for TrieCursorMetricsRecorder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cache
-    }
-}
-
-#[cfg(feature = "metrics")]
-impl Drop for TrieCursorMetricsRecorder {
+impl<C, M: AsMut<TrieCursorMetricsCache>> Drop for InstrumentedTrieCursor<C, M> {
     fn drop(&mut self) {
-        self.metrics.record(&mut self.cache);
+        if let Some(metrics) = &self.metrics {
+            metrics.record(self.cache.as_mut());
+        }
     }
 }

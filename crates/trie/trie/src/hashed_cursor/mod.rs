@@ -20,7 +20,7 @@ pub mod metrics;
 pub use metrics::{HashedCursorMetricsCache, InstrumentedHashedCursor};
 
 #[cfg(feature = "metrics")]
-pub use metrics::{HashedCursorMetrics, HashedCursorMetricsRecorder};
+pub use metrics::HashedCursorMetrics;
 
 /// The factory trait for creating cursors over the hashed state.
 #[auto_impl::auto_impl(&)]
