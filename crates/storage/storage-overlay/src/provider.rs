@@ -724,10 +724,8 @@ where
             if targets.is_empty() {
                 return Ok(DecodedMultiProofV2::default())
             }
+            // A reused sparse trie already covers any intentionally skipped overlay.
             let overlay = self.state_trie_overlay(true)?;
-            if overlay.skipped_for_reused_sparse_trie() {
-                return Err(ProviderError::UnsupportedProvider)
-            }
             return self
                 .proof_calculators
                 .borrow_mut()
