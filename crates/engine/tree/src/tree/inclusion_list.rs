@@ -4,11 +4,7 @@
 //! was given, and the bounded store of lists retained from `engine_newPayloadV6`.
 
 use alloy_consensus::{constants::KECCAK_EMPTY, Transaction};
-use alloy_eips::{
-    eip2718::Decodable2718,
-    eip4844::{DATA_GAS_PER_BLOB, VERSIONED_HASH_VERSION_KZG},
-    eip7840::BlobParams,
-};
+use alloy_eips::eip2718::{Decodable2718, Typed2718};
 use alloy_primitives::{
     map::{AddressMap, B256Map, B256Set},
     Bytes, B256, U256,
@@ -17,8 +13,9 @@ use reth_errors::ProviderResult;
 use reth_primitives_traits::{BlockBody as _, NodePrimitives, RecoveredBlock, SignedTransaction};
 use reth_provider::StateProviderBox;
 use revm::{
-    context_interface::cfg::gas_params::Eip2780TxInfo, interpreter::gas::calculate_initial_tx_gas,
-    primitives::hardfork::SpecId,
+    context_interface::cfg::gas_params::Eip2780TxInfo,
+    interpreter::gas::calculate_initial_tx_gas,
+    primitives::{eip8037::MAX_TX_TOTAL_GAS_LIMIT, hardfork::SpecId},
 };
 use std::collections::VecDeque;
 use tracing::{debug, info};
@@ -30,18 +27,28 @@ pub(super) struct InclusionListContext {
     pub(super) chain_id: u64,
     pub(super) spec_id: SpecId,
     pub(super) base_fee_per_gas: Option<u64>,
-    /// Gas still unspent at the end of the block.
+    /// Execution gas still unspent at the end of the block.
     pub(super) available_gas: u64,
+    /// State gas still unspent at the end of the block.
+    pub(super) available_state_gas: u64,
     /// EIP-7825 cap on a single transaction's gas limit.
     pub(super) tx_gas_limit_cap: u64,
     /// EIP-3860 init code bound, as raised by EIP-7954 from Amsterdam on.
     pub(super) max_initcode_size: usize,
-    /// Blob gas still unspent at the end of the block.
-    pub(super) blob_gas_available: u64,
-    /// The block's blob gas price, from its own excess blob gas.
-    pub(super) blob_gas_price: u128,
-    /// EIP-7840 cap on the blobs a single transaction may carry.
-    pub(super) max_blobs_per_tx: Option<u64>,
+}
+
+/// Gas consumed by the block's transactions in each EIP-8037 dimension.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct InclusionListGas {
+    pub(super) execution: u64,
+    pub(super) state: u64,
+}
+
+/// Inclusion-list status and gas accounting from authoritative block execution.
+#[derive(Debug)]
+pub(super) struct InclusionListExecution {
+    pub(super) satisfied: Option<bool>,
+    pub(super) gas: InclusionListGas,
 }
 
 /// Returns whether the block satisfies its EIP-7805 inclusion list, i.e. no inclusion-list
@@ -74,7 +81,6 @@ pub(super) fn inclusion_list_satisfied<N: NodePrimitives>(
                 block_number = block.num_hash().number,
                 il_txs = transactions.len(),
                 available_gas = ctx.available_gas,
-                blob_gas_available = ctx.blob_gas_available,
                 path = "post_state",
                 %tx_hash,
                 il_index,
@@ -89,7 +95,6 @@ pub(super) fn inclusion_list_satisfied<N: NodePrimitives>(
         block_number = block.num_hash().number,
         il_txs = transactions.len(),
         available_gas = ctx.available_gas,
-        blob_gas_available = ctx.blob_gas_available,
         path = "post_state",
         "Inclusion list satisfied"
     );
@@ -114,43 +119,25 @@ fn withdrawal_credits<N: NodePrimitives>(block: &RecoveredBlock<N::Block>) -> Ad
 /// Returns whether `transaction` could have been validly appended to the end of the block.
 ///
 /// Mirrors the execution spec's `check_inclusion_list_transactions`
-/// (`src/ethereum/forks/amsterdam/fork.py`), which admits a transaction that passes
+/// (`src/ethereum/forks/bogota/fork.py`), which admits a transaction that passes
 /// `validate_transaction` and `check_transaction` against the block's post-transaction state.
 ///
 /// Conditions rejected here must also be rejected by the payload builder, otherwise reth reports
-/// its own blocks as unsatisfied. Blob transactions are a known exception: the spec judges them
-/// appendable, while the payload builder skips every EIP-4844 transaction in an inclusion list
-/// instead of looking its sidecar up in the blob store. The two can only disagree on a list
-/// aggregated from another proposer, since `engine_getInclusionListV1` does not offer blob
-/// transactions of our own.
+/// its own blocks as unsatisfied. EIP-7805 excludes blob transactions from the check, matching
+/// the payload builder and `engine_getInclusionListV1`.
 fn could_append_transaction<N: NodePrimitives>(
     transaction: &N::SignedTx,
     state: &StateProviderBox,
     ctx: &InclusionListContext,
     withdrawn: &AddressMap<U256>,
 ) -> ProviderResult<bool> {
-    // EIP-2681 reserves the maximum nonce; execution could not increment past it.
-    if transaction.nonce() == u64::MAX {
+    if transaction.is_eip4844() {
         return Ok(false)
     }
 
-    // EIP-4844 form, from the spec's `validate_transaction`: a blob transaction must carry blobs,
-    // no more than the EIP-7840 per-transaction cap, and only KZG-versioned hashes.
-    if let Some(blob_versioned_hashes) = transaction.blob_versioned_hashes() {
-        if blob_versioned_hashes.is_empty() ||
-            ctx.max_blobs_per_tx.is_some_and(|max| blob_versioned_hashes.len() as u64 > max) ||
-            blob_versioned_hashes.iter().any(|hash| hash[0] != VERSIONED_HASH_VERSION_KZG)
-        {
-            return Ok(false)
-        }
-
-        // The blob dimension has its own remaining budget (`check_block_gas_capacity`), and the
-        // fee cap is measured against the block's blob gas price (`check_max_fee_per_blob_gas`).
-        if blob_gas(transaction) > ctx.blob_gas_available ||
-            transaction.max_fee_per_blob_gas().unwrap_or_default() < ctx.blob_gas_price
-        {
-            return Ok(false)
-        }
+    // EIP-2681 reserves the maximum nonce; execution could not increment past it.
+    if transaction.nonce() == u64::MAX {
+        return Ok(false)
     }
 
     // EIP-7702 requires a non-empty authorization list.
@@ -158,9 +145,17 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    // Block gas capacity. The EIP-7825 cap is not a bound on the gas limit itself; it bounds
-    // regular gas only, and is checked against intrinsic gas below.
-    if transaction.gas_limit() > ctx.available_gas {
+    // EIP-8037 admits the capped execution gas and the full gas limit against separate budgets.
+    let gas_limit = transaction.gas_limit();
+    let execution_gas = if ctx.spec_id >= SpecId::AMSTERDAM {
+        if gas_limit > MAX_TX_TOTAL_GAS_LIMIT || gas_limit > ctx.available_state_gas {
+            return Ok(false)
+        }
+        gas_limit.min(ctx.tx_gas_limit_cap)
+    } else {
+        gas_limit
+    };
+    if execution_gas > ctx.available_gas {
         return Ok(false)
     }
 
@@ -233,38 +228,14 @@ fn could_append_transaction<N: NodePrimitives>(
         return Ok(false)
     }
 
-    let max_gas_cost = U256::from(transaction.gas_limit())
+    let Some(max_cost) = U256::from(transaction.gas_limit())
         .checked_mul(U256::from(transaction.max_fee_per_gas()))
-        .unwrap_or(U256::MAX);
-    // A blob transaction also prepays its blob gas at its own fee cap.
-    let max_blob_cost = U256::from(blob_gas(transaction))
-        .checked_mul(U256::from(transaction.max_fee_per_blob_gas().unwrap_or_default()))
-        .unwrap_or(U256::MAX);
-    let max_cost = max_gas_cost
-        .checked_add(max_blob_cost)
         .and_then(|cost| cost.checked_add(transaction.value()))
-        .unwrap_or(U256::MAX);
+    else {
+        return Ok(false)
+    };
 
     Ok(account.nonce == transaction.nonce() && balance >= max_cost)
-}
-
-/// Blob gas a transaction consumes, zero for every non-blob type.
-fn blob_gas(transaction: &impl Transaction) -> u64 {
-    transaction.blob_versioned_hashes().map_or(0, |hashes| hashes.len() as u64) * DATA_GAS_PER_BLOB
-}
-
-/// Blob gas the block leaves unspent under the blob schedule in force at its timestamp.
-///
-/// A block with no schedule cannot carry blobs, so the resulting zero budget leaves every blob
-/// transaction unappendable.
-pub(super) fn blob_gas_available(
-    blob_params: Option<BlobParams>,
-    blob_gas_used: Option<u64>,
-) -> u64 {
-    blob_params
-        .map(|params| params.max_blob_gas_per_block())
-        .unwrap_or_default()
-        .saturating_sub(blob_gas_used.unwrap_or_default())
 }
 
 /// Upper bound on the inclusion lists retained from `engine_newPayloadV6`.
@@ -279,6 +250,7 @@ const MAX_RETAINED_INCLUSION_LISTS: usize = 64;
 pub(super) struct RetainedInclusionLists {
     lists: B256Map<Vec<Bytes>>,
     results: B256Map<bool>,
+    gas: B256Map<InclusionListGas>,
     order: VecDeque<B256>,
 }
 
@@ -293,6 +265,7 @@ impl RetainedInclusionLists {
             if let Some(evicted) = self.order.pop_front() {
                 self.lists.remove(&evicted);
                 self.results.remove(&evicted);
+                self.gas.remove(&evicted);
             }
         }
     }
@@ -309,9 +282,20 @@ impl RetainedInclusionLists {
         self.results.insert(block_hash, satisfied);
     }
 
+    pub(super) fn gas(&self, block_hash: &B256) -> Option<InclusionListGas> {
+        self.gas.get(block_hash).copied()
+    }
+
+    pub(super) fn cache_gas(&mut self, block_hash: B256, gas: InclusionListGas) {
+        if self.lists.contains_key(&block_hash) {
+            self.gas.insert(block_hash, gas);
+        }
+    }
+
     pub(super) fn remove(&mut self, block_hash: &B256) {
         self.lists.remove(block_hash);
         self.results.remove(block_hash);
+        self.gas.remove(block_hash);
         // The FIFO must stay in sync with `lists`: a hash left here would be pushed a second time
         // by a re-insert of the same block, and the stale copy would later evict the live entry.
         self.order.retain(|hash| hash != block_hash);
@@ -321,6 +305,7 @@ impl RetainedInclusionLists {
 mod inclusion_list_tests {
     use super::*;
     use alloy_consensus::{TxEip4844, TxEip7702, TxLegacy};
+    use alloy_eips::{eip2718::Encodable2718, eip4844::VERSIONED_HASH_VERSION_KZG};
     use alloy_primitives::{Address, TxKind};
     use reth_ethereum_primitives::{
         EthPrimitives, Transaction as EthTransaction, TransactionSigned,
@@ -340,11 +325,9 @@ mod inclusion_list_tests {
             spec_id: SpecId::BOGOTA,
             base_fee_per_gas: Some(BASE_FEE),
             available_gas: 1_000_000,
+            available_state_gas: u64::MAX,
             tx_gas_limit_cap: 500_000,
             max_initcode_size: revm::primitives::eip7954::MAX_INITCODE_SIZE,
-            blob_gas_available: 6 * DATA_GAS_PER_BLOB,
-            blob_gas_price: 1,
-            max_blobs_per_tx: Some(6),
         }
     }
 
@@ -494,13 +477,10 @@ mod inclusion_list_tests {
         })
     }
 
-    // The structural guards in `could_append_transaction` exist because decoding does not enforce
-    // them: a non-conforming consensus layer can hand us these and they decode cleanly. Without
-    // the guards an invalid transaction could be judged appendable, wrongly reporting an honest
-    // block as unsatisfied.
+    // Decoding does not enforce every structural transaction constraint, so the appendability
+    // check still needs to reject invalid transactions that decode cleanly.
     #[test]
     fn decoding_accepts_an_empty_authorization_list() {
-        use alloy_eips::eip2718::Encodable2718;
         let mut rng = generators::rng();
         let tx = EthTransaction::Eip7702(TxEip7702 {
             chain_id: CHAIN_ID,
@@ -520,7 +500,6 @@ mod inclusion_list_tests {
 
     #[test]
     fn decoding_accepts_a_blob_transaction_without_blobs() {
-        use alloy_eips::eip2718::Encodable2718;
         let mut rng = generators::rng();
         let encoded =
             sign_tx_with_key_pair(generate_key(&mut rng), blob_tx(Vec::new(), 1)).encoded_2718();
@@ -552,42 +531,17 @@ mod inclusion_list_tests {
     }
 
     #[test]
-    fn well_formed_blob_transaction_is_appendable() {
-        // A blob transaction is appendable like any other type: the list carries the consensus
-        // form, and a proposer holding the sidecar can include it.
-        assert!(could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), context()));
+    fn well_formed_blob_transaction_is_skipped() {
+        // Even a fully funded blob transaction is excluded by EIP-7805.
+        assert!(!could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), context()));
     }
 
     #[test]
-    fn malformed_blob_transactions_are_not_appendable() {
-        // No blobs at all, more blobs than a transaction may carry, and a hash that is not
-        // KZG-versioned are each rejected by `validate_transaction`.
+    fn malformed_blob_transactions_are_skipped() {
         assert!(!could_append(blob_tx(Vec::new(), 1), funded(0), context()));
         let too_many = (0..7).map(kzg_hash).collect::<Vec<_>>();
         assert!(!could_append(blob_tx(too_many, 1), funded(0), context()));
         assert!(!could_append(blob_tx(vec![B256::ZERO], 1), funded(0), context()));
-    }
-
-    #[test]
-    fn blob_transaction_over_the_block_blob_budget_is_not_appendable() {
-        let ctx = InclusionListContext { blob_gas_available: DATA_GAS_PER_BLOB - 1, ..context() };
-        assert!(!could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), ctx));
-    }
-
-    #[test]
-    fn blob_transaction_below_the_blob_gas_price_is_not_appendable() {
-        let ctx = InclusionListContext { blob_gas_price: 2, ..context() };
-        assert!(!could_append(blob_tx(vec![kzg_hash(1)], 1), funded(0), ctx));
-    }
-
-    #[test]
-    fn blob_fee_counts_toward_the_senders_balance() {
-        // The sender prepays blob gas at its own fee cap, so a balance that covers only the
-        // execution gas is not enough.
-        let tx = blob_tx(vec![kzg_hash(1)], 1_000_000_000_000);
-        let execution_only = U256::from(100_000u64) * U256::from(BASE_FEE);
-        assert!(!could_append(tx.clone(), ExtendedAccount::new(0, execution_only), context()));
-        assert!(could_append(tx, funded(0), context()));
     }
 
     #[test]
@@ -670,5 +624,78 @@ mod inclusion_list_tests {
             retained.insert(B256::with_last_byte(i as u8 + 2), Vec::new());
         }
         assert_eq!(retained.get(&hash), Some(&vec![Bytes::from_static(b"tx")]));
+    }
+
+    #[test]
+    fn appendability_uses_separate_gas_budgets() {
+        let cap = 16_777_216;
+        for (execution_room, state_room, gas_limit, expected) in [
+            (cap, cap + 837_400, cap + 1, true),
+            (cap - 1, cap + 837_399, cap + 1, false),
+            (cap, cap + 837_400, cap + 837_400, true),
+            (cap, cap + 837_400, cap + 837_401, false),
+        ] {
+            let ctx = InclusionListContext {
+                available_gas: execution_room,
+                available_state_gas: state_room,
+                tx_gas_limit_cap: cap,
+                ..context()
+            };
+            assert_eq!(
+                could_append(legacy_tx(Some(CHAIN_ID), 0, gas_limit), funded(0), ctx),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn appendability_enforces_total_transaction_gas_cap() {
+        let ctx = InclusionListContext {
+            available_gas: u64::MAX,
+            available_state_gas: u64::MAX,
+            ..context()
+        };
+        assert!(could_append(legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT), funded(0), ctx));
+        assert!(!could_append(
+            legacy_tx(Some(CHAIN_ID), 0, MAX_TX_TOTAL_GAS_LIMIT + 1),
+            funded(0),
+            ctx
+        ));
+    }
+
+    #[test]
+    fn overflowing_total_cost_is_not_appendable() {
+        let fee = U256::from(100_000 * BASE_FEE);
+        for (value, expected) in [(U256::MAX, false), (U256::MAX - fee, true)] {
+            let account = ExtendedAccount::new(0, U256::MAX);
+            let tx = EthTransaction::Legacy(TxLegacy {
+                chain_id: Some(CHAIN_ID),
+                gas_price: BASE_FEE as u128,
+                gas_limit: 100_000,
+                to: TxKind::Call(Address::ZERO),
+                value,
+                ..Default::default()
+            });
+            assert_eq!(could_append(tx, account, context()), expected);
+        }
+    }
+
+    #[test]
+    fn replacing_a_list_preserves_gas_but_eviction_removes_it() {
+        let mut retained = RetainedInclusionLists::default();
+        let hash = B256::with_last_byte(1);
+        let gas = InclusionListGas { execution: 1_021_000, state: 183_600 };
+        retained.cache_gas(hash, gas);
+        assert_eq!(retained.gas(&hash), None);
+        retained.insert(hash, Vec::new());
+        retained.cache_gas(hash, gas);
+        retained.cache_result(hash, true);
+        retained.insert(hash, vec![Bytes::from_static(b"replacement")]);
+        assert_eq!(retained.gas(&hash), Some(gas));
+        assert_eq!(retained.cached_result(&hash), None);
+        for i in 0..MAX_RETAINED_INCLUSION_LISTS {
+            retained.insert(B256::with_last_byte(i as u8 + 2), Vec::new());
+        }
+        assert_eq!(retained.gas(&hash), None);
     }
 }

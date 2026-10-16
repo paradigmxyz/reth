@@ -15,8 +15,8 @@ case "${fixture_variant}" in
         eels_fork="Osaka"
         ;;
     bogota)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-focil-devnet@v0.3.0/fixtures_focil-devnet.tar.gz"
-        eels_branch="devnets/focil/0"
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-heze-devnet@v2.0.0/fixtures_heze-devnet.tar.gz"
+        eels_branch="devnets/heze/2"
         eels_fork="Bogota"
         ;;
     *)
@@ -29,6 +29,14 @@ esac
 mkdir hive_assets/
 
 cd hivetests
+
+# Keep fixtures compressed in the images to avoid exhausting disk during builds.
+curl --fail --location --retry 3 "${eels_fixtures}" \
+    -o simulators/ethereum/eels/consume-engine/fixtures.tar.gz
+cp simulators/ethereum/eels/consume-engine/fixtures.tar.gz \
+    simulators/ethereum/eels/consume-rlp/fixtures.tar.gz
+eels_fixtures="/fixtures"
+
 go build .
 
 ./hive -client reth # first builds and caches the client
