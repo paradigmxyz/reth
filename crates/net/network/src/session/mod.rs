@@ -443,6 +443,18 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         Some(session)
     }
 
+    /// Cancels outgoing attempts superseded by an incoming session for this peer.
+    fn cancel_pending_outbound(&mut self, peer_id: PeerId) {
+        self.pending_sessions.retain(|_, session| {
+            if session.direction == Direction::Outgoing(peer_id) {
+                session.disconnect();
+                self.counter.dec_pending(&session.direction);
+                return false
+            }
+            true
+        });
+    }
+
     /// Removes the [`PendingSessionHandle`] if it exists.
     fn remove_active_session(&mut self, id: &PeerId) -> Option<ActiveSessionHandle<N>> {
         let session = self.active_sessions.remove(id)?;
@@ -527,10 +539,22 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
 
         // Poll the pending session event stream
-        let event = match self.pending_session_rx.poll_next_unpin(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
-            Poll::Ready(Some(event)) => event,
+        let event = loop {
+            let event = match self.pending_session_rx.poll_next_unpin(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => unreachable!("Manager holds both channel halves."),
+                Poll::Ready(Some(event)) => event,
+            };
+            let session_id = match &event {
+                PendingSessionEvent::Established { session_id, .. } |
+                PendingSessionEvent::Disconnected { session_id, .. } |
+                PendingSessionEvent::OutgoingConnectionError { session_id, .. } |
+                PendingSessionEvent::EciesAuthError { session_id, .. } => session_id,
+            };
+            // Canceled attempts must not affect a replacement session for the same peer.
+            if self.remove_pending_session(session_id).is_some() {
+                break event
+            }
         };
         match event {
             PendingSessionEvent::Established {
@@ -545,9 +569,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 client_id,
                 peer_listen_port,
             } => {
-                // move from pending to established.
-                self.remove_pending_session(&session_id);
-
                 // If there's already a session to the peer then we disconnect right away
                 if self.active_sessions.contains_key(&peer_id) {
                     trace!(
@@ -570,6 +591,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                         remote_addr,
                         direction,
                     })
+                }
+
+                if direction.is_incoming() {
+                    self.cancel_pending_outbound(peer_id);
                 }
 
                 let (commands_tx, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -690,7 +715,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     ?error,
                     "disconnected pending session"
                 );
-                self.remove_pending_session(&session_id);
                 match direction {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
@@ -721,7 +745,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     ?peer_id,
                     "connection refused"
                 );
-                self.remove_pending_session(&session_id);
                 Poll::Ready(SessionEvent::OutgoingConnectionError { remote_addr, peer_id, error })
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
@@ -732,7 +755,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     ?remote_addr,
                     "ecies auth failed"
                 );
-                self.remove_pending_session(&session_id);
                 match direction {
                     Direction::Incoming => {
                         Poll::Ready(SessionEvent::IncomingPendingSessionClosed {
@@ -993,7 +1015,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     eth_max_message_size: usize,
-    disconnect_rx: oneshot::Receiver<()>,
+    mut disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -1004,7 +1026,19 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
-    let stream = match TcpStream::connect(remote_addr).await {
+    let connection = tokio::select! {
+        _ = &mut disconnect_rx => {
+            let _ = events.send(PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id,
+                direction: Direction::Outgoing(remote_peer_id),
+                error: None,
+            }).await;
+            return
+        },
+        connection = TcpStream::connect(remote_addr) => connection,
+    };
+    let stream = match connection {
         Ok(stream) => {
             if let Err(err) = stream.set_nodelay(true) {
                 tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
@@ -1059,36 +1093,36 @@ async fn authenticate<N: NetworkPrimitives>(
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
     let local_addr = stream.local_addr().ok();
-    let stream = match get_ecies_stream(stream, secret_key, direction).await {
-        Ok(stream) => stream,
-        Err(error) => {
-            let _ = events
-                .send(PendingSessionEvent::EciesAuthError {
+    let auth = async move {
+        let stream = match get_ecies_stream(stream, secret_key, direction).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                return PendingSessionEvent::EciesAuthError {
                     remote_addr,
                     session_id,
                     error,
                     direction,
-                })
-                .await;
-            return
-        }
-    };
+                }
+            }
+        };
 
-    let unauthed = UnauthedP2PStream::new(stream);
+        let unauthed = UnauthedP2PStream::new(stream);
 
-    let auth = authenticate_stream(
-        handshake,
-        eth_max_message_size,
-        unauthed,
-        session_id,
-        remote_addr,
-        local_addr,
-        direction,
-        hello,
-        status,
-        fork_filter,
-        extra_handlers,
-    )
+        authenticate_stream(
+            handshake,
+            eth_max_message_size,
+            unauthed,
+            session_id,
+            remote_addr,
+            local_addr,
+            direction,
+            hello,
+            status,
+            fork_filter,
+            extra_handlers,
+        )
+        .await
+    }
     .boxed();
 
     match futures::future::select(disconnect_rx, auth).await {

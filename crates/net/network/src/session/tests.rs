@@ -20,7 +20,7 @@ use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_network_peers::pk2id;
 use secp256k1::SECP256K1;
-use std::sync::Mutex;
+use std::{sync::Mutex, task::Waker};
 use tokio::{net::TcpListener, sync::Notify};
 
 /// Extra `RLPx` protocol that records which identity the session hands to it.
@@ -412,4 +412,121 @@ async fn extra_protocol_waits_for_status_handshake() {
             "the extra protocol must wait for the status handshake"
         );
     }
+}
+
+fn session_manager() -> SessionManager<EthNetworkPrimitives> {
+    let (key, id) = new_peer();
+    SessionManager::new(
+        key,
+        SessionsConfig::default(),
+        Runtime::test(),
+        status(),
+        remote_hello(id),
+        fork_filter(),
+        RlpxSubProtocols::default(),
+        Arc::new(EthHandshake::default()),
+        MAX_MESSAGE_SIZE,
+        false,
+    )
+}
+
+#[tokio::test]
+async fn canceled_dial_events_do_not_reach_replacement_sessions() {
+    let mut sessions = session_manager();
+    let (_, peer_id) = new_peer();
+    let remote_addr = "127.0.0.1:8008".parse().unwrap();
+    let (disconnect_tx, disconnect_rx) = oneshot::channel();
+    let old_id = sessions.next_id();
+    sessions.pending_sessions.insert(
+        old_id,
+        PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Outgoing(peer_id),
+        },
+    );
+    sessions.counter.inc_pending_outbound();
+    sessions.cancel_pending_outbound(peer_id);
+    assert_eq!(disconnect_rx.await, Ok(()));
+    assert!(sessions.pending_sessions.is_empty());
+
+    let new_id = sessions.next_id();
+    let (disconnect_tx, _disconnect_rx) = oneshot::channel();
+    sessions.pending_sessions.insert(
+        new_id,
+        PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Outgoing(peer_id),
+        },
+    );
+    sessions.counter.inc_pending_outbound();
+    for error in [None, Some(PendingSessionHandshakeError::Timeout)] {
+        sessions
+            .pending_sessions_tx
+            .send(PendingSessionEvent::Disconnected {
+                remote_addr,
+                session_id: old_id,
+                direction: Direction::Outgoing(peer_id),
+                error,
+            })
+            .await
+            .unwrap();
+        assert!(sessions.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(sessions.pending_sessions.contains_key(&new_id));
+    }
+    sessions
+        .pending_sessions_tx
+        .send(PendingSessionEvent::OutgoingConnectionError {
+            remote_addr,
+            session_id: old_id,
+            peer_id,
+            error: std::io::ErrorKind::ConnectionRefused.into(),
+        })
+        .await
+        .unwrap();
+    assert!(sessions.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+    sessions
+        .pending_sessions_tx
+        .send(PendingSessionEvent::Disconnected {
+            remote_addr,
+            session_id: new_id,
+            direction: Direction::Outgoing(peer_id),
+            error: None,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(SessionEvent::OutgoingPendingSessionClosed { peer_id: id, error: None, .. }) if id == peer_id));
+    assert!(sessions.pending_sessions.is_empty());
+}
+
+#[tokio::test]
+async fn cancellation_interrupts_stalled_ecies() {
+    let (key, id) = new_peer();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let remote_addr = listener.local_addr().unwrap();
+    let stream = TcpStream::connect(remote_addr).await.unwrap();
+    let (_remote, _) = listener.accept().await.unwrap();
+    let (disconnect_tx, disconnect_rx) = oneshot::channel();
+    let (events, mut rx) = mpsc::channel(1);
+    let auth = tokio::spawn(authenticate::<EthNetworkPrimitives>(
+        Arc::new(EthHandshake::default()),
+        MAX_MESSAGE_SIZE,
+        disconnect_rx,
+        events,
+        stream,
+        SessionId(0),
+        remote_addr,
+        key,
+        Direction::Incoming,
+        remote_hello(id),
+        status(),
+        fork_filter(),
+        RlpxSubProtocolHandlers::default(),
+    ));
+    disconnect_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), auth).await.unwrap().unwrap();
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        PendingSessionEvent::Disconnected { error: None, .. }
+    ));
 }
