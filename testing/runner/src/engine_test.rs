@@ -23,7 +23,7 @@ use reth_db::{
     mdbx::{DatabaseArguments, SyncMode},
     DatabaseEnv,
 };
-use reth_db_common::init::init_genesis;
+use reth_db_common::init::init_genesis_with_settings;
 use reth_engine_primitives::{ConsensusEngineHandle, NoopInvalidBlockHook};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
@@ -42,7 +42,7 @@ use reth_node_types::NodeTypesWithDBAdapter;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_provider::{
     providers::{BlockchainProvider, RocksDBBuilder, RocksDBProvider, StaticFileProvider},
-    BlockNumReader, ProviderFactory,
+    BlockNumReader, ProviderFactory, StorageSettings,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::EngineApiServer;
@@ -75,10 +75,11 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// Runs every fixture in the JSON `files` on `workers` threads and passes one result per
 /// fixture to `on_result` as it completes. A file that fails to load is reported as a failed
 /// result. Each fixture's datadir is created in the system temporary directory (`TMPDIR`), where
-/// a tmpfs avoids disk syncs.
+/// a tmpfs avoids disk syncs, and its genesis is written with `storage_settings`.
 pub(crate) fn run_fixtures(
     files: Vec<PathBuf>,
     bal_sequential: bool,
+    storage_settings: StorageSettings,
     workers: usize,
     on_result: &(dyn Fn(FixtureResult) + Sync),
 ) {
@@ -102,7 +103,7 @@ pub(crate) fn run_fixtures(
                     };
                     for (name, test) in tests {
                         let (result, remains) =
-                            run_fixture(name, &test, &tree_config, &datadir_root);
+                            run_fixture(name, &test, &tree_config, storage_settings, &datadir_root);
                         on_result(result);
                         cleanup.remains.push(remains);
                         cleanup.sweep();
@@ -228,6 +229,7 @@ fn run_fixture(
     name: String,
     test: &EngineTest,
     tree_config: &TreeConfig,
+    storage_settings: StorageSettings,
     datadir_root: &Path,
 ) -> (FixtureResult, Remains) {
     let fork = format!("{:?}", test.network);
@@ -237,6 +239,7 @@ fn run_fixture(
     let result = runtime.handle().block_on(run_case(
         test,
         tree_config,
+        storage_settings,
         datadir_root,
         &runtime,
         &mut outcome,
@@ -254,6 +257,7 @@ type FixtureNode = NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>;
 async fn run_case(
     test: &EngineTest,
     tree_config: &TreeConfig,
+    storage_settings: StorageSettings,
     datadir_root: &Path,
     runtime: &Runtime,
     outcome: &mut Outcome,
@@ -274,7 +278,7 @@ async fn run_case(
         .map_err(|err| Error::Assertion(format!("failed to create a datadir: {err}")))?
         .keep();
     remains.datadir = Some(datadir.clone());
-    let engine = Engine::start(chain_spec, &datadir, tree_config, runtime)?;
+    let engine = Engine::start(chain_spec, &datadir, tree_config, storage_settings, runtime)?;
     let result = drive(&engine.rpc, test, outcome).await;
     outcome.last_block_hash = engine.provider.chain_info().ok().map(|info| info.best_hash);
     remains.databases = Some(engine.stop().await);
@@ -306,6 +310,7 @@ impl Engine {
         chain_spec: Arc<ChainSpec>,
         datadir: &Path,
         tree_config: &TreeConfig,
+        storage_settings: StorageSettings,
         runtime: &Runtime,
     ) -> Result<Self, Error> {
         let setup_err = |err: &dyn std::fmt::Display| {
@@ -335,8 +340,7 @@ impl Engine {
         )
         .map_err(|e| setup_err(&e))?
         .with_overlay_manager(overlay_manager.clone());
-        // The node's default storage settings, as a fresh node writes them with its genesis.
-        init_genesis(&factory).map_err(|e| setup_err(&e))?;
+        init_genesis_with_settings(&factory, storage_settings).map_err(|e| setup_err(&e))?;
         let provider = BlockchainProvider::new(factory.clone()).map_err(|e| setup_err(&e))?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
@@ -581,7 +585,7 @@ mod tests {
     use alloy_primitives::{Address, Bloom, U256};
     use alloy_rpc_types_engine::ExecutionPayloadV1;
     use ef_tests::models::{ForkSpec, Header, State};
-    use reth_provider::{DatabaseProviderFactory, StorageSettings, StorageSettingsCache};
+    use reth_provider::{DatabaseProviderFactory, StorageSettingsCache};
 
     /// A Paris fixture whose one payload is an empty block on genesis with the given state root,
     /// and that payload's block hash.
@@ -643,8 +647,13 @@ mod tests {
     /// Runs a fixture as a worker does and checks that its datadir is removed.
     fn run(test: &EngineTest) -> FixtureResult {
         let datadir_root = tempfile::tempdir().unwrap();
-        let (result, remains) =
-            run_fixture("test".to_string(), test, &tree_config(false), datadir_root.path());
+        let (result, remains) = run_fixture(
+            "test".to_string(),
+            test,
+            &tree_config(false),
+            StorageSettings::base(),
+            datadir_root.path(),
+        );
         let mut cleanup = Cleanup::default();
         cleanup.remains.push(remains);
         cleanup.finish();
@@ -653,30 +662,38 @@ mod tests {
     }
 
     #[test]
-    fn engine_runs_on_the_default_storage_layout() {
-        let (test, _) = empty_block_fixture(None);
-        let datadir_root = tempfile::tempdir().unwrap();
-        let datadir = datadir_root.path().join("datadir");
-        fs::create_dir(&datadir).unwrap();
-        let runtime = Runtime::test();
-        let databases = runtime.handle().block_on(async {
-            let engine =
-                Engine::start(Arc::new(test.chain_spec()), &datadir, &tree_config(false), &runtime)
-                    .unwrap();
-            let settings =
-                engine.provider.database_provider_ro().unwrap().cached_storage_settings();
-            assert_eq!(settings, StorageSettings::base());
-            engine.stop().await
-        });
-        runtime.clone().shutdown_timeout(Duration::ZERO);
-        let mut cleanup = Cleanup::default();
-        cleanup.remains.push(Remains {
-            runtime,
-            databases: Some(databases),
-            datadir: Some(datadir),
-        });
-        cleanup.finish();
-        assert_eq!(fs::read_dir(datadir_root.path()).unwrap().count(), 0, "datadir left behind");
+    fn engine_runs_on_the_given_storage_layout() {
+        for storage_settings in [StorageSettings::v2(), StorageSettings::v1()] {
+            let (test, _) = empty_block_fixture(None);
+            let datadir_root = tempfile::tempdir().unwrap();
+            let datadir = datadir_root.path().join("datadir");
+            fs::create_dir(&datadir).unwrap();
+            let runtime = Runtime::test();
+            let databases = runtime.handle().block_on(async {
+                let engine = Engine::start(
+                    Arc::new(test.chain_spec()),
+                    &datadir,
+                    &tree_config(false),
+                    storage_settings,
+                    &runtime,
+                )
+                .unwrap();
+                let stored =
+                    engine.provider.database_provider_ro().unwrap().cached_storage_settings();
+                assert_eq!(stored, storage_settings);
+                engine.stop().await
+            });
+            runtime.clone().shutdown_timeout(Duration::ZERO);
+            let mut cleanup = Cleanup::default();
+            cleanup.remains.push(Remains {
+                runtime,
+                databases: Some(databases),
+                datadir: Some(datadir),
+            });
+            cleanup.finish();
+            let left = fs::read_dir(datadir_root.path()).unwrap().count();
+            assert_eq!(left, 0, "datadir left behind");
+        }
     }
 
     #[test]
