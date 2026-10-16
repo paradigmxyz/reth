@@ -44,10 +44,13 @@ use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Cfg, Transaction},
+    context_interface::{
+        result::{ExecutionResult, ResultAndState},
+        Cfg, Transaction,
+    },
     Database, DatabaseCommit,
 };
-use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use revm_inspectors::access_list::AccessListInspector;
 use std::collections::BTreeMap;
 use tracing::{debug, trace};
 
@@ -226,9 +229,8 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             .is_enabled_in(revm::primitives::hardfork::SpecId::AMSTERDAM) ||
                             evm_env.cfg_env.is_eip7708_disabled());
                     let (result, results) = if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        let inspector = TransferInspector::new(false).with_logs(true);
+                        // Synthetic transfer logs belong only to the RPC result, not the receipts.
+                        let inspector = simulate::SimulateInspector::default();
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
@@ -250,6 +252,11 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            |inspector, result| {
+                                if let ExecutionResult::Success { logs, .. } = result {
+                                    std::mem::swap(logs, &mut inspector.logs);
+                                }
+                            },
                         )
                         .map_err(map_err)?
                     } else {
@@ -272,6 +279,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                             chain_id,
                             this.compute_state_root_for_eth_simulate(),
                             this.converter(),
+                            |_, _| {},
                         )
                         .map_err(map_err)?
                     };

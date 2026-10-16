@@ -1,4 +1,4 @@
-use alloy_primitives::{address, bytes, Address, U256};
+use alloy_primitives::{address, bytes, Address, B256, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -53,6 +53,9 @@ async fn test_simulate_v1_transfer_logs_across_amsterdam() -> eyre::Result<()> {
             }
             assert!(!block.calls[1].status);
             assert!(block.calls[1].logs.is_empty());
+            if let Some(untraced) = &untraced {
+                assert_eq!(block.inner.header, untraced[index].inner.header);
+            }
             if index > 0 {
                 assert!(!block.inner.header.logs_bloom.is_zero());
                 if let Some(untraced) = &untraced {
@@ -340,5 +343,107 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
     assert_eq!(err.code, -38026);
     assert_eq!(err.message, "too many blocks");
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_transfer_log_order_and_reverts() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Osaka).build_single().await?;
+    let provider = node.rpc_provider();
+    let from = Address::with_last_byte(0x41);
+    let to = Address::with_last_byte(0x42);
+    let reverting = Address::with_last_byte(0x43);
+    let receiver = Address::with_last_byte(0x44);
+    let caller = Address::with_last_byte(0x45);
+    let destroying = Address::with_last_byte(0x46);
+    let calling_code = Address::with_last_byte(0x47);
+    let emitter = Address::repeat_byte(0xee);
+    let log_code = bytes!("5f5fa000");
+    let call_block = SimBlock::default()
+        .with_state_overrides(StateOverride::from_iter([
+            (from, AccountOverride::default().with_balance(U256::from(100)).with_nonce(0)),
+            (reverting, AccountOverride::default().with_code(bytes!("5f5fa05f5ffd"))),
+            (receiver, AccountOverride::default().with_code(log_code.clone())),
+            (emitter, AccountOverride::default().with_code(log_code)),
+            // LOG0, a reverting value call, a successful value call, LOG0, STOP.
+            (caller, AccountOverride::default().with_code(bytes!(
+                "5f5fa05f5f5f5f60017300000000000000000000000000000000000000435af1505f5f5f5f60027300000000000000000000000000000000000000445af1505f5fa000"
+            ))),
+            (destroying, AccountOverride::default().with_balance(U256::from(10)).with_code(
+                bytes!("730000000000000000000000000000000000000042ff")
+            )),
+            // CALLCODE executes the receiver's LOG0 in this account without moving value.
+            (calling_code, AccountOverride::default().with_code(bytes!(
+                "5f5f5f5f60017300000000000000000000000000000000000000445af25000"
+            ))),
+        ]))
+        .call(TransactionRequest::default().from(from).to(caller).value(U256::from(5)))
+        .call(TransactionRequest::default().from(from).to(reverting).value(U256::ONE))
+        .call(TransactionRequest::default().from(from).to(to).value(U256::ONE))
+        .call(TransactionRequest::default().from(from).value(U256::ONE).input(
+            bytes!("5f5fa05f5ff3").into()
+        ))
+        .call(TransactionRequest::default().from(from).value(U256::ONE).input(
+            bytes!("5f5fa05f5ffd").into()
+        ))
+        .call(TransactionRequest::default().from(from).to(destroying).value(U256::ONE))
+        .call(TransactionRequest::default().from(from).to(destroying))
+        .call(TransactionRequest::default().from(from).to(emitter))
+        .call(TransactionRequest::default().from(from).to(calling_code).value(U256::ONE));
+    let untraced: Vec<SimulatedBlock> = provider
+        .raw_request(
+            "eth_simulateV1".into(),
+            (&SimulatePayload::default().extend(call_block.clone()), "latest"),
+        )
+        .await?;
+    let mut payload = SimulatePayload::default().extend(call_block);
+    payload.trace_transfers = true;
+    let traced: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+    assert_eq!(traced[0].inner, untraced[0].inner);
+    let calls = &traced[0].calls;
+    assert_eq!(calls.len(), 9);
+    assert_eq!(
+        calls.iter().map(|call| call.status).collect::<Vec<_>>(),
+        [true, false, true, true, false, true, true, true, true]
+    );
+    assert_eq!(
+        calls[0].logs.iter().map(|log| log.address()).collect::<Vec<_>>(),
+        [emitter, caller, emitter, receiver, caller]
+    );
+    assert!(calls[1].logs.is_empty());
+    assert_eq!(calls[2].logs.len(), 1);
+    assert_eq!(calls[3].logs.len(), 2);
+    assert_eq!(calls[3].logs[0].address(), emitter);
+    assert_eq!(calls[3].logs[1].address(), from.create(3));
+    assert!(calls[4].logs.is_empty());
+    assert_eq!(calls[5].logs.len(), 2);
+    assert!(calls[6].logs.is_empty());
+    // Contract logs from the synthetic emitter's address must also survive.
+    assert_eq!(calls[7].logs.len(), 1);
+    assert_eq!(calls[7].logs[0].address(), emitter);
+    assert!(calls[7].logs[0].topics().is_empty());
+    assert_eq!(
+        calls[8].logs.iter().map(|log| log.address()).collect::<Vec<_>>(),
+        [emitter, calling_code]
+    );
+    for (log, (sender, recipient, value)) in [
+        (&calls[0].logs[0], (from, caller, 5)),
+        (&calls[0].logs[2], (caller, receiver, 2)),
+        (&calls[2].logs[0], (from, to, 1)),
+        (&calls[3].logs[0], (from, from.create(3), 1)),
+        (&calls[5].logs[0], (from, destroying, 1)),
+        (&calls[5].logs[1], (destroying, to, 11)),
+        (&calls[8].logs[0], (from, calling_code, 1)),
+    ] {
+        assert_eq!(log.address(), emitter);
+        assert_eq!(log.topics()[1..], [sender.into_word(), recipient.into_word()]);
+        assert_eq!(log.data().data.as_ref(), B256::from(U256::from(value)).as_slice());
+    }
+    for (index, log) in calls.iter().flat_map(|call| &call.logs).enumerate() {
+        assert_eq!(log.log_index, Some(index as u64));
+        assert_eq!(log.block_hash, Some(traced[0].inner.header.hash));
+    }
     Ok(())
 }

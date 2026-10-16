@@ -32,6 +32,9 @@ use revm::{
     Database,
 };
 
+mod inspector;
+pub use inspector::SimulateInspector;
+
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
 const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
@@ -308,9 +311,12 @@ pub fn apply_precompile_overrides(
 /// execution. This matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and
 /// geth's per-call `sanitizeCall` behavior.
 ///
+/// `process_result` runs after each transaction and only modifies the cloned RPC result, leaving
+/// the block builder's receipts unchanged.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-#[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn execute_transactions<S, T, F>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
@@ -318,6 +324,7 @@ pub fn execute_transactions<S, T>(
     chain_id: u64,
     compute_state_root: bool,
     converter: &T,
+    mut process_result: F,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -332,6 +339,10 @@ where
         >,
     >,
     T: RpcConvert<Primitives = S::Primitives>,
+    F: FnMut(
+        &mut <<S::Executor as BlockExecutor>::Evm as Evm>::Inspector,
+        &mut ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+    ),
 {
     builder.apply_pre_execution_changes()?;
 
@@ -398,6 +409,10 @@ where
             tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        if let Some(result) = results.last_mut() {
+            process_result(builder.evm_mut().inspector_mut(), result);
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
