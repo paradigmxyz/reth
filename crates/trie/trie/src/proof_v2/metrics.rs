@@ -1,6 +1,6 @@
 //! Cursor counters owned by cached proof calculators and recorded on drop.
 
-use reth_trie::{
+use crate::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache, InstrumentedHashedCursor},
     trie_cursor::{InstrumentedTrieCursor, TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,

@@ -11,6 +11,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
+    proof_v2::ProofV2,
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
@@ -234,11 +235,12 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         _requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.0, |A| {
-            Proof::new(
+            ProofV2::new(
                 reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
                 reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+                Default::default(),
             )
-            .multiproof_v2(targets)
+            .multiproof(targets)
             .map_err(ProviderError::from)
         })
     }

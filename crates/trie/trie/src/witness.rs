@@ -1,6 +1,9 @@
 use crate::{
-    hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof, proof_v2,
-    trie_cursor::TrieCursorFactory, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    hashed_cursor::HashedCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof_v2::{self, ProofV2},
+    trie_cursor::TrieCursorFactory,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
     keccak256,
@@ -120,10 +123,12 @@ where
         } else {
             Self::get_proof_targets(&state)
         };
-        let multiproof =
-            Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(proof_targets)?;
+        let mut proof = ProofV2::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+            self.prefix_sets.clone(),
+        );
+        let multiproof = proof.multiproof(proof_targets)?;
 
         // No need to reconstruct the rest of the trie, we just need to include
         // the root node and return.
@@ -207,12 +212,7 @@ where
                     break;
                 }
 
-                let multiproof = Proof::new(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(targets)?;
+                let multiproof = proof.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }
@@ -281,12 +281,7 @@ where
                     break;
                 }
 
-                let multiproof = Proof::new(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                )
-                .with_prefix_sets_mut(self.prefix_sets.clone())
-                .multiproof_v2(targets)?;
+                let multiproof = proof.multiproof(targets)?;
                 self.record_multiproof_nodes(&multiproof);
                 sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
             }

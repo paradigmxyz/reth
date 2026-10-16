@@ -1,6 +1,6 @@
 use crate::{
     database_state_frontiers,
-    proof::{ProofCalculatorCache, ProofCalculators},
+    proof::{CachedProof, ProofCache},
     ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
@@ -43,7 +43,7 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
+use std::{cell::OnceCell, fmt, ops::Deref, pin::Pin, sync::Arc, time::Instant};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -127,14 +127,10 @@ where
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
-pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives>
-where
-    Provider: Deref,
-    Provider::Target: DBProvider,
-{
+pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     /// Cached cursors are released before their backing provider.
-    proof_calculators: ProofCalculatorCache<<Provider::Target as DbTxProvider>::Tx>,
-    provider: Provider,
+    proof_cache: ProofCache,
+    provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
@@ -160,7 +156,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         )
     }
 
-    const fn new_with_caches(
+    fn new_with_caches(
         provider: Provider,
         overlay_builder: OverlayBuilder<N>,
         state_trie_overlay_cache: StateTrieOverlayCache,
@@ -168,7 +164,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         is_v2: bool,
     ) -> Self {
         Self {
-            provider: OwnedProvider(provider),
+            provider: Box::pin(OwnedProvider(provider)),
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache,
             metrics,
@@ -176,7 +172,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_calculators: ProofCalculatorCache::new(None),
+            proof_cache: ProofCache::new(None),
         }
     }
 
@@ -187,7 +183,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         is_v2: bool,
     ) -> Self {
         Self {
-            provider: OwnedProvider(provider),
+            provider: Box::pin(OwnedProvider(provider)),
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
@@ -198,7 +194,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
                 historical_fallback: None,
             }),
             is_v2,
-            proof_calculators: ProofCalculatorCache::new(None),
+            proof_cache: ProofCache::new(None),
         }
     }
 }
@@ -211,7 +207,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
         Self {
-            provider,
+            provider: Box::pin(provider),
             overlay_builder: Some(overlay_builder),
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
@@ -219,7 +215,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_calculators: ProofCalculatorCache::new(None),
+            proof_cache: ProofCache::new(None),
         }
     }
 
@@ -229,7 +225,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         is_v2: bool,
     ) -> Self {
         Self {
-            provider,
+            provider: Box::pin(provider),
             overlay_builder: None,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
@@ -237,7 +233,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
-            proof_calculators: ProofCalculatorCache::new(None),
+            proof_cache: ProofCache::new(None),
         }
     }
 }
@@ -712,40 +708,22 @@ where
         targets: MultiProofTargetsV2,
         requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        if requires_masks {
-            if targets.is_empty() {
-                return Ok(DecodedMultiProofV2::default())
-            }
-            let mut cache = self.proof_calculators.borrow_mut();
-            let calculators = match &mut *cache {
-                Some(calculators) => calculators,
-                slot @ None => {
-                    // A reused sparse trie already covers any intentionally skipped overlay.
-                    let overlay = self.state_trie_overlay(true)?;
-                    slot.insert(Box::new(ProofCalculators::new(
-                        self.is_v2,
-                        overlay.input().clone(),
-                    )))
-                }
-            };
-            return calculators.multiproof(self.provider().tx(), targets)
+        if targets.is_empty() {
+            return Ok(DecodedMultiProofV2::default())
         }
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.state_trie_overlay(false)?.input();
-            Proof::new(
-                InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
-                    &input.nodes,
-                ),
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(self.provider().tx()),
-                    &input.state,
-                ),
-            )
-            .with_prefix_sets_mut(input.prefix_sets.clone())
-            .multiproof_v2(targets)
-            .map_err(ProviderError::from)
-        })
+        let mut cache = self.proof_cache.borrow_mut();
+        match &mut *cache {
+            Some(proof) if proof.requires_masks == requires_masks => proof.multiproof(targets),
+            slot => {
+                let input = self.state_trie_overlay(requires_masks)?.input().clone();
+                // SAFETY: The pinned provider keeps its transaction at a stable address. This
+                // private cache moves with the non-Sync provider and is dropped before its tx.
+                slot.insert(unsafe {
+                    CachedProof::new(self.provider().tx(), input, self.is_v2, requires_masks)
+                })
+                .multiproof(targets)
+            }
+        }
     }
 
     fn witness(
