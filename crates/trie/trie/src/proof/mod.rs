@@ -1,11 +1,8 @@
 use crate::{
-    hashed_cursor::{
-        HashedCursorFactory, HashedCursorMetricsCache, HashedStorageCursor,
-        InstrumentedHashedCursor,
-    },
+    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
+    trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
@@ -222,7 +219,7 @@ where
 
 /// Generates storage merkle proofs.
 #[derive(Debug)]
-pub struct StorageProof<'a, T, H, K = AddedRemovedKeys> {
+pub struct StorageProof<T, H, K = AddedRemovedKeys> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -235,13 +232,9 @@ pub struct StorageProof<'a, T, H, K = AddedRemovedKeys> {
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     added_removed_keys: Option<K>,
-    /// Optional reference to accumulate trie cursor metrics.
-    trie_cursor_metrics: Option<&'a mut TrieCursorMetricsCache>,
-    /// Optional reference to accumulate hashed cursor metrics.
-    hashed_cursor_metrics: Option<&'a mut HashedCursorMetricsCache>,
 }
 
-impl<T, H> StorageProof<'static, T, H> {
+impl<T, H> StorageProof<T, H> {
     /// Create a new [`StorageProof`] instance.
     pub fn new(t: T, h: H, address: Address) -> Self {
         Self::new_hashed(t, h, keccak256(address))
@@ -256,18 +249,13 @@ impl<T, H> StorageProof<'static, T, H> {
             prefix_set: PrefixSetMut::default(),
             collect_branch_node_masks: false,
             added_removed_keys: None,
-            trie_cursor_metrics: None,
-            hashed_cursor_metrics: None,
         }
     }
 }
 
-impl<'a, T, H, K> StorageProof<'a, T, H, K> {
+impl<T, H, K> StorageProof<T, H, K> {
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(
-        self,
-        trie_cursor_factory: TF,
-    ) -> StorageProof<'a, TF, H, K> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H, K> {
         StorageProof {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
@@ -275,8 +263,6 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys: self.added_removed_keys,
-            trie_cursor_metrics: self.trie_cursor_metrics,
-            hashed_cursor_metrics: self.hashed_cursor_metrics,
         }
     }
 
@@ -284,7 +270,7 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
     pub fn with_hashed_cursor_factory<HF>(
         self,
         hashed_cursor_factory: HF,
-    ) -> StorageProof<'a, T, HF, K> {
+    ) -> StorageProof<T, HF, K> {
         StorageProof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
@@ -292,8 +278,6 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys: self.added_removed_keys,
-            trie_cursor_metrics: self.trie_cursor_metrics,
-            hashed_cursor_metrics: self.hashed_cursor_metrics,
         }
     }
 
@@ -309,24 +293,6 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
         self
     }
 
-    /// Set the trie cursor metrics cache to accumulate metrics into.
-    pub const fn with_trie_cursor_metrics(
-        mut self,
-        metrics: &'a mut TrieCursorMetricsCache,
-    ) -> Self {
-        self.trie_cursor_metrics = Some(metrics);
-        self
-    }
-
-    /// Set the hashed cursor metrics cache to accumulate metrics into.
-    pub const fn with_hashed_cursor_metrics(
-        mut self,
-        metrics: &'a mut HashedCursorMetricsCache,
-    ) -> Self {
-        self.hashed_cursor_metrics = Some(metrics);
-        self
-    }
-
     /// Configures the retainer to retain proofs for certain nodes which would otherwise fall
     /// outside the target set, when those nodes might be required to calculate the state root when
     /// keys have been added or removed to the trie.
@@ -335,7 +301,7 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
     pub fn with_added_removed_keys<K2>(
         self,
         added_removed_keys: Option<K2>,
-    ) -> StorageProof<'a, T, H, K2> {
+    ) -> StorageProof<T, H, K2> {
         StorageProof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
@@ -343,13 +309,11 @@ impl<'a, T, H, K> StorageProof<'a, T, H, K> {
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
             added_removed_keys,
-            trie_cursor_metrics: self.trie_cursor_metrics,
-            hashed_cursor_metrics: self.hashed_cursor_metrics,
         }
     }
 }
 
-impl<'a, T, H, K> StorageProof<'a, T, H, K>
+impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
@@ -369,32 +333,19 @@ where
         self,
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
-        let mut discard_hashed_cursor_metrics = HashedCursorMetricsCache::default();
-        let hashed_cursor_metrics =
-            self.hashed_cursor_metrics.unwrap_or(&mut discard_hashed_cursor_metrics);
-
-        let hashed_storage_cursor =
-            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
-
         let mut hashed_storage_cursor =
-            InstrumentedHashedCursor::new(hashed_storage_cursor, hashed_cursor_metrics);
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::empty())
         }
 
-        let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();
-        let trie_cursor_metrics =
-            self.trie_cursor_metrics.unwrap_or(&mut discard_trie_cursor_metrics);
-
         let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
         let mut prefix_set = self.prefix_set;
         prefix_set.extend_keys(target_nibbles.iter().copied());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-
-        let trie_cursor = InstrumentedTrieCursor::new(trie_cursor, trie_cursor_metrics);
 
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, prefix_set.freeze())?
             .with_added_removed_keys(self.added_removed_keys.as_ref());

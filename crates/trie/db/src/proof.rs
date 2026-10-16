@@ -84,11 +84,7 @@ pub trait DatabaseStorageProof<'a, TX> {
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
-    for StorageProof<
-        'static,
-        DatabaseTrieCursorFactory<&'a TX, A>,
-        DatabaseHashedCursorFactory<&'a TX>,
-    >
+    for StorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(

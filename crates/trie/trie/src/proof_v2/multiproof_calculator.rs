@@ -5,7 +5,7 @@ use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     prefix_set::{PrefixSet, TriePrefixSets},
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
-    DecodedMultiProofV2, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
+    DecodedMultiProofV2, MultiProofTargetsV2,
 };
 use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_rlp::Encodable;
@@ -113,10 +113,11 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
         if !storage_targets.is_empty() {
             let mut storage_calculator = storage_calculator.lock();
             for (hashed_address, mut targets) in storage_targets {
+                let calculator = storage_calculator.calculator_for(hashed_address);
                 let nodes = if targets.is_empty() {
-                    vec![storage_calculator.storage_root_node(hashed_address)?]
+                    vec![calculator.storage_root_node(hashed_address)?]
                 } else {
-                    storage_calculator.storage_proof(hashed_address, &mut targets)?
+                    calculator.storage_proof(hashed_address, &mut targets)?
                 };
                 proof.storage_proofs.insert(hashed_address, nodes);
             }
@@ -196,28 +197,6 @@ struct PrefixSetStorageCalculator<TC, HC> {
 impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>>
     PrefixSetStorageCalculator<TC, HC>
 {
-    /// Calculates the storage root hash of the account at `hashed_address`.
-    fn storage_root(&mut self, hashed_address: B256) -> Result<B256, StateProofError> {
-        self.calculator_for(hashed_address).storage_root(hashed_address)
-    }
-
-    /// Calculates the storage root node of the account at `hashed_address`.
-    fn storage_root_node(
-        &mut self,
-        hashed_address: B256,
-    ) -> Result<ProofTrieNodeV2, StateProofError> {
-        self.calculator_for(hashed_address).storage_root_node(hashed_address)
-    }
-
-    /// Calculates a storage proof of the account at `hashed_address`.
-    fn storage_proof(
-        &mut self,
-        hashed_address: B256,
-        targets: &mut [ProofV2Target],
-    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
-        self.calculator_for(hashed_address).storage_proof(hashed_address, targets)
-    }
-
     fn calculator_for(&mut self, hashed_address: B256) -> &mut StorageProofCalculator<TC, HC> {
         if self.hashed_address != Some(hashed_address) {
             self.calculator
@@ -265,7 +244,11 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValue
     for AccountDeferredValueEncoder<TC, HC>
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let root = self.storage_calculator.lock().storage_root(self.hashed_address)?;
+        let root = self
+            .storage_calculator
+            .lock()
+            .calculator_for(self.hashed_address)
+            .storage_root(self.hashed_address)?;
         self.account.into_trie_account(root).encode(buf);
         Ok(())
     }

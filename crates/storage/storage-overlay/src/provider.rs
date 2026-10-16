@@ -133,9 +133,9 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new_with_caches(
-            provider,
-            self.overlay_builder.clone(),
+        Ok(OverlayStateProvider::from_parts(
+            OwnedProvider(provider),
+            Some(self.overlay_builder.clone()),
             Arc::clone(&self.state_trie_overlay_cache),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
@@ -175,30 +175,12 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        Self::new_with_caches(
-            provider,
-            overlay_builder,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            is_v2,
-        )
-    }
-
-    fn new_with_caches(
-        provider: Provider,
-        overlay_builder: OverlayBuilder<N>,
-        state_trie_overlay_cache: StateTrieOverlayCache,
-        metrics: OverlayStateProviderFactoryMetrics,
-        proof_cursor_metrics: ProofCursorMetrics,
-        is_v2: bool,
-    ) -> Self {
         Self::from_parts(
             OwnedProvider(provider),
             Some(overlay_builder),
-            state_trie_overlay_cache,
-            metrics,
-            proof_cursor_metrics,
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
         )
     }
@@ -1083,11 +1065,8 @@ type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbStorageProof<'a, TX, A> = TrieStorageProof<
-    'static,
-    DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
+type DbStorageProof<'a, TX, A> =
+    TrieStorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 

@@ -30,7 +30,6 @@ type DbStorageRoot<'a, TX, A> = StorageRoot<
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
 type DbStorageProof<'a, TX, A> = StorageProof<
-    'static,
     reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
     reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
 >;
