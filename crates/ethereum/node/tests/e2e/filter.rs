@@ -1,8 +1,7 @@
 //! End-to-end coverage for `eth_getLogs` and the poll filter API.
 
-use crate::utils::eth_payload_attributes;
 use alloy_primitives::{b256, Address, B256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::{BlockNumberOrTag, Filter, FilterId, Log};
 use jsonrpsee::{
     core::client::{ClientT, Error as ClientError},
@@ -10,19 +9,16 @@ use jsonrpsee::{
     rpc_params,
     types::error::INVALID_PARAMS_CODE,
 };
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     logs::{run_concurrent_log_scans, LogEmitter, LogFilterPoller},
-    E2ETestSetupBuilder, NodeHelperType,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{BlockIdReader, ReceiptProvider};
 use serde_json::json;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// Topic of every log the test contract emits.
 const TOPIC: B256 = b256!("0x00000000000000000000000000000000000000000000000000000000000000aa");
@@ -348,25 +344,14 @@ async fn setup(
 ) -> eyre::Result<(NodeHelperType<EthereumNode>, impl Provider + Clone, LogEmitter, Address)> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_node_config_modifier(modifier)
+        .build_single()
+        .await?;
 
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
-            .with_node_config_modifier(modifier)
-            .build()
-            .await?;
-
-    let mut node = nodes.pop().unwrap();
-    let signer = wallet.wallet_gen().swap_remove(0);
+    let signer = wallet.signer(0);
     let from = signer.address();
-    let provider =
-        ProviderBuilder::new().wallet(EthereumWallet::new(signer)).connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer);
     let emitter = LogEmitter::deploy(&mut node, &provider, from).await?;
 
     Ok((node, provider, emitter, from))
