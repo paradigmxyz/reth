@@ -71,7 +71,7 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
-    Provider: DBProvider<Tx: 'static>
+    Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -91,7 +91,7 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
-    Provider: DBProvider<Tx: 'static>
+    Provider: DBProvider
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -221,7 +221,7 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
-        P: DBProvider<Tx: 'static>
+        P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -274,7 +274,7 @@ impl ChangesetCache {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
-        P: DBProvider<Tx: 'static>
+        P: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -695,7 +695,7 @@ mod tests {
         range: RangeInclusive<BlockNumber>,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<Tx: 'static>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -714,7 +714,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<Tx: 'static>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -730,7 +730,7 @@ mod tests {
         block_number: BlockNumber,
     ) -> TrieUpdatesSorted
     where
-        Provider: DBProvider<Tx: 'static>
+        Provider: DBProvider
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader

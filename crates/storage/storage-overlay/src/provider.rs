@@ -136,7 +136,7 @@ where
 pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>,
+    Provider::Target: DBProvider,
 {
     /// Cached cursors are released before their backing transaction and overlays.
     #[expect(clippy::type_complexity, reason = "Keep the concrete cache layout visible.")]
@@ -151,9 +151,7 @@ where
     is_v2: bool,
 }
 
-impl<Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
-    OverlayStateProvider<OwnedProvider<Provider>, N>
-{
+impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     /// Creates an overlay state provider over an already-open database provider.
     pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
@@ -212,9 +210,7 @@ impl<Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
     }
 }
 
-impl<'a, Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
-    OverlayStateProvider<&'a Provider, N>
-{
+impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
     /// Creates an overlay state provider over a borrowed database provider.
     pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
@@ -256,7 +252,7 @@ impl<'a, Provider: DBProvider<Tx: 'static>, N: NodePrimitives>
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>,
+    Provider::Target: DBProvider,
 {
     fn provider(&self) -> &Provider::Target {
         &self.provider
@@ -407,7 +403,7 @@ where
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static> + fmt::Debug,
+    Provider::Target: DBProvider + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayStateProvider")
@@ -422,7 +418,7 @@ where
 impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -463,7 +459,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static> + StorageSettingsCache,
+    Provider::Target: DBProvider + StorageSettingsCache,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
@@ -484,7 +480,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -521,7 +517,7 @@ where
 impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -547,7 +543,7 @@ where
 impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -606,7 +602,7 @@ where
 impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -673,7 +669,7 @@ where
 impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -781,7 +777,7 @@ where
 impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -819,7 +815,7 @@ where
 impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -866,7 +862,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static> + StorageSettingsCache,
+    Provider::Target: DBProvider + StorageSettingsCache,
 {
     fn storage_from_db(
         &self,
@@ -898,7 +894,7 @@ where
 impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -953,7 +949,7 @@ where
 impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider<Tx: 'static>
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
