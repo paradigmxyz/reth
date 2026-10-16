@@ -2,7 +2,7 @@
 
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    prefix_set::{PrefixSet, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, TriePrefixSets},
     trie_cursor::{TrieCursorFactory, TrieStorageCursor},
     DecodedMultiProofV2, MultiProofTargetsV2, TrieType,
 };
@@ -42,16 +42,16 @@ type HashedCursor<C> = C;
 pub struct ProofV2<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> {
     account: Option<AccountCalculator<'a, T, H>>,
     storage: Option<Arc<Mutex<StorageCalculator<'a, T, H>>>>,
-    prefix_sets: TriePrefixSetsMut,
+    prefix_sets: TriePrefixSets,
     // Cursors borrow these pinned factories and must be dropped before them.
     factories: Pin<Box<Factories<T, H>>>,
 }
 
 impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, H> {
-    /// Creates a proof generator for the supplied factories and changed-key prefixes.
+    /// Creates a proof generator for the supplied factories and frozen changed-key prefixes.
     ///
     /// Prefixes invalidate cached branch hashes for keys whose leaf values have changed.
-    pub fn new(trie: T, hashed: H, prefix_sets: TriePrefixSetsMut) -> Self {
+    pub fn new(trie: T, hashed: H, prefix_sets: TriePrefixSets) -> Self {
         Self {
             account: None,
             storage: None,
@@ -81,10 +81,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                 let factories = unsafe { borrow_factories(self.factories.as_ref()) };
                 let trie = factories.trie.storage_trie_cursor(B256::ZERO)?;
                 let hashed = factories.hashed.hashed_storage_cursor(B256::ZERO)?;
-                let prefix_sets = std::mem::take(&mut self.prefix_sets.storage_prefix_sets)
-                    .into_iter()
-                    .map(|(address, prefixes)| (address, prefixes.freeze()))
-                    .collect();
+                let prefix_sets = std::mem::take(&mut self.prefix_sets.storage_prefix_sets);
                 slot.insert(Arc::new(Mutex::new(CachedStorage {
                     calculator: StorageProofCalculator::new_storage(
                         instrument_trie(trie, TrieType::Storage),
@@ -108,9 +105,7 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> ProofV2<'a, T, 
                             instrument_trie(trie, TrieType::State),
                             instrument_hashed(hashed, TrieType::State),
                         )
-                        .with_prefix_set(
-                            std::mem::take(&mut self.prefix_sets.account_prefix_set).freeze(),
-                        ),
+                        .with_prefix_set(std::mem::take(&mut self.prefix_sets.account_prefix_set)),
                     )
                 }
             };

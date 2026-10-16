@@ -126,7 +126,7 @@ where
         let mut proof = ProofV2::new(
             self.trie_cursor_factory.clone(),
             self.hashed_cursor_factory.clone(),
-            self.prefix_sets.clone(),
+            self.prefix_sets.clone().freeze(),
         );
         let multiproof = proof.multiproof(proof_targets)?;
 

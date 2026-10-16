@@ -77,7 +77,7 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> OverlayProof<'a, TX, A> {
             proof: ProofV2::new(
                 InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
                 HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
-                std::mem::take(&mut input.prefix_sets),
+                std::mem::take(&mut input.prefix_sets).freeze(),
             ),
             _input: input,
         }
