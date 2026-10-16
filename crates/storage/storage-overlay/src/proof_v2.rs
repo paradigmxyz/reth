@@ -2,7 +2,7 @@
 
 use reth_db_api::transaction::DbTx;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof_v2::ProofV2,
+    hashed_cursor::HashedPostStateCursorFactory, prefix_set::TriePrefixSets, proof_v2::ProofV2,
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdatesSorted, HashedPostStateSorted,
     TrieInputSorted,
 };
@@ -18,6 +18,32 @@ pub(crate) enum DatabaseProofV2<TX: DbTx + 'static> {
     Packed(ProofWithOverlay<TX, PackedKeyAdapter>),
 }
 
+impl<TX: DbTx + 'static> DatabaseProofV2<TX> {
+    /// Creates a generator for the selected trie table format.
+    ///
+    /// # Safety
+    ///
+    /// The transaction and immutable overlay allocations must remain at stable addresses and
+    /// outlive the generator. The generator must only move with its owning non-Sync provider,
+    /// and the transaction must not be accessed concurrently elsewhere.
+    pub(crate) unsafe fn new(tx: &TX, input: &TrieInputSorted, is_v2: bool) -> Self {
+        // SAFETY: The caller retains these stable allocations until the generator drops.
+        let (tx, nodes, state) = unsafe {
+            (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state))
+        };
+        let prefix_sets = input.prefix_sets.clone().freeze();
+        if is_v2 {
+            Self::Packed(proof_with_overlay(tx, nodes, state, prefix_sets))
+        } else {
+            Self::Legacy(proof_with_overlay(tx, nodes, state, prefix_sets))
+        }
+    }
+}
+
+// SAFETY: The unsafe constructor requires this generator to move only with its owning non-Sync
+// provider, which retains its Send transaction and immutable overlays without concurrent access.
+unsafe impl<TX: DbTx + 'static> Send for DatabaseProofV2<TX> {}
+
 type ProofWithOverlay<TX, A> = ProofV2<
     'static,
     InMemoryTrieCursorFactory<
@@ -30,22 +56,15 @@ type ProofWithOverlay<TX, A> = ProofV2<
     >,
 >;
 
-/// Creates a concrete generator borrowing its provider's transaction and overlays.
-///
-/// # Safety
-///
-/// The caller must retain the pinned transaction and immutable overlay allocations until the
-/// proof drops.
-pub(crate) unsafe fn cached_proof_v2<TX: DbTx + 'static, A: TrieTableAdapter>(
-    tx: &TX,
-    input: &TrieInputSorted,
+fn proof_with_overlay<TX: DbTx + 'static, A: TrieTableAdapter>(
+    tx: &'static TX,
+    nodes: &'static TrieUpdatesSorted,
+    state: &'static HashedPostStateSorted,
+    prefix_sets: TriePrefixSets,
 ) -> ProofWithOverlay<TX, A> {
-    // SAFETY: The caller guarantees these allocations remain stable and outlive the generator.
-    let (tx, nodes, state) =
-        unsafe { (&*(tx as *const TX), &*Arc::as_ptr(&input.nodes), &*Arc::as_ptr(&input.state)) };
     ProofV2::new(
         InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), nodes),
         HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), state),
-        input.prefix_sets.clone().freeze(),
+        prefix_sets,
     )
 }

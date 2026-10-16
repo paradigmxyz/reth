@@ -1,7 +1,6 @@
 use crate::{
-    database_state_frontiers,
-    proof_v2::{cached_proof_v2, DatabaseProofV2},
-    ExecutionOverlay, OverlayBuilder, StateTrieOverlay,
+    database_state_frontiers, proof_v2::DatabaseProofV2, ExecutionOverlay, OverlayBuilder,
+    StateTrieOverlay,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -734,13 +733,10 @@ where
                 let input = self.state_trie_overlay(requires_masks)?.input();
                 // SAFETY: The pinned transaction and overlay allocations outlive this private
                 // cache. Cached generators are dropped first and never escape the provider.
-                let proof = unsafe {
-                    if self.is_v2 {
-                        DatabaseProofV2::Packed(cached_proof_v2(self.provider().tx(), input))
-                    } else {
-                        DatabaseProofV2::Legacy(cached_proof_v2(self.provider().tx(), input))
-                    }
-                };
+                // The non-Sync provider moves with the cache and never accesses its tx
+                // concurrently.
+                let proof =
+                    unsafe { DatabaseProofV2::new(self.provider().tx(), input, self.is_v2) };
                 slot.insert((requires_masks, proof))
             }
         };
@@ -1041,16 +1037,6 @@ type DbStorageProof<'a, TX, A> = TrieStorageProof<
 >;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-
-// SAFETY: The cache borrows only this provider's pinned transaction and immutable overlays.
-// Moving them together preserves those references. RefCell prevents shared concurrent access,
-// and requiring Provider: Send also prevents moving borrowed non-Sync database providers.
-unsafe impl<Provider, N: NodePrimitives> Send for OverlayStateProvider<Provider, N>
-where
-    Provider: Deref + Send,
-    Provider::Target: DBProvider<Tx: 'static>,
-{
-}
 
 #[doc(hidden)]
 #[derive(Debug)]
