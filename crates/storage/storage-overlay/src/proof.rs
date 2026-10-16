@@ -42,7 +42,7 @@ pub(super) enum ProofCalculators<TX: DbTx> {
 }
 
 impl<TX: DbTx> ProofCalculators<TX> {
-    pub(super) fn new(is_v2: bool, overlay: TrieInputSorted) -> Self {
+    pub(super) const fn new(is_v2: bool, overlay: TrieInputSorted) -> Self {
         if is_v2 {
             Self::Packed(Calculators::new(overlay))
         } else {
@@ -64,34 +64,34 @@ impl<TX: DbTx> ProofCalculators<TX> {
 
 type AccountTrieCursor<TX, A> = TrieCursor<
     InMemoryTrieCursor<
+        'static,
         DatabaseAccountTrieCursor<
             <TX as DbTx>::Cursor<<A as TrieTableAdapter>::AccountTrieTable>,
             A,
         >,
-        Arc<TrieUpdatesSorted>,
     >,
 >;
 type StorageTrieCursor<TX, A> = TrieCursor<
     InMemoryTrieCursor<
+        'static,
         DatabaseStorageTrieCursor<
             <TX as DbTx>::DupCursor<<A as TrieTableAdapter>::StorageTrieTable>,
             A,
         >,
-        Arc<TrieUpdatesSorted>,
     >,
 >;
 type AccountHashedCursor<TX> = HashedCursor<
     HashedPostStateCursor<
+        'static,
         DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>,
         Option<Account>,
-        Arc<HashedPostStateSorted>,
     >,
 >;
 type StorageHashedCursor<TX> = HashedCursor<
     HashedPostStateCursor<
+        'static,
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>,
         U256,
-        Arc<HashedPostStateSorted>,
     >,
 >;
 type StorageCalculator<TX, A> =
@@ -102,7 +102,10 @@ type AccountCalculator<TX, A> = ProofCalculator<
     AccountValueEncoder<StorageTrieCursor<TX, A>, StorageHashedCursor<TX>>,
 >;
 
-/// Account workers initialize both fields; storage workers initialize only `storage`.
+/// Account workers initialize both calculators; storage workers initialize only `storage`.
+///
+/// Cursors borrow the immutable Arc allocations in `overlay` with erased lifetimes. Calculators
+/// and their deferred encoders must remain private and be dropped before `overlay`.
 pub(super) struct Calculators<TX: DbTx, A: TrieTableAdapter> {
     account: Option<AccountCalculator<TX, A>>,
     storage: Option<Arc<Mutex<StorageCalculator<TX, A>>>>,
@@ -110,7 +113,7 @@ pub(super) struct Calculators<TX: DbTx, A: TrieTableAdapter> {
 }
 
 impl<TX: DbTx, A: TrieTableAdapter> Calculators<TX, A> {
-    fn new(overlay: TrieInputSorted) -> Self {
+    const fn new(overlay: TrieInputSorted) -> Self {
         Self { account: None, storage: None, overlay }
     }
 
@@ -124,16 +127,19 @@ impl<TX: DbTx, A: TrieTableAdapter> Calculators<TX, A> {
         let storage = match &mut self.storage {
             Some(storage) => storage,
             slot @ None => {
+                // SAFETY: The private calculators cannot outlive their immutable backing overlay,
+                // which is dropped after both calculators and all their deferred encoders.
+                let (nodes, state) = unsafe { borrow_overlay(&self.overlay) };
                 let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
                 let hashed_factory = DatabaseHashedCursorFactory::new(tx);
                 let trie_cursor = InMemoryTrieCursor::new_storage(
                     trie_factory.storage_trie_cursor(B256::ZERO)?,
-                    self.overlay.nodes.clone(),
+                    nodes,
                     B256::ZERO,
                 );
                 let hashed_cursor = HashedPostStateCursor::new_storage(
                     hashed_factory.hashed_storage_cursor(B256::ZERO)?,
-                    self.overlay.state.clone(),
+                    state,
                     B256::ZERO,
                 );
                 slot.insert(Arc::new(Mutex::new(StorageProofCalculator::new_storage(
@@ -147,15 +153,15 @@ impl<TX: DbTx, A: TrieTableAdapter> Calculators<TX, A> {
             let calculator = match &mut self.account {
                 Some(calculator) => calculator,
                 slot @ None => {
+                    // SAFETY: As above, the overlay outlives both private calculators and encoders.
+                    let (nodes, state) = unsafe { borrow_overlay(&self.overlay) };
                     let trie_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
                     let hashed_factory = DatabaseHashedCursorFactory::new(tx);
-                    let trie_cursor = InMemoryTrieCursor::new_account(
-                        trie_factory.account_trie_cursor()?,
-                        self.overlay.nodes.clone(),
-                    );
+                    let trie_cursor =
+                        InMemoryTrieCursor::new_account(trie_factory.account_trie_cursor()?, nodes);
                     let hashed_cursor = HashedPostStateCursor::new_account(
                         hashed_factory.hashed_account_cursor()?,
-                        self.overlay.state.clone(),
+                        state,
                     );
                     slot.insert(ProofCalculator::new(
                         instrument_trie(trie_cursor, TrieType::State),
@@ -235,4 +241,19 @@ fn instrument_trie<C>(cursor: C, _trie_type: TrieType) -> C {
 #[cfg(not(feature = "metrics"))]
 fn instrument_hashed<C>(cursor: C, _trie_type: TrieType) -> C {
     cursor
+}
+
+/// Borrows the overlay's stable Arc allocations with erased lifetimes.
+///
+/// # Safety
+///
+/// The caller must retain the backing Arcs, without mutating their contents, until all returned
+/// references and cursors borrowing them have been dropped. These references must not escape
+/// the owner that enforces this lifetime and drop order.
+unsafe fn borrow_overlay(
+    overlay: &TrieInputSorted,
+) -> (&'static TrieUpdatesSorted, &'static HashedPostStateSorted) {
+    // SAFETY: Arc allocations remain at stable addresses while retained by the caller, which
+    // guarantees their immutability and that all borrowers are dropped before the backing Arcs.
+    unsafe { (&*Arc::as_ptr(&overlay.nodes), &*Arc::as_ptr(&overlay.state)) }
 }

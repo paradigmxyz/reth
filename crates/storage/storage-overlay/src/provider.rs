@@ -30,7 +30,7 @@ use reth_trie::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
     },
-    updates::{TrieUpdates, TrieUpdatesSorted},
+    updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
     HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
@@ -909,12 +909,12 @@ where
         + StorageSettingsCache,
 {
     type AccountTrieCursor<'a>
-        = InMemoryTrieCursor<Box<dyn TrieCursor + Send + 'a>, &'a TrieUpdatesSorted>
+        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = InMemoryTrieCursor<Box<dyn TrieStorageCursor + Send + 'a>, &'a TrieUpdatesSorted>
+        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
     where
         Self: 'a;
 
