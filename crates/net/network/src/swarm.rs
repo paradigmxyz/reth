@@ -113,6 +113,10 @@ impl<N: NetworkPrimitives> Swarm<N> {
 impl<N: NetworkPrimitives> Swarm<N> {
     /// Triggers an outgoing connection, returning whether a session was started.
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) -> bool {
+        if !self.peers().can_activate_outbound(remote_id, remote_addr) {
+            self.peers_mut().on_outgoing_pending_session_gracefully_closed(&remote_id);
+            return false
+        }
         if let Err(err) = self.sessions.try_dial_outbound(remote_addr, remote_id) {
             trace!(target: "net", %err, "Outgoing connection rejected, capacity already reached.");
             // Leave retries to the refill timer so a saturated session manager cannot busy-loop.
@@ -250,6 +254,8 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 }
             }
             StateAction::Disconnect { peer_id, reason } => {
+                self.sessions.cancel_pending_outbound(peer_id);
+                self.peers_mut().on_outgoing_pending_session_gracefully_closed(&peer_id);
                 self.sessions.disconnect(peer_id, reason);
             }
             StateAction::NewBlock { peer_id, block: msg } => {
@@ -261,7 +267,10 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 self.sessions.send_message(&peer_id, msg);
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
-            StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
+            StateAction::PeerRemoved(peer_id) => {
+                self.sessions.cancel_pending_outbound(peer_id);
+                return Some(SwarmEvent::PeerRemoved(peer_id))
+            }
             StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
                 if self.is_shutting_down() {
                     return None
@@ -335,8 +344,13 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
             }
 
             // poll all sessions
-            match this.sessions.poll(cx, |peer_id| this.state.peers().has_inbound_capacity(peer_id))
-            {
+            match this.sessions.poll(
+                cx,
+                |peer_id| this.state.peers().has_inbound_capacity(peer_id),
+                |peer_id, remote_addr| {
+                    this.state.peers().can_activate_outbound(peer_id, remote_addr)
+                },
+            ) {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {

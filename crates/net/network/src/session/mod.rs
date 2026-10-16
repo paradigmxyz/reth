@@ -444,7 +444,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Cancels outgoing attempts superseded by an incoming session for this peer.
-    fn cancel_pending_outbound(&mut self, peer_id: PeerId) {
+    pub(crate) fn cancel_pending_outbound(&mut self, peer_id: PeerId) {
         self.pending_sessions.retain(|_, session| {
             if session.direction == Direction::Outgoing(peer_id) {
                 session.disconnect();
@@ -506,6 +506,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         &mut self,
         cx: &mut Context<'_>,
         has_inbound_capacity: impl Fn(PeerId) -> bool,
+        can_activate_outbound: impl Fn(PeerId, SocketAddr) -> bool,
     ) -> Poll<SessionEvent<N>> {
         // Poll events from active sessions
         match self.active_session_rx.poll_next_unpin(cx) {
@@ -584,6 +585,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 client_id,
                 peer_listen_port,
             } => {
+                if direction.is_outgoing() && !can_activate_outbound(peer_id, remote_addr) {
+                    return Poll::Ready(SessionEvent::OutgoingPendingSessionClosed {
+                        remote_addr,
+                        peer_id,
+                        error: None,
+                    })
+                }
                 // If there's already a session to the peer then we disconnect right away
                 if self.active_sessions.contains_key(&peer_id) {
                     trace!(

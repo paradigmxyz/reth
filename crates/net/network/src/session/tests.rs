@@ -470,7 +470,9 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
             })
             .await
             .unwrap();
-        assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+        assert!(sessions
+            .poll(&mut Context::from_waker(Waker::noop()), |_| true, |_, _| true)
+            .is_pending());
         assert!(sessions.pending_sessions.contains_key(&new_id));
     }
     sessions
@@ -483,7 +485,9 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+    assert!(sessions
+        .poll(&mut Context::from_waker(Waker::noop()), |_| true, |_, _| true)
+        .is_pending());
     sessions
         .pending_sessions_tx
         .send(PendingSessionEvent::Disconnected {
@@ -494,8 +498,10 @@ async fn canceled_dial_events_do_not_reach_replacement_sessions() {
         })
         .await
         .unwrap();
-    assert!(matches!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true),
-        Poll::Ready(SessionEvent::OutgoingPendingSessionClosed { peer_id: id, error: None, .. }) if id == peer_id));
+    assert!(
+        matches!(sessions.poll(&mut Context::from_waker(Waker::noop()), |_| true, |_, _| true),
+        Poll::Ready(SessionEvent::OutgoingPendingSessionClosed { peer_id: id, error: None, .. }) if id == peer_id)
+    );
     assert!(sessions.pending_sessions.is_empty());
 }
 
@@ -572,7 +578,9 @@ async fn canceled_completed_dial_sends_disconnect() {
     );
     outgoing.counter.inc_pending_outbound();
     outgoing.pending_sessions_tx.send(event).await.unwrap();
-    assert!(outgoing.poll(&mut Context::from_waker(Waker::noop()), |_| true).is_pending());
+    assert!(outgoing
+        .poll(&mut Context::from_waker(Waker::noop()), |_| true, |_, _| true)
+        .is_pending());
     assert!(outgoing.pending_sessions.contains_key(&replacement));
     assert!(outgoing.active_sessions.is_empty());
     let error = tokio::time::timeout(Duration::from_secs(5), conn.next())
@@ -601,10 +609,14 @@ async fn inbound_capacity_rejection_preserves_outbound_attempt() {
         let event = tokio::time::timeout(
             Duration::from_secs(5),
             futures::future::poll_fn(|cx| {
-                incoming.poll(cx, |id| {
-                    assert_eq!(id, peer_id);
-                    allow
-                })
+                incoming.poll(
+                    cx,
+                    |id| {
+                        assert_eq!(id, peer_id);
+                        allow
+                    },
+                    |_, _| true,
+                )
             }),
         )
         .await
@@ -639,4 +651,71 @@ async fn inbound_capacity_rejection_preserves_outbound_attempt() {
             assert!(matches!(error, P2PStreamError::Disconnected(DisconnectReason::TooManyPeers)));
         }
     }
+}
+
+#[tokio::test]
+async fn outgoing_admission_precedes_activation() {
+    for allow in [false, true] {
+        let mut incoming = session_manager();
+        let mut outgoing = session_manager();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        outgoing.dial_outbound(addr, incoming.hello_message.id);
+        let (stream, remote) =
+            tokio::time::timeout(Duration::from_secs(5), listener.accept()).await.unwrap().unwrap();
+        incoming.on_incoming(stream, remote).unwrap();
+        let event = tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::poll_fn(|cx| {
+                let _ = incoming.poll(cx, |_| true, |_, _| true);
+                outgoing.poll(
+                    cx,
+                    |_| true,
+                    |_, remote_addr| {
+                        assert_eq!(remote_addr, addr);
+                        allow
+                    },
+                )
+            }),
+        )
+        .await
+        .unwrap();
+        if allow {
+            assert!(matches!(event, SessionEvent::SessionEstablished { .. }));
+            assert_eq!(outgoing.active_sessions.len(), 1);
+        } else {
+            assert!(matches!(
+                event,
+                SessionEvent::OutgoingPendingSessionClosed { error: None, .. }
+            ));
+            assert!(outgoing.active_sessions.is_empty());
+        }
+        assert!(outgoing.pending_sessions.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn canceled_completed_dial_cannot_activate() {
+    let mut incoming = session_manager();
+    let mut outgoing = session_manager();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let peer_id = incoming.hello_message.id;
+    outgoing.dial_outbound(addr, peer_id);
+    let (stream, remote) =
+        tokio::time::timeout(Duration::from_secs(5), listener.accept()).await.unwrap().unwrap();
+    incoming.on_incoming(stream, remote).unwrap();
+    // Hold a completed handshake while the administrative cancellation is processed.
+    let event = tokio::time::timeout(Duration::from_secs(5), outgoing.pending_session_rx.next())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(&event, PendingSessionEvent::Established { .. }));
+    outgoing.cancel_pending_outbound(peer_id);
+    outgoing.pending_sessions_tx.send(event).await.unwrap();
+    assert!(outgoing
+        .poll(&mut Context::from_waker(Waker::noop()), |_| true, |_, _| true)
+        .is_pending());
+    assert!(outgoing.active_sessions.is_empty());
+    assert!(outgoing.pending_sessions.is_empty());
 }

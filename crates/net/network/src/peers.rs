@@ -1006,7 +1006,9 @@ impl PeersManager {
         trace!(target: "net::peers", ?peer_id, "remove discovered node");
         self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
 
-        if peer.state.is_connected() {
+        if peer.state.is_pending_out() {
+            self.connection_info.decr_state(peer.state);
+        } else if peer.state.is_connected() {
             trace!(target: "net::peers", ?peer_id, "disconnecting on remove from discovery");
             // we terminate the active session here, but only remove the peer after the session
             // was disconnected, this prevents the case where the session is scheduled for
@@ -1125,6 +1127,20 @@ impl PeersManager {
         }
     }
 
+    /// Revalidates an outgoing attempt immediately before dialing or activating its session.
+    pub(crate) fn can_activate_outbound(&self, peer_id: PeerId, remote_addr: SocketAddr) -> bool {
+        self.peers.get(&peer_id).is_some_and(|peer| {
+            peer.state.is_pending_out() &&
+                !peer.remove_after_disconnect &&
+                !peer.is_banned() &&
+                !self.ban_list.is_banned(&peer_id, &remote_addr.ip()) &&
+                self.ip_filter.is_allowed(&remote_addr.ip()) &&
+                (!self.trusted_nodes_only ||
+                    peer.is_trusted() ||
+                    self.trusted_peer_ids.contains(&peer_id))
+        })
+    }
+
     /// Returns the best idle peer to connect to.
     ///
     /// Peers that are `trusted` or `static`, see [`PeerKind`], are prioritized as long as they're
@@ -1142,6 +1158,8 @@ impl PeersManager {
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
+                !peer.remove_after_disconnect &&
+                !self.ban_list.is_banned(peer_id, &peer.addr.tcp().ip()) &&
                 peer.state.is_unconnected() &&
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
@@ -4372,5 +4390,29 @@ mod tests {
         assert!(peers.queued_actions.is_empty());
         assert_eq!(peers.connection_info.num_pending_out, 1);
         assert_eq!(peers.connection_info.num_outbound, 1);
+    }
+
+    #[tokio::test]
+    async fn test_outbound_admission_rechecks_peer_policy() {
+        for rejection in 0..5 {
+            let mut peers = PeersManager::new(PeersConfig::test());
+            let peer_id = PeerId::random();
+            let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+            peers.add_and_connect_kind(peer_id, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+            assert!(peers.can_activate_outbound(peer_id, addr));
+            match rejection {
+                0 => peers.remove_peer(peer_id),
+                1 => peers.ban_peer_by_admin(peer_id),
+                2 => peers.ban_list.ban_ip(addr.ip()),
+                3 => peers.peers.get_mut(&peer_id).unwrap().reputation = i32::MIN,
+                4 => peers.peers.get_mut(&peer_id).unwrap().remove_after_disconnect = true,
+                _ => unreachable!(),
+            }
+            assert!(!peers.can_activate_outbound(peer_id, addr));
+            peers.on_outgoing_pending_session_gracefully_closed(&peer_id);
+            assert_eq!(peers.connection_info.num_pending_out, 0);
+            assert_eq!(peers.connection_info.num_outbound, 0);
+            assert!(peers.best_unconnected(false).is_none());
+        }
     }
 }
