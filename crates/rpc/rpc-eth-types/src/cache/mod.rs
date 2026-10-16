@@ -991,7 +991,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
         noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
@@ -1375,17 +1375,13 @@ mod tests {
     fn cached_revm_bal_size_accounts_for_nested_allocations() {
         let mut account = RevmAccountBal::default();
         account.account_info.nonce.writes.push((BlockAccessIndex::new(1), 1));
-        account
-            .account_info
-            .balance
-            .writes
-            .push((BlockAccessIndex::new(2), StorageValue::from(1u64)));
+        account.account_info.balance.writes.push((BlockAccessIndex::new(2), StorageValue::ONE));
         account.account_info.code.writes.push((
             BlockAccessIndex::new(3),
             (B256::repeat_byte(0xaa), Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))),
         ));
         account.storage.storage.insert(
-            StorageKey::from(1u64),
+            StorageKey::ONE,
             RevmBalWrites::new(vec![(BlockAccessIndex::new(4), StorageValue::from(2u64))]),
         );
 
@@ -1797,13 +1793,14 @@ mod tests {
             Ok(None)
         }
 
-        fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
             Ok(None)
         }
 
         fn pending_block_and_receipts(
             &self,
-        ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+        ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>>
+        {
             Ok(None)
         }
 

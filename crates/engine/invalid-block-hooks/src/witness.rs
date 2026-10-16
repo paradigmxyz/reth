@@ -128,8 +128,7 @@ fn collect_execution_data(
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
+        codes.insert(code.hash_slow(), code.original_bytes());
     });
 
     // Collect preimages
@@ -206,7 +205,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -328,11 +327,11 @@ where
             if &trie_output != original_updates {
                 let original_path = self.save_file(
                     format!("{}.trie_updates.original.json", block_prefix),
-                    &original_updates.into_sorted_ref(),
+                    &original_updates.to_sorted_ref(),
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}.trie_updates.re_executed.json", block_prefix),
-                    &trie_output.into_sorted_ref(),
+                    &trie_output.to_sorted_ref(),
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -396,7 +395,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + Send + Sync + 'static,
+    P: StateProviderFactory + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
@@ -455,14 +454,13 @@ mod tests {
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                    nonce: 0,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 }),
                 storage,
                 status: AccountStatus::default(),
@@ -683,12 +681,12 @@ mod tests {
 
         // Mock Data
         let mut codes = BTreeMap::new();
-        codes.insert(B256::from([1u8; 32]), Bytes::from("contract_code_1"));
-        codes.insert(B256::from([2u8; 32]), Bytes::from("contract_code_2"));
+        codes.insert(B256::repeat_byte(1u8), Bytes::from("contract_code_1"));
+        codes.insert(B256::repeat_byte(2u8), Bytes::from("contract_code_2"));
 
         let mut preimages = BTreeMap::new();
-        preimages.insert(B256::from([3u8; 32]), Bytes::from("preimage_1"));
-        preimages.insert(B256::from([4u8; 32]), Bytes::from("preimage_2"));
+        preimages.insert(B256::repeat_byte(3u8), Bytes::from("preimage_1"));
+        preimages.insert(B256::repeat_byte(4u8), Bytes::from("preimage_2"));
 
         let hashed_state = reth_trie::HashedPostState::default();
 
@@ -739,7 +737,7 @@ mod tests {
         let mut modified_state = create_bundle_state();
 
         // Modify the state to create a mismatch
-        let addr = Address::from([1u8; 20]);
+        let addr = Address::repeat_byte(1u8);
         if let Some(account) = modified_state.state.get_mut(&addr) &&
             let Some(ref mut info) = account.info
         {
@@ -772,11 +770,11 @@ mod tests {
         let mut account_nodes = HashMap::default();
         let nibbles = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]);
         let branch_node = BranchNodeCompact::new(
-            0b1010,                      // state_mask
-            0b1010,                      // tree_mask - must be subset of state_mask
-            0b1000,                      // hash_mask
-            vec![B256::from([1u8; 32])], // hashes
-            None,                        // root_hash
+            0b1010,                       // state_mask
+            0b1010,                       // tree_mask - must be subset of state_mask
+            0b1000,                       // hash_mask
+            vec![B256::repeat_byte(1u8)], // hashes
+            None,                         // root_hash
         );
         account_nodes.insert(nibbles, branch_node);
 
@@ -807,7 +805,7 @@ mod tests {
         .unwrap();
 
         let trie_updates = create_test_trie_updates();
-        let original_root = B256::from([2u8; 32]); // Different from what will be computed
+        let original_root = B256::repeat_byte(2u8); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
 
         // Test with trie updates - this will likely produce warnings due to mock data

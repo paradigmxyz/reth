@@ -342,6 +342,7 @@ where
             ctx.config.rpc.flashbots_config(),
             ctx.node.task_executor().clone(),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+            ctx.sender_recovery_cache.clone(),
         );
 
         let eth_config =
@@ -692,7 +693,7 @@ where
         Primitives: NodePrimitives<SignedTx = TransactionSigned>,
     >,
     Node: FullNodeTypes<Types = Types>,
-    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + Clone + 'static,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Types>> + 'static,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
@@ -815,7 +816,7 @@ pub struct EthereumEngineValidatorBuilder;
 impl<Node, Types> PayloadValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypes<
-        ChainSpec: Hardforks + EthereumHardforks + Clone + 'static,
+        ChainSpec: Hardforks + EthereumHardforks + 'static,
         Payload: EngineTypes<ExecutionData = ExecutionData>
                      + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
         Primitives = EthPrimitives,
@@ -826,16 +827,5 @@ where
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::EthereumPoolBuilder;
-
-    #[test]
-    fn configures_kzg_settings_initialization() {
-        assert!(!EthereumPoolBuilder::new().init_kzg_settings);
-        assert!(EthereumPoolBuilder::new().with_init_kzg_settings(true).init_kzg_settings);
     }
 }

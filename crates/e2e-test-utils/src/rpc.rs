@@ -1,15 +1,15 @@
-use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant};
-use alloy_eips::eip7594::BlobTransactionSidecarVariant;
+use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
+use futures_util::future::BoxFuture;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes,
+    helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
+    EthApiTypes, RpcReceipt,
 };
 
 #[expect(missing_debug_implementations)]
@@ -25,18 +25,45 @@ where
         + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
-    pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {
-        let eth_api = self.inner.eth_api();
-        eth_api.send_raw_transaction(raw_tx).await
+    ///
+    /// Boxed like [`NodeTestContext::mine`](crate::node::NodeTestContext::mine), to keep callers
+    /// from borrow-checking the eth API future.
+    pub fn inject_tx(&self, raw_tx: Bytes) -> BoxFuture<'_, Result<B256, EthApi::Error>> {
+        Box::pin(async move { self.inner.eth_api().send_raw_transaction(raw_tx).await })
     }
 
-    /// Retrieves a transaction envelope by its hash
-    pub async fn envelope_by_hash(
+    /// Retrieves an Ethereum transaction envelope by its hash, including its blob sidecar if the
+    /// transaction is still pooled.
+    pub async fn envelope_by_hash(&self, hash: B256) -> eyre::Result<TxEnvelope> {
+        self.decoded_transaction_by_hash(hash).await
+    }
+
+    /// Retrieves the raw transaction with the given hash via `debug_getRawTransaction` and decodes
+    /// it as `T`.
+    ///
+    /// Returns an error if the node does not know the transaction.
+    pub async fn decoded_transaction_by_hash<T: Decodable2718>(
         &self,
         hash: B256,
-    ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
-        let tx = self.inner.debug_api().raw_transaction(hash).await?.unwrap();
-        let tx = tx.to_vec();
-        Ok(EthereumTxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
+    ) -> eyre::Result<T> {
+        let tx = self
+            .inner
+            .debug_api()
+            .raw_transaction(hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("transaction {hash} not found"))?;
+        Ok(T::decode_2718_exact(&tx)?)
+    }
+
+    /// Returns the RPC receipt of the transaction with the given hash, if it is included in a
+    /// canonical block.
+    pub async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> Result<Option<RpcReceipt<EthApi::NetworkTypes>>, EthApi::Error>
+    where
+        EthApi: LoadReceipt + 'static,
+    {
+        self.inner.eth_api().transaction_receipt(hash).await
     }
 }

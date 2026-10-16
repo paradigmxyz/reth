@@ -2,7 +2,10 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
-    payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+    payload_processor::{
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
+        reuse::{cfg_reuses_prewarm_results, PrewarmResults},
+    },
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
     ExecutionEnv, PayloadExecutionCache, SavedCache, TreeConfig,
 };
@@ -14,7 +17,8 @@ use rayon::prelude::*;
 use reth_evm::{
     block::ExecutableTxParts,
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
+    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, HaltReasonFor, SpecFor,
+    TxEnvFor,
 };
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -29,7 +33,7 @@ pub use reth_trie_parallel::{
     state_root_task::{
         evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
         StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use std::{
@@ -39,12 +43,13 @@ use std::{
         mpsc, Arc, OnceLock,
     },
 };
-use tracing::{debug, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
 pub mod bal_prewarm_pool;
 pub mod prewarm;
 pub mod receipt_root_task;
+pub(crate) mod reuse;
 
 /// Blocks with fewer transactions than this skip prewarming, since the fixed overhead of spawning
 /// prewarm workers exceeds the execution time saved.
@@ -57,6 +62,7 @@ type IteratorPayloadHandle<Evm, I> = PayloadHandle<
     IteratorTx<Evm, I>,
     <I as ExecutableTxTuple>::Error,
     <<Evm as ConfigureEvm>::Primitives as NodePrimitives>::Receipt,
+    HaltReasonFor<Evm>,
 >;
 
 type IteratorPrewarmTxReceiver<Evm, I> =
@@ -108,6 +114,8 @@ where
     disable_bal_parallel_state_root: bool,
     /// Whether BAL state prefetching during prewarm is disabled.
     disable_bal_batch_io: bool,
+    /// Whether block execution may reuse transaction prewarming results.
+    reuse_prewarm_results: bool,
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
@@ -139,6 +147,7 @@ where
                 .then(CachedStateCacheMetrics::default),
             disable_bal_parallel_state_root: config.disable_bal_parallel_state_root(),
             disable_bal_batch_io: config.disable_bal_batch_io(),
+            reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
         }
     }
@@ -263,6 +272,7 @@ where
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let parent_span = Span::current();
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -275,6 +285,9 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                // Restore the parent even when the worker span is filtered out.
+                let _parent = parent_span.enter();
+                let _span = debug_span!(target: "engine::tree::payload_processor", "tx_iterator", transaction_count).entered();
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(
                     transactions.into_iter(),
@@ -288,15 +301,25 @@ where
             // to prewarming and execution.
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _parent = parent_span.enter();
+                let _span = debug_span!(target: "engine::tree::payload_processor", "tx_iterator", transaction_count).entered();
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
                     // With BALs, we don't care about the order of transactions in execution and
                     // prewarming, so we don't have to use `for_each_ordered_in`.
+                    let parent_span = Span::current();
                     executor.cpu_pool().install(|| {
+                        let _parent = parent_span.enter();
+                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
+                        let _entered = span.enter();
                         let _ = transactions
                             .into_par_iter()
                             .enumerate()
+                            // Feed the ordered commit loop before recovering distant transactions.
+                            .by_exponential_blocks()
                             .try_for_each(|(idx, tx)| {
+                                let _parent = span.enter();
+                                let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
                                 let tx = convert.convert(tx).map(WithTxEnv::new);
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
@@ -336,7 +359,11 @@ where
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
+                    let parent_span = Span::current();
                     executor.cpu_pool().install(move || {
+                        let _parent = parent_span.enter();
+                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
+                        let _entered = span.enter();
                         loop {
                             let chunk = iter
                                 .by_ref()
@@ -352,6 +379,8 @@ where
                                 .into_par_iter()
                                 .map(|(i, tx)| {
                                     let idx = i + prefetch;
+                                    let _parent = span.enter();
+                                    let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
                                     (idx, tx)
                                 })
@@ -386,13 +415,13 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         transactions: Option<
-            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + 'static)>,
+            mpsc::Receiver<(usize, impl ExecutableTxFor<Evm> + Clone + Send + Sync + 'static)>,
         >,
         state_provider_factory: OverlayStateProviderFactory<P, Evm::Primitives>,
         hint_stream: Option<StateRootHintStream>,
         hashed_update_stream: Option<StateRootUpdateStream>,
         parallel_bal_execution: bool,
-    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt>
+    ) -> CacheTaskHandle<<Evm::Primitives as NodePrimitives>::Receipt, HaltReasonFor<Evm>>
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: BlockNumReader
@@ -418,6 +447,16 @@ where
         };
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
+        // Reused results replace whole transaction executions, which is only equivalent for
+        // configurations that opt in, without block access lists and EIP-8037 multidimensional
+        // block gas.
+        let prewarm_results = (self.reuse_prewarm_results &&
+            matches!(mode, PrewarmMode::Transactions { .. }) &&
+            env.decoded_bal.is_none() &&
+            cfg_reuses_prewarm_results(&env.evm_env.cfg_env) &&
+            self.evm_config.reuses_prewarm_results())
+        .then(|| Arc::new(PrewarmResults::new(env.transaction_count)));
+
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -435,6 +474,7 @@ where
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
+            prewarm_results: prewarm_results.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) =
@@ -450,6 +490,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            prewarm_results,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -543,6 +584,9 @@ where
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
+        let _span =
+            trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx)
+                .entered();
         let tx = convert.convert(raw_tx);
         let failed = tx.is_err();
         let tx = tx.map(WithTxEnv::new);
@@ -560,17 +604,18 @@ where
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive `BundleState`.
+/// caching task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err, R> {
-    prewarm_handle: CacheTaskHandle<R>,
+pub struct PayloadHandle<Tx, Err, R, H> {
+    prewarm_handle: CacheTaskHandle<R, H>,
     /// Stream of block transactions and their indices in the block.
     transactions: IndexedTxReceiver<Tx, Err>,
     /// Span for tracing
     _span: Span,
 }
 
-impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
+impl<Tx, Err, R: Send + Sync + 'static, H> PayloadHandle<Tx, Err, R, H> {
     /// Returns a clone of the caches used by prewarming
     pub fn caches(&self) -> Option<ExecutionCache> {
         self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
@@ -587,6 +632,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// prewarm workers can skip transactions that have already been processed.
     pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
         &self.prewarm_handle.executed_tx_index
+    }
+
+    /// Returns the transaction prewarming results that execution may reuse, if enabled.
+    pub(crate) fn prewarm_results(&self) -> Option<Arc<PrewarmResults<H>>> {
+        self.prewarm_handle.prewarm_results.clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -624,9 +674,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive `BundleState`.
+/// prewarm task without cloning the expensive `BundleState`, and over `H` (halt reason) of the
+/// prewarm results that execution may reuse.
 #[derive(Debug)]
-pub struct CacheTaskHandle<R> {
+pub struct CacheTaskHandle<R, H> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
@@ -634,11 +685,13 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Transaction prewarming results that execution may reuse.
+    prewarm_results: Option<Arc<PrewarmResults<H>>>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
 
-impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
+impl<R: Send + Sync + 'static, H> CacheTaskHandle<R, H> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -669,7 +722,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     }
 }
 
-impl<R> Drop for CacheTaskHandle<R> {
+impl<R, H> Drop for CacheTaskHandle<R, H> {
     fn drop(&mut self) {
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
@@ -683,6 +736,7 @@ impl<R> Drop for CacheTaskHandle<R> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::tree::{
         payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
         PayloadExecutionCache, SavedCache, TreeConfig,
@@ -690,12 +744,23 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{Address, B256, U256};
+    use proptest::{
+        prelude::any,
+        test_runner::{Config, TestRunner},
+    };
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_revm::db::BundleState;
     use revm::state::AccountInfo;
-    use std::sync::{atomic::Ordering, Arc};
+    use std::{
+        collections::HashSet,
+        process::Command,
+        sync::{atomic::Ordering, Arc, Mutex},
+    };
+    use tracing_subscriber::{
+        filter::LevelFilter, layer::SubscriberExt, registry::LookupSpan, Registry,
+    };
 
     type TestTx = reth_evm::execute::WithTxEnv<
         reth_evm::TxEnvFor<EthEvmConfig>,
@@ -836,10 +901,11 @@ mod tests {
                 false,
             );
             let handle = super::PayloadHandle {
-                prewarm_handle: super::CacheTaskHandle::<()> {
+                prewarm_handle: super::CacheTaskHandle::<(), ()> {
                     saved_cache: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
+                    prewarm_results: None,
                     cache_metrics: None,
                 },
                 transactions: receiver,
@@ -869,7 +935,7 @@ mod tests {
     #[test]
     fn execution_cache_allows_single_checkout() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([1u8; 32]);
+        let hash = B256::repeat_byte(1u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
@@ -888,7 +954,7 @@ mod tests {
     #[test]
     fn execution_cache_checkout_releases_on_drop() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([2u8; 32]);
+        let hash = B256::repeat_byte(2u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
@@ -905,13 +971,13 @@ mod tests {
     #[test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
         let execution_cache = PayloadExecutionCache::default();
-        let hash = B256::from([3u8; 32]);
+        let hash = B256::repeat_byte(3u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
         // When the parent hash doesn't match (fork block), the cache is cleared,
         // hash updated on the original, and clone returned for reuse
-        let different_hash = B256::from([4u8; 32]);
+        let different_hash = B256::repeat_byte(4u8);
         let cache = execution_cache.get_cache_for(different_hash);
         assert!(cache.is_some(), "cache should be returned for reuse after clearing");
 
@@ -926,7 +992,7 @@ mod tests {
     #[test]
     fn execution_cache_update_after_release_succeeds() {
         let execution_cache = PayloadExecutionCache::default();
-        let initial = B256::from([5u8; 32]);
+        let initial = B256::repeat_byte(5u8);
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
 
@@ -935,7 +1001,7 @@ mod tests {
 
         drop(guard);
 
-        let updated = B256::from([6u8; 32]);
+        let updated = B256::repeat_byte(6u8);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));
 
         let new_checkout = execution_cache.get_cache_for(updated);
@@ -951,8 +1017,8 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
-        let parent_hash = B256::from([1u8; 32]);
-        let block_hash = B256::from([10u8; 32]);
+        let parent_hash = B256::repeat_byte(1u8);
+        let block_hash = B256::repeat_byte(10u8);
         let block_with_parent = BlockWithParent {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
@@ -981,14 +1047,14 @@ mod tests {
         );
 
         // Setup: populate cache with block 1
-        let block1_hash = B256::from([1u8; 32]);
+        let block1_hash = B256::repeat_byte(1u8);
         payload_processor
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
         // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
-        let wrong_parent = B256::from([99u8; 32]);
-        let block3_hash = B256::from([3u8; 32]);
+        let wrong_parent = B256::repeat_byte(99u8);
+        let block3_hash = B256::repeat_byte(3u8);
         let block_with_parent = BlockWithParent {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
@@ -1015,7 +1081,7 @@ mod tests {
             PrecompileCacheMap::default(),
         );
 
-        let parent_hash = B256::from([1u8; 32]);
+        let parent_hash = B256::repeat_byte(1u8);
         payload_processor
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(parent_hash)));
@@ -1037,7 +1103,7 @@ mod tests {
                     nonce: 7,
                     code_hash: KECCAK_EMPTY,
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 },
             )
             .build();
@@ -1045,7 +1111,7 @@ mod tests {
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
         // the in-use guard specifically.
         let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: B256::from([2u8; 32]), number: 2 },
+            block: BlockNumHash { hash: B256::repeat_byte(2u8), number: 2 },
             parent: parent_hash,
         };
 
@@ -1080,12 +1146,12 @@ mod tests {
         let execution_cache = PayloadExecutionCache::default();
 
         // Canonical chain at block 4.
-        let block4_hash = B256::from([4u8; 32]);
+        let block4_hash = B256::repeat_byte(4u8);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(block4_hash)));
 
         // Fork block arrives with parent = block 2. Prewarm task checks out the cache.
         // This simulates PrewarmCacheTask receiving a SavedCache clone from get_cache_for.
-        let fork_parent = B256::from([2u8; 32]);
+        let fork_parent = B256::repeat_byte(2u8);
         let prewarm_cache = execution_cache.get_cache_for(fork_parent);
         assert!(prewarm_cache.is_some(), "prewarm should obtain cache for fork block");
         let prewarm_cache = prewarm_cache.unwrap();
@@ -1093,8 +1159,8 @@ mod tests {
 
         // Prewarm populates cache with fork-specific state (ancestor data for block 2).
         // Since ExecutionCache uses Arc<Inner>, this data is shared with the stored original.
-        let fork_addr = Address::from([0xBB; 20]);
-        let fork_key = B256::from([0xCC; 32]);
+        let fork_addr = Address::repeat_byte(0xBB);
+        let fork_key = B256::repeat_byte(0xCC);
         prewarm_cache.cache().insert_storage(fork_addr, fork_key, Some(U256::from(999)));
 
         // While prewarm holds the clone, the cache handle count > 1 so the cache is in use.
@@ -1120,5 +1186,119 @@ mod tests {
             block4_hash,
             "cache must carry the canonical parent hash, not the fork parent"
         );
+    }
+
+    #[test]
+    fn transaction_conversion_has_child_spans() {
+        // Worker threads use the global subscriber. Isolate it from other tests and run each
+        // filter level in a fresh process so filtered child spans also exercise context fallback.
+        const LEVEL_ENV: &str = "RETH_TEST_CONVERSION_SPAN_LEVEL";
+        let Ok(level) = std::env::var(LEVEL_ENV) else {
+            for level in ["trace", "debug", "info"] {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "tree::payload_processor::tests::transaction_conversion_has_child_spans",
+                        "--nocapture",
+                    ])
+                    .env(LEVEL_ENV, level)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{level}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        };
+        let level = level.parse::<LevelFilter>().unwrap();
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(level))
+            .unwrap();
+        let processor = test_processor();
+
+        // Exercise both sides of the sequential cutoff and the first parallel window, as well
+        // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
+        for count in [0, 1, 29, 30, 68, 69] {
+            for bal in [false, true] {
+                assert_conversion_spans(&processor, count, bal, level);
+            }
+        }
+        TestRunner::new(Config::with_cases(32))
+            .run(&(0..200usize, any::<bool>()), |(count, bal)| {
+                assert_conversion_spans(&processor, count, bal, level);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn assert_conversion_spans(
+        processor: &PayloadProcessor<EthEvmConfig>,
+        count: usize,
+        bal: bool,
+        level: LevelFilter,
+    ) {
+        let request = tracing::info_span!(parent: None, "request");
+        let _entered = request.enter();
+        // Retain the spans so registry IDs cannot be recycled between conversions.
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let converted = observed.clone();
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), move |idx| {
+                converted.lock().unwrap().push((idx, Span::current()));
+                Ok::<_, std::io::Error>(converted_tx())
+            }),
+            count,
+            bal,
+            false,
+        );
+        let mut indices = Vec::new();
+        loop {
+            match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok((idx, tx)) => {
+                    assert!(tx.is_ok());
+                    indices.push(idx);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(err) => panic!("conversion did not terminate: {err}"),
+            }
+        }
+        if bal {
+            indices.sort_unstable();
+        }
+        assert_eq!(indices, (0..count).collect::<Vec<_>>());
+        let observed = observed.lock().unwrap();
+        assert_eq!(observed.len(), count);
+        let mut transaction_ids = HashSet::new();
+        for (idx, span) in observed.iter() {
+            let scope = span
+                .with_subscriber(|(id, dispatch)| {
+                    dispatch
+                        .downcast_ref::<Registry>()
+                        .unwrap()
+                        .span(id)
+                        .unwrap()
+                        .scope()
+                        .from_root()
+                        .map(|span| (span.id(), span.name()))
+                        .collect::<Vec<_>>()
+                })
+                .expect("conversion lost its request context");
+            assert_eq!(Some(scope[0].0.clone()), request.id());
+            let mut expected = vec!["request"];
+            if level >= LevelFilter::DEBUG {
+                expected.push("spawn_tx_iterator");
+                expected.push("tx_iterator");
+                if count >= 30 && (bal || *idx >= 4) {
+                    expected.push("convert_transactions");
+                }
+            }
+            if level == LevelFilter::TRACE {
+                expected.push("convert_transaction");
+                assert!(transaction_ids.insert(span.id().unwrap()), "reused a transaction span");
+            }
+            assert_eq!(scope.iter().map(|(_, name)| *name).collect::<Vec<_>>(), expected);
+        }
     }
 }

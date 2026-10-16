@@ -73,6 +73,9 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Configures the state root walker to visit all children of changed branch paths.
+    ///
+    /// When updates are retained, also removes stored descendants hidden by a changed branch's
+    /// tree mask. Regenerated branch updates take precedence over these deletions.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -266,7 +269,7 @@ where
             // no intermediate state, create new hash builder and node iter for state root
             // calculation
             let hash_builder = HashBuilder::default().with_updates(retain_updates);
-            let walker = TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)
+            let walker = TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)?
                 .with_walk_all_changed_branch_children(self.walk_all_changed_branch_children)
                 .with_deletions_retained(retain_updates);
             let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
@@ -586,6 +589,9 @@ impl<T, H> StorageRoot<T, H> {
     }
 
     /// Configures the storage root walker to visit all children of changed branch paths.
+    ///
+    /// When updates are retained, also removes stored descendants hidden by a changed branch's
+    /// tree mask. Regenerated branch updates take precedence over these deletions.
     pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
         self
@@ -820,7 +826,7 @@ where
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
-                let walker = TrieWalker::storage_trie(trie_cursor, prefix_set)
+                let walker = TrieWalker::storage_trie(trie_cursor, prefix_set)?
                     .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
                     .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);

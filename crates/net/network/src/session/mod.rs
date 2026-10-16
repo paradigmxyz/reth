@@ -18,7 +18,10 @@ use crate::{
 use active::QueuedOutgoingMessages;
 use alloy_primitives::map::{FbBuildHasher, HashMap};
 use counter::SessionCounter;
-use futures::{future::Either, io, FutureExt, StreamExt};
+use futures::{
+    future::{self, Either},
+    io, stream, FutureExt, StreamExt,
+};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
@@ -45,7 +48,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, watch},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
@@ -1256,21 +1259,30 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             }
         }
     } else {
-        // Multiplex the stream with the extra protocols
         let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
+        let (protocol_start, protocol_ready) = watch::channel(false);
 
-        // install additional handlers
+        // Register bounded inbound queues and frame limits before reading early satellite frames.
+        // The application callbacks stay dormant until the eth Status handshake succeeds.
         for handler in extra_handlers.into_iter() {
             let protocol = handler.protocol();
             let limits = handler.inbound_limits();
             let remote_peer_id = authenticated_peer_id;
-
-            // The unsupported-handler pass above guarantees that every remaining handler has a
-            // matching negotiated capability. The multiplexer retains the same immutable set of
-            // shared capabilities, so installing one of these handlers cannot fail.
+            let mut protocol_ready = protocol_ready.clone();
+            // The unsupported-handler pass guarantees a matching negotiated capability. The
+            // multiplexer retains that immutable capability set, so installation cannot fail.
             multiplex_stream
                 .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
-                    handler.into_connection(direction, remote_peer_id, conn)
+                    stream::once(async move {
+                        // A closed gate means authentication failed and the connection is dropped.
+                        protocol_ready
+                            .wait_for(|started| *started)
+                            .await
+                            .is_ok()
+                            .then(|| handler.into_connection(direction, remote_peer_id, conn))
+                    })
+                    .filter_map(future::ready)
+                    .flatten()
                 })
                 .expect("remaining handler capability was negotiated");
         }
@@ -1289,6 +1301,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 }
             }
         };
+        protocol_start.send_replace(true);
 
         (multiplex_stream.into(), their_status)
     };

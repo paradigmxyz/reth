@@ -462,9 +462,7 @@ where
 impl<Provider, N: NodePrimitives> BlockHashReader for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: BlockHashReader
-        + DBProvider
-        + Sized
+    Provider::Target: DBProvider
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -516,7 +514,11 @@ where
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
-        self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.provider()
+            .tx()
+            .prefetch(true)
+            .get_by_encoded_key::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
     }
 }
 
@@ -787,7 +789,6 @@ where
     Provider: Deref,
     Provider::Target: DBProvider
         + HistoryReader
-        + BlockHashReader
         + StorageSettingsCache
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -1047,8 +1048,8 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
-        updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
-        HashedStorage, Nibbles,
+        updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+        SortedTrieData,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1076,7 +1077,7 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::clone(&block.execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
         )
     }
 
@@ -1300,6 +1301,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn historical_execution_reads_use_history_indexes() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
@@ -1317,7 +1319,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()

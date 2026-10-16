@@ -16,11 +16,7 @@ workspace = true
 reth-e2e-test-utils.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 
-# ethereum
-alloy-rpc-types-engine.workspace = true
-
 # async
-tokio.workspace = true
 futures-util.workspace = true
 
 # misc
@@ -37,6 +33,7 @@ reth-tracing.workspace = true
 reth-chainspec.workspace = true
 reth-node-ethereum.workspace = true
 alloy-genesis.workspace = true
+tokio.workspace = true
 
 [[test]]
 name = "e2e_testsuite"

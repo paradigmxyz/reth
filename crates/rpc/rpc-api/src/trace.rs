@@ -69,7 +69,7 @@ pub trait TraceApi<TxReq> {
 
     /// Returns traces matching given filter.
     ///
-    /// This is similar to `eth_getLogs` but for traces.
+    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest.
     #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 

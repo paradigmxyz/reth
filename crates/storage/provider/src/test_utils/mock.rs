@@ -27,7 +27,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -483,7 +483,7 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
@@ -504,6 +504,16 @@ impl ExtendedAccount {
         storage: impl IntoIterator<Item = (StorageKey, StorageValue)>,
     ) -> Self {
         self.storage.extend(storage);
+        self
+    }
+
+    /// Sets the account extension.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(
+        mut self,
+        extension: impl Into<reth_primitives_traits::AccountExtension>,
+    ) -> Self {
+        self.account.extension = extension.into();
         self
     }
 }
@@ -585,7 +595,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderProvider
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HeaderProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Header = <T::Block as Block>::Header;
@@ -637,7 +647,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 impl<T, ChainSpec> ChainSpecProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + 'static + Debug + Send + Sync,
+    ChainSpec: EthChainSpec + 'static,
 {
     type ChainSpec = ChainSpec;
 
@@ -909,7 +919,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync + 'static> BlockNumReader
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockIdReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockIdReader
     for MockEthProvider<T, ChainSpec>
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
@@ -926,7 +936,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockId
 }
 
 //look
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> BlockReader
     for MockEthProvider<T, ChainSpec>
 {
     type Block = T::Block;
@@ -949,13 +959,13 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<T::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
         Ok(None)
     }
 
@@ -1011,7 +1021,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
 impl<T, ChainSpec> BlockReaderIdExt for MockEthProvider<T, ChainSpec>
 where
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
     T: NodePrimitives,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<T::Block>> {
@@ -1194,7 +1204,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 impl<T, ChainSpec> StateProvider for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + 'static,
 {
     fn storage(
         &self,
@@ -1234,7 +1244,7 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
     fn set_storage_settings_cache(&self, _settings: StorageSettings) {}
 }
 
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
+impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
     type Primitives = T;
