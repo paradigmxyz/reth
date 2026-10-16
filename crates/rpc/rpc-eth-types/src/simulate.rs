@@ -9,6 +9,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{Log, LogData};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
@@ -31,6 +32,7 @@ use revm::{
     primitives::{hardfork::SpecId, Address, Bytes, TxKind, U256},
     Database,
 };
+use revm_inspectors::transfer::{TransferInspector, TRANSFER_EVENT_TOPIC, TRANSFER_LOG_EMITTER};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -308,9 +310,12 @@ pub fn apply_precompile_overrides(
 /// execution. This matches the spec rule `"gasLimit: blockGasLimit - soFarUsedGasInBlock"` and
 /// geth's per-call `sanitizeCall` behavior.
 ///
+/// `process_result` runs after each transaction and only modifies the cloned RPC result, leaving
+/// the block builder's receipts unchanged.
+///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-#[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn execute_transactions<S, T, F>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
@@ -318,6 +323,7 @@ pub fn execute_transactions<S, T>(
     chain_id: u64,
     compute_state_root: bool,
     converter: &T,
+    mut process_result: F,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -332,6 +338,10 @@ where
         >,
     >,
     T: RpcConvert<Primitives = S::Primitives>,
+    F: FnMut(
+        &<<S::Executor as BlockExecutor>::Evm as Evm>::Inspector,
+        &mut ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+    ),
 {
     builder.apply_pre_execution_changes()?;
 
@@ -398,6 +408,10 @@ where
             tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        if let Some(result) = results.last_mut() {
+            process_result(builder.evm().inspector(), result);
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
@@ -585,6 +599,43 @@ where
         |header, block_size| converter.convert_header(header, Some(block_size)),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
+}
+
+/// Appends newly collected ETH transfers to the cloned RPC result, leaving receipts unchanged.
+///
+/// `next_transfer` is a cursor into this inspector's transfers and must be retained between
+/// transactions. Failed transactions advance it without adding logs. Zero-value transfers are
+/// omitted. The inspector's transfer order is preserved, but it does not retain contract-log
+/// positions or roll back transfers from reverted nested calls. It also reports `CALLCODE` as
+/// self-transfers.
+pub fn append_transfer_logs<HaltReasonTy>(
+    inspector: &TransferInspector,
+    result: &mut ExecutionResult<HaltReasonTy>,
+    next_transfer: &mut usize,
+) {
+    let transfers = inspector.transfers();
+    if *next_transfer >= transfers.len() {
+        return
+    }
+
+    if let ExecutionResult::Success { logs, .. } = result {
+        logs.extend(
+            transfers[*next_transfer..].iter().filter(|transfer| !transfer.value.is_zero()).map(
+                |transfer| Log {
+                    address: TRANSFER_LOG_EMITTER,
+                    data: LogData::new_unchecked(
+                        vec![
+                            TRANSFER_EVENT_TOPIC,
+                            transfer.from.into_word(),
+                            transfer.to.into_word(),
+                        ],
+                        transfer.value.to_be_bytes::<32>().into(),
+                    ),
+                },
+            ),
+        );
+    }
+    *next_transfer = transfers.len();
 }
 
 #[cfg(test)]
