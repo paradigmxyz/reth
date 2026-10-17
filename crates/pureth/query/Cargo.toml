@@ -14,19 +14,35 @@ reth-ethereum-primitives.workspace = true
 reth-provider.workspace = true
 reth-pureth-receipt.workspace = true
 reth-pureth-ssz.workspace = true
+pureth-withdrawal-root.workspace = true
+reth-pureth-block.workspace = true
+reth-pureth-transaction.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
 ethereum_ssz.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-alloy-rpc-types-eth.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
+reth-primitives-traits.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
-alloy-consensus.workspace = true
-reth-primitives-traits.workspace = true
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-evm.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+reth-db-api.workspace = true
+reth-db-common.workspace = true
+reth-chain-state = { workspace = true, features = ["test-utils"] }
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-revm.workspace = true
+reth-pureth-block = { workspace = true, features = ["native-source"] }
+revm.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-pureth-receipt = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

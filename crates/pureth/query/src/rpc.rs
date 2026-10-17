@@ -169,14 +169,41 @@ mod tests {
         assert_eq!(response.selection.results[1].values_ssz[0].as_ref(), &[0x22; 32]);
         assert_eq!(response.selection.results[2].values_ssz[0].as_ref(), &[0x02, 0x03]);
         let json = serde_json::to_string(&response).unwrap();
-        for obsolete in ["schema_id", "producer_revision", "gindex", "merkle_branch_v0"] {
+        for obsolete in ["gindex", "schema_id", "producer_revision", "merkle_branch_v0"] {
             assert!(!json.contains(obsolete));
         }
         let mut changed = response;
-        changed.selection.results[0].witnesses.as_mut().unwrap()[0].branch[0][0] ^= 1;
+        changed.selection.multiproof.as_mut().unwrap().helpers[0][0] ^= 1;
         assert!(
             verify_query_response(&request, &changed, root, SelectionLimits::default()).is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn installed_rpc_filters_and_proves_no_match_results() {
+        use crate::{FilterOutput, FilterPredicate};
+        let module = module();
+        let mut request = request(MULTIPLE_LOGS_BLOCK_HASH);
+        request.selection.selections = vec![ReceiptSelection {
+            path: ".".into(),
+            operation: SelectionOperation::Filter {
+                output: FilterOutput::Logs,
+                predicates: vec![FilterPredicate::LogAddress {
+                    address: alloy_primitives::Address::ZERO,
+                }],
+            },
+        }];
+        let result = call(&module, serde_json::to_value(&request).unwrap()).await;
+        let response: QueryResponse = serde_json::from_value(result["result"].clone()).unwrap();
+        let provider = reth_pureth_receipt::DeterministicProvider::new().unwrap();
+        let snapshot = provider
+            .lookup(MULTIPLE_LOGS_BLOCK_HASH, reth_pureth_receipt::ObjectKind::Receipts)
+            .unwrap();
+        verify_query_response(&request, &response, snapshot.root(), SelectionLimits::default())
+            .unwrap();
+        assert!(response.selection.results[0].values_ssz.is_empty());
+        assert_eq!(response.selection.results[0].matches, Some(Vec::new()));
+        assert!(response.selection.multiproof.is_some());
     }
 
     #[tokio::test]
@@ -249,6 +276,7 @@ mod tests {
         }
         for error in [
             HistoricalAcquisitionError::BlockRead(ProviderError::InvalidStorageOutput),
+            HistoricalAcquisitionError::ReceiptsRead(ProviderError::InvalidStorageOutput),
             HistoricalAcquisitionError::ConsistentView(ProviderError::BlockExpired {
                 requested: 1,
                 earliest_available: 2,

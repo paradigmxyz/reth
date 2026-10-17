@@ -38,6 +38,31 @@ fn deterministic_cases_join_the_exact_stored_eip_snapshot() {
 }
 
 #[test]
+fn filters_use_the_existing_service_and_validate_predicates_before_lookup() {
+    use crate::{FilterOutput, FilterPredicate};
+    let provider = DeterministicProvider::new().unwrap();
+    let snapshot = provider.lookup(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+    let mut query = request(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ".");
+    query.selection.selections[0].operation =
+        SelectionOperation::Filter { output: FilterOutput::Receipts, predicates: Vec::new() };
+    let response = query_snapshot(&query, snapshot, SelectionLimits::default()).unwrap();
+    assert_eq!(
+        response.selection.results[0].values_ssz.len(),
+        snapshot.receipt_snapshot().receipts().len()
+    );
+    verify_query_response(&query, &response, snapshot.root(), SelectionLimits::default()).unwrap();
+    query.block_hash = B256::ZERO;
+    query.selection.selections[0].operation = SelectionOperation::Filter {
+        output: FilterOutput::Logs,
+        predicates: vec![FilterPredicate::GasUsed { min: 2, max: 1 }],
+    };
+    assert!(matches!(
+        QueryService::new().unwrap().query(query),
+        Err(QueryError::Selection(SelectionError::OutOfBounds))
+    ));
+}
+
+#[test]
 fn historical_query_uses_eip_tree_and_preserves_source_context() {
     let (provider, hash) = test_utils::historical_provider(Some(test_utils::singleton_receipts()));
     let service = QueryService::from_blockchain_provider(provider);
@@ -158,12 +183,8 @@ fn response_verification_rejects_wrong_identity_values_roots_and_witnesses() {
                 changed.selection.results[0].values_ssz[0] =
                     alloy_primitives::Bytes::from(vec![0; 20])
             }
-            6 => changed.selection.results[0].witnesses.as_mut().unwrap()[0].node[0] ^= 1,
-            _ => changed.selection.results[0]
-                .witnesses
-                .as_mut()
-                .unwrap()
-                .push(crate::SelectionWitness { node: B256::ZERO, branch: vec![] }),
+            6 => changed.selection.multiproof.as_mut().unwrap().targets[0][0] ^= 1,
+            _ => changed.selection.multiproof.as_mut().unwrap().helpers.push(B256::ZERO),
         }
         assert!(
             verify_query_response(&request, &changed, root, SelectionLimits::default()).is_err()
