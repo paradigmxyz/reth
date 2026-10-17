@@ -213,7 +213,7 @@ where
             }
         }
 
-        session.select(&provider, head, self.context.finalized())?;
+        session.select(&provider, head, self.context.finalized()?)?;
         let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
@@ -323,7 +323,7 @@ where
             info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
-        let generation = self.policy.select(&provider, head, self.context.finalized())?;
+        let generation = self.policy.select(&provider, head, self.context.finalized()?)?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
         // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
@@ -355,7 +355,7 @@ where
         let provider = self.factory.database_provider_rw()?;
         let from = self.pivot()?;
         let Some(advanced) =
-            self.session.advance(&provider, write, head, self.context.finalized())?
+            self.session.advance(&provider, write, head, self.context.finalized()?)?
         else {
             return Ok(write)
         };
@@ -555,13 +555,16 @@ pub trait SnapSyncContext: Send {
     /// Highest block whose canonical header is downloaded.
     fn head(&self) -> Result<u64, SnapSyncError>;
 
-    /// Latest finalized block, preferred as the pivot when recent enough.
-    fn finalized(&self) -> Option<u64> {
-        None
+    /// Latest finalized block, preferred as the pivot when recent enough. `None` if no finalized
+    /// block is known locally yet.
+    fn finalized(&self) -> Result<Option<u64>, SnapSyncError> {
+        Ok(None)
     }
 
-    /// Waits until the head moves past `head` or new peers connect, returning `false` once no
-    /// further progress will come.
+    /// Waits for a reason to retry the stalled step and returns `true` if one came, such as new
+    /// peers connecting or a retry delay passing. Returns `false` if the run should stop instead,
+    /// so the caller can refresh its headers, as when a new target arrived or the source of
+    /// targets is gone.
     fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
 }
 
