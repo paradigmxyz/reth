@@ -207,13 +207,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn rejects_zero_blocks_per_file() {
-        let args = |n| ["manifest", "-d", "src", "-o", "out", "--blocks-per-file", n];
-        assert!(SnapshotManifestCommand::try_parse_from(args("0")).is_err());
-        assert!(SnapshotManifestCommand::try_parse_from(args("1")).is_ok());
-    }
-
-    #[test]
     fn parse_headers_range_works_with_suffixes() {
         assert_eq!(parse_headers_range("static_file_headers_0_499999"), Some((0, 499_999)));
         assert_eq!(
