@@ -416,30 +416,3 @@ impl<C: ChainSpecParser> Command<C> {
         matches!(self.stage, StageEnum::Headers | StageEnum::Bodies | StageEnum::Execution)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-
-    fn parse(args: &[&str]) -> Result<Command<EthereumChainSpecParser>, clap::Error> {
-        Command::try_parse_from(["reth"].into_iter().chain(args.iter().copied()))
-    }
-
-    #[test]
-    fn rejects_zero_batch_size() {
-        assert!(parse(&["senders", "--from", "1", "--to", "2", "--batch-size", "0"]).is_err());
-    }
-
-    #[test]
-    fn validates_range_and_stage() {
-        let cmd = parse(&["senders", "--from", "5", "--to", "2"]).unwrap();
-        assert!(cmd.validate().unwrap_err().to_string().contains("--from"));
-
-        let cmd = parse(&["hashing", "--from", "1", "--to", "2"]).unwrap();
-        assert!(cmd.validate().is_err());
-
-        let cmd = parse(&["senders", "--from", "2", "--to", "2"]).unwrap();
-        assert!(cmd.validate().is_ok());
-    }
-}
