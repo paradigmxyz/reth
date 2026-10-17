@@ -10,10 +10,10 @@ use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
-    StateRoot,
+    HashedPostStateSorted, StateRoot,
 };
-use reth_trie_common::updates::TrieUpdatesSorted;
-use std::ops::RangeInclusive;
+use reth_trie_common::{updates::TrieUpdatesSorted, TrieInputSorted};
+use std::{iter::once, ops::RangeInclusive, sync::Arc};
 use tracing::debug;
 
 /// Computes trie changesets for a block.
@@ -38,6 +38,7 @@ where
     compute_range_trie_changesets(
         provider,
         state_trie_provider,
+        &[],
         block_number..=block_number,
         db_tip_block,
     )
@@ -45,8 +46,12 @@ where
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
-/// The returned changesets restore the trie from the state after `range.end()` to the state before
-/// `range.start()`. `db_tip_block` must be the current database tip for `provider`.
+/// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
+///
+/// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
+/// strictly increasing block number. Consecutive available blocks are reverted together, preserving
+/// forward paths omitted by the aggregate calculation. Missing blocks are reverted individually so
+/// transient nodes are retained.
 ///
 /// # Errors
 ///
@@ -55,6 +60,7 @@ where
 pub fn compute_range_trie_changesets<Provider, StateTrieProvider>(
     provider: &Provider,
     state_trie_provider: &StateTrieProvider,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
     range: RangeInclusive<BlockNumber>,
     db_tip_block: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
@@ -62,12 +68,17 @@ where
     Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
     StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
 {
-    let start_block = *range.start();
-    let end_block = *range.end();
+    debug_assert!(
+        forward_updates.is_sorted_by(|(a, _), (b, _)| a < b),
+        "forward updates must have strictly increasing block numbers"
+    );
 
-    if start_block > end_block {
+    if range.is_empty() {
         return Ok(TrieUpdatesSorted::default())
     }
+
+    let start_block = *range.start();
+    let end_block = *range.end();
 
     if end_block > db_tip_block {
         return Err(ProviderError::InsufficientChangesets {
@@ -84,67 +95,126 @@ where
         "Computing range trie changesets from database state"
     );
 
-    // Collect the state revert for the requested range.
-    let range_state_revert = reth_trie::HashedPostStateSorted::from_reverts(provider, range)?;
-    let range_prefix_sets = range_state_revert.construct_prefix_sets();
-
-    let (range_nodes, range_state) = if end_block == db_tip_block {
-        debug!(
-            target: "trie::changesets",
-            start_block,
-            end_block,
-            db_tip_block,
-            "Skipping tail trie revert computation for tip-ended range"
-        );
-
-        (TrieUpdatesSorted::default(), range_state_revert)
-    } else {
-        // Collect the state revert from the database tip to just after the range.
-        let tail_state_revert = end_block
-            .checked_add(1)
-            .map(|next_block| {
-                reth_trie::HashedPostStateSorted::from_reverts(provider, next_block..)
-            })
-            .transpose()?
-            .unwrap_or_default();
-
-        // Compute trie reverts from the database tip to just after the range.
-        let tail_prefix_sets = tail_state_revert.construct_prefix_sets().freeze();
-        let tail_trie_revert = StateRoot::new(
+    let mut overlay = TrieInputSorted::default();
+    // Rewind later blocks to reconstruct the trie at the end of the requested range.
+    if end_block < db_tip_block {
+        rewind_trie_range(
+            provider,
             state_trie_provider,
-            HashedPostStateCursorFactory::new(state_trie_provider, &tail_state_revert),
-        )
-        .with_prefix_sets(tail_prefix_sets)
-        .root_with_updates()
-        .map_err(ProviderError::other)?
-        .1
-        .into_sorted();
+            forward_updates,
+            (end_block + 1)..=db_tip_block,
+            &mut overlay,
+            &mut None,
+        )?;
+    }
 
-        // Overlay the post-range trie and compute the trie revert to the pre-range state.
-        let mut pre_range_state_revert = tail_state_revert;
-        pre_range_state_revert.extend_ref_and_sort(&range_state_revert);
-
-        (tail_trie_revert, pre_range_state_revert)
-    };
-
-    let range_trie_revert = StateRoot::new(
-        InMemoryTrieCursorFactory::new(state_trie_provider, &range_nodes),
-        HashedPostStateCursorFactory::new(state_trie_provider, &range_state),
-    )
-    .with_prefix_sets(range_prefix_sets.freeze())
-    .root_with_updates()
-    .map_err(ProviderError::other)?
-    .1
-    .into_sorted();
+    let mut reverts = Some(TrieUpdatesSorted::default());
+    rewind_trie_range(
+        provider,
+        state_trie_provider,
+        forward_updates,
+        range,
+        &mut overlay,
+        &mut reverts,
+    )?;
+    let reverts = reverts.expect("revert collection is enabled");
 
     debug!(
         target: "trie::changesets",
         start_block,
         end_block,
-        num_account_nodes = range_trie_revert.account_nodes_ref().len(),
-        num_storage_tries = range_trie_revert.storage_tries_ref().len(),
+        num_account_nodes = reverts.account_nodes_ref().len(),
+        num_storage_tries = reverts.storage_tries_ref().len(),
         "Computed range trie changesets successfully"
     );
 
-    Ok(range_trie_revert)
+    Ok(reverts)
+}
+
+/// Rewinds the current state and trie views, accumulating changesets when `reverts` is `Some`.
+fn rewind_trie_range<Provider, StateTrieProvider>(
+    provider: &Provider,
+    state_trie_provider: &StateTrieProvider,
+    forward_updates: &[(BlockNumber, Arc<TrieUpdatesSorted>)],
+    blocks: RangeInclusive<BlockNumber>,
+    overlay: &mut TrieInputSorted,
+    reverts: &mut Option<TrieUpdatesSorted>,
+) -> Result<(), ProviderError>
+where
+    Provider: ChangeSetReader + StorageChangeSetReader + BlockNumReader,
+    StateTrieProvider: TrieCursorFactory + HashedCursorFactory,
+{
+    let mut end = *blocks.end();
+    while end >= *blocks.start() {
+        let mut start = end;
+        let mut segment_range = 0..0;
+
+        // Select updates of consecutive blocks iterating backwards from `end`.
+        // Without the original updates, reverting one block at a time preserves nodes that
+        // appear and disappear inside the range. An endpoint-only calculation would omit them.
+        if let Ok(index) = forward_updates.binary_search_by_key(&end, |(block, _)| *block) {
+            segment_range = index..index + 1;
+            while segment_range.start > 0 && start > *blocks.start() {
+                if forward_updates[segment_range.start - 1].0 != start - 1 {
+                    break
+                }
+                segment_range.start -= 1;
+                start -= 1;
+            }
+        }
+
+        // If binary_search_by_key doesn't find the block then:
+        // * start stays equal to end, so the segment covers just that one block.
+        // * segment_range stays 0..0, making the forward-update iterator empty.
+        // * The code reconstructs that block’s trie reverts from its state changesets and the
+        //   current overlay.
+        // * merge_iter receives only those calculated reverts.
+
+        // Collect reverts for the segment and use them to generate the trie reverts for the
+        // segment.
+        let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
+        let prefixes = segment_state_reverts.construct_prefix_sets().freeze();
+        Arc::make_mut(&mut overlay.state).extend_ref_and_sort(&segment_state_reverts);
+
+        let segment_trie_reverts = StateRoot::new(
+            InMemoryTrieCursorFactory::new(state_trie_provider, overlay.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(state_trie_provider, overlay.state.as_ref()),
+        )
+        .with_prefix_sets(prefixes)
+        .root_with_updates()
+        .map_err(ProviderError::other)?
+        .1
+        .into_sorted();
+
+        // Merging segment_trie_reverts into segment_trie_forward is a semi-hacky way to handle a
+        // particular edge-case:
+        // * Block 5: node N is absent
+        // * Block 6: node N is created
+        // * Block 8: node N is deleted
+        //
+        // In this case if we request reverts for 6..=8 then N wouldn't appear in them, because it
+        // did not undergo any change during the range (started absent, ended absent).
+        //
+        // By merging in the forward trie updates we incorporate N's most recent update which is a
+        // deletion in block 8, therefore deleting it in the reverts as well.
+        //
+        // N will appear in segment_trie_reverts in all other cases; segment_trie_forward only
+        // surfaces updates in this one case.
+        let segment_trie_forward =
+            forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
+        let segment_trie_reverts =
+            TrieUpdatesSorted::merge_iter(once(&segment_trie_reverts).chain(segment_trie_forward));
+
+        Arc::make_mut(&mut overlay.nodes).extend_ref_and_sort(&segment_trie_reverts);
+        if let Some(reverts) = reverts {
+            reverts.extend_ref_and_sort(&segment_trie_reverts);
+        }
+
+        if start == *blocks.start() {
+            break
+        }
+        end = start - 1;
+    }
+
+    Ok(())
 }
