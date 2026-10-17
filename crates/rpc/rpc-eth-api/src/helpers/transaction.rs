@@ -630,13 +630,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 request.as_mut().populate_blob_hashes();
             }
 
-            if request.as_ref().gas_limit().is_none() {
-                let estimated_gas = self
-                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
-                    .await?;
-                request.as_mut().set_gas_limit(estimated_gas.to());
-            }
-
             if request.as_ref().gas_price().is_none() {
                 let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
                     tip
@@ -657,6 +650,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
                     request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
                 }
+            }
+
+            if request.as_ref().gas_limit().is_none() {
+                let estimated_gas = self
+                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
+                    .await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
             }
 
             let tx = self.converter().build_simulate_v1_transaction(request)?;
