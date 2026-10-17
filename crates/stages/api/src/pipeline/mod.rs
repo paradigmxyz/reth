@@ -1290,10 +1290,8 @@ mod tests {
     fn detached_head_unwinds_no_lower_than_genesis() {
         for genesis in [0, 5] {
             let factory = create_test_provider_factory_with_genesis_block_number(genesis);
-            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder().build(
-                factory.clone(),
-                StaticFileProducer::new(factory.clone(), PruneModes::default()),
-            );
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+                .build(factory.clone(), StaticFileProducer::new(factory, PruneModes::default()));
             let block = |number| {
                 Box::new(BlockWithParent {
                     parent: B256::ZERO,
