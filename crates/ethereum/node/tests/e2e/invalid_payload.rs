@@ -4,8 +4,15 @@
 //! state roots) before receiving valid ones, ensuring the node can recover and continue.
 
 use alloy_consensus::proofs::calculate_transaction_root;
-use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
-use alloy_primitives::{bytes, keccak256, Bytes, B256};
+use alloy_eips::{
+    eip2718::Decodable2718,
+    eip7685::RequestsOrHash,
+    eip7928::{
+        AccountChanges, BlockAccessIndex, BlockAccessListChangeKind,
+        BlockAccessListValidationError, NonceChange,
+    },
+};
+use alloy_primitives::{bytes, keccak256, Address, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
@@ -459,6 +466,100 @@ async fn submit_payload_errors_on_invalid_payload() -> eyre::Result<()> {
     let status = node.submit_payload_with_status(invalid).await?;
     assert!(status.is_invalid(), "{status}");
     assert_eq!(status.latest_valid_hash, Some(parent_hash));
+
+    Ok(())
+}
+
+/// Structurally invalid BALs fail before execution in both parallel and sequential modes.
+#[tokio::test]
+async fn invalid_bal_structure_is_invalid_payload() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    for disable_parallel in [false, true] {
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+            .with_tree_config_modifier(move |config| {
+                config.without_bal_parallel_execution(disable_parallel)
+            })
+            .build_single()
+            .await?;
+        let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+        node.rpc.inject_tx(raw_tx).await?;
+        let payload = node.new_payload().await?;
+        let block = payload.block().clone();
+        let envelope = payload.try_into_v6()?;
+        let valid_payload = envelope.execution_payload;
+        let max = BlockAccessIndex::new(block.body().transactions.len() as u64 + 1);
+        let exceeds_block = BlockAccessIndex::new(max.get() + 1);
+        let exceeds_u32 = BlockAccessIndex::new(u64::from(u32::MAX) + 1);
+        let address = Address::ZERO;
+        let cases = [
+            (
+                vec![AccountChanges {
+                    address,
+                    nonce_changes: vec![NonceChange::new(exceeds_block, 1)],
+                    ..Default::default()
+                }],
+                BlockAccessListValidationError::BlockAccessIndexExceedsBlock {
+                    address,
+                    kind: BlockAccessListChangeKind::Nonce,
+                    index: exceeds_block,
+                    max,
+                },
+            ),
+            (
+                vec![AccountChanges {
+                    address,
+                    nonce_changes: vec![NonceChange::new(exceeds_u32, 1)],
+                    ..Default::default()
+                }],
+                BlockAccessListValidationError::BlockAccessIndexOutOfRange {
+                    address,
+                    kind: BlockAccessListChangeKind::Nonce,
+                    index: exceeds_u32,
+                },
+            ),
+            (
+                vec![AccountChanges::new(address), AccountChanges::new(address)],
+                BlockAccessListValidationError::DuplicateAccount { address },
+            ),
+        ];
+        let engine = node.auth_server_handle().http_client();
+        let parent_beacon_block_root = block.header().parent_beacon_block_root.unwrap();
+
+        for (bal, expected_error) in cases {
+            let raw_bal = Bytes::from(alloy_rlp::encode(&bal));
+            let mut header = block.header().clone();
+            header.block_access_list_hash = Some(keccak256(&raw_bal));
+            let mut corrupted = valid_payload.clone();
+            corrupted.block_access_list = raw_bal;
+            corrupted.payload_inner.payload_inner.payload_inner.block_hash = header.hash_slow();
+
+            let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
+                &engine,
+                corrupted,
+                vec![],
+                parent_beacon_block_root,
+                RequestsOrHash::Requests(envelope.execution_requests.clone()),
+            )
+            .await?;
+            assert_eq!(
+                status.status,
+                PayloadStatusEnum::Invalid { validation_error: expected_error.to_string() }
+            );
+            assert_eq!(status.latest_valid_hash, Some(block.parent_hash));
+        }
+
+        // Invalid sidecars must not prevent a subsequent valid payload from being processed.
+        let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v5(
+            &engine,
+            valid_payload,
+            vec![],
+            parent_beacon_block_root,
+            RequestsOrHash::Requests(envelope.execution_requests),
+        )
+        .await?;
+        assert_eq!(status.status, PayloadStatusEnum::Valid);
+    }
 
     Ok(())
 }
