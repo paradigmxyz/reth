@@ -411,15 +411,16 @@ where
         let tracer_interrupt = interrupt.clone();
         let this = self.clone();
         let trace =
-            self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+            self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env, state_overrides| {
                 let mut inspector = tracer_interrupt.attach(
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
-                let res = this.eth_api().inspect(
+                let res = this.eth_api().inspect_with_overrides(
                     &mut *db,
                     evm_env.clone(),
                     tx_env.clone(),
                     &mut inspector,
+                    state_overrides.as_ref(),
                 )?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, db)
@@ -478,14 +479,19 @@ where
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
                 // 2. now execute the trace call on this state
-                let (evm_env, tx_env) =
+                let (evm_env, tx_env, state_overrides) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
                 let mut inspector = tracer_interrupt.attach(
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
                 );
-                let res =
-                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let res = eth_api.inspect_with_overrides(
+                    &mut db,
+                    evm_env.clone(),
+                    tx_env.clone(),
+                    &mut inspector,
+                    state_overrides.as_ref(),
+                )?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -540,6 +546,9 @@ where
             replay_block_txs = false;
         }
 
+        // Kept for every tx: DB overrides apply once, but each inspect builds a fresh EVM.
+        let precompile_overrides = state_overrides.clone();
+
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 // the outer vec for the bundles
@@ -573,14 +582,15 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
+                        let (evm_env, tx_env, _) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        let res = eth_api.inspect(
+                        let res = eth_api.inspect_with_overrides(
                             &mut db,
                             evm_env.clone(),
                             tx_env.clone(),
                             &mut inspector,
+                            precompile_overrides.as_ref(),
                         )?;
                         let trace = inspector
                             .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
