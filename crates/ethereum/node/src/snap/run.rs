@@ -7,12 +7,10 @@ use super::{
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use reth_chainspec::EthChainSpec;
 use reth_errors::RethError;
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ChainSpecProvider,
-    ProviderError, ProviderFactory,
+    providers::ProviderNodeTypes, BlockHashReader, BlockNumReader, ProviderError, ProviderFactory,
 };
 use reth_snap_sync::{SnapBootstrap, SnapBootstrapOutcome, SnapWrite};
 use reth_stages::{
@@ -253,9 +251,7 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<ControlFlow, PipelineError> {
-        let Some((target, ahead)) = self.resolve_target(pipeline, targets).await? else {
-            return Ok(STOPPED)
-        };
+        let Some((target, ahead)) = self.resolve_target(targets).await? else { return Ok(STOPPED) };
         // A stale target never completes the header stage, so the stages run to the local
         // head and the engine follows forkchoice from there.
         let target = if ahead { target } else { self.local_head()? };
@@ -270,7 +266,7 @@ where
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Pass, PipelineError> {
-        let Some((target, ahead)) = self.resolve_target(pipeline, targets).await? else {
+        let Some((target, ahead)) = self.resolve_target(targets).await? else {
             return Ok(Pass::Stopped)
         };
         if !ahead {
@@ -290,52 +286,31 @@ where
         Ok(Pass::Done)
     }
 
-    // Where `target` sits relative to the local headers. The header stage only finishes once it
-    // downloads the block after the local head, so a pass to a sibling or an older block never
-    // completes.
-    async fn position(&self, target: B256) -> Result<TargetPosition, PipelineError> {
+    // Whether `target` is above the local headers, or `None` when no peer serves its header. The
+    // header stage only finishes once it downloads the block after the local head, so a pass to a
+    // sibling or an older block never completes.
+    async fn is_ahead(&self, target: B256) -> Result<Option<bool>, PipelineError> {
         let head = {
             let provider = self.factory.provider()?;
             if provider.block_number(target)?.is_some() {
-                return Ok(TargetPosition::Behind)
+                return Ok(Some(false))
             }
             provider.last_block_number()?
         };
+        let header = self.client.get_header(target.into()).await;
         // A peer may answer with another block's header.
-        let Some(header) = self
-            .client
-            .get_header(target.into())
-            .await
+        Ok(header
             .ok()
             .and_then(|header| header.into_data())
             .filter(|header| header.hash_slow() == target)
-        else {
-            return Ok(TargetPosition::Unavailable)
-        };
-        let next = head + 1;
-        match header.number() {
-            number if number < next => Ok(TargetPosition::Behind),
-            number if number > next => Ok(TargetPosition::Ahead),
-            // A tip-only download bypasses the downloader's batch parent check, so the head's
-            // successor must attach to it.
-            _ if header.parent_hash() == self.local_hash(head)? => Ok(TargetPosition::Ahead),
-            // Unwinding needs a header below the head, which genesis doesn't have.
-            _ if head <= self.factory.chain_spec().genesis_header().number() => Err(
-                PipelineError::Internal(RethError::msg("snap headers do not connect to genesis")),
-            ),
-            _ => Ok(TargetPosition::Detached { unwind_to: head - 1 }),
-        }
+            .map(|header| header.number() > head))
     }
 
     // Returns the hash of the highest local header.
     fn local_head(&self) -> Result<B256, PipelineError> {
-        self.local_hash(self.factory.provider()?.last_block_number()?)
-    }
-
-    // Returns the hash of the local header at `number`.
-    fn local_hash(&self, number: u64) -> Result<B256, PipelineError> {
-        let hash = self.factory.provider()?.block_hash(number)?;
-        Ok(hash.ok_or(ProviderError::HeaderNotFound(number.into()))?)
+        let provider = self.factory.provider()?;
+        let number = provider.last_block_number()?;
+        Ok(provider.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))?)
     }
 
     // Resolves once the refresh interval has passed and forkchoice has moved, or once the
@@ -345,56 +320,28 @@ where
         let _ = targets.changed().await;
     }
 
-    // Resolves after the lookup retry delay or a forkchoice update, or `false` once the backfill
-    // stops.
-    async fn retry_due(&self, targets: &mut watch::Receiver<B256>) -> bool {
-        tokio::select! {
-            biased;
-            () = self.stop.cancelled() => false,
-            Ok(()) = targets.changed() => true,
-            () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => true,
-        }
-    }
-
     // Resolve the target before starting a pipeline pass, which cannot safely be retargeted with
     // headers buffered. Only the peer lookup and retry delay are interrupted by forkchoice.
     async fn resolve_target(
         &self,
-        pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Result<Option<(B256, bool)>, PipelineError> {
         loop {
             let target = *targets.borrow_and_update();
-            let position = tokio::select! {
+            let ahead = tokio::select! {
                 biased;
                 () = self.stop.cancelled() => return Ok(None),
                 Ok(()) = targets.changed() => continue,
-                position = self.position(target) => position?,
+                ahead = self.is_ahead(target) => ahead?,
             };
-            match position {
-                TargetPosition::Unavailable => {
-                    if !self.retry_due(targets).await {
-                        return Ok(None)
-                    }
-                }
-                TargetPosition::Behind => return Ok(Some((target, false))),
-                TargetPosition::Ahead => return Ok(Some((target, true))),
-                TargetPosition::Detached { unwind_to } => {
-                    // Reopen a two-header gap so the downloader validates attachment and performs
-                    // its normal fork unwind before snap uses the canonical headers.
-                    let unwind = pipeline
-                        .run_until(StageId::Headers, Some(PipelineTarget::Unwind(unwind_to)));
-                    let Some(result) = self.stop.run_until_cancelled(unwind).await else {
-                        return Ok(None)
-                    };
-                    result?;
-                    // An unwind that skips the stage leaves the target detached from the same head.
-                    if self.factory.provider()?.last_block_number()? > unwind_to &&
-                        !self.retry_due(targets).await
-                    {
-                        return Ok(None)
-                    }
-                }
+            if let Some(ahead) = ahead {
+                return Ok(Some((target, ahead)))
+            }
+            tokio::select! {
+                biased;
+                () = self.stop.cancelled() => return Ok(None),
+                Ok(()) = targets.changed() => {},
+                () = tokio::time::sleep(HEADER_LOOKUP_RETRY) => {},
             }
         }
     }
@@ -414,24 +361,11 @@ enum Pass {
     Done,
 }
 
-// Where a forkchoice target sits relative to the local headers.
-#[derive(Debug, PartialEq, Eq)]
-enum TargetPosition {
-    // No peer serves the target's header yet.
-    Unavailable,
-    // The target is a local header or not above the local head.
-    Behind,
-    // The target is above the local head.
-    Ahead,
-    // The target follows the local head on another branch, so headers unwind to `unwind_to`.
-    Detached { unwind_to: u64 },
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::snap::{
-        handoff::tests::{downloaded_attempt, published, PIVOT},
+        handoff::tests::{downloaded_attempt, PIVOT},
         tests::{
             hashed_factory, headers_done, headers_reach, next_target, pipeline, pipeline_on,
             pipeline_with, target,
@@ -439,39 +373,31 @@ pub(crate) mod tests {
     };
     use alloy_consensus::Header;
     use alloy_eips::eip1898::BlockWithParent;
-    use alloy_primitives::U256;
     use futures::future::{pending, ready, Either, Pending, Ready};
-    use reth_consensus::{ConsensusError, HeaderValidator};
+    use reth_consensus::ConsensusError;
     use reth_db::{tables, transaction::DbTxMut};
-    use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
     use reth_eth_wire_types::snap::{
         GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
         GetStorageRangesMessage,
     };
     use reth_network_p2p::{
         download::DownloadClient, error::PeerRequestResult, headers::client::HeadersRequest,
-        priority::Priority, test_utils::TestHeadersClient, NoopFullBlockClient,
+        priority::Priority, NoopFullBlockClient,
     };
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::{Account, GotExpected, SealedHeader};
+    use reth_primitives_traits::{Account, SealedHeader};
     use reth_provider::{
-        test_utils::{
-            create_test_provider_factory_with_genesis_block_number, insert_headers,
-            MockNodeTypesWithDB,
-        },
+        test_utils::{insert_headers, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
-        StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment,
-        StaticFileWriter,
     };
     use reth_snap_sync::{SnapAttemptStore, SnapStateVerifier, DEFAULT_SCAN_CHUNK};
     use reth_stages::{
-        stages::HeaderStage, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
-        StageSetBuilder, UnwindInput, UnwindOutput,
+        ExecInput, ExecOutput, Stage, StageError, StageSetBuilder, UnwindInput, UnwindOutput,
     };
     use reth_stages_api::test_utils::TestStage;
     use std::{
         sync::{
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
             Arc, Mutex,
         },
         task::{Context, Poll},
@@ -485,7 +411,6 @@ pub(crate) mod tests {
         noop: NoopFullBlockClient,
         empty_response: Arc<AtomicBool>,
         pending_target: Option<B256>,
-        requests: Arc<AtomicUsize>,
     }
 
     impl Default for ServesHeaders {
@@ -497,7 +422,6 @@ pub(crate) mod tests {
                 noop: NoopFullBlockClient::default(),
                 empty_response: Arc::default(),
                 pending_target: None,
-                requests: Arc::default(),
             }
         }
     }
@@ -520,7 +444,6 @@ pub(crate) mod tests {
             request: HeadersRequest,
             _priority: Priority,
         ) -> Self::Output {
-            self.requests.fetch_add(1, Ordering::Relaxed);
             if self.pending_target.is_some_and(|hash| request.start == hash.into()) {
                 return Either::Right(pending())
             }
@@ -621,29 +544,6 @@ pub(crate) mod tests {
             _input: UnwindInput,
         ) -> Result<UnwindOutput, StageError> {
             unreachable!("nothing unwinds in this test")
-        }
-    }
-
-    // Accepts a header only on top of its parent, which `TestConsensus` doesn't check.
-    #[derive(Debug)]
-    struct ParentHashValidator;
-
-    impl HeaderValidator<Header> for ParentHashValidator {
-        fn validate_header(&self, _header: &SealedHeader<Header>) -> Result<(), ConsensusError> {
-            Ok(())
-        }
-
-        fn validate_header_against_parent(
-            &self,
-            header: &SealedHeader<Header>,
-            parent: &SealedHeader<Header>,
-        ) -> Result<(), ConsensusError> {
-            if header.parent_hash != parent.hash() {
-                return Err(ConsensusError::ParentHashMismatch(
-                    GotExpected { got: header.parent_hash, expected: parent.hash() }.into(),
-                ))
-            }
-            Ok(())
         }
     }
 
@@ -958,7 +858,7 @@ pub(crate) mod tests {
         let client = ServesHeaders { headers: vec![genesis], ..Default::default() };
         let (run, _stop) = snap_run_with(&factory, client);
 
-        assert_eq!(run.position(target()).await.unwrap(), TargetPosition::Unavailable);
+        assert_eq!(run.is_ahead(target()).await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -1076,143 +976,5 @@ pub(crate) mod tests {
         let receiver = watch::channel(sibling.hash_slow()).1;
         let client = ServesHeaders { headers: vec![sibling], ..Default::default() };
         (snap_run_with(factory, client).0, head.hash(), receiver)
-    }
-
-    #[tokio::test]
-    async fn a_detached_single_header_replaces_the_local_branch() {
-        let factory = hashed_factory();
-        let genesis = SealedHeader::seal_slow(Header::default());
-        let local = SealedHeader::seal_slow(Header {
-            number: 1,
-            parent_hash: genesis.hash(),
-            ..Default::default()
-        });
-        let replacement =
-            SealedHeader::seal_slow(Header { extra_data: vec![1].into(), ..local.clone_header() });
-        let target = Header { number: 2, parent_hash: replacement.hash(), ..Default::default() };
-        insert_headers(&factory, &[genesis, local.clone()]);
-        let provider = factory.database_provider_rw().unwrap();
-        provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(1)).unwrap();
-        provider.commit().unwrap();
-
-        // A tip-only response skips the batch parent check, so the old local header must be
-        // unwound before downloading the replacement.
-        let client = TestHeadersClient::default();
-        client.extend([target.clone(), replacement.clone_header()]).await;
-        let downloader =
-            ReverseHeadersDownloaderBuilder::default().build(client, Arc::new(ParentHashValidator));
-        let (tip, receiver) = watch::channel(B256::ZERO);
-        let headers = HeaderStage::new(factory.clone(), downloader, receiver, Default::default());
-        let mut pipeline =
-            pipeline_on(&factory, StageSetBuilder::default().add_stage(headers), tip);
-        let target_hash = target.hash_slow();
-        let (_targets, mut receiver) = watch::channel(target_hash);
-        let client = ServesHeaders { headers: vec![target], ..Default::default() };
-        let (run, _) = snap_run_with(&factory, client);
-
-        let pass = tokio::time::timeout(
-            Duration::from_secs(5),
-            run.catch_up_headers(&mut pipeline, &mut receiver),
-        )
-        .await
-        .expect("header catch-up completes without another forkchoice update")
-        .unwrap();
-
-        assert_eq!(pass, Pass::Done);
-        assert_eq!(factory.sealed_header(1).unwrap(), Some(replacement));
-        assert_eq!(factory.block_number(local.hash()).unwrap(), None);
-        assert_eq!(factory.block_hash(2).unwrap(), Some(target_hash));
-    }
-
-    #[tokio::test]
-    async fn a_missing_head_hash_fails_the_attachment_check() {
-        let factory = hashed_factory();
-        let header = Header { number: 1, parent_hash: B256::repeat_byte(1), ..Default::default() };
-        let hash = header.hash_slow();
-        let client = ServesHeaders { headers: vec![header], ..Default::default() };
-        let (run, _) = snap_run_with(&factory, client);
-
-        let error = run.position(hash).await.unwrap_err();
-
-        assert_eq!(error.to_string(), "no header found for Number(0)");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn an_unwind_that_keeps_the_head_waits_before_retrying() {
-        let (tip, _) = watch::channel(B256::ZERO);
-        let (mut pipeline, factory) = pipeline_with(TestStage::new(StageId::Headers), tip);
-        let genesis = SealedHeader::seal_slow(Header::default());
-        let head = SealedHeader::seal_slow(Header {
-            number: 1,
-            parent_hash: genesis.hash(),
-            ..Default::default()
-        });
-        // Without a headers checkpoint above genesis, the pipeline skips the stage's unwind.
-        insert_headers(&factory, &[genesis, head]);
-        let detached =
-            Header { number: 2, parent_hash: B256::repeat_byte(1), ..Default::default() };
-        let (_targets, mut receiver) = watch::channel(detached.hash_slow());
-        let client = ServesHeaders { headers: vec![detached], ..Default::default() };
-        let requests = client.requests.clone();
-        let (run, _stop) = snap_run_with(&factory, client);
-
-        // Paused time advances only through the retry delays, so this spans exactly one retry.
-        let resolved = tokio::time::timeout(
-            HEADER_LOOKUP_RETRY * 3 / 2,
-            run.resolve_target(&mut pipeline, &mut receiver),
-        )
-        .await;
-
-        assert!(resolved.is_err());
-        assert_eq!(requests.load(Ordering::Relaxed), 2);
-    }
-
-    #[tokio::test]
-    async fn a_detached_target_does_not_unwind_published_state() {
-        let factory = published();
-        let pivot = factory.sealed_header(PIVOT).unwrap();
-        let stages = StageSetBuilder::default()
-            .add_stage(TestStage::new(StageId::Headers))
-            .add_stage(TestStage::new(StageId::Execution))
-            .add_stage(TestStage::new(StageId::Finish));
-        let mut pipeline = pipeline_on(&factory, stages, watch::channel(B256::ZERO).0);
-        let detached =
-            Header { number: PIVOT + 1, parent_hash: B256::repeat_byte(1), ..Default::default() };
-        let (_targets, mut receiver) = watch::channel(detached.hash_slow());
-        let client = ServesHeaders { headers: vec![detached], ..Default::default() };
-        let (run, _stop) = snap_run_with(&factory, client);
-
-        let error = run.finish(&mut pipeline, &mut receiver).await.unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Cannot unwind to block 0 as AccountHistory is pruned through block 1"
-        );
-        assert_eq!(factory.sealed_header(PIVOT).unwrap(), pivot);
-        let provider = factory.provider().unwrap();
-        assert_eq!(
-            provider.get_stage_checkpoint(StageId::Execution).unwrap(),
-            Some(StageCheckpoint::new(PIVOT))
-        );
-    }
-
-    #[tokio::test]
-    async fn a_detached_genesis_child_is_rejected() {
-        let factory = create_test_provider_factory_with_genesis_block_number(5);
-        let genesis = SealedHeader::seal_slow(factory.chain_spec().genesis_header().clone());
-        let static_files = factory.static_file_provider();
-        let mut writer = static_files.get_writer(5, StaticFileSegment::Headers).unwrap();
-        writer.user_header_mut().set_block_range(5, 5);
-        writer.append_header_direct(genesis.header(), U256::ZERO, &genesis.hash()).unwrap();
-        writer.commit().unwrap();
-        drop(writer);
-        let header = Header { number: 6, parent_hash: B256::repeat_byte(1), ..Default::default() };
-        let hash = header.hash_slow();
-        let client = ServesHeaders { headers: vec![header], ..Default::default() };
-        let (run, _) = snap_run_with(&factory, client);
-
-        let error = run.position(hash).await.unwrap_err();
-
-        assert_eq!(error.to_string(), "snap headers do not connect to genesis");
     }
 }
