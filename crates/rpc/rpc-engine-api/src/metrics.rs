@@ -86,3 +86,33 @@ pub(crate) struct BlobMetrics {
     /// Number of times getBlobsV2 responded with “miss”
     pub(crate) get_blobs_requests_failure_total: Counter,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use metrics_util::layers::{Layer, PrefixLayer};
+
+    /// Metric names referenced by production alerts. Renaming any of these silently breaks
+    /// alerting, so the exported Prometheus names and quantile labels are pinned here.
+    #[test]
+    fn alerted_metric_names() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        metrics::with_local_recorder(&PrefixLayer::new("reth").layer(recorder), || {
+            EngineApiMetrics::default().latency.new_payload_v4.record(1.0);
+        });
+        let rendered = handle.render();
+
+        // The maximum quantile is exported as `1`, not `1.0`.
+        for sample in [
+            r#"reth_engine_rpc_new_payload_v4{quantile="0.99"}"#,
+            r#"reth_engine_rpc_new_payload_v4{quantile="1"}"#,
+        ] {
+            assert!(
+                rendered.lines().any(|line| line.split(' ').next() == Some(sample)),
+                "missing `{sample}` in:\n{rendered}"
+            );
+        }
+    }
+}
