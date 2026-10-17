@@ -17,7 +17,6 @@ use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
 use reth_node_ethereum::snap::{EthereumBackfill, EthereumBackfillSync};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use std::{
-    fmt,
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -241,24 +240,16 @@ impl SnapGate {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ControlState {
     response_bytes: Option<u64>,
     requests: Vec<SnapProtocolMessage>,
     gates: Vec<RequestGate>,
 }
 
-impl fmt::Debug for ControlState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ControlState")
-            .field("response_bytes", &self.response_bytes)
-            .field("requests", &self.requests)
-            .field("gates", &self.gates.len())
-            .finish()
-    }
-}
-
+#[derive(derive_more::Debug)]
 struct RequestGate {
+    #[debug(skip)]
     matches: Box<dyn Fn(&SnapProtocolMessage) -> bool + Send + Sync>,
     state: watch::Sender<GateState>,
 }
