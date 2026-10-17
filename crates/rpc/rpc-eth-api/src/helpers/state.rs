@@ -150,7 +150,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         }
     }
 
-    /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
+    /// Returns account and storage proofs using the V2 proof calculator at the given block.
     fn get_proof(
         &self,
         address: Address,
@@ -176,8 +176,20 @@ pub trait EthState: LoadState + SpawnBlocking {
             self.spawn_blocking_io_with_state(block_id, move |_, state| {
                 let _permit = permit;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
-                let proof = state
-                    .proof(Default::default(), address, &storage_keys)
+                let hashed_address = keccak256(address);
+                let mut proof_targets = MultiProofTargetsV2::default();
+                proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
+                proof_targets.storage_targets.insert(
+                    hashed_address,
+                    storage_keys.iter().map(|slot| ProofV2Target::new(keccak256(slot))).collect(),
+                );
+
+                let multiproof = state
+                    .multiproof_v2(Default::default(), proof_targets)
+                    .map_err(Self::Error::from_eth_err)?;
+                let proof = multiproof
+                    .account_proof(address, &storage_keys)
+                    .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?;
                 Ok(proof.into_eip1186_response(keys))
             })

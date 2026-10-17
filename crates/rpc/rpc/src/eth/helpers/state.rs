@@ -30,17 +30,24 @@ mod tests {
 
     use super::*;
     use alloy_eips::BlockId;
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{
+        keccak256,
         map::{AddressMap, B256Map},
         Address, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+            NoopProvider,
+        },
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
@@ -50,11 +57,13 @@ mod tests {
     };
     use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
     use reth_storage_api::{StateProviderBox, StateProviderFactory};
+    use reth_storage_overlay::OverlayManager;
     use reth_tasks::{
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
     };
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_trie_common::{AccountProof, Nibbles};
     use std::{future::Future, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
@@ -296,5 +305,69 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    #[tokio::test]
+    async fn get_proof_verifies_embedded_storage_leaves() {
+        let address = Address::repeat_byte(0x11);
+        // These slots share eight hashed nibbles, making their small-value leaves inline.
+        let slots = [50_541, 125_299].map(|slot| B256::from(U256::from(slot)));
+        assert_eq!(
+            Nibbles::unpack(keccak256(slots[0]))
+                .common_prefix_length(&Nibbles::unpack(keccak256(slots[1]))),
+            8
+        );
+        let values = [U256::from(0x4b), U256::from(7)];
+        let genesis = Genesis::default().with_gas_limit(30_000_000).extend_accounts([(
+            address,
+            GenesisAccount {
+                balance: U256::ONE,
+                storage: Some(slots.into_iter().zip(values.map(B256::from)).collect()),
+                ..Default::default()
+            },
+        )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let state_root = chain_spec.genesis_header().state_root;
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec)
+            .with_overlay_manager(OverlayManager::default());
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let eth_api =
+            EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm_config).build();
+
+        // Preserve request order, duplicates, and both quantity and full-width storage keys.
+        let keys =
+            vec![U256::from(125_299).into(), slots[0].into(), B256::ZERO.into(), slots[0].into()];
+        for block_id in [None, Some(BlockId::number(0))] {
+            let response =
+                eth_api.get_proof(address, keys.clone(), block_id).unwrap().await.unwrap();
+            assert_eq!(response.address, address);
+            assert_eq!(response.balance, U256::ONE);
+            assert_eq!(
+                response.storage_proof.iter().map(|proof| proof.key).collect::<Vec<_>>(),
+                keys
+            );
+            assert_eq!(
+                response.storage_proof.iter().map(|proof| proof.value).collect::<Vec<_>>(),
+                [values[1], values[0], U256::ZERO, values[0]]
+            );
+            AccountProof::from_eip1186_proof(response.clone()).verify(state_root).unwrap();
+            for proof in &response.storage_proof {
+                assert!(proof.proof.iter().skip(1).all(|node| node.len() >= B256::len_bytes()));
+            }
+        }
+
+        let error =
+            eth_api.get_proof(address, keys, Some(BlockId::pending())).unwrap().await.unwrap_err();
+        assert!(matches!(error, EthApiError::HeaderNotFound(id) if id == BlockId::pending()));
+
+        // Account-only and missing-account proofs must still verify.
+        for account in [address, Address::repeat_byte(0x22)] {
+            let response = eth_api.get_proof(account, Vec::new(), None).unwrap().await.unwrap();
+            assert!(response.storage_proof.is_empty());
+            AccountProof::from_eip1186_proof(response).verify(state_root).unwrap();
+        }
     }
 }
