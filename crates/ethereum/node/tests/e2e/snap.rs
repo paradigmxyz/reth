@@ -25,6 +25,7 @@ use crate::utils::advance_with_random_transactions;
 use alloy_primitives::{bytes, keccak256, Bytes, B256, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
+use alloy_sol_types::SolValue;
 use rand::{rngs::StdRng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
@@ -40,7 +41,7 @@ use reth_node_ethereum::{snap::EthereumBackfill, EthereumNode};
 use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, MetadataProvider, StageCheckpointReader,
 };
-use reth_snap_sync::{SnapAccountStore, SnapAttemptStore, SnapStorageStore};
+use reth_snap_sync::{SnapAccountStore, SnapAttemptStore, SnapStorageStore, DEFAULT_HEAD_DISTANCE};
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
 use std::time::Duration;
@@ -52,6 +53,10 @@ const CHAIN_LENGTH: u64 = 40;
 // Finalized block a syncing node anchors its snap pivot to. It is below the head, so the blocks
 // above it execute on the downloaded state.
 const FINALIZED: u64 = 32;
+
+// Head of the reorged pivot scenario before the reorg. The optimistic pivot must lie after the fork
+// at block 32.
+const INITIAL_HEAD: u64 = 100;
 
 // A node on `fork` that serves snap/2 from the storage layout snap writes, and picks its backfill
 // from `--snap.v2` like `reth node` does.
@@ -112,6 +117,11 @@ fn incrementer_init_code() -> Bytes {
     }
     init_code.extend_from_slice(&bytes!("675f546001015f55005f5260086018f3"));
     init_code.into()
+}
+
+// Calldata for the storage writer used by the reorg scenario.
+fn storage_input(slot: u64, value: u64) -> Bytes {
+    (slot, value).abi_encode_params().into()
 }
 
 #[tokio::test]
@@ -500,8 +510,6 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
 #[tokio::test]
 async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    // The optimistic pivot must lie after the fork at block 32.
-    const INITIAL_HEAD: u64 = 100;
     let runtime = Runtime::test();
     let (mut server, wallet) =
         snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
@@ -633,17 +641,9 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     Ok(())
 }
 
-// Calldata for the storage writer used by the reorg scenario.
-fn storage_input(slot: u64, value: u64) -> Bytes {
-    [U256::from(slot).to_be_bytes::<32>(), U256::from(value).to_be_bytes::<32>()].concat().into()
-}
-
 #[tokio::test]
 async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    // Without a finalized block, the default snap pivot is 64 blocks behind the head.
-    const TAIL_LENGTH: u64 = 64;
-
     let runtime = Runtime::test();
     let (mut server, wallet) =
         snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
@@ -661,12 +661,12 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
 
     // Keep the pivot finalized while every later block changes the downloaded storage.
     server.set_finality(Finality::Keep);
-    for _ in 0..TAIL_LENGTH {
+    for _ in 0..DEFAULT_HEAD_DISTANCE {
         let mined =
             server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
         server.wait_for_pool_head(mined.block().hash()).await?;
     }
-    let head = server.inner.provider.sealed_header(CHAIN_LENGTH + TAIL_LENGTH)?.unwrap();
+    let head = server.inner.provider.sealed_header(CHAIN_LENGTH + DEFAULT_HEAD_DISTANCE)?.unwrap();
     assert_eq!(server.current_forkchoice_state()?.finalized_block_hash, pivot.hash());
     assert_ne!(pivot.state_root, head.state_root);
 
@@ -698,7 +698,10 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
     }
     let provider = client.rpc_provider();
     assert_eq!(provider.get_code_at(contract).await?, code);
-    assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, U256::from(TAIL_LENGTH + 1));
+    assert_eq!(
+        provider.get_storage_at(contract, U256::ZERO).await?,
+        U256::from(DEFAULT_HEAD_DISTANCE + 1)
+    );
     assert_eq!(provider.get_transaction_count(account.address()).await?, account.nonce());
     assert_trie_consistency(&client.inner.provider)?;
     Ok(())
