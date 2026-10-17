@@ -17,7 +17,6 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     MetadataWriter, StageCheckpointWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::{fmt, future::Future};
 use tokio_util::sync::CancellationToken;
@@ -165,7 +164,10 @@ where
                         Step::Continue
                     }
                     // Progress this build cannot read is unusable, so the attempt starts over.
-                    Err(error @ SnapSyncError::UnsupportedRecord { .. }) => {
+                    Err(
+                        error @ (SnapSyncError::UnsupportedRecord { .. } |
+                        SnapSyncError::UnreadableRecord { .. }),
+                    ) => {
                         info!(target: "sync::snap", %error, "Snap progress is unreadable, restarting");
                         Step::Restart
                     }
@@ -502,7 +504,7 @@ where
                 Ok(())
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     // Pivot of the attempt being driven.
