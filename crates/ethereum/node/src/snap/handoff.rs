@@ -327,9 +327,10 @@ pub(crate) mod tests {
     fn downloading() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
-        let pivot = provider.sealed_header(PIVOT).unwrap().unwrap().num_hash();
-        let write =
-            provider.start_snap_attempt(SnapGeneration::new(pivot, B256::repeat_byte(1))).unwrap();
+        let header = provider.sealed_header(PIVOT).unwrap().unwrap();
+        let write = provider
+            .start_snap_attempt(SnapGeneration::new(header.num_hash(), header.state_root))
+            .unwrap();
         provider.commit().unwrap();
         (factory, write)
     }
@@ -449,13 +450,21 @@ pub(crate) mod tests {
     fn a_pivot_reorged_out_is_abandoned_instead_of_published() {
         let factory = with_headers();
         let provider = factory.database_provider_rw().unwrap();
-        let orphan = BlockNumHash::new(PIVOT, B256::repeat_byte(0xaa));
+        let pivot = provider.sealed_header(PIVOT).unwrap().unwrap();
         let write = provider
-            .start_snap_attempt(SnapGeneration::new(orphan, B256::repeat_byte(0xbb)))
+            .start_snap_attempt(SnapGeneration::new(pivot.num_hash(), pivot.state_root))
             .unwrap();
         provider.commit().unwrap();
 
         // The canonical header at the pivot's number is a different block now.
+        let replacement = Header { extra_data: vec![1].into(), ..pivot.header().clone() };
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.prune_headers(1).unwrap();
+        writer.commit().unwrap();
+        writer.append_header(&replacement, &replacement.hash_slow()).unwrap();
+        writer.commit().unwrap();
+        drop(writer);
         let handoff =
             SnapHandoff::new(factory.clone()).hand_off(write, &CancellationToken::new()).unwrap();
 
