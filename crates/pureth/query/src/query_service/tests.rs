@@ -65,6 +65,8 @@ fn filters_use_the_existing_service_and_validate_predicates_before_lookup() {
 #[test]
 fn historical_query_uses_eip_tree_and_preserves_source_context() {
     let (provider, hash) = test_utils::historical_provider(Some(test_utils::singleton_receipts()));
+    let expected_root =
+        RethRootProvider::new(provider.clone()).lookup(hash, ObjectKind::Receipts).unwrap().root();
     let service = QueryService::from_blockchain_provider(provider);
     let request = request(hash, "[0].logs[0].address");
     let response = service.query(request.clone()).unwrap();
@@ -72,8 +74,29 @@ fn historical_query_uses_eip_tree_and_preserves_source_context() {
     assert_eq!(response.block_status, "canonical");
     assert_eq!(response.root_context, "reth_experimental_unanchored");
     assert_eq!(response.selection.results[0].values_ssz[0].as_ref(), &[0x11; 20]);
-    verify_query_response(&request, &response, response.selection.root, SelectionLimits::default())
-        .unwrap();
+    verify_query_response(&request, &response, expected_root, SelectionLimits::default()).unwrap();
+}
+
+#[test]
+fn self_consistent_proofs_from_another_block_do_not_replace_the_expected_root() {
+    let provider = DeterministicProvider::new().unwrap();
+    let expected_root = provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts).unwrap().root();
+    let requested = request(SINGLETON_BLOCK_HASH, "[0].status");
+    let alternate = request(MULTIPLE_LOGS_BLOCK_HASH, "[0].status");
+    let mut response = QueryService::from_provider(provider).query(alternate).unwrap();
+    response.block_hash = requested.block_hash;
+    assert_ne!(response.selection.root, expected_root);
+    assert!(verify_query_response(
+        &requested,
+        &response,
+        response.selection.root,
+        SelectionLimits::default(),
+    )
+    .is_ok());
+    assert_eq!(
+        verify_query_response(&requested, &response, expected_root, SelectionLimits::default()),
+        Err(ResponseVerificationError::Selection(SelectionError::InvalidContext)),
+    );
 }
 
 #[test]

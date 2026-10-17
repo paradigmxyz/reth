@@ -18,7 +18,7 @@ use reth_pureth_query::{
     verify_query_response, PurethApiServer, PurethRpc, QueryRequest, QueryResponse, QueryService,
     ReceiptSelection, SelectionLimits, SelectionOperation, SelectionRequest,
 };
-use reth_pureth_receipt::RethRootProvider;
+use reth_pureth_receipt::{ObjectKind, RethRootProvider};
 use std::{sync::Arc, time::Duration};
 
 #[tokio::main]
@@ -74,6 +74,9 @@ async fn run() -> eyre::Result<()> {
     let receipt = tokio::time::timeout(Duration::from_secs(30), pending.get_receipt()).await??;
     let block_hash =
         receipt.block_hash.ok_or_else(|| eyre::eyre!("mined receipt has no block hash"))?;
+    let expected_root = RethRootProvider::new(node.node.provider.clone())
+        .lookup(block_hash, ObjectKind::Receipts)?
+        .root();
     let mut topic = B256::ZERO;
     topic[31] = 0x2a;
     let request = QueryRequest {
@@ -112,7 +115,7 @@ async fn run() -> eyre::Result<()> {
     eyre::ensure!(response.selection.results[3].values_ssz[0].as_ref() == [0xad, 0xbe]);
     eyre::ensure!(response.block_status == "canonical");
     eyre::ensure!(response.root_context == "reth_experimental_unanchored");
-    verify_query_response(&request, &response, response.selection.root, SelectionLimits::default())
+    verify_query_response(&request, &response, expected_root, SelectionLimits::default())
         .map_err(|error| eyre::eyre!("{error:?}"))?;
 
     let missing = QueryRequest { block_hash: B256::repeat_byte(0xff), ..request };

@@ -5,14 +5,11 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, B256};
 use reth_pureth_receipt::{
-    eip6466::{BasicReceipt, Eip6466ReceiptSnapshot, Log, Receipt, Receipts},
+    eip6466::{Eip6466ReceiptSnapshot, Log, Receipt},
     RetainedNode,
 };
-use reth_pureth_ssz::{
-    merkleize_fixed, merkleize_progressive, mix_in_length, progressive_byte_list,
-};
 use serde::{Deserialize, Serialize};
-use ssz::{read_offset, Decode, SszDecoderBuilder};
+use ssz::{read_offset, SszDecoderBuilder};
 use std::{
     cell::Cell,
     collections::BTreeMap,
@@ -360,75 +357,7 @@ fn check_whole_verification_budget(
 
 fn whole_root(kind: Kind, value: &[u8], limit: usize) -> Result<B256, SelectionError> {
     check_whole_verification_budget(kind, value, limit)?;
-    if matches!(kind, Kind::Receipt(_) | Kind::Log | Kind::Receipts | Kind::Logs) {
-        let receipts = match kind {
-            Kind::Receipts => {
-                Receipts::from_ssz_bytes(value).map_err(|_| SelectionError::InvalidValue)?
-            }
-            Kind::Receipt(selector) => {
-                let receipt =
-                    Receipt::from_ssz_bytes(value).map_err(|_| SelectionError::InvalidValue)?;
-                if receipt.selector() != selector {
-                    return Err(SelectionError::InvalidValue);
-                }
-                Receipts::new(vec![receipt])
-            }
-            Kind::Log | Kind::Logs => {
-                let logs = if kind == Kind::Log {
-                    vec![Log::from_ssz_bytes(value).map_err(|_| SelectionError::InvalidValue)?]
-                } else {
-                    Vec::<Log>::from_ssz_bytes(value).map_err(|_| SelectionError::InvalidValue)?
-                };
-                Receipts::new(vec![Receipt::Basic(BasicReceipt {
-                    from_: alloy_primitives::Address::ZERO,
-                    gas_used: 0,
-                    logs,
-                    status: false,
-                })])
-            }
-            _ => return Err(SelectionError::InvalidValue),
-        };
-        let snapshot =
-            Eip6466ReceiptSnapshot::build(receipts).map_err(|_| SelectionError::InvalidValue)?;
-        if kind == Kind::Receipts {
-            return Ok(snapshot.root());
-        }
-        let path = if kind == Kind::Log {
-            "[0].logs[0]"
-        } else if kind == Kind::Logs {
-            "[0].logs"
-        } else {
-            "[0]"
-        };
-        let mut read = |index| {
-            node_and_branch(snapshot.tree(), index)
-                .map(|(node, _)| node)
-                .map_err(|_| SelectionError::InvalidProof)
-        };
-        let target = resolve_eip(&tokens(path)?, &mut read)?;
-        return read(target.index);
-    }
-    if kind == Kind::Data {
-        return progressive_byte_list(value)
-            .map(|node| node.root())
-            .map_err(|_| SelectionError::InvalidValue);
-    }
-    let width = match kind {
-        Kind::Topics => 32,
-        Kind::Authorities => 20,
-        _ => return Err(SelectionError::CodecRequired),
-    };
-    if !value.len().is_multiple_of(width) || (kind == Kind::Topics && value.len() / width > 4) {
-        return Err(SelectionError::InvalidValue);
-    }
-    let nodes = value
-        .chunks_exact(width)
-        .map(|value| RetainedNode::leaf(B256::right_padding_from(value)))
-        .collect();
-    let contents =
-        if kind == Kind::Topics { merkleize_fixed(nodes, 4) } else { merkleize_progressive(nodes) }
-            .map_err(|_| SelectionError::InvalidValue)?;
-    Ok(mix_in_length(contents, value.len() / width).root())
+    whole::root(kind, value)
 }
 
 fn supplied_whole<'a>(
@@ -847,10 +776,6 @@ pub(crate) fn source_budget(
     limits: SelectionLimits,
     cancelled: &AtomicBool,
 ) -> Result<usize, SelectionError> {
-    if snapshot.receipts().len() > limits.receipts {
-        return Err(SelectionError::LimitExceeded("receipts"));
-    }
-    let mut logs = 0;
     let mut bytes = snapshot.serialized().len();
     let mut pending = vec![(snapshot.tree(), 0_u32)];
     while let Some((node, depth)) = pending.pop() {
@@ -868,7 +793,6 @@ pub(crate) fn source_budget(
     for receipt in snapshot.receipts().as_slice() {
         add(&mut bytes, size_of::<Receipt>(), limits.source_bytes, "source bytes")?;
         let receipt_logs = receipt.logs();
-        add(&mut logs, receipt_logs.len(), limits.logs, "logs")?;
         for log in receipt_logs {
             add(&mut bytes, size_of_val(log), limits.source_bytes, "source bytes")?;
             add(&mut bytes, log.data().len(), limits.source_bytes, "source bytes")?;
@@ -1329,3 +1253,4 @@ mod tests;
 
 mod filter;
 pub(crate) mod multiproof;
+mod whole;

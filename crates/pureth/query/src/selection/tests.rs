@@ -1059,8 +1059,6 @@ fn every_independent_budget_rejects_the_first_excess() {
         (SelectionLimits { witness_hashes: hashes - 1, ..Default::default() }, "witness hashes"),
         (SelectionLimits { response_bytes: bytes - 1, ..Default::default() }, "response bytes"),
         (SelectionLimits { source_bytes: 0, ..Default::default() }, "source bytes"),
-        (SelectionLimits { receipts: 2, ..Default::default() }, "receipts"),
-        (SelectionLimits { logs: 2, ..Default::default() }, "logs"),
     ] {
         assert_eq!(
             select_receipt_snapshot(&snapshot, &request, limits),
@@ -1405,6 +1403,120 @@ fn structural_budget_covers_retained_trees_at_progressive_boundaries() {
             assert!(bound >= actual, "count={count} length={length} bound={bound} actual={actual}");
         }
     }
+}
+
+#[test]
+fn sparse_queries_do_not_apply_filter_scan_caps_to_the_entire_block() {
+    let defaults = SelectionLimits::default();
+    for (receipts, logs, reason) in
+        [(defaults.receipts + 1, 0, "receipts"), (1, defaults.logs + 1, "logs")]
+    {
+        let log = Log::new(Address::ZERO, Vec::new(), Bytes::new()).unwrap();
+        let snapshot =
+            Eip6466ReceiptSnapshot::build(Receipts::new(vec![
+                Receipt::Basic(BasicReceipt {
+                    from_: Address::repeat_byte(0x44),
+                    gas_used: 21_000,
+                    logs: vec![log; logs],
+                    status: true,
+                });
+                receipts
+            ]))
+            .unwrap();
+        for format in [SelectionProofFormat::SingleBranch, SelectionProofFormat::Multiproof] {
+            let request = single_request("[0].from", SelectionOperation::Value {});
+            let response =
+                select_with_format(&snapshot, &request, defaults, &AtomicBool::new(false), format)
+                    .unwrap();
+            verify_receipt_selection(&request, &response, snapshot.root(), defaults).unwrap();
+            assert_eq!(response.results[0].values_ssz[0].as_ref(), &[0x44; 20]);
+        }
+        assert_eq!(
+            select_receipt_multiproof(
+                &snapshot,
+                &filter_request(FilterOutput::Receipts, Vec::new()),
+                defaults,
+            ),
+            Err(SelectionError::LimitExceeded(reason))
+        );
+        assert_eq!(
+            select_receipt_multiproof(
+                &snapshot,
+                &single_request("[0].from", SelectionOperation::Value {}),
+                SelectionLimits { source_bytes: 1, ..defaults },
+            ),
+            Err(SelectionError::LimitExceeded("source bytes"))
+        );
+    }
+}
+
+#[test]
+fn root_only_receipt_verification_matches_retained_nodes_at_progressive_boundaries() {
+    for count in [0, 1, 4, 5, 6, 20, 21, 22] {
+        for length in [0, 1, 31, 32, 33, 160, 161, 672, 673] {
+            let log = Log::new(
+                Address::repeat_byte(0x33),
+                vec![B256::repeat_byte(0x44); count.min(4)],
+                Bytes::from(vec![0x55; length]),
+            )
+            .unwrap();
+            let snapshot = Eip6466ReceiptSnapshot::build(Receipts::new(
+                (0..count)
+                    .map(|index| match index % 3 {
+                        0 => Receipt::Basic(BasicReceipt {
+                            from_: Address::repeat_byte(1),
+                            gas_used: 21_000,
+                            logs: vec![log.clone()],
+                            status: index % 2 == 0,
+                        }),
+                        1 => Receipt::Create(CreateReceipt {
+                            from_: Address::repeat_byte(2),
+                            gas_used: 42_000,
+                            contract_address: Address::repeat_byte(3),
+                            logs: Vec::new(),
+                            status: index % 2 == 0,
+                        }),
+                        _ => Receipt::SetCode(SetCodeReceipt {
+                            from_: Address::repeat_byte(4),
+                            gas_used: 63_000,
+                            logs: vec![log.clone(); count],
+                            status: index % 2 == 0,
+                            authorities: vec![Address::repeat_byte(5); count],
+                        }),
+                    })
+                    .collect(),
+            ))
+            .unwrap();
+            assert_eq!(
+                whole_root(Kind::Receipts, snapshot.serialized(), usize::MAX),
+                Ok(snapshot.root()),
+                "count={count}, length={length}",
+            );
+            if count > 0 {
+                for path in
+                    ["[0]", "[0].logs", "[0].logs[0]", "[0].logs[0].topics", "[0].logs[0].data"]
+                {
+                    let path = tokens(path).unwrap();
+                    let target = resolve_eip(&path, &mut |index| {
+                        Ok(node_at(snapshot.tree(), index).unwrap())
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        whole_root(
+                            target.kind,
+                            supplied_whole(&snapshot, &path).unwrap(),
+                            usize::MAX,
+                        ),
+                        node_at(snapshot.tree(), target.index)
+                            .map_err(|_| SelectionError::InvalidProof),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(whole::root(Kind::Receipt(2), &[1]), Err(SelectionError::InvalidValue));
+    assert_eq!(whole::root(Kind::Topics, &[0; 160]), Err(SelectionError::InvalidValue));
+    assert_eq!(whole::root(Kind::Authorities, &[0; 21]), Err(SelectionError::InvalidValue));
 }
 
 #[test]
