@@ -1,4 +1,7 @@
-//! Observes and pauses snap requests without replacing the serving peer or response validation.
+//! Observes and pauses the snap requests of a node's production backfill in e2e tests.
+//!
+//! [`SnapControl`] records every request and can pause one at a [`SnapGate`], while responses
+//! still come from the real serving peer and go through production validation.
 
 use crate::{wait::poll_until, E2ETestSetupBuilder};
 use parking_lot::Mutex;
@@ -26,7 +29,9 @@ use tokio::sync::watch;
 /// Controls the requests of a node's production snap backfill, including across restarts.
 #[derive(Clone, Debug, Default)]
 pub struct SnapControl {
+    // Byte limit set on account and storage range requests, if any.
     response_bytes: Option<u64>,
+    // Recorded requests and registered gates, shared by every clone.
     state: Arc<Mutex<ControlState>>,
 }
 
@@ -73,7 +78,9 @@ impl E2ETestSetupBuilder<EthereumNode> {
 /// Builds the production backfill with an observed network client.
 #[derive(Debug)]
 pub struct ControlledBackfill {
+    // Backfill chosen by the node configuration.
     inner: EthereumBackfill,
+    // Control handed to the network client the backfill is built with.
     control: SnapControl,
 }
 
@@ -99,7 +106,9 @@ where
 /// A real network client with request observation and deterministic gates.
 #[derive(Clone, Debug)]
 pub struct ControlledSnapClient<C> {
+    // Network client that sends the requests to peers.
     inner: C,
+    // Control that records and gates the requests.
     control: SnapControl,
 }
 
@@ -207,6 +216,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
 #[derive(Debug)]
 #[must_use = "dropping the gate releases the paused request"]
 pub struct SnapGate {
+    // Progress of the gate, shared with its `RequestGate`.
     state: watch::Sender<GateState>,
 }
 
@@ -228,9 +238,12 @@ impl SnapGate {
     }
 }
 
+// State shared by the clones of a `SnapControl`.
 #[derive(Debug, Default)]
 struct ControlState {
+    // Requests seen since the last `take_requests`.
     requests: Vec<SnapProtocolMessage>,
+    // Gates still waiting for a matching request, in registration order.
     gates: Vec<RequestGate>,
 }
 
@@ -247,16 +260,23 @@ impl ControlState {
     }
 }
 
+// A registered gate waiting for its first matching request.
 #[derive(derive_more::Debug)]
 struct RequestGate {
+    // Selects the request to pause.
     #[debug(skip)]
     matches: Box<dyn Fn(&SnapProtocolMessage) -> bool + Send + Sync>,
+    // Progress shared with the test's `SnapGate`.
     state: watch::Sender<GateState>,
 }
 
+// Progress of a gate from registration to release.
 #[derive(Debug)]
 enum GateState {
+    // No request matched yet.
     Waiting,
+    // The matched request is paused before it reaches the network.
     Reached(SnapProtocolMessage),
+    // The test released the request.
     Released,
 }
