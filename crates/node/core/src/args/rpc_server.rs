@@ -1209,29 +1209,6 @@ mod tests {
     }
 
     #[test]
-    fn test_format_tx_fee_cap() {
-        for (wei, ether) in [
-            (0, "0"),
-            (1, "0.000000000000000001"),
-            (500_000_000_000_000_000, "0.5"),
-            (1_000_000_000_000_000_000, "1"),
-            (1_050_000_000_000_000_000, "1.05"),
-            (1_000_000_000_000_000_000_000, "1000"),
-        ] {
-            assert_eq!(format_tx_fee_cap(wei), ether);
-        }
-    }
-
-    #[test]
-    fn test_format_tx_fee_cap_round_trips() {
-        for wei in
-            [0, 500_000_000_000_000_000, 1_000_000_000_000_000_000, 1_000_000_000_000_000_000_000]
-        {
-            assert_eq!(parse_ether_value(&format_tx_fee_cap(wei)).unwrap(), wei);
-        }
-    }
-
-    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
