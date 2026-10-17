@@ -849,8 +849,11 @@ pub trait Call:
     /// This modifies certain EVM settings to mirror geth's `SkipAccountChecks` when transacting requests, see also: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L145-L148>:
     ///
     ///  - `disable_eip3607` is set to `true`
-    ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// A call with a zero gas price runs free: the basefee is lowered to 0 and fees are not
+    /// charged. A priced call is validated against the basefee, funded and charged like a
+    /// transaction.
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
     #[expect(clippy::type_complexity)]
@@ -889,22 +892,12 @@ pub trait Call:
         // See <https://github.com/paradigmxyz/reth/issues/1959>
         evm_env.cfg_env.disable_eip3607 = true;
 
-        // The basefee should be ignored for eth_call
-        // See:
-        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        evm_env.cfg_env.disable_base_fee = true;
-
         // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
         // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
         // it to execute the call like a transaction.
         if !evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
             evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
         }
-
-        // Disable additional fee charges, e.g. opstack operator fee charge
-        // See:
-        // <https://github.com/paradigmxyz/reth/issues/18470>
-        evm_env.cfg_env.disable_fee_charge = true;
 
         evm_env.cfg_env.memory_limit = self.evm_memory_limit();
 
@@ -924,6 +917,12 @@ pub trait Call:
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if tx_env.gas_price() == 0 {
             evm_env.block_env.inner_mut().basefee = 0;
+
+            // A free call pays no fees, including additional ones such as the opstack operator
+            // fee: <https://github.com/paradigmxyz/reth/issues/18470>
+            if tx_env.max_fee_per_blob_gas() == 0 {
+                evm_env.cfg_env.disable_fee_charge = true;
+            }
         }
 
         if !request_has_gas_limit {
