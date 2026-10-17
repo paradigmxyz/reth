@@ -446,12 +446,16 @@ where
         Address::ZERO
     };
 
+    let state_nonce = db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default();
     if tx.as_ref().nonce().is_none() {
-        tx.as_mut().set_nonce(
-            db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
-        );
+        tx.as_mut().set_nonce(state_nonce);
     }
-    // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
+    // EIP-2681 applies in both modes. Check it here because revm checks the fee cap first.
+    if state_nonce == u64::MAX && (disable_nonce_check || tx.as_ref().nonce() == Some(u64::MAX)) {
+        return Err(EthApiError::other(EthSimulateError::NonceMaxValue))
+    }
+    // revm rejects a tx nonce of u64::MAX even with the nonce check disabled. The state nonce is
+    // below the limit here, so only the tx object changes.
     if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
         tx.as_mut().set_nonce(0);
     }

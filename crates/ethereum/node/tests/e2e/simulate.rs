@@ -423,3 +423,38 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let to = address!("0xc100000000000000000000000000000000000000");
+    let sim_block = SimBlock::default()
+        .with_state_overrides(StateOverride::from_iter([(
+            from,
+            AccountOverride::default().with_nonce(u64::MAX),
+        )]))
+        .call(TransactionRequest::default().from(from).to(to));
+
+    for validation in [false, true] {
+        let mut payload = SimulatePayload::default().extend(sim_block.clone());
+        payload.validation = validation;
+
+        let err = provider
+            .raw_request::<_, Vec<SimulatedBlock>>("eth_simulateV1".into(), (&payload, "latest"))
+            .await
+            .unwrap_err();
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+
+        assert_eq!(err.code, -32603);
+        assert_eq!(err.message, "nonce has max value");
+        assert!(err.data.is_none());
+    }
+
+    Ok(())
+}
