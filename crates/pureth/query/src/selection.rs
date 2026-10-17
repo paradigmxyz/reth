@@ -204,14 +204,12 @@ fn resolve_eip(
     }
     let receipt = progressive(1, *receipt_index)?;
     let selector = small(read(join(receipt, 3)?)?, 1)?[0];
-    let mask = match selector {
-        1 => 0x1b,
-        2 => 0x1f,
-        3 => 0x3b,
-        _ => return Err(SelectionError::InvalidContext),
-    };
+    if !(1..=127).contains(&selector) {
+        return Err(SelectionError::InvalidContext);
+    }
     let container = join(receipt, 2)?;
-    if small(read(join(container, 3)?)?, 1)?[0] != mask {
+    let active_fields = read(join(container, 3)?)?;
+    if active_fields == B256::ZERO {
         return Err(SelectionError::InvalidContext);
     }
     if rest.is_empty() {
@@ -223,12 +221,13 @@ fn resolve_eip(
     let (field_index, kind) = match field.as_str() {
         "from" => (0, Kind::Scalar(20)),
         "gas_used" => (1, Kind::Scalar(8)),
-        "contract_address" => (2, if selector == 2 { Kind::Scalar(20) } else { Kind::Absent }),
+        "contract_address" => (2, Kind::Scalar(20)),
         "logs" => (3, Kind::Logs),
         "status" => (4, Kind::Scalar(1)),
-        "authorities" => (5, if selector == 3 { Kind::Authorities } else { Kind::Absent }),
+        "authorities" => (5, Kind::Authorities),
         _ => return Err(SelectionError::InvalidPath),
     };
+    let kind = if active_fields[0] & (1 << field_index) == 0 { Kind::Absent } else { kind };
     if kind == Kind::Absent && rest.is_empty() {
         return Ok(Target { index: join(container, 3)?, kind, length: None });
     }
@@ -356,6 +355,9 @@ fn check_whole_verification_budget(
 }
 
 fn whole_root(kind: Kind, value: &[u8], limit: usize) -> Result<B256, SelectionError> {
+    if matches!(kind, Kind::Receipt(selector) if selector > 3) {
+        return Err(SelectionError::UnsupportedOperation);
+    }
     check_whole_verification_budget(kind, value, limit)?;
     whole::root(kind, value)
 }
