@@ -1,7 +1,8 @@
 //! Enode identifier command
 
 use clap::Parser;
-use reth_cli_util::get_secret_key;
+use eyre::WrapErr;
+use reth_cli_util::parse_secret_key_from_hex;
 use reth_network_peers::NodeRecord;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -9,6 +10,8 @@ use std::{
 };
 
 /// Print the enode identifier for a given secret key.
+///
+/// The secret key file must already exist.
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Path to the secret key file for discovery.
@@ -19,16 +22,37 @@ pub struct Command {
     /// If not provided, defaults to 0.0.0.0.
     #[arg(long)]
     pub ip: Option<IpAddr>,
+
+    /// Port to include in the enode URL.
+    #[arg(long, default_value_t = 30303)]
+    pub port: u16,
 }
 
 impl Command {
     /// Execute the enode command.
     pub fn execute(self) -> eyre::Result<()> {
-        let sk = get_secret_key(&self.discovery_secret)?;
+        let contents = reth_fs_util::read_to_string(&self.discovery_secret)?;
+        let sk = parse_secret_key_from_hex(contents.trim()).wrap_err_with(|| {
+            format!("Invalid secret key in {}", self.discovery_secret.display())
+        })?;
         let ip = self.ip.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let addr = SocketAddr::new(ip, 30303);
+        let addr = SocketAddr::new(ip, self.port);
         let enr = NodeRecord::from_secret_key(addr, &sk);
         println!("{enr}");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_secret_key_is_not_generated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key");
+        let cmd = Command::parse_from(["enode", path.to_str().unwrap()]);
+        assert!(cmd.execute().is_err());
+        assert!(!path.exists());
     }
 }
