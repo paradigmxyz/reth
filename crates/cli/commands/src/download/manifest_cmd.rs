@@ -40,7 +40,7 @@ pub struct SnapshotManifestCommand {
     /// Blocks per archive file for chunked components.
     ///
     /// If omitted, this is inferred from header static file ranges in the source datadir.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
     blocks_per_file: Option<u64>,
 }
 
@@ -205,6 +205,13 @@ fn parse_headers_range(file_name: &str) -> Option<(u64, u64)> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn rejects_zero_blocks_per_file() {
+        let args = |n| ["manifest", "-d", "src", "-o", "out", "--blocks-per-file", n];
+        assert!(SnapshotManifestCommand::try_parse_from(args("0")).is_err());
+        assert!(SnapshotManifestCommand::try_parse_from(args("1")).is_ok());
+    }
 
     #[test]
     fn parse_headers_range_works_with_suffixes() {
