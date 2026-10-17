@@ -57,6 +57,29 @@ pub enum DownloadOutcome<B: Block> {
     },
 }
 
+/// Configuration for [`BasicBlockDownloader`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BasicBlockDownloaderConfig {
+    /// Maximum number of active in-flight requests (sum of single blocks and range requests).
+    /// `None` indicates unbounded active requests.
+    pub max_active_requests: Option<usize>,
+    /// Maximum capacity for the deferred request queue.
+    pub max_deferred_queue_capacity: usize,
+    /// Number of consecutive polls after which an active request is considered stalled
+    /// and eligible for recovery/demotion when new requests arrive under backpressure.
+    pub stalled_poll_threshold: usize,
+}
+
+impl Default for BasicBlockDownloaderConfig {
+    fn default() -> Self {
+        Self {
+            max_active_requests: None,
+            max_deferred_queue_capacity: 256,
+            stalled_poll_threshold: 64,
+        }
+    }
+}
+
 /// Basic [`BlockDownloader`].
 #[expect(missing_debug_implementations)]
 pub struct BasicBlockDownloader<Client, B: Block>
@@ -76,6 +99,10 @@ where
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
     pending_events: VecDeque<DownloadOutcome<B>>,
+    /// Downloader configuration for bounds and stalled task recovery.
+    config: BasicBlockDownloaderConfig,
+    /// Bounded queue of deferred requests awaiting execution slots.
+    deferred_requests: VecDeque<DownloadRequest>,
 }
 
 impl<Client, B> BasicBlockDownloader<Client, B>
@@ -85,6 +112,15 @@ where
 {
     /// Create a new instance
     pub fn new(client: Client, consensus: Arc<dyn Consensus<B>>) -> Self {
+        Self::with_config(client, consensus, BasicBlockDownloaderConfig::default())
+    }
+
+    /// Create a new instance with a specific configuration.
+    pub fn with_config(
+        client: Client,
+        consensus: Arc<dyn Consensus<B>>,
+        config: BasicBlockDownloaderConfig,
+    ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -92,6 +128,37 @@ where
             set_buffered_blocks: BinaryHeap::new(),
             metrics: BlockDownloaderMetrics::default(),
             pending_events: Default::default(),
+            config,
+            deferred_requests: VecDeque::new(),
+        }
+    }
+
+    /// Returns a reference to the downloader configuration.
+    pub const fn config(&self) -> &BasicBlockDownloaderConfig {
+        &self.config
+    }
+
+    /// Returns the number of currently active in-flight requests.
+    pub fn active_request_count(&self) -> usize {
+        self.inflight_full_block_requests.len() + self.inflight_block_range_requests.len()
+    }
+
+    /// Returns the number of deferred requests waiting in the queue.
+    pub fn deferred_request_count(&self) -> usize {
+        self.deferred_requests.len()
+    }
+
+    /// Returns whether the active task limit has been reached.
+    pub fn is_at_active_capacity(&self) -> bool {
+        self.config
+            .max_active_requests
+            .map_or(false, |limit| self.active_request_count() >= limit)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_inflight_request_poll_count(&mut self, index: usize, count: usize) {
+        if let Some(req) = self.inflight_full_block_requests.get_mut(index) {
+            req.poll_count = count;
         }
     }
 
@@ -100,6 +167,7 @@ where
         self.inflight_full_block_requests.clear();
         self.inflight_block_range_requests.clear();
         self.set_buffered_blocks.clear();
+        self.deferred_requests.clear();
         self.update_block_download_metrics();
     }
 
@@ -135,6 +203,26 @@ where
                 return
             }
 
+            if self.is_at_active_capacity() {
+                if !self.try_demote_stalled_request() {
+                    if self.deferred_requests.len() < self.config.max_deferred_queue_capacity {
+                        self.deferred_requests.push_back(DownloadRequest::BlockRange {
+                            hash,
+                            count,
+                            access_lists,
+                        });
+                    } else {
+                        trace!(
+                            target: "engine::download",
+                            ?hash,
+                            count,
+                            "deferred queue at capacity, dropping range request"
+                        );
+                    }
+                    return
+                }
+            }
+
             trace!(
                 target: "engine::download",
                 ?hash,
@@ -144,12 +232,12 @@ where
             );
 
             let request = if access_lists {
-                FullBlockRangeDownload::WithAccessLists(
+                FullBlockRangeDownload::with_access_lists(
                     self.full_block_client
                         .get_full_block_range_with_optional_access_lists(hash, count),
                 )
             } else {
-                FullBlockRangeDownload::Blocks(
+                FullBlockRangeDownload::blocks(
                     self.full_block_client.get_full_block_range(hash, count),
                 )
             };
@@ -171,6 +259,25 @@ where
         if self.is_inflight_request(hash) {
             return false
         }
+
+        if self.is_at_active_capacity() {
+            if !self.try_demote_stalled_request() {
+                if self.deferred_requests.len() < self.config.max_deferred_queue_capacity {
+                    self.deferred_requests.push_back(DownloadRequest::BlockSet {
+                        hashes: B256Set::from_iter([hash]),
+                        access_lists,
+                    });
+                } else {
+                    trace!(
+                        target: "engine::download",
+                        ?hash,
+                        "deferred queue at capacity, dropping full block request"
+                    );
+                }
+                return false
+            }
+        }
+
         self.push_pending_event(DownloadOutcome::NewDownloadStarted {
             remaining_blocks: 1,
             target: hash,
@@ -184,17 +291,80 @@ where
         );
 
         let request = if access_lists {
-            FullBlockDownload::WithAccessList(
+            FullBlockDownload::with_access_list(
                 self.full_block_client.get_full_block_with_access_lists(hash),
             )
         } else {
-            FullBlockDownload::Block(self.full_block_client.get_full_block(hash))
+            FullBlockDownload::block(self.full_block_client.get_full_block(hash))
         };
         self.inflight_full_block_requests.push(request);
 
         self.update_block_download_metrics();
 
         true
+    }
+
+    /// Attempts to demote the most stalled in-flight request into the deferred queue
+    /// if its poll count exceeds `stalled_poll_threshold`.
+    /// Returns `true` if a stalled request was demoted (freeing up an active slot).
+    fn try_demote_stalled_request(&mut self) -> bool {
+        let threshold = self.config.stalled_poll_threshold;
+
+        // Check full block requests first
+        if let Some((idx, _)) = self
+            .inflight_full_block_requests
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.poll_count >= threshold)
+            .max_by_key(|(_, r)| r.poll_count)
+        {
+            let stalled = self.inflight_full_block_requests.swap_remove(idx);
+            let hash = *stalled.hash();
+            trace!(
+                target: "engine::download",
+                ?hash,
+                poll_count = stalled.poll_count,
+                "Demoting stalled full block request to deferred queue"
+            );
+            if self.deferred_requests.len() < self.config.max_deferred_queue_capacity {
+                self.deferred_requests.push_back(DownloadRequest::BlockSet {
+                    hashes: B256Set::from_iter([hash]),
+                    access_lists: stalled.access_lists,
+                });
+            }
+            return true;
+        }
+
+        // Check range requests
+        if let Some((idx, _)) = self
+            .inflight_block_range_requests
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.poll_count >= threshold)
+            .max_by_key(|(_, r)| r.poll_count)
+        {
+            let stalled = self.inflight_block_range_requests.swap_remove(idx);
+            let hash = stalled.start_hash();
+            let count = stalled.count();
+            let access_lists = stalled.access_lists();
+            trace!(
+                target: "engine::download",
+                ?hash,
+                count,
+                poll_count = stalled.poll_count,
+                "Demoting stalled range request to deferred queue"
+            );
+            if self.deferred_requests.len() < self.config.max_deferred_queue_capacity {
+                self.deferred_requests.push_back(DownloadRequest::BlockRange {
+                    hash,
+                    count,
+                    access_lists,
+                });
+            }
+            return true;
+        }
+
+        false
     }
 
     /// Returns true if there's already a request for the given hash.
@@ -266,6 +436,15 @@ where
             }
         }
 
+        // Drain deferred requests into available active capacity slots
+        while !self.is_at_active_capacity() {
+            if let Some(deferred) = self.deferred_requests.pop_front() {
+                self.download(deferred);
+            } else {
+                break;
+            }
+        }
+
         self.update_block_download_metrics();
 
         if self.set_buffered_blocks.is_empty() {
@@ -317,7 +496,7 @@ impl<B: Block> From<SealedBlockWithAccessList<B>> for OrderedDownloadedBlock<B> 
 }
 
 /// An in-flight full block request that optionally also fetches the block's access list.
-enum FullBlockDownload<Client>
+enum FullBlockDownloadKind<Client>
 where
     Client: BlockClient + BlockAccessListsClient,
 {
@@ -327,29 +506,56 @@ where
     WithAccessList(FetchFullBlockWithBalFuture<Client>),
 }
 
+/// An in-flight full block request with poll tracking for stalled recovery.
+struct FullBlockDownload<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    kind: FullBlockDownloadKind<Client>,
+    access_lists: bool,
+    poll_count: usize,
+}
+
 impl<Client> FullBlockDownload<Client>
 where
     Client: BlockClient + BlockAccessListsClient + 'static,
 {
+    fn block(req: FetchFullBlockFuture<Client>) -> Self {
+        Self {
+            kind: FullBlockDownloadKind::Block(req),
+            access_lists: false,
+            poll_count: 0,
+        }
+    }
+
+    fn with_access_list(req: FetchFullBlockWithBalFuture<Client>) -> Self {
+        Self {
+            kind: FullBlockDownloadKind::WithAccessList(req),
+            access_lists: true,
+            poll_count: 0,
+        }
+    }
+
     /// Returns the hash of the block being requested.
     const fn hash(&self) -> &B256 {
-        match self {
-            Self::Block(req) => req.hash(),
-            Self::WithAccessList(req) => req.hash(),
+        match &self.kind {
+            FullBlockDownloadKind::Block(req) => req.hash(),
+            FullBlockDownloadKind::WithAccessList(req) => req.hash(),
         }
     }
 
     /// Advances the download.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<SealedBlockWithAccessList<Client::Block>> {
-        match self {
-            Self::Block(req) => req.poll_unpin(cx).map(SealedBlockWith::from_block),
-            Self::WithAccessList(req) => req.poll_unpin(cx),
+        self.poll_count += 1;
+        match &mut self.kind {
+            FullBlockDownloadKind::Block(req) => req.poll_unpin(cx).map(SealedBlockWith::from_block),
+            FullBlockDownloadKind::WithAccessList(req) => req.poll_unpin(cx),
         }
     }
 }
 
 /// An in-flight full block range request that optionally also fetches the blocks' access lists.
-enum FullBlockRangeDownload<Client>
+enum FullBlockRangeDownloadKind<Client>
 where
     Client: BlockClient + BlockAccessListsClient,
 {
@@ -359,29 +565,52 @@ where
     WithAccessLists(FetchFullBlockRangeWithBalFuture<Client>),
 }
 
+/// An in-flight full block range request with poll tracking for stalled recovery.
+struct FullBlockRangeDownload<Client>
+where
+    Client: BlockClient + BlockAccessListsClient,
+{
+    kind: FullBlockRangeDownloadKind<Client>,
+    poll_count: usize,
+}
+
 impl<Client> FullBlockRangeDownload<Client>
 where
     Client: BlockClient + BlockAccessListsClient + 'static,
 {
+    fn blocks(req: FetchFullBlockRangeFuture<Client>) -> Self {
+        Self {
+            kind: FullBlockRangeDownloadKind::Blocks(req),
+            poll_count: 0,
+        }
+    }
+
+    fn with_access_lists(req: FetchFullBlockRangeWithBalFuture<Client>) -> Self {
+        Self {
+            kind: FullBlockRangeDownloadKind::WithAccessLists(req),
+            poll_count: 0,
+        }
+    }
+
     /// Returns the block hash the requested range starts at (inclusive).
     const fn start_hash(&self) -> B256 {
-        match self {
-            Self::Blocks(req) => req.start_hash(),
-            Self::WithAccessLists(req) => req.start_hash(),
+        match &self.kind {
+            FullBlockRangeDownloadKind::Blocks(req) => req.start_hash(),
+            FullBlockRangeDownloadKind::WithAccessLists(req) => req.start_hash(),
         }
     }
 
     /// Returns the number of requested blocks.
     const fn count(&self) -> u64 {
-        match self {
-            Self::Blocks(req) => req.count(),
-            Self::WithAccessLists(req) => req.count(),
+        match &self.kind {
+            FullBlockRangeDownloadKind::Blocks(req) => req.count(),
+            FullBlockRangeDownloadKind::WithAccessLists(req) => req.count(),
         }
     }
 
     /// Returns whether the request also fetches block access lists.
     const fn access_lists(&self) -> bool {
-        matches!(self, Self::WithAccessLists(_))
+        matches!(&self.kind, FullBlockRangeDownloadKind::WithAccessLists(_))
     }
 
     /// Advances the download.
@@ -389,11 +618,12 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Vec<SealedBlockWithAccessList<Client::Block>>> {
-        match self {
-            Self::Blocks(req) => req
+        self.poll_count += 1;
+        match &mut self.kind {
+            FullBlockRangeDownloadKind::Blocks(req) => req
                 .poll_unpin(cx)
                 .map(|blocks| blocks.into_iter().map(SealedBlockWith::from_block).collect()),
-            Self::WithAccessLists(req) => req.poll_unpin(cx),
+            FullBlockRangeDownloadKind::WithAccessLists(req) => req.poll_unpin(cx),
         }
     }
 }
@@ -651,5 +881,131 @@ mod tests {
 
         // ensure we have no in flight full block request
         assert_eq!(block_downloader.inflight_full_block_requests.len(), 0);
+    }
+
+    fn insert_test_blocks(client: &TestFullBlockClient, count: usize) -> Vec<B256> {
+        let header = Header {
+            base_fee_per_gas: Some(7),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            ..Default::default()
+        };
+        let mut sealed_header = SealedHeader::seal_slow(header);
+        let body = reth_ethereum_primitives::BlockBody::default();
+        let mut hashes = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let (mut header, hash) = sealed_header.split();
+            header.parent_hash = hash;
+            header.number += 1;
+            header.timestamp += 1;
+            sealed_header = SealedHeader::seal_slow(header);
+            hashes.push(sealed_header.hash());
+            client.insert(sealed_header.clone(), body.clone());
+        }
+
+        hashes
+    }
+
+    #[tokio::test]
+    async fn block_downloader_bounds_active_requests_and_defers() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+
+        let client = TestFullBlockClient::default();
+        let blocks = insert_test_blocks(&client, 4);
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
+
+        let config = BasicBlockDownloaderConfig {
+            max_active_requests: Some(2),
+            max_deferred_queue_capacity: 10,
+            stalled_poll_threshold: 50,
+        };
+        let mut block_downloader =
+            BasicBlockDownloader::with_config(client.clone(), consensus, config);
+
+        // Submit 4 individual block requests
+        for hash in &blocks {
+            block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_set(
+                B256Set::from_iter([*hash]),
+            )));
+        }
+
+        // Active requests should be bounded at max_active_requests (2)
+        assert_eq!(block_downloader.active_request_count(), 2);
+        // Remaining 2 should be in deferred queue
+        assert_eq!(block_downloader.deferred_request_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn block_downloader_recovers_stalled_requests() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+
+        let client = TestFullBlockClient::default();
+        let blocks = insert_test_blocks(&client, 2);
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
+
+        let config = BasicBlockDownloaderConfig {
+            max_active_requests: Some(1),
+            max_deferred_queue_capacity: 10,
+            stalled_poll_threshold: 2,
+        };
+        let mut block_downloader =
+            BasicBlockDownloader::with_config(client.clone(), consensus, config);
+
+        let block1 = blocks[0];
+        let block2 = blocks[1];
+
+        // Submit first block
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_set(
+            B256Set::from_iter([block1]),
+        )));
+        assert_eq!(block_downloader.active_request_count(), 1);
+
+        // Mark the in-flight request as having stalled past threshold
+        block_downloader.set_inflight_request_poll_count(0, 5);
+
+        // Submit second block target while capacity (1) is full
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_set(
+            B256Set::from_iter([block2]),
+        )));
+
+        // The stalled request should be demoted to deferred queue, and block2 should become active
+        assert_eq!(block_downloader.active_request_count(), 1);
+        assert_eq!(block_downloader.deferred_request_count(), 1);
+
+        // Poll to receive the download started event for block1
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, target } => {
+            assert_eq!(remaining_blocks, 1);
+            assert_eq!(target, block1);
+        });
+
+        // Poll to receive the download started event for block2
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, DownloadOutcome::NewDownloadStarted { remaining_blocks, target } => {
+            assert_eq!(remaining_blocks, 1);
+            assert_eq!(target, block2);
+        });
+
+        // Poll to receive downloaded block2
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
+        let next_ready = sync_future.await;
+        assert_matches!(next_ready, DownloadOutcome::Blocks(blocks) => {
+            assert_eq!(blocks.len(), 1);
+            assert_eq!(blocks[0].hash(), block2);
+        });
     }
 }
