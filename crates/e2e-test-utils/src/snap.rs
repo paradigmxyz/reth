@@ -20,7 +20,7 @@ use reth_node_ethereum::{
     EthereumNode,
 };
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, mem, pin::Pin, sync::Arc};
 use tokio::sync::watch;
 
 /// Controls the requests of a node's production snap backfill, including across restarts.
@@ -52,9 +52,10 @@ impl SnapControl {
         SnapGate { state }
     }
 
-    /// Returns the requests seen so far, including a request currently paused at a gate.
-    pub fn requests(&self) -> Vec<SnapProtocolMessage> {
-        self.state.lock().requests.clone()
+    /// Returns the requests seen since the last call and clears them, including a request
+    /// currently paused at a gate.
+    pub fn take_requests(&self) -> Vec<SnapProtocolMessage> {
+        mem::take(&mut self.state.lock().requests)
     }
 }
 

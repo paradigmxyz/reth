@@ -198,7 +198,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
         0
     );
     let contract_hash = keccak256(contract);
-    assert!(control.requests().iter().any(|request| matches!(request,
+    assert!(control.take_requests().iter().any(|request| matches!(request,
         SnapProtocolMessage::GetStorageRanges(request)
         if request.account_hashes == [contract_hash] && request.starting_hash.unwrap_or(B256::ZERO) != B256::ZERO
     )), "contract storage must require a continuation request");
@@ -246,7 +246,7 @@ async fn a_completed_snap_sync_survives_restart() -> eyre::Result<()> {
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
     let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
     assert!(attempt.is_verified());
-    let requests = control.requests();
+    control.take_requests();
 
     let client = client.restart().await?;
     assert_eq!(client.block_hash(CHAIN_LENGTH), server.block_hash(CHAIN_LENGTH));
@@ -256,7 +256,7 @@ async fn a_completed_snap_sync_survives_restart() -> eyre::Result<()> {
     client.import_payload(next.payload).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH + 1).await?;
     assert_trie_consistency(&client.inner.provider)?;
-    assert_eq!(control.requests(), requests, "verified state must not be downloaded again");
+    assert!(control.take_requests().is_empty(), "verified state must not be downloaded again");
     Ok(())
 }
 
@@ -386,7 +386,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     let target = 210;
     server.advance_blocks(target - CHAIN_LENGTH - 1).await?;
     server.wait_for_persisted_block(target).await?;
-    let before_advance = control.requests().len();
+    control.take_requests();
     let bals =
         control.pause_on(|request| matches!(request, SnapProtocolMessage::GetBlockAccessLists(_)));
     client.engine.forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(target))).await?;
@@ -400,8 +400,8 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     client.sync_to(server.block_hash(target)).await?;
     client.wait_for_persisted_block(target).await?;
 
-    let requests = control.requests();
-    let requested_blocks: Vec<_> = requests[before_advance..]
+    let requests = control.take_requests();
+    let requested_blocks: Vec<_> = requests
         .iter()
         .filter_map(|request| match request {
             SnapProtocolMessage::GetBlockAccessLists(request) => {
@@ -416,7 +416,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
         ((FINALIZED + 1)..=target).map(|number| server.block_hash(number)).collect::<Vec<_>>()
     );
     assert!(
-        requests[before_advance..]
+        requests
             .iter()
             .filter_map(|request| match request {
                 SnapProtocolMessage::GetAccountRange(request) => Some(request.starting_hash),
@@ -569,7 +569,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     for payload in fork.advance_blocks(101 - 33).await? {
         server.import_payload(payload).await?;
     }
-    let before_restart = control.requests().len();
+    control.take_requests();
     let recovery =
         control.pause_on(|request| matches!(request, SnapProtocolMessage::GetBlockAccessLists(_)));
     let mut client = stopped.start().await?;
@@ -600,8 +600,8 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         })
         .await?;
     client.wait_for_persisted_block(101).await?;
-    let requests = control.requests();
-    let requested_blocks: Vec<_> = requests[before_restart..]
+    let requests = control.take_requests();
+    let requested_blocks: Vec<_> = requests
         .iter()
         .filter_map(|request| match request {
             SnapProtocolMessage::GetBlockAccessLists(request) => {
@@ -616,7 +616,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         .chain((33..=37).map(|number| server.block_hash(number)))
         .collect();
     assert_eq!(requested_blocks, expected);
-    assert!(requests[before_restart..].iter().any(|request| matches!(request,
+    assert!(requests.iter().any(|request| matches!(request,
         SnapProtocolMessage::GetAccountRange(request) if request.starting_hash == contract_hash && request.limit_hash == contract_hash
     )), "the downloaded contract must be repaired at the new pivot");
     let completed = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
