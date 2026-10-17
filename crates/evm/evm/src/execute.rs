@@ -379,6 +379,28 @@ pub trait BlockBuilder {
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
+    /// Completes the block building process like [`Self::finish`], but obtains the state root
+    /// from `state_root` after the executor has finished the block.
+    ///
+    /// Use this when the state root is computed from the state changes streamed through the
+    /// database's state hook (e.g. by the sparse trie pipeline): the post-execution changes, such
+    /// as system calls and withdrawals, only reach the hook while the executor finishes. The hook
+    /// is detached before `state_root` is called, which signals the end of the block to its
+    /// receiver. When `state_root` returns `None`, the state root is computed internally.
+    ///
+    /// The default implementation calls `state_root` before finishing the block, so builders
+    /// that support a state hook must override it.
+    fn finish_with_state_root(
+        self,
+        state_provider: impl StateProvider,
+        state_root: impl FnOnce() -> Option<(B256, TrieUpdates)>,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.finish(state_provider, state_root())
+    }
+
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
 
@@ -505,8 +527,21 @@ where
         state: impl StateProvider,
         state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        self.finish_with_state_root(state, || state_root_precomputed)
+    }
+
+    fn finish_with_state_root(
+        self,
+        state: impl StateProvider,
+        state_root: impl FnOnce() -> Option<(B256, TrieUpdates)>,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
+
+        // The state hook has seen every state change of the block, including the post-execution
+        // changes. Dropping it signals the end of the block to its receiver.
+        db.set_state_hook(None);
+        let state_root_precomputed = state_root();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);

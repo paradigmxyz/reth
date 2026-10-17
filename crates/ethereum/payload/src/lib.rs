@@ -467,25 +467,23 @@ where
             Some((parent_header.state_root(), Default::default())),
         )?
     } else if let Some(mut task) = state_root_handle {
-        // Drop the state hook, which signals the state-root task to finalize.
-        builder.evm_mut().db_mut().set_state_hook(None);
-
         // The state-root task has been computing incrementally alongside tx execution.
         // This recv() waits for the final root hash — most work is already done.
         // Fall back to sync state root if the trie pipeline fails.
-        match task.state_root() {
+        let state_root = || match task.state_root() {
             Ok(outcome) => {
                 debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, job = task.name(), "received state root from state-root job");
-                builder.finish(
-                    state_provider.as_ref(),
-                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
-                )?
+                Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates)))
             }
             Err(err) => {
                 warn!(target: "payload_builder", id=%payload_id, %err, "state-root job failed, falling back to sync state root");
-                builder.finish(state_provider.as_ref(), None)?
+                None
             }
-        }
+        };
+
+        // Keeps the state hook attached while the post-execution changes are applied, and drops
+        // it before requesting the state root, which signals the state-root task to finalize.
+        builder.finish_with_state_root(state_provider.as_ref(), state_root)?
     } else {
         builder.finish(state_provider.as_ref(), None)?
     };
