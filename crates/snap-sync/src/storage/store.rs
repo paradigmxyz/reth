@@ -348,9 +348,10 @@ mod tests {
     fn started() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let mut contract = account(1);
         contract.storage_root = root();
-        let factory = hashed_factory_with_roots(&[state_root(&[(CONTRACT, contract)])]);
+        let state_root = state_root(&[(CONTRACT, contract)]);
+        let factory = hashed_factory_with_roots(&[state_root]);
         let provider = factory.database_provider_rw().unwrap();
-        let generation = generation(1, state_root(&[(CONTRACT, contract)]));
+        let generation = generation(1, state_root);
         let write = provider.start_snap_attempt(generation).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider.commit().unwrap();
