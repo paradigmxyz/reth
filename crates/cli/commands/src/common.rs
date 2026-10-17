@@ -4,6 +4,7 @@ pub use reth_primitives_traits::header::HeaderMut;
 
 use alloy_primitives::B256;
 use clap::Parser;
+use eyre::WrapErr;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
@@ -111,11 +112,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
-        let mut config = Config::from_path(config_path)
-            .inspect_err(
-                |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
-            )
-            .unwrap_or_default();
+        let mut config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
