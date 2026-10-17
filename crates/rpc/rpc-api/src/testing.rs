@@ -23,6 +23,7 @@ pub const TESTING_COMMIT_BLOCK_V1: &str = "testing_commitBlockV1";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TestingBuildBlockResponseV1 {
+    // Try V6 first: V5 accepts unknown fields and would discard the Amsterdam payload fields.
     /// Payload envelope of a block after Amsterdam.
     V6(ExecutionPayloadEnvelopeV6),
     /// Payload envelope of a block before Amsterdam.
