@@ -351,19 +351,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         Ok(Ok(())) => {}
                         Ok(Err(err)) => return Err(err.wrap_err("Re-execution failed")),
                         Err(err) => {
-                            return Err(match err.try_into_panic() {
-                                Ok(panic) => {
-                                    let msg = panic
-                                        .downcast_ref::<&str>()
-                                        .map(|s| s.to_string())
-                                        .or_else(|| panic.downcast_ref::<String>().cloned());
-                                    eyre::eyre!(
-                                        "Re-execution worker panicked: {}",
-                                        msg.as_deref().unwrap_or("unknown panic")
-                                    )
-                                }
-                                Err(err) => eyre::Report::new(err).wrap_err("Re-execution failed"),
-                            })
+                            return Err(eyre::Report::new(err).wrap_err("Re-execution failed"))
                         }
                     }
                 }
