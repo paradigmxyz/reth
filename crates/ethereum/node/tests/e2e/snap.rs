@@ -289,22 +289,19 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         .engine
         .forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(CHAIN_LENGTH)))
         .await?;
-    continuation.reached().await?;
+    let SnapProtocolMessage::GetStorageRanges(request) = continuation.reached().await? else {
+        panic!("paused storage request")
+    };
     let (write, origin, account, resume_at) = {
         let provider = client.inner.provider.database_provider_ro()?;
         let write = provider.active_snap_write()?.unwrap();
         let origin = provider.account_coverage(write)?.unwrap().next().unwrap();
-        let requests = control.requests();
-        let SnapProtocolMessage::GetStorageRanges(request) = requests.last().unwrap() else {
-            panic!("paused storage request")
-        };
         let account = request.account_hashes[0];
         let resume_at = request.starting_hash.unwrap_or(B256::ZERO);
         assert_eq!(provider.storage_progress(write, origin)?.resume_at(account), Some(resume_at));
         (write, origin, account, resume_at)
     };
     let stopped = client.stop().await?;
-    let before_restart = control.requests().len();
     let mut resumed = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetStorageRanges(request) if request.account_hashes == [account]
@@ -321,19 +318,9 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         .engine
         .forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(CHAIN_LENGTH)))
         .await?;
-    resumed.reached().await?;
-    let requests = control.requests();
-    let resumed_request = requests[before_restart..]
-        .iter()
-        .find_map(|request| match request {
-            SnapProtocolMessage::GetStorageRanges(request)
-                if request.account_hashes == [account] =>
-            {
-                Some(request)
-            }
-            _ => None,
-        })
-        .unwrap();
+    let SnapProtocolMessage::GetStorageRanges(resumed_request) = resumed.reached().await? else {
+        panic!("resumed storage request")
+    };
     assert_eq!(resumed_request.starting_hash.unwrap_or(B256::ZERO), resume_at);
     resumed.release();
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;

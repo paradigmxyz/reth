@@ -45,7 +45,7 @@ impl SnapControl {
         &self,
         matches: impl Fn(&SnapProtocolMessage) -> bool + Send + Sync + 'static,
     ) -> SnapGate {
-        let (reached, receiver) = watch::channel(false);
+        let (reached, receiver) = watch::channel(None);
         let (release, released) = watch::channel(false);
         self.state.lock().unwrap().gates.push(RequestGate {
             matches: Box::new(matches),
@@ -69,15 +69,16 @@ impl SnapControl {
 /// A single request boundary a test can await and release.
 #[derive(Debug)]
 pub struct SnapGate {
-    reached: watch::Receiver<bool>,
+    reached: watch::Receiver<Option<SnapProtocolMessage>>,
     release: watch::Sender<bool>,
 }
 
 impl SnapGate {
-    /// Waits until the downloader reaches this request, with the harness timeout.
-    pub async fn reached(&mut self) -> eyre::Result<()> {
-        tokio::time::timeout(WAIT_TIMEOUT, self.reached.wait_for(|reached| *reached)).await??;
-        Ok(())
+    /// Waits until the downloader reaches this request, with the harness timeout, and returns it.
+    pub async fn reached(&mut self) -> eyre::Result<SnapProtocolMessage> {
+        let reached =
+            tokio::time::timeout(WAIT_TIMEOUT, self.reached.wait_for(Option::is_some)).await??;
+        Ok(reached.clone().expect("waited for a matched request"))
     }
 
     /// Lets the paused request proceed to the real peer.
@@ -193,7 +194,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
         mut request: SnapProtocolMessage,
         priority: Priority,
     ) -> <Self as SnapClient>::Output {
-        let gate = {
+        let released = {
             let mut state = self.control.state.lock().unwrap();
             if let Some(bytes) = state.response_bytes {
                 match &mut request {
@@ -204,19 +205,20 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
                     _ => {}
                 }
             }
-            let gate = state
-                .gates
-                .iter()
-                .position(|gate| (gate.matches)(&request))
-                .map(|index| state.gates.remove(index));
+            // Signal the match right away: the request future may be dropped before it is polled.
+            let released =
+                state.gates.iter().position(|gate| (gate.matches)(&request)).map(|index| {
+                    let gate = state.gates.remove(index);
+                    gate.reached.send_replace(Some(request.clone()));
+                    gate.released
+                });
             state.requests.push(request.clone());
-            gate
+            released
         };
         let client = self.inner.clone();
         Box::pin(async move {
-            if let Some(mut gate) = gate {
-                gate.reached.send_replace(true);
-                let _ = gate.released.wait_for(|released| *released).await;
+            if let Some(mut released) = released {
+                let _ = released.wait_for(|released| *released).await;
             }
             match request {
                 SnapProtocolMessage::GetAccountRange(request) => {
@@ -256,6 +258,6 @@ impl fmt::Debug for ControlState {
 
 struct RequestGate {
     matches: Box<dyn Fn(&SnapProtocolMessage) -> bool + Send + Sync>,
-    reached: watch::Sender<bool>,
+    reached: watch::Sender<Option<SnapProtocolMessage>>,
     released: watch::Receiver<bool>,
 }
