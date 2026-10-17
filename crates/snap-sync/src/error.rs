@@ -48,6 +48,16 @@ pub enum SnapSyncError {
         /// Root the range was proved against.
         got: B256,
     },
+    /// A generation carries a state root other than the one its target header commits to.
+    #[error("block {block} commits to state root {expected}, not {got}")]
+    HeaderRootMismatch {
+        /// Target block of the generation.
+        block: u64,
+        /// State root of the canonical header.
+        expected: B256,
+        /// State root the generation carries.
+        got: B256,
+    },
     /// No catch-up progress is recorded for the attempt.
     #[error("no catch-up progress is recorded for the attempt")]
     NoCatchUpProgress,
@@ -250,6 +260,7 @@ impl SnapSyncError {
             Self::NoAttempt |
             Self::StaleWrite { .. } |
             Self::RootMismatch { .. } |
+            Self::HeaderRootMismatch { .. } |
             Self::NoCatchUpProgress |
             Self::MissingHeader { .. } |
             Self::OutOfOrderBlock { .. } |

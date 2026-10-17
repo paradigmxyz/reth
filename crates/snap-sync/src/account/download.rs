@@ -216,8 +216,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, generation, hashed_factory, key, state_root, verified_range,
-            ScriptedSnapClient,
+            account, account_range, generation, hashed_factory, hashed_factory_with_roots, key,
+            state_root, verified_range, ScriptedSnapClient,
         },
         StateRepairs,
     };
@@ -236,7 +236,7 @@ mod tests {
     }
 
     fn started(accounts: &[(B256, TrieAccount)]) -> ProviderFactory<MockNodeTypesWithDB> {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(accounts); 3]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -375,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn nothing_is_requested_without_recorded_coverage() {
-        let factory = hashed_factory();
+        let factory = hashed_factory_with_roots(&[state_root(&accounts())]);
         let provider = factory.database_provider_rw().unwrap();
         provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
         provider.commit().unwrap();
