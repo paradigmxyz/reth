@@ -179,9 +179,8 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     let bytecode = control.pause_on(move |request| {
         matches!(request, SnapProtocolMessage::GetByteCodes(request) if request.hashes.contains(&code_hash))
     });
-    let backfill_control = control.clone();
     let setup = snap_setup(EthereumHardfork::Amsterdam, runtime)
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)))
+        .with_snap_control(&control)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         });
@@ -236,10 +235,9 @@ async fn a_completed_snap_sync_survives_restart() -> eyre::Result<()> {
     let (mut server, _) = snap_setup(EthereumHardfork::Amsterdam, runtime).build_single().await?;
     server.advance_blocks(CHAIN_LENGTH).await?;
     let control = SnapControl::default();
-    let backfill_control = control.clone();
     let setup = snap_node(EthereumHardfork::Amsterdam)
         .with_restartable_nodes()
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)))
+        .with_snap_control(&control)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         });
@@ -280,10 +278,8 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
             if request.starting_hash.unwrap_or(B256::ZERO) != B256::ZERO
         )
     });
-    let backfill_control = control.clone();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_restartable_nodes()
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
+    let setup =
+        snap_node(EthereumHardfork::Amsterdam).with_restartable_nodes().with_snap_control(&control);
     let client = syncing_client(&mut server, setup).await?;
     client
         .engine
@@ -362,9 +358,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > account_hash
         )
     });
-    let backfill_control = control.clone();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
+    let setup = snap_node(EthereumHardfork::Amsterdam).with_snap_control(&control);
     let client = syncing_client(&mut server, setup).await?;
     let finalized = server.block_hash(FINALIZED);
     client
@@ -464,9 +458,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash != B256::ZERO
         )
     });
-    let backfill_control = control.clone();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
+    let setup = snap_node(EthereumHardfork::Amsterdam).with_snap_control(&control);
     let mut client = syncing_client(&mut server, setup).await?;
     client.engine.forkchoice_updated(ForkchoiceState::same_hash(head)).await?;
     continuation.reached().await?;
@@ -554,10 +546,8 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > contract_hash
         )
     });
-    let backfill_control = control.clone();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_restartable_nodes()
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
+    let setup =
+        snap_node(EthereumHardfork::Amsterdam).with_restartable_nodes().with_snap_control(&control);
     let client = syncing_client(&mut server, setup).await?;
     client.update_optimistic_forkchoice(server.block_hash(INITIAL_HEAD)).await?;
     downloaded.reached().await?;

@@ -1,6 +1,6 @@
 //! Observes and pauses snap requests without replacing the serving peer or response validation.
 
-use crate::wait::poll_until;
+use crate::{wait::poll_until, E2ETestSetupBuilder};
 use parking_lot::Mutex;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
@@ -15,7 +15,10 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
-use reth_node_ethereum::snap::{EthereumBackfill, EthereumBackfillSync};
+use reth_node_ethereum::{
+    snap::{EthereumBackfill, EthereumBackfillSync},
+    EthereumNode,
+};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::watch;
@@ -53,10 +56,16 @@ impl SnapControl {
     pub fn requests(&self) -> Vec<SnapProtocolMessage> {
         self.state.lock().requests.clone()
     }
+}
 
-    /// Wraps the backfill chosen by the node configuration.
-    pub fn backfill(&self, inner: EthereumBackfill) -> ControlledBackfill {
-        ControlledBackfill { inner, control: self.clone() }
+impl E2ETestSetupBuilder<EthereumNode> {
+    /// Wraps the backfill chosen by the node configuration with `control`.
+    pub fn with_snap_control(self, control: &SnapControl) -> Self {
+        let control = control.clone();
+        self.with_backfill(move |config| ControlledBackfill {
+            inner: EthereumBackfill::new(config),
+            control: control.clone(),
+        })
     }
 }
 
