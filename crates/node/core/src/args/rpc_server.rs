@@ -728,7 +728,17 @@ pub struct RpcServerArgs {
     pub rpc_pending_block: PendingBlockKind,
 
     /// Endpoint to forward transactions to.
-    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER", default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|v| v.as_str().into())))]
+    #[arg(
+        long = "rpc.forwarder",
+        alias = "rpc-forwarder",
+        value_name = "FORWARDER",
+        value_parser = DefaultValueParser {
+            inner: Url::parse,
+            default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        hide_default_value = true,
+    )]
     pub rpc_forwarder: Option<Url>,
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
