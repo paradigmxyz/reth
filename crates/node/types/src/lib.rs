@@ -118,7 +118,7 @@ where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
-    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,
+    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>>,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -170,10 +170,10 @@ impl<P, E, C, S, PL> AnyNodeTypesWithEngine<P, E, C, S, PL> {
 impl<P, E, C, S, PL> NodeTypes for AnyNodeTypesWithEngine<P, E, C, S, PL>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin,
+    E: EngineTypes,
     C: EthChainSpec<Header = P::BlockHeader> + Clone + 'static,
     S: Default + Clone + Send + Sync + Unpin + Debug + 'static,
-    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + 'static,
+    PL: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = P>>,
 {
     type Primitives = P;
     type ChainSpec = C;

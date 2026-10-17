@@ -192,7 +192,7 @@ where
 
 impl<Provider, T> Future for ImportService<Provider, T>
 where
-    Provider: BlockNumReader + BlockHashReader + Sync + Clone + 'static + Unpin,
+    Provider: BlockNumReader + Sync + Clone + 'static + Unpin,
     T: PayloadTypes,
 {
     type Output = Result<(), Box<dyn std::error::Error>>;
@@ -404,11 +404,11 @@ mod tests {
         tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
-                    BeaconEngineMessage::NewPayload { payload: _, tx } => {
+                    BeaconEngineMessage::NewPayload { tx, .. } => {
                         tx.send(Ok(PayloadStatus::new(responses.new_payload.clone(), None)))
                             .unwrap();
                     }
-                    BeaconEngineMessage::ForkchoiceUpdated { state: _, payload_attrs: _, tx } => {
+                    BeaconEngineMessage::ForkchoiceUpdated { tx, .. } => {
                         tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(
                             responses.fcu.clone(),
                             None,

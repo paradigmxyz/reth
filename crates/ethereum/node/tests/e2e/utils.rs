@@ -1,4 +1,4 @@
-use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId};
 use alloy_primitives::{bytes, U256};
 use alloy_provider::{
     network::{
@@ -11,7 +11,7 @@ use alloy_signer::SignerSync;
 use eyre::{ensure, eyre};
 use rand::{seq::IndexedRandom, Rng};
 use reqwest::{header, RequestBuilder, Response, StatusCode};
-use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType};
+use reth_e2e_test_utils::{node::Finality, wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
 use reth_node_ethereum::EthereumNode;
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -19,12 +19,16 @@ use reth_rpc_layer::secret_to_bearer_header;
 use ssz::{Decode, Encode};
 
 /// Advances node by producing blocks with random transactions.
+///
+/// The blocks become the safe and finalized block if `finalize` is set, otherwise the safe and
+/// finalized blocks stay. The node keeps the corresponding [`Finality`] policy afterwards.
 pub(crate) async fn advance_with_random_transactions(
     node: &mut NodeHelperType<EthereumNode>,
     num_blocks: usize,
     rng: &mut impl Rng,
     finalize: bool,
 ) -> eyre::Result<()> {
+    node.set_finality(if finalize { Finality::Head } else { Finality::Keep });
     let provider = node.rpc_provider();
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
@@ -44,14 +48,14 @@ pub(crate) async fn advance_with_random_transactions(
 
             let nonce = provider
                 .get_transaction_count(signer.address())
-                .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                .block_id(BlockId::pending())
                 .await?;
 
             let mut tx =
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create =
-                rng.random::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
+                rng.random::<bool>() && !tx_type.is_eip4844() && !tx_type.is_eip7702();
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
@@ -64,7 +68,7 @@ pub(crate) async fn advance_with_random_transactions(
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.random::<bool>() || tx_type == TxType::Eip2930 {
+            if rng.random::<bool>() || tx_type.is_eip2930() {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
@@ -74,14 +78,14 @@ pub(crate) async fn advance_with_random_transactions(
                 );
             }
 
-            if tx_type == TxType::Eip7702 {
+            if tx_type.is_eip7702() {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
                     chain_id: U256::from(provider.get_chain_id().await?),
                     address: *call_destinations.choose(rng).unwrap(),
                     nonce: provider
                         .get_transaction_count(signer.address())
-                        .block_id(BlockId::Number(BlockNumberOrTag::Pending))
+                        .block_id(BlockId::pending())
                         .await?,
                 };
                 let sig = signer.sign_hash_sync(&auth.signature_hash())?;
@@ -90,7 +94,7 @@ pub(crate) async fn advance_with_random_transactions(
 
             let gas = provider
                 .estimate_gas(tx.clone())
-                .block(BlockId::Number(BlockNumberOrTag::Pending))
+                .block(BlockId::pending())
                 .await
                 .unwrap_or(1_000_000);
 
@@ -106,14 +110,7 @@ pub(crate) async fn advance_with_random_transactions(
             }
         }
 
-        let payload = node.build_and_submit_payload().await?;
-        if finalize {
-            node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
-        } else {
-            let last_safe =
-                provider.get_block_by_number(BlockNumberOrTag::Safe).await?.unwrap().header.hash;
-            node.update_forkchoice(last_safe, payload.block().hash()).await?;
-        }
+        node.advance_block().await?;
 
         for pending in pending {
             let receipt = pending.get_receipt().await?;

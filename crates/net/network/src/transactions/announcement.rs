@@ -186,7 +186,7 @@ mod tests {
             assert_eq!(announcement.iter().next().unwrap().hash, hashes[3]);
             assert_eq!(
                 announcement.cell_mask(),
-                if msg.version() == EthVersion::Eth72 { mask } else { None }
+                if msg.version().is_eth72() { mask } else { None }
             );
         }
     }

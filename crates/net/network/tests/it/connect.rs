@@ -3,7 +3,7 @@
 use alloy_primitives::map::HashSet;
 use futures::StreamExt;
 use reth_chainspec::SEPOLIA;
-use reth_eth_wire::{DisconnectReason, HeadersDirection};
+use reth_eth_wire::DisconnectReason;
 use reth_network::{
     config::rng_secret_key,
     test_utils::{PeerConfig, Testnet},
@@ -158,13 +158,7 @@ async fn test_connect_to_trusted_peer() {
     peer.network().update_sync_state(SyncState::Syncing);
 
     let fetcher = peer.network().fetch_client().await.unwrap();
-    let headers = fetcher
-        .get_headers(HeadersRequest {
-            start: 73174u64.into(),
-            limit: 10,
-            direction: HeadersDirection::Falling,
-        })
-        .await;
+    let headers = fetcher.get_headers(HeadersRequest::falling(73174u64.into(), 10)).await;
     dbg!(&headers);
 
     while let Some(ev) = events.next().await {
@@ -346,15 +340,24 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     // incoming connection should fail because exceeding max_inbound
     peer1.add_peer(peer);
 
-    let (peer_id, reason) = events_peer1.next_session_closed().await.unwrap();
+    let (peer_id, reason) =
+        tokio::time::timeout(Duration::from_secs(10), events_peer1.next_session_closed())
+            .await
+            .expect("untrusted peer was not rejected in time")
+            .unwrap();
     assert_eq!(peer_id, *peer.peer_id());
     assert_eq!(reason, Some(DisconnectReason::TooManyPeers));
 
-    assert_eq!(events.next_session_established().await, Some(*peer1.peer_id()));
+    assert_eq!(peer.network().num_connected_peers(), 0);
 
     // outbound connection from `peer2` should succeed
     peer2.add_peer(peer);
-    assert_eq!(events.next_session_established().await, Some(*peer2.peer_id()));
+    // The rejected peer must not emit an established event before the trusted peer.
+    let established =
+        tokio::time::timeout(Duration::from_secs(10), events.next_session_established())
+            .await
+            .expect("trusted peer was not accepted in time");
+    assert_eq!(established, Some(*peer2.peer_id()));
 
     assert_eq!(peer.network().num_connected_peers(), 1);
 }

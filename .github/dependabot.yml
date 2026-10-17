@@ -8,13 +8,16 @@ updates:
       time: "09:00"
       timezone: UTC
     cooldown:
-      default-days: 7
+      # Buffer the scanner's seven-day minimum: Dependabot reads date-only tag metadata.
+      default-days: 8
     groups:
       ci-weekly:
         patterns:
           - '*'
   - package-ecosystem: cargo
     directory: /
+    allow:
+      - dependency-type: all
     schedule:
       interval: weekly
       day: monday

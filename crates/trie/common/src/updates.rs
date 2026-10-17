@@ -206,19 +206,15 @@ impl TrieUpdates {
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
-    /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
+    /// Allocates sorted collections borrowing the trie updates as [`TrieUpdatesSortedRef`].
+    pub fn to_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         TrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
-            storage_tries: self
-                .storage_tries
-                .iter()
-                .map(|m| (*m.0, m.1.into_sorted_ref()))
-                .collect(),
+            storage_tries: self.storage_tries.iter().map(|m| (*m.0, m.1.to_sorted_ref())).collect(),
         }
     }
 
@@ -368,8 +364,9 @@ impl StorageTrieUpdates {
         StorageTrieUpdatesSorted { storage_nodes }
     }
 
-    /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
-    pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
+    /// Allocates sorted collections borrowing the storage updates as
+    /// [`StorageTrieUpdatesSortedRef`].
+    pub fn to_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
         StorageTrieUpdatesSortedRef {
             removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),
@@ -923,8 +920,8 @@ mod tests {
             storage_nodes: vec![(Nibbles::from_nibbles_unchecked([0x0b]), None)],
         };
 
-        let hashed_address1 = B256::from([1; 32]);
-        let hashed_address2 = B256::from([2; 32]);
+        let hashed_address1 = B256::repeat_byte(1);
+        let hashed_address2 = B256::repeat_byte(2);
 
         let mut updates1 = TrieUpdatesSorted {
             account_nodes: vec![],
@@ -950,7 +947,7 @@ mod tests {
     fn test_trie_updates_sorted_disjointed_merge_batch() {
         let kept_node = Nibbles::from_nibbles_unchecked([0x01]);
         let removed_node = Nibbles::from_nibbles_unchecked([0x02]);
-        let kept_storage = B256::from([3; 32]);
+        let kept_storage = B256::repeat_byte(3);
         let slot1 = Nibbles::from_nibbles_unchecked([0x0a]);
         let slot2 = Nibbles::from_nibbles_unchecked([0x0b]);
 
@@ -1058,8 +1055,8 @@ mod tests {
 
         let node_path = Nibbles::from_nibbles_unchecked([0x03]);
         let deleted_node_path = Nibbles::from_nibbles_unchecked([0x04]);
-        let storage = B256::from([5; 32]);
-        let deleted_storage = B256::from([6; 32]);
+        let storage = B256::repeat_byte(5);
+        let deleted_storage = B256::repeat_byte(6);
         let storage_node_path = Nibbles::from_nibbles_unchecked([0x0c]);
         let deleted_storage_node_path = Nibbles::from_nibbles_unchecked([0x0d]);
         let batch = TrieUpdatesSorted::new(
@@ -1112,7 +1109,7 @@ mod tests {
 
     #[test]
     fn test_trie_updates_sorted_disjointed_merge_batch_uses_exact_key_masking() {
-        let hashed_address = B256::from([7; 32]);
+        let hashed_address = B256::repeat_byte(7);
         let grandparent = Nibbles::from_nibbles_unchecked([0x05]);
         let parent = Nibbles::from_nibbles_unchecked([0x05, 0x04]);
         let child = Nibbles::from_nibbles_unchecked([0x05, 0x04, 0x03]);
@@ -1164,7 +1161,7 @@ mod tests {
 
     #[test]
     fn test_trie_updates_sorted_disjointed_merge_batch_ignores_empty_storage_mask() {
-        let storage = B256::from([6; 32]);
+        let storage = B256::repeat_byte(6);
         let slot = Nibbles::from_nibbles_unchecked([0x0d]);
 
         let batch = TrieUpdatesSorted::new(
@@ -1194,7 +1191,7 @@ mod tests {
     /// Test extending with storage tries adds both nodes and removed nodes correctly
     #[test]
     fn test_trie_updates_extend_from_sorted_with_storage_tries() {
-        let hashed_address = B256::from([1; 32]);
+        let hashed_address = B256::repeat_byte(1);
 
         let mut updates = TrieUpdates::default();
 

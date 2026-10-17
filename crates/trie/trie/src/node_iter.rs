@@ -322,6 +322,7 @@ mod tests {
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
+        B256,
     };
     use alloy_trie::{
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
@@ -343,7 +344,8 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
+        let walker =
+            TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze()).unwrap();
 
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
@@ -402,8 +404,8 @@ mod tests {
         //     │      │      └── 1 -> Leaf (`account_4`)
         //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
 
-        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
-        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
+        let account_1 = B256::ZERO;
+        let account_2 = B256::with_last_byte(0x10);
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
         let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
         let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
@@ -474,7 +476,8 @@ mod tests {
         let walker = TrieWalker::<_>::state_trie(
             trie_cursor_factory.account_trie_cursor().unwrap(),
             prefix_set,
-        );
+        )
+        .unwrap();
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([

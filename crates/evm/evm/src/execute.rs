@@ -729,10 +729,11 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use revm::database::{CacheDB, EmptyDB};
+    use revm::database::InMemoryDB;
 
     #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
@@ -787,7 +788,7 @@ mod tests {
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDB>::default();
+        let db = InMemoryDB::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
     }

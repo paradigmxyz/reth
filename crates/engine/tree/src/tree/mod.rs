@@ -40,7 +40,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::ComputedTrieData;
+use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{
@@ -68,7 +68,6 @@ mod metrics;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
-pub mod precompile_cache;
 pub mod state_root_strategy;
 #[cfg(test)]
 mod tests;
@@ -85,8 +84,9 @@ pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
-    CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider,
-    ExecutionCache, PayloadExecutionCache, SavedCache, TxPoolPrewarmCacheSnapshot,
+    precompile_cache, CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource,
+    CachedStateProvider, ExecutionCache, PayloadExecutionCache, SavedCache,
+    TxPoolPrewarmCacheSnapshot,
 };
 pub use txpool_prewarm::{
     Source as TxPoolPrewarmSource, Transaction as TxPoolPrewarmTransaction,
@@ -323,11 +323,11 @@ where
     runtime: reth_tasks::Runtime,
 }
 
-impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
+impl<N, P: Debug, T: PayloadTypes, V: Debug, C> std::fmt::Debug
     for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
-    C: Debug + ConfigureEvm<Primitives = N>,
+    C: ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -518,6 +518,14 @@ where
     ///
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
+        let terminated = self.run_until_exit();
+        drop(self);
+        if let Some(tx) = terminated {
+            let _ = tx.send(());
+        }
+    }
+
+    fn run_until_exit(&mut self) -> Option<oneshot::Sender<()>> {
         loop {
             // Each iteration has three phases:
             //
@@ -547,14 +555,14 @@ where
                 Ok(true) => {
                     if let Err(err) = self.advance_persistence() {
                         error!(target: "engine::tree", %err, "Advancing persistence failed");
-                        return
+                        return None
                     }
                     continue;
                 }
                 Ok(false) => {}
                 Err(err) => {
                     error!(target: "engine::tree", %err, "Polling persistence failed");
-                    return
+                    return None
                 }
             }
 
@@ -573,24 +581,24 @@ where
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
-                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Break(tx)) => return Some(tx),
                         Ok(ops::ControlFlow::Continue(())) => {}
                         Err(fatal) => {
                             error!(target: "engine::tree", %fatal, "insert block fatal error");
-                            return
+                            return None
                         }
                     }
                 }
                 LoopEvent::PersistenceComplete { result, start_time } => {
                     if let Err(err) = self.on_persistence_complete(result, start_time) {
                         error!(target: "engine::tree", %err, "Persistence complete handling failed");
-                        return
+                        return None
                     }
                 }
                 LoopEvent::PayloadBuildFinished => {}
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
-                    return
+                    return None
                 }
             }
 
@@ -600,7 +608,7 @@ where
             // - After persistence completion: we can now persist more blocks if needed
             if let Err(err) = self.advance_persistence() {
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
-                return
+                return None
             }
         }
     }
@@ -1202,6 +1210,15 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // Forward the head and finalized block, since a long-running backfill such as snap
+            // must follow them. A run awaiting revalidation has not started and reads the latest
+            // forkchoice when it does.
+            if self.backfill_sync_state.is_pending() || self.backfill_sync_state.is_active() {
+                self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
+                    state.head_block_hash,
+                )));
+                self.forward_finalized(state.finalized_block_hash);
+            }
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
@@ -1460,20 +1477,6 @@ where
         Ok(())
     }
 
-    /// Finishes termination by persisting all remaining blocks and signaling completion.
-    ///
-    /// This blocks until all persistence is complete. Always signals completion,
-    /// even if an error occurs.
-    fn finish_termination(
-        &mut self,
-        pending_termination: oneshot::Sender<()>,
-    ) -> Result<(), AdvancePersistenceError> {
-        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
-        let result = self.persist_until_complete();
-        let _ = pending_termination.send(());
-        result
-    }
-
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
@@ -1576,11 +1579,12 @@ where
 
     /// Handles a message from the engine.
     ///
-    /// Returns `ControlFlow::Break(())` if the engine should terminate.
+    /// Returns `ControlFlow::Break` with the sender of the termination request if the engine
+    /// should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<oneshot::Sender<()>>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1592,10 +1596,11 @@ where
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
-                    if let Err(err) = self.finish_termination(tx) {
+                    trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
+                    if let Err(err) = self.persist_until_complete() {
                         error!(target: "engine::tree", %err, "Termination failed");
                     }
-                    return Ok(ops::ControlFlow::Break(()))
+                    return Ok(ops::ControlFlow::Break(tx))
                 }
             },
             FromEngine::Request(request) => {
@@ -1644,7 +1649,13 @@ where
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
-                            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            BeaconEngineMessage::ForkchoiceUpdated {
+                                cause,
+                                state,
+                                payload_attrs,
+                                tx,
+                            } => {
+                                let _cause = cause.enter();
                                 let has_attrs = payload_attrs.is_some();
 
                                 let start = Instant::now();
@@ -1687,7 +1698,8 @@ where
                                     warn!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to deliver forkchoiceUpdated response, receiver dropped (request cancelled): {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                            BeaconEngineMessage::NewPayload { cause, payload, tx } => {
+                                let _cause = cause.enter();
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
@@ -1717,12 +1729,14 @@ where
                                 self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::RethNewPayload {
+                                cause,
                                 payload,
                                 wait_for_persistence,
                                 wait_for_caches,
                                 tx,
                                 enqueued_at,
                             } => {
+                                let _cause = cause.enter();
                                 debug!(
                                     target: "engine::tree",
                                     wait_for_persistence,
@@ -2189,8 +2203,22 @@ where
         );
         self.backfill_sync_state = BackfillSyncState::Pending;
         self.metrics.engine.pipeline_runs.increment(1);
+        // Forkchoice updates only forward finality to a running backfill, so the run starting here
+        // gets the latest one up front.
+        if let Some(state) = self.state.forkchoice_state_tracker.latest_state() {
+            self.forward_finalized(state.finalized_block_hash);
+        }
         debug!(target: "engine::tree", "emitting backfill action event");
         self.send_event(EngineApiEvent::BackfillAction(action));
+    }
+
+    // Forwards `finalized` to the backfill unless the forkchoice leaves it unset.
+    fn forward_finalized(&self, finalized: B256) {
+        if !finalized.is_zero() {
+            self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateFinalized(
+                finalized,
+            )));
+        }
     }
 
     /// Sends an event to the orchestrator.
@@ -2371,11 +2399,15 @@ where
         let bundle_state = execution_output.state();
         // `get_state` can return an in-memory execution outcome that retains destruction statuses.
         // Hashing it requires the parent provider to expand a pre-existing destroyed account's
-        // storage into zero-valued slots.
-        let hashed_state = self
-            .provider
-            .state_by_block_hash(block.parent_hash())?
-            .hashed_post_state(bundle_state)?;
+        // storage into zero-valued slots. Genesis has no parent state, and no account existed
+        // before it to be destroyed.
+        let hashed_state = if block.parent_hash().is_zero() {
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
+        } else {
+            self.provider
+                .state_by_block_hash(block.parent_hash())?
+                .hashed_post_state(bundle_state)?
+        };
 
         debug!(
             target: "engine::tree",
@@ -2391,7 +2423,7 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
+        let trie_data = SortedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,

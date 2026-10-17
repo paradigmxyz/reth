@@ -63,6 +63,7 @@ account-ext = [
     "reth-provider?/account-ext",
     "reth-trie?/account-ext",
     "reth-rpc?/account-ext",
+    "reth-trie-db?/account-ext",
 ]
 std = [
     "reth-chainspec/std",

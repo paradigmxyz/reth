@@ -265,21 +265,13 @@ fn holesky_deposit_contract_proof() {
     let factory = create_test_provider_factory();
     let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
 
-    let target = address!("0x4242424242424242424242424242424242424242");
+    let target = Address::repeat_byte(0x42);
     // existent
-    let slot_22 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000022")
-            .unwrap();
-    let slot_23 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000023")
-            .unwrap();
-    let slot_24 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000024")
-            .unwrap();
+    let slot_22 = B256::with_last_byte(0x22);
+    let slot_23 = B256::with_last_byte(0x23);
+    let slot_24 = B256::with_last_byte(0x24);
     // non-existent
-    let slot_100 =
-        B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000100")
-            .unwrap();
+    let slot_100 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
     let slots = Vec::from([slot_22, slot_23, slot_24, slot_100]);
 
     // `cast proof 0x4242424242424242424242424242424242424242 0x22 0x23 0x24 0x100 --block 0`
@@ -353,5 +345,70 @@ fn holesky_deposit_contract_proof() {
         let account_proof = proof.account_proof(target, &slots).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);
         assert_eq!(account_proof.verify(root), Ok(()));
+    });
+}
+
+#[test]
+#[cfg(feature = "account-ext")]
+fn extension_only_genesis_account_proof() {
+    let target = Address::with_last_byte(1);
+    let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x82, 0xaa]);
+    let mut spec = ChainSpec::default();
+    spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
+    spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::ONE;
+    let expected_root =
+        reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
+    let factory = create_test_provider_factory();
+    let root = insert_genesis(&factory, Arc::new(spec)).unwrap();
+    assert_eq!(root, expected_root);
+
+    let provider = factory.provider().unwrap();
+    reth_trie_db::with_adapter!(provider, |A| {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(target, &[])
+            .unwrap();
+        let account = proof.info.as_ref().unwrap();
+        assert_eq!(account.extension, extension);
+        assert!(!account.is_empty());
+        assert_eq!(proof.verify(root), Ok(()));
+
+        let witness = proof.proof.iter().map(|node| (keccak256(node), node.clone())).collect();
+        let decoded = reth_trie::DecodedMultiProofV2::from_witness(root, &witness).unwrap();
+        let witness_proof = decoded.account_proof(target, &[]).unwrap();
+        assert_eq!(witness_proof.info, proof.info);
+        assert_eq!(witness_proof.verify(root), Ok(()));
+
+        let multiproof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .overlay_multiproof_v2(
+                TrieInput::default(),
+                MultiProofTargetsV2 {
+                    account_targets: vec![ProofV2Target::new(keccak256(target))],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let multiproof = multiproof.account_proof(target, &[]).unwrap();
+        assert_eq!(multiproof.info, proof.info);
+        assert_eq!(multiproof.verify(root), Ok(()));
+
+        for proof in [proof, multiproof] {
+            let response = proof.clone().into_eip1186_response(Vec::new());
+            assert_eq!(response.account_proof, proof.proof);
+            let restored = AccountProof::from_eip1186_proof(response);
+            assert_eq!(restored.info.as_ref().unwrap().extension, extension);
+            assert_eq!(restored.verify(root), Ok(()));
+
+            let mut tampered = proof.into_eip1186_response(Vec::new());
+            tampered.balance = U256::ONE;
+            assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
+        }
+
+        let absent = Address::with_last_byte(2);
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(absent, &[])
+            .unwrap();
+        let restored = AccountProof::from_eip1186_proof(proof.into_eip1186_response(Vec::new()));
+        assert!(restored.info.is_none());
+        assert_eq!(restored.verify(root), Ok(()));
     });
 }
