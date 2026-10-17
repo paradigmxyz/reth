@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use eyre::WrapErr;
-use reth_cli_util::parse_secret_key_from_hex;
 use reth_network_peers::NodeRecord;
+use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -30,7 +30,8 @@ impl Command {
     /// Execute the enode command.
     pub fn execute(self) -> eyre::Result<()> {
         let contents = reth_fs_util::read_to_string(&self.discovery_secret)?;
-        let sk = parse_secret_key_from_hex(contents.trim()).wrap_err_with(|| {
+        // Parse exactly like the node's key loader so only keys it accepts produce an enode.
+        let sk = contents.parse::<SecretKey>().wrap_err_with(|| {
             format!("Invalid secret key in {}", self.discovery_secret.display())
         })?;
         let ip = self.ip.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
