@@ -174,7 +174,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
 
-    let control = SnapControl::default().with_response_bytes(256);
+    let control = SnapControl::with_response_bytes(256);
     let code_hash = keccak256(&code);
     let bytecode = control.pause_on(move |request| {
         matches!(request, SnapProtocolMessage::GetByteCodes(request) if request.hashes.contains(&code_hash))
@@ -272,7 +272,7 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         .await?
         .ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - 1).await?;
-    let control = SnapControl::default().with_response_bytes(256);
+    let control = SnapControl::with_response_bytes(256);
     // Stop after one page has committed, before fetching the continuation.
     let continuation = control.pause_on(|request| {
         matches!(request,
@@ -356,7 +356,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     server.mine([account.transfer(recipient, U256::ONE).await]).await?.ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - FINALIZED - 1).await?;
     let account_hash = keccak256(account.address());
-    let control = SnapControl::default().with_response_bytes(256);
+    let control = SnapControl::with_response_bytes(256);
     let downloaded = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > account_hash
@@ -458,7 +458,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
         snap_node(EthereumHardfork::Amsterdam).with_restartable_nodes().build_single().await?;
     server.advance_blocks(CHAIN_LENGTH).await?;
     let head = server.block_hash(CHAIN_LENGTH);
-    let control = SnapControl::default().with_response_bytes(256);
+    let control = SnapControl::with_response_bytes(256);
     let continuation = control.pause_on(|request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash != B256::ZERO
@@ -548,7 +548,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     server.advance_blocks(INITIAL_HEAD - 33).await?;
     // No finalized pivot is supplied, so the initial pivot is HEAD - 64 = 36.
     let orphaned_hashes: Vec<_> = (33..=36).map(|number| server.block_hash(number)).collect();
-    let control = SnapControl::default().with_response_bytes(256);
+    let control = SnapControl::with_response_bytes(256);
     let downloaded = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > contract_hash

@@ -1,6 +1,7 @@
 //! Observes and pauses snap requests without replacing the serving peer or response validation.
 
 use crate::wait::poll_until;
+use parking_lot::Mutex;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
     GetStorageRangesMessage, SnapProtocolMessage,
@@ -16,11 +17,7 @@ use reth_network_peers::PeerId;
 use reth_node_builder::sync::{BackfillContext, BackfillSyncBuilder};
 use reth_node_ethereum::snap::{EthereumBackfill, EthereumBackfillSync};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::watch;
 
 /// Controls the requests of a node's production snap backfill, including across restarts.
@@ -30,16 +27,20 @@ pub struct SnapControl {
 }
 
 impl SnapControl {
-    /// Limits account and storage responses to force real peer pagination.
-    pub fn with_response_bytes(self, bytes: u64) -> Self {
-        self.state.lock().unwrap().response_bytes = Some(bytes);
-        self
+    /// Creates a control that limits account and storage responses to force real peer pagination.
+    pub fn with_response_bytes(bytes: u64) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(ControlState {
+                response_bytes: Some(bytes),
+                ..Default::default()
+            })),
+        }
     }
 
     /// Pauses the next matching request before it reaches the network.
     ///
-    /// Register before starting sync. The gate fires once; cancelling its request does not
-    /// pause the retry. Keep the gate alive until releasing it or stopping the node.
+    /// Only requests sent after this call can match. The gate fires once, so a retry of the paused
+    /// request is not paused again. Dropping the gate releases the request.
     pub fn pause_on(
         &self,
         matches: impl Fn(&SnapProtocolMessage) -> bool + Send + Sync + 'static,
@@ -47,7 +48,6 @@ impl SnapControl {
         let (state, _) = watch::channel(GateState::Waiting);
         self.state
             .lock()
-            .unwrap()
             .gates
             .push(RequestGate { matches: Box::new(matches), state: state.clone() });
         SnapGate { state }
@@ -55,7 +55,7 @@ impl SnapControl {
 
     /// Returns the requests seen so far, including a request currently paused at a gate.
     pub fn requests(&self) -> Vec<SnapProtocolMessage> {
-        self.state.lock().unwrap().requests.clone()
+        self.state.lock().requests.clone()
     }
 
     /// Wraps the backfill chosen by the node configuration.
@@ -172,7 +172,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
         priority: Priority,
     ) -> <Self as SnapClient>::Output {
         let released = {
-            let mut state = self.control.state.lock().unwrap();
+            let mut state = self.control.state.lock();
             if let Some(bytes) = state.response_bytes {
                 match &mut request {
                     SnapProtocolMessage::GetAccountRange(request) => request.response_bytes = bytes,
@@ -218,6 +218,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
 
 /// A single request boundary a test can await and release.
 #[derive(Debug)]
+#[must_use = "dropping the gate releases the paused request"]
 pub struct SnapGate {
     state: watch::Sender<GateState>,
 }

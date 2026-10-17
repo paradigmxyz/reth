@@ -8548,6 +8548,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "jsonrpsee",
+ "parking_lot",
  "reth-chainspec",
  "reth-cli-commands",
  "reth-config",
