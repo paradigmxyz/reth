@@ -23,18 +23,14 @@ use tokio::sync::watch;
 /// Controls the requests of a node's production snap backfill, including across restarts.
 #[derive(Clone, Debug, Default)]
 pub struct SnapControl {
+    response_bytes: Option<u64>,
     state: Arc<Mutex<ControlState>>,
 }
 
 impl SnapControl {
     /// Creates a control that limits account and storage responses to force real peer pagination.
     pub fn with_response_bytes(bytes: u64) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(ControlState {
-                response_bytes: Some(bytes),
-                ..Default::default()
-            })),
-        }
+        Self { response_bytes: Some(bytes), state: Default::default() }
     }
 
     /// Pauses the next matching request before it reaches the network.
@@ -125,10 +121,15 @@ impl<C: SnapClient + Clone + 'static> SnapClient for ControlledSnapClient<C> {
 
     fn get_account_range_with_priority(
         &self,
-        request: GetAccountRangeMessage,
+        mut request: GetAccountRangeMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.request(SnapProtocolMessage::GetAccountRange(request), priority)
+        if let Some(bytes) = self.control.response_bytes {
+            request.response_bytes = bytes;
+        }
+        self.gated(SnapProtocolMessage::GetAccountRange(request.clone()), move |client| {
+            client.get_account_range_with_priority(request, priority)
+        })
     }
 
     fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
@@ -137,10 +138,15 @@ impl<C: SnapClient + Clone + 'static> SnapClient for ControlledSnapClient<C> {
 
     fn get_storage_ranges_with_priority(
         &self,
-        request: GetStorageRangesMessage,
+        mut request: GetStorageRangesMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.request(SnapProtocolMessage::GetStorageRanges(request), priority)
+        if let Some(bytes) = self.control.response_bytes {
+            request.response_bytes = bytes;
+        }
+        self.gated(SnapProtocolMessage::GetStorageRanges(request.clone()), move |client| {
+            client.get_storage_ranges_with_priority(request, priority)
+        })
     }
 
     fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
@@ -152,7 +158,9 @@ impl<C: SnapClient + Clone + 'static> SnapClient for ControlledSnapClient<C> {
         request: GetByteCodesMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.request(SnapProtocolMessage::GetByteCodes(request), priority)
+        self.gated(SnapProtocolMessage::GetByteCodes(request.clone()), move |client| {
+            client.get_byte_codes_with_priority(request, priority)
+        })
     }
 
     fn get_block_access_lists_with_priority(
@@ -160,58 +168,26 @@ impl<C: SnapClient + Clone + 'static> SnapClient for ControlledSnapClient<C> {
         request: GetBlockAccessListsMessage,
         priority: Priority,
     ) -> Self::Output {
-        self.request(SnapProtocolMessage::GetBlockAccessLists(request), priority)
+        self.gated(SnapProtocolMessage::GetBlockAccessLists(request.clone()), move |client| {
+            client.get_block_access_lists_with_priority(request, priority)
+        })
     }
 }
 
 impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
     // Record and gate before dispatching; all responses still come from the real network.
-    fn request(
+    fn gated(
         &self,
-        mut request: SnapProtocolMessage,
-        priority: Priority,
+        request: SnapProtocolMessage,
+        send: impl FnOnce(&C) -> C::Output + Send + Sync + 'static,
     ) -> <Self as SnapClient>::Output {
-        let released = {
-            let mut state = self.control.state.lock();
-            if let Some(bytes) = state.response_bytes {
-                match &mut request {
-                    SnapProtocolMessage::GetAccountRange(request) => request.response_bytes = bytes,
-                    SnapProtocolMessage::GetStorageRanges(request) => {
-                        request.response_bytes = bytes
-                    }
-                    _ => {}
-                }
-            }
-            // Signal the match right away: the request future may be dropped before it is polled.
-            let released =
-                state.gates.iter().position(|gate| (gate.matches)(&request)).map(|index| {
-                    let gate = state.gates.remove(index);
-                    gate.state.send_replace(GateState::Reached(request.clone()));
-                    gate.state.subscribe()
-                });
-            state.requests.push(request.clone());
-            released
-        };
+        let released = self.control.state.lock().observe(request);
         let client = self.inner.clone();
         Box::pin(async move {
             if let Some(mut released) = released {
                 let _ = released.wait_for(|state| matches!(state, GateState::Released)).await;
             }
-            match request {
-                SnapProtocolMessage::GetAccountRange(request) => {
-                    client.get_account_range_with_priority(request, priority).await
-                }
-                SnapProtocolMessage::GetStorageRanges(request) => {
-                    client.get_storage_ranges_with_priority(request, priority).await
-                }
-                SnapProtocolMessage::GetByteCodes(request) => {
-                    client.get_byte_codes_with_priority(request, priority).await
-                }
-                SnapProtocolMessage::GetBlockAccessLists(request) => {
-                    client.get_block_access_lists_with_priority(request, priority).await
-                }
-                _ => unreachable!("only requests are dispatched"),
-            }
+            send(&client).await
         })
     }
 }
@@ -243,9 +219,21 @@ impl SnapGate {
 
 #[derive(Debug, Default)]
 struct ControlState {
-    response_bytes: Option<u64>,
     requests: Vec<SnapProtocolMessage>,
     gates: Vec<RequestGate>,
+}
+
+impl ControlState {
+    // Signals a matching gate right away: the request future may be dropped before it is polled.
+    fn observe(&mut self, request: SnapProtocolMessage) -> Option<watch::Receiver<GateState>> {
+        let released = self.gates.iter().position(|gate| (gate.matches)(&request)).map(|index| {
+            let gate = self.gates.remove(index);
+            gate.state.send_replace(GateState::Reached(request.clone()));
+            gate.state.subscribe()
+        });
+        self.requests.push(request);
+        released
+    }
 }
 
 #[derive(derive_more::Debug)]
