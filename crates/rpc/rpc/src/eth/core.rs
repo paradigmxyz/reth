@@ -558,6 +558,10 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         Bundle, TransactionRequest,
     };
+    use alloy_rpc_types_trace::{
+        parity::{ChangedType, Delta, TraceType},
+        tracerequest::TraceCallRequest,
+    };
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -574,11 +578,11 @@ mod tests {
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::RpcInvalidTransactionError;
+    use reth_rpc_eth_types::{EthApiError, EthConfig, RpcInvalidTransactionError};
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
-    use reth_tasks::cancel::is_cancelled;
+    use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::time::{Duration, Instant};
@@ -1218,6 +1222,85 @@ mod tests {
                 assert_eq!(traces.output, output);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn priced_call_is_funded_and_charged() {
+        let sender = Address::repeat_byte(0x11);
+        let recipient = Address::repeat_byte(0x22);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        let trace_api =
+            crate::TraceApi::new(api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let request = |gas_price| TransactionRequest {
+            gas: Some(21_000),
+            gas_price: Some(gas_price),
+            ..TransactionRequest::default().with_from(sender).with_to(recipient)
+        };
+        let balance = |balance| {
+            StateOverride::from_iter([(
+                sender,
+                AccountOverride { balance: Some(U256::from(balance)), ..Default::default() },
+            )])
+        };
+
+        let traces = trace_api
+            .trace_call(TraceCallRequest {
+                call: request(10),
+                trace_types: std::iter::once(TraceType::StateDiff).collect(),
+                block_id: Some(BlockId::latest()),
+                state_overrides: Some(balance(1_000_000)),
+                block_overrides: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            traces.state_diff.unwrap()[&sender].balance,
+            Delta::Changed(ChangedType {
+                from: U256::from(1_000_000),
+                to: U256::from(1_000_000 - 21_000 * 10)
+            })
+        );
+
+        let err = EthCall::call(
+            &api,
+            request(10),
+            Some(BlockId::latest()),
+            EvmOverrides::state(Some(balance(1_000))),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::InsufficientFunds { .. }
+                )
+            ),
+            "{err:?}"
+        );
+
+        EthCall::call(
+            &api,
+            request(0),
+            Some(BlockId::latest()),
+            EvmOverrides::state(Some(balance(1_000))),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
