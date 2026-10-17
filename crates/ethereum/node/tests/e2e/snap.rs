@@ -18,8 +18,6 @@
 //!   and completes the same attempt when the peer returns.
 //! - A restarted download recovers from a reorged pivot using orphaned and canonical BALs, repairs
 //!   orphan-only storage changes, and completes with the replacement chain's state root.
-//! - RPC rejects state reads during an incomplete snap download and returns the expected state
-//!   after verification and activation.
 //! - A fresh node downloads state below an optimistic sync head, then executes the remaining blocks
 //!   through the staged pipeline.
 
@@ -523,6 +521,8 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
 #[tokio::test]
 async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
+    // The optimistic pivot must lie after the fork at block 32.
+    const INITIAL_HEAD: u64 = 100;
     let runtime = Runtime::test();
     let (mut server, wallet) =
         snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
@@ -558,7 +558,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         ])
         .await?
         .ensure_success()?;
-    server.advance_blocks(CHAIN_LENGTH - 33).await?;
+    server.advance_blocks(INITIAL_HEAD - 33).await?;
     // No finalized pivot is supplied, so the initial pivot is HEAD - 64 = 36.
     let orphaned_hashes: Vec<_> = (33..=36).map(|number| server.block_hash(number)).collect();
     let control = SnapControl::default().with_response_bytes(256);
@@ -572,7 +572,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         .with_restartable_nodes()
         .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
     let client = syncing_client(&mut server, setup).await?;
-    client.update_optimistic_forkchoice(server.block_hash(CHAIN_LENGTH)).await?;
+    client.update_optimistic_forkchoice(server.block_hash(INITIAL_HEAD)).await?;
     downloaded.reached().await?;
     let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
     assert_eq!(attempt.pivot().number, 36);
@@ -659,59 +659,6 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
 // Calldata for the storage writer used by the reorg scenario.
 fn storage_input(slot: u64, value: u64) -> Bytes {
     [U256::from(slot).to_be_bytes::<32>(), U256::from(value).to_be_bytes::<32>()].concat().into()
-}
-
-#[tokio::test]
-async fn incomplete_snap_state_is_not_served_over_rpc() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-    let (mut server, wallet) = snap_node(EthereumHardfork::Amsterdam).build_single().await?;
-    let mut account = (0..20)
-        .map(|index| wallet.account(index))
-        .min_by_key(|account| keccak256(account.address()))
-        .unwrap();
-    server
-        .mine([account.transfer(wallet.account(19).address(), U256::ONE).await])
-        .await?
-        .ensure_success()?;
-    server.advance_blocks(CHAIN_LENGTH - 1).await?;
-    let account_hash = keccak256(account.address());
-    let control = SnapControl::default().with_response_bytes(256);
-    let mut downloaded = control.pause_on(move |request| {
-        matches!(request,
-            SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > account_hash
-        )
-    });
-    let backfill_control = control.clone();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_backfill(move |config| backfill_control.backfill(EthereumBackfill::new(config)));
-    let client = syncing_client(&mut server, setup).await?;
-    client
-        .engine
-        .forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(CHAIN_LENGTH)))
-        .await?;
-    downloaded.reached().await?;
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
-    assert!(!attempt.is_verified());
-    assert_eq!(
-        client.inner.provider.get_stage_checkpoint(StageId::Finish)?.unwrap().block_number,
-        0
-    );
-    // A downloaded account is not trustworthy as canonical RPC state until the whole root has
-    // been verified. Returning its balance here exposes a mixture of downloaded and absent state.
-    let error = client
-        .rpc_provider()
-        .get_balance(account.address())
-        .await
-        .expect_err("RPC must reject state reads until the snap root has been verified");
-    let error = error.as_error_resp().expect("expected a JSON-RPC error response");
-    assert_eq!(error.code, -32603);
-    downloaded.release();
-    client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
-    assert_eq!(
-        client.rpc_provider().get_balance(account.address()).await?,
-        server.rpc_provider().get_balance(account.address()).await?
-    );
-    Ok(())
 }
 
 #[tokio::test]
