@@ -635,27 +635,19 @@ impl Discv4Service {
         // for EIP-868 construct an ENR
         let local_eip_868_enr = {
             let mut builder = Enr::builder();
+            for ip in
+                std::iter::once(local_node_record.address).chain(config.secondary_advertised_ip)
             {
-                let mut set_endpoint = |ip: IpAddr| {
-                    // don't advertise an unspecified ip key (EIP-778 keys are optional), but keep
-                    // the port keys: `set_external_ip_addr` only sets the ip key, so NAT
-                    // resolution must find the ports already in place to complete the record.
-                    // Peers, including reth's own `TryFrom<&Enr>`, treat a record without an ip
-                    // key as not yet dialable, the same as they treated `ip 0.0.0.0`
-                    if !ip.is_unspecified() {
-                        builder.ip(ip);
-                    }
-                    if ip.is_ipv4() {
-                        builder.udp4(local_node_record.udp_port);
-                        builder.tcp4(local_node_record.tcp_port);
-                    } else {
-                        builder.udp6(local_node_record.udp_port);
-                        builder.tcp6(local_node_record.tcp_port);
-                    }
-                };
-                set_endpoint(local_node_record.address);
-                if let Some(ip) = config.secondary_advertised_ip {
-                    set_endpoint(ip);
+                // Keep port keys for NAT resolution, but omit unspecified IP addresses.
+                if !ip.is_unspecified() {
+                    builder.ip(ip);
+                }
+                if ip.is_ipv4() {
+                    builder.udp4(local_node_record.udp_port);
+                    builder.tcp4(local_node_record.tcp_port);
+                } else {
+                    builder.udp6(local_node_record.udp_port);
+                    builder.tcp6(local_node_record.tcp_port);
                 }
             }
 

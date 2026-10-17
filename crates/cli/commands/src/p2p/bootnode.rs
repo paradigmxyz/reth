@@ -11,6 +11,7 @@ use reth_discv5::{
 use reth_net_nat::NatResolver;
 use reth_network_peers::{id2pk, pk2id, AnyNode, Enr, NodeRecord};
 use secp256k1::SecretKey;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
@@ -424,7 +425,6 @@ async fn bind_socket(addr: SocketAddr) -> eyre::Result<Arc<UdpSocket>> {
     let socket = match addr {
         SocketAddr::V4(_) => UdpSocket::bind(addr).await?,
         SocketAddr::V6(_) => {
-            use socket2::{Domain, Protocol, Socket, Type};
             let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
             socket.set_only_v6(true)?;
             socket.set_nonblocking(true)?;
@@ -729,8 +729,14 @@ mod tests {
 
     #[test]
     fn enr_seed_prefers_served_family() {
-        // Deterministic record (key 0xaa..aa): ip 9.9.9.9/udp 30303 + ip6 2001:db8::9/udp6 30304.
-        let dual = "enr:-KG4QF9o9jc3N31d-QdtzGq_HRKxncK1dmwMPQv8upyE43wzaMXsUrFdXobKuBTEwRaxToiampTdT9gw0sbWMjrE8SoBgmlkgnY0gmlwhAkJCQmDaXA2kCABDbgAAAAAAAAAAAAAAAmJc2VjcDI1NmsxoQJqBKuY2eR3StgG4wLd3rY76ha1y18iPud0eOhhu1g-s4N1ZHCCdl-EdWRwNoJ2YA";
+        let dual = Enr::builder()
+            .ip4("9.9.9.9".parse().unwrap())
+            .udp4(30303)
+            .ip6("2001:db8::9".parse().unwrap())
+            .udp6(30304)
+            .build(&rng_secret_key())
+            .unwrap()
+            .to_base64();
 
         // v6-primary: the discv4 seed must be the ENR's IPv6 endpoint, not the ip4-first default
         let command = Command::parse_from([
@@ -740,7 +746,7 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
             "--bootnodes",
-            dual,
+            &dual,
         ]);
         let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
         assert_eq!(seeds.enr_records[0].address, "2001:db8::9".parse::<IpAddr>().unwrap());
@@ -754,7 +760,7 @@ mod tests {
             "--nat",
             "extip:1.2.3.4",
             "--bootnodes",
-            dual,
+            &dual,
         ]);
         let seeds = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap();
         assert_eq!(seeds.enr_records[0].address, "9.9.9.9".parse::<IpAddr>().unwrap());
@@ -798,7 +804,10 @@ mod tests {
             &enr.to_base64(),
         ]);
         let err = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap_err();
-        assert!(err.to_string().contains("no ip+udp endpoint"), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!("unusable --bootnodes ENR (no ip+udp endpoint for one family): {enr}")
+        );
     }
 
     #[test]
@@ -858,7 +867,7 @@ mod tests {
             &enr.to_base64(),
         ]);
         let err = command.seed_nodes(&command.resolved_nat().unwrap()).unwrap_err();
-        assert!(err.to_string().contains("no discovery port"), "{err}");
+        assert_eq!(err.to_string(), format!("--bootnodes entry has no discovery port: {enr}"));
     }
 
     #[test]
