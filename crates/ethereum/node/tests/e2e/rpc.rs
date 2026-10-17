@@ -22,7 +22,6 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_trace::geth::{
     CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
@@ -30,6 +29,7 @@ use reth_e2e_test_utils::{
     transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
     NodeHelperType,
 };
+use reth_json_rpc::client::{ClientT, Subscription, SubscriptionClientT};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -112,7 +112,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
             .request::<serde_json::Value, _>(method, (BlockNumberOrTag::Latest,))
             .await
             .unwrap_err();
-        let jsonrpsee::core::client::Error::Call(error) = error else {
+        let reth_json_rpc::client::Error::Call(error) = error else {
             panic!("expected a resource not found error, got {error:?}")
         };
         assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
@@ -280,7 +280,7 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     let invalid: Result<Subscription<ChainBlockTraceResult>, _> = client
         .subscribe(
             "debug_subscribe",
-            jsonrpsee::rpc_params!["traceChain", "0x3", "0x3"],
+            reth_json_rpc::rpc_params!["traceChain", "0x3", "0x3"],
             "debug_unsubscribe",
         )
         .await;
@@ -289,7 +289,7 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     let mut subscription: Subscription<ChainBlockTraceResult> = client
         .subscribe(
             "debug_subscribe",
-            jsonrpsee::rpc_params![
+            reth_json_rpc::rpc_params![
                 "traceChain",
                 BlockNumberOrTag::Number(0),
                 BlockNumberOrTag::Number(3),

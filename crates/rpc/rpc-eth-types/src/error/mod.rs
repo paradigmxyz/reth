@@ -33,19 +33,19 @@ use tokio::sync::oneshot::error::RecvError;
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
     /// Converts the error to a JSON-RPC error object.
-    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static>;
+    fn to_rpc_error(&self) -> reth_json_rpc::ErrorObject;
 }
 
-impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
-    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+impl ToRpcError for reth_json_rpc::ErrorObject {
+    fn to_rpc_error(&self) -> reth_json_rpc::ErrorObject {
         self.clone()
     }
 }
 
 impl ToRpcError for RpcError<TransportErrorKind> {
-    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+    fn to_rpc_error(&self) -> reth_json_rpc::ErrorObject {
         match self {
-            Self::ErrorResp(payload) => jsonrpsee_types::error::ErrorObject::owned(
+            Self::ErrorResp(payload) => reth_json_rpc::ErrorObject::owned(
                 payload.code as i32,
                 payload.message.clone(),
                 payload.data.clone(),
@@ -219,7 +219,7 @@ pub enum EthApiError {
         /// Transaction index within the bundle where the error occurred
         tx_index: usize,
         /// The underlying error object
-        error: jsonrpsee_types::ErrorObject<'static>,
+        error: reth_json_rpc::ErrorObject,
     },
     /// Error thrown when trying to access block access list for blocks before Amsterdam
     #[error("Block access list not available for pre-Amsterdam blocks")]
@@ -239,7 +239,7 @@ impl EthApiError {
     pub const fn call_many_error(
         bundle_index: usize,
         tx_index: usize,
-        error: jsonrpsee_types::ErrorObject<'static>,
+        error: reth_json_rpc::ErrorObject,
     ) -> Self {
         Self::CallManyError { bundle_index, tx_index, error }
     }
@@ -285,12 +285,12 @@ impl EthApiError {
     }
 
     /// Converts this error into the rpc error object.
-    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+    pub fn into_rpc_err(self) -> reth_json_rpc::ErrorObject {
         self.into()
     }
 }
 
-impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<EthApiError> for reth_json_rpc::ErrorObject {
     fn from(error: EthApiError) -> Self {
         match error {
             EthApiError::FailedToDecodeSignedTransaction |
@@ -319,10 +319,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
-                rpc_error_with_code(
-                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
-                    error.to_string(),
-                )
+                rpc_error_with_code(reth_json_rpc::CALL_EXECUTION_FAILED_CODE, error.to_string())
             }
             EthApiError::TracingBlockNotFound(id) => {
                 let id = match id {
@@ -330,7 +327,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     BlockId::Number(number) => number.to_string(),
                 };
                 rpc_error_with_code(
-                    jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                    reth_json_rpc::CALL_EXECUTION_FAILED_CODE,
                     format!("block {id} not found"),
                 )
             }
@@ -351,10 +348,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
-            err @ EthApiError::ExecutionTimedOut(_) => rpc_error_with_code(
-                jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
-                err.to_string(),
-            ),
+            err @ EthApiError::ExecutionTimedOut(_) => {
+                rpc_error_with_code(reth_json_rpc::CALL_EXECUTION_FAILED_CODE, err.to_string())
+            }
             err @ (EthApiError::InternalBlockingTaskError | EthApiError::InternalEthError) => {
                 internal_rpc_err(err.to_string())
             }
@@ -368,16 +364,14 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
             }
-            EthApiError::CallManyError { bundle_index, tx_index, error } => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    error.code(),
-                    format!(
-                        "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
-                        error.message()
-                    ),
-                    error.data(),
-                )
-            }
+            EthApiError::CallManyError { bundle_index, tx_index, error } => Self::owned(
+                error.code(),
+                format!(
+                    "call_many error in bundle {bundle_index} and transaction {tx_index}: {}",
+                    error.message()
+                ),
+                error.data(),
+            ),
         }
     }
 }
@@ -836,12 +830,12 @@ impl RpcInvalidTransactionError {
     }
 
     /// Converts this error into the rpc error object.
-    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+    pub fn into_rpc_err(self) -> reth_json_rpc::ErrorObject {
         self.into()
     }
 }
 
-impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<RpcInvalidTransactionError> for reth_json_rpc::ErrorObject {
     fn from(err: RpcInvalidTransactionError) -> Self {
         match err {
             RpcInvalidTransactionError::Revert(revert) => {
@@ -1069,7 +1063,7 @@ pub enum RpcPoolError {
     Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
-impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
+impl From<RpcPoolError> for reth_json_rpc::ErrorObject {
     fn from(error: RpcPoolError) -> Self {
         match error {
             RpcPoolError::Invalid(err) => err.into(),
@@ -1200,7 +1194,7 @@ mod tests {
         ];
 
         for (error, message) in cases {
-            let error: jsonrpsee_types::error::ErrorObject<'static> = error.into();
+            let error: reth_json_rpc::ErrorObject = error.into();
             assert_eq!(error.code(), -32000);
             assert_eq!(error.message(), message);
         }
@@ -1208,34 +1202,30 @@ mod tests {
 
     #[test]
     fn header_not_found_message() {
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::hash(b256!(
-                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
-            )))
-            .into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::HeaderNotFound(BlockId::hash(b256!(
+            "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        )))
+        .into();
         assert_eq!(
             err.message(),
             "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
-                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
-            )))
-            .into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::HeaderNotFound(BlockId::hash_canonical(
+            b256!("0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"),
+        ))
+        .into();
         assert_eq!(
             err.message(),
             "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
         assert_eq!(err.message(), "block not found: 0x186a0");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::latest()).into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::HeaderNotFound(BlockId::latest()).into();
         assert_eq!(err.message(), "block not found: latest");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::HeaderNotFound(BlockId::safe()).into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::HeaderNotFound(BlockId::safe()).into();
         assert_eq!(err.message(), "block not found: safe");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
     }
@@ -1250,7 +1240,7 @@ mod tests {
             EthApiError::PrunedHistoryUnavailable { requested: 5, earliest_available: 100 }
         ));
 
-        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        let err: reth_json_rpc::ErrorObject = err.into();
         assert_eq!(err.code(), 4444);
         assert_eq!(
             err.message(),
@@ -1282,16 +1272,15 @@ mod tests {
 
     #[test]
     fn receipts_not_found_message() {
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::hash(b256!(
-                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
-            )))
-            .into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::ReceiptsNotFound(BlockId::hash(b256!(
+            "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        )))
+        .into();
         assert_eq!(
             err.message(),
             "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::hash_canonical(b256!(
                 "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
@@ -1300,23 +1289,22 @@ mod tests {
             err.message(),
             "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
         );
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::number(100000)).into();
         assert_eq!(err.code(), EthRpcErrorCode::ResourceNotFound.code());
         assert_eq!(err.message(), "block not found: 0x186a0");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::latest()).into();
         assert_eq!(err.message(), "block not found: latest");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
-            EthApiError::ReceiptsNotFound(BlockId::safe()).into();
+        let err: reth_json_rpc::ErrorObject = EthApiError::ReceiptsNotFound(BlockId::safe()).into();
         assert_eq!(err.message(), "block not found: safe");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::pending()).into();
         assert_eq!(err.message(), "block not found: pending");
-        let err: jsonrpsee_types::error::ErrorObject<'static> =
+        let err: reth_json_rpc::ErrorObject =
             EthApiError::ReceiptsNotFound(BlockId::earliest()).into();
         assert_eq!(err.message(), "block not found: earliest");
     }

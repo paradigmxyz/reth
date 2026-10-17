@@ -48,7 +48,7 @@ reth-fs-util.workspace = true
 tempfile.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
+reth-json-rpc = { workspace = true, features = ["http-client"] }
 url.workspace = true
 
 # ethereum

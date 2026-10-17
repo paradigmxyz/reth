@@ -1,4 +1,4 @@
-//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
+//! Implementation of the RPC macro generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
 use std::{sync::Arc, time::Duration};
@@ -58,7 +58,7 @@ pub type EthApiBuilderFor<N, NetworkT = Ethereum> =
 /// [`EthApiSpec`](reth_rpc_eth_api::helpers::EthApiSpec) trait. Additionally, the required server
 /// implementations (e.g. [`EthApiServer`](reth_rpc_eth_api::EthApiServer)) are implemented
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
-/// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
+/// This way [`EthApi`] is not limited to the RPC server and can be used standalone or in other
 /// network handlers (for example ipc).
 ///
 /// ## Trait requirements
@@ -558,12 +558,12 @@ mod tests {
         state::{AccountOverride, EvmOverrides, StateOverride},
         Bundle, TransactionRequest,
     };
-    use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_json_rpc::INVALID_PARAMS_CODE;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
