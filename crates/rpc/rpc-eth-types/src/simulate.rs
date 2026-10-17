@@ -344,28 +344,23 @@ where
     let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap();
     for mut call in calls {
         let block_gas_remaining = if is_amsterdam {
-            block_gas_limit
-                .saturating_sub(block_regular_gas_used)
-                .min(block_gas_limit.saturating_sub(block_state_gas_used))
+            let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
+            let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
+            // Gas above the tx gas cap goes to the state gas reservoir and only needs state gas.
+            if regular_available_gas >= tx_gas_limit_cap {
+                state_available_gas
+            } else {
+                regular_available_gas.min(state_available_gas)
+            }
         } else {
             block_gas_limit.saturating_sub(cumulative_tx_gas_used)
         };
         let mut default_gas_limit = block_gas_remaining;
 
-        if let Some(gas_limit) = call.as_ref().gas_limit() {
-            let exceeds_gas_limit = if is_amsterdam {
-                let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
-                let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
-                let regular_tx_gas_limit = gas_limit.min(tx_gas_limit_cap);
-
-                regular_tx_gas_limit > regular_available_gas || gas_limit > state_available_gas
-            } else {
-                gas_limit > block_gas_remaining
-            };
-
-            if exceeds_gas_limit {
-                return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
-            }
+        if let Some(gas_limit) = call.as_ref().gas_limit() &&
+            gas_limit > block_gas_remaining
+        {
+            return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
         }
 
         if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
