@@ -1,6 +1,6 @@
 //! Observes and pauses snap requests without replacing the serving peer or response validation.
 
-use crate::wait::WAIT_TIMEOUT;
+use crate::wait::poll_until;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
     GetStorageRangesMessage, SnapProtocolMessage,
@@ -45,14 +45,13 @@ impl SnapControl {
         &self,
         matches: impl Fn(&SnapProtocolMessage) -> bool + Send + Sync + 'static,
     ) -> SnapGate {
-        let (reached, receiver) = watch::channel(None);
-        let (release, released) = watch::channel(false);
-        self.state.lock().unwrap().gates.push(RequestGate {
-            matches: Box::new(matches),
-            reached,
-            released,
-        });
-        SnapGate { reached: receiver, release }
+        let (state, _) = watch::channel(GateState::Waiting);
+        self.state
+            .lock()
+            .unwrap()
+            .gates
+            .push(RequestGate { matches: Box::new(matches), state: state.clone() });
+        SnapGate { state }
     }
 
     /// Returns the requests seen so far, including a request currently paused at a gate.
@@ -63,27 +62,6 @@ impl SnapControl {
     /// Wraps the backfill chosen by the node configuration.
     pub fn backfill(&self, inner: EthereumBackfill) -> ControlledBackfill {
         ControlledBackfill { inner, control: self.clone() }
-    }
-}
-
-/// A single request boundary a test can await and release.
-#[derive(Debug)]
-pub struct SnapGate {
-    reached: watch::Receiver<Option<SnapProtocolMessage>>,
-    release: watch::Sender<bool>,
-}
-
-impl SnapGate {
-    /// Waits until the downloader reaches this request, with the harness timeout, and returns it.
-    pub async fn reached(&mut self) -> eyre::Result<SnapProtocolMessage> {
-        let reached =
-            tokio::time::timeout(WAIT_TIMEOUT, self.reached.wait_for(Option::is_some)).await??;
-        Ok(reached.clone().expect("waited for a matched request"))
-    }
-
-    /// Lets the paused request proceed to the real peer.
-    pub fn release(&self) {
-        self.release.send_replace(true);
     }
 }
 
@@ -209,8 +187,8 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
             let released =
                 state.gates.iter().position(|gate| (gate.matches)(&request)).map(|index| {
                     let gate = state.gates.remove(index);
-                    gate.reached.send_replace(Some(request.clone()));
-                    gate.released
+                    gate.state.send_replace(GateState::Reached(request.clone()));
+                    gate.state.subscribe()
                 });
             state.requests.push(request.clone());
             released
@@ -218,7 +196,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
         let client = self.inner.clone();
         Box::pin(async move {
             if let Some(mut released) = released {
-                let _ = released.wait_for(|released| *released).await;
+                let _ = released.wait_for(|state| matches!(state, GateState::Released)).await;
             }
             match request {
                 SnapProtocolMessage::GetAccountRange(request) => {
@@ -236,6 +214,30 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
                 _ => unreachable!("only requests are dispatched"),
             }
         })
+    }
+}
+
+/// A single request boundary a test can await and release.
+#[derive(Debug)]
+pub struct SnapGate {
+    state: watch::Sender<GateState>,
+}
+
+impl SnapGate {
+    /// Waits until the downloader reaches this request, with the harness timeout, and returns it.
+    pub async fn reached(&self) -> eyre::Result<SnapProtocolMessage> {
+        poll_until("a paused snap request", || async {
+            Ok(match &*self.state.borrow() {
+                GateState::Reached(request) => Some(request.clone()),
+                GateState::Waiting | GateState::Released => None,
+            })
+        })
+        .await
+    }
+
+    /// Lets the paused request proceed to the real peer.
+    pub fn release(&self) {
+        self.state.send_replace(GateState::Released);
     }
 }
 
@@ -258,6 +260,12 @@ impl fmt::Debug for ControlState {
 
 struct RequestGate {
     matches: Box<dyn Fn(&SnapProtocolMessage) -> bool + Send + Sync>,
-    reached: watch::Sender<Option<SnapProtocolMessage>>,
-    released: watch::Receiver<bool>,
+    state: watch::Sender<GateState>,
+}
+
+#[derive(Debug)]
+enum GateState {
+    Waiting,
+    Reached(SnapProtocolMessage),
+    Released,
 }

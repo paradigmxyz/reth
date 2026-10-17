@@ -1848,7 +1848,7 @@ mod tests {
         assert_send(node.import_payload(payload));
         assert_send(poll_until_with(PollOpts::default(), "", || async { Ok(Some(())) }));
         assert_send(assert_holds_for(Duration::ZERO, "", || async { Ok(true) }));
-        let mut gate = SnapControl::default().pause_on(|_| true);
+        let gate = SnapControl::default().pause_on(|_| true);
         assert_send(gate.reached());
     }
 

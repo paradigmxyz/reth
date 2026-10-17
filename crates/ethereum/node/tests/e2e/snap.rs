@@ -176,7 +176,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
 
     let control = SnapControl::default().with_response_bytes(256);
     let code_hash = keccak256(&code);
-    let mut bytecode = control.pause_on(move |request| {
+    let bytecode = control.pause_on(move |request| {
         matches!(request, SnapProtocolMessage::GetByteCodes(request) if request.hashes.contains(&code_hash))
     });
     let backfill_control = control.clone();
@@ -274,7 +274,7 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
     server.advance_blocks(CHAIN_LENGTH - 1).await?;
     let control = SnapControl::default().with_response_bytes(256);
     // Stop after one page has committed, before fetching the continuation.
-    let mut continuation = control.pause_on(|request| {
+    let continuation = control.pause_on(|request| {
         matches!(request,
             SnapProtocolMessage::GetStorageRanges(request)
             if request.starting_hash.unwrap_or(B256::ZERO) != B256::ZERO
@@ -302,7 +302,7 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
         (write, origin, account, resume_at)
     };
     let stopped = client.stop().await?;
-    let mut resumed = control.pause_on(move |request| {
+    let resumed = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetStorageRanges(request) if request.account_hashes == [account]
         )
@@ -357,7 +357,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     server.advance_blocks(CHAIN_LENGTH - FINALIZED - 1).await?;
     let account_hash = keccak256(account.address());
     let control = SnapControl::default().with_response_bytes(256);
-    let mut downloaded = control.pause_on(move |request| {
+    let downloaded = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > account_hash
         )
@@ -393,7 +393,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     server.advance_blocks(target - CHAIN_LENGTH - 1).await?;
     server.wait_for_persisted_block(target).await?;
     let before_advance = control.requests().len();
-    let mut bals =
+    let bals =
         control.pause_on(|request| matches!(request, SnapProtocolMessage::GetBlockAccessLists(_)));
     client.engine.forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(target))).await?;
     downloaded.release();
@@ -459,7 +459,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
     server.advance_blocks(CHAIN_LENGTH).await?;
     let head = server.block_hash(CHAIN_LENGTH);
     let control = SnapControl::default().with_response_bytes(256);
-    let mut continuation = control.pause_on(|request| {
+    let continuation = control.pause_on(|request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash != B256::ZERO
         )
@@ -549,7 +549,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     // No finalized pivot is supplied, so the initial pivot is HEAD - 64 = 36.
     let orphaned_hashes: Vec<_> = (33..=36).map(|number| server.block_hash(number)).collect();
     let control = SnapControl::default().with_response_bytes(256);
-    let mut downloaded = control.pause_on(move |request| {
+    let downloaded = control.pause_on(move |request| {
         matches!(request,
             SnapProtocolMessage::GetAccountRange(request) if request.starting_hash > contract_hash
         )
@@ -580,7 +580,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         server.import_payload(payload).await?;
     }
     let before_restart = control.requests().len();
-    let mut recovery =
+    let recovery =
         control.pause_on(|request| matches!(request, SnapProtocolMessage::GetBlockAccessLists(_)));
     let mut client = stopped.start().await?;
     client.connect(&mut server).await;
