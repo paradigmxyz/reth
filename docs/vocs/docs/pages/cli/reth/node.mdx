@@ -601,7 +601,7 @@ Gas Price Oracle:
       --gpo.ignoreprice <IGNORE_PRICE>
           Gas Price below which gpo will ignore transactions
 
-          [default: 0]
+          [default: 2]
 
       --gpo.maxprice <MAX_PRICE>
           Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
@@ -902,6 +902,8 @@ Database:
       --db.sync-mode <SYNC_MODE>
           Controls how aggressively the database synchronizes data to disk
 
+          [env: RETH_DB_SYNC_MODE=]
+
       --db.rocksdb-block-cache-size <ROCKSDB_BLOCK_CACHE_SIZE>
           `RocksDB` block cache size (e.g., 512MB, 4GB).
 
@@ -1194,6 +1196,11 @@ Engine:
 
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
+
+      --engine.prewarm-reuse
+          Reuse transaction prewarming results during block execution instead of executing transactions again when their prewarm reads are still valid
+
+          [env: RETH_ENGINE_PREWARM_REUSE=]
 
 ERA:
       --era.enable

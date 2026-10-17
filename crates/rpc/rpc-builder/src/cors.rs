@@ -1,5 +1,9 @@
-use http::{HeaderValue, Method};
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use http::{header::ORIGIN, HeaderValue, Method, Request, Response, StatusCode};
+use reth_json_rpc::server::{is_upgrade_request, HttpBody};
+use tower_http::{
+    cors::{AllowOrigin, Any, CorsLayer},
+    validate_request::ValidateRequest,
+};
 
 /// Error thrown when parsing cors domains went wrong
 #[derive(Debug, thiserror::Error)]
@@ -21,27 +25,12 @@ pub enum CorsDomainError {
 
 /// Creates a [`CorsLayer`] from the given domains
 pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
-    let cors = match http_cors_domains.trim() {
-        "*" => CorsLayer::new()
+    let cors = match parse_origins(http_cors_domains)? {
+        None => CorsLayer::new()
             .allow_methods([Method::GET, Method::POST])
             .allow_origin(Any)
             .allow_headers(Any),
-        _ => {
-            let iter = http_cors_domains.split(',').map(str::trim);
-            if iter.clone().any(|o| o == "*") {
-                return Err(CorsDomainError::WildCardNotAllowed {
-                    input: http_cors_domains.to_string(),
-                })
-            }
-
-            let origins = iter
-                .map(|domain| {
-                    domain
-                        .parse::<HeaderValue>()
-                        .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
-                })
-                .collect::<Result<Vec<HeaderValue>, _>>()?;
-
+        Some(origins) => {
             let origin = AllowOrigin::list(origins);
             CorsLayer::new()
                 .allow_methods([Method::GET, Method::POST])
@@ -50,6 +39,54 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
         }
     };
     Ok(cors)
+}
+
+/// Rejects `WebSocket` upgrades from origins outside the configured allowlist.
+#[derive(Clone, Debug)]
+pub(crate) struct WsOriginValidator {
+    origins: Option<Vec<HeaderValue>>,
+}
+
+impl WsOriginValidator {
+    pub(crate) fn new(domains: Option<&str>) -> Result<Self, CorsDomainError> {
+        Ok(Self { origins: domains.map(parse_origins).transpose()?.flatten() })
+    }
+}
+
+impl<B> ValidateRequest<B> for WsOriginValidator {
+    type ResponseBody = HttpBody;
+
+    fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
+        if let Some(allowed) = &self.origins &&
+            is_upgrade_request(request)
+        {
+            let mut origins = request.headers().get_all(ORIGIN).iter();
+            // Originless clients are allowed; an explicit Origin must match exactly once.
+            if let Some(origin) = origins.next() &&
+                (origins.next().is_some() || !allowed.contains(origin))
+            {
+                let mut response = Response::new(HttpBody::empty());
+                *response.status_mut() = StatusCode::FORBIDDEN;
+                return Err(response)
+            }
+        }
+        Ok(())
+    }
+}
+
+fn parse_origins(domains: &str) -> Result<Option<Vec<HeaderValue>>, CorsDomainError> {
+    if domains.trim() == "*" {
+        return Ok(None)
+    }
+    let iter = domains.split(',').map(str::trim);
+    if iter.clone().any(|origin| origin == "*") {
+        return Err(CorsDomainError::WildCardNotAllowed { input: domains.to_string() })
+    }
+    iter.map(|domain| {
+        domain.parse().map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
+    })
+    .collect::<Result<Vec<_>, _>>()
+    .map(Some)
 }
 
 #[cfg(test)]

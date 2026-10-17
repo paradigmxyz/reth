@@ -477,7 +477,8 @@ where
     }
 }
 
-fn is_upgrade_request<B>(req: &http::Request<B>) -> bool {
+/// Returns whether `req` asks to upgrade the connection to `WebSocket`.
+pub fn is_upgrade_request<B>(req: &http::Request<B>) -> bool {
     let has_token = |name, token: &str| {
         req.headers().get_all(name).iter().any(|value| {
             value

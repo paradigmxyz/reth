@@ -66,6 +66,11 @@ on:
         required: false
         default: ""
         type: string
+      mempool:
+        description: "Engine mode: submit each block's transactions to the txpool before its payload: true, DELAY, or DELAY,FRACTION (e.g. 200ms,0.5)"
+        required: false
+        default: ""
+        type: string
       block_time:
         description: "RPC mode local block interval (default: 1s)"
         required: false
@@ -177,6 +182,7 @@ jobs:
       reorg: ${{ steps.args.outputs.reorg }}
       bal: ${{ steps.args.outputs.bal }}
       wait-time: ${{ steps.args.outputs.wait-time }}
+      mempool: ${{ steps.args.outputs.mempool }}
       block-time: ${{ steps.args.outputs.block-time }}
       baseline-args: ${{ steps.args.outputs.baseline-args }}
       feature-args: ${{ steps.args.outputs.feature-args }}
@@ -301,6 +307,7 @@ jobs:
           INPUT_CORES: ${{ github.event.inputs.cores }}
           INPUT_FEATURE: ${{ github.event.inputs.feature }}
           INPUT_FEATURE_ARGS: ${{ github.event.inputs.feature_args }}
+          INPUT_MEMPOOL: ${{ github.event.inputs.mempool }}
           INPUT_METRICS: ${{ github.event.inputs.metrics }}
           INPUT_MODE: ${{ github.event.inputs.mode }}
           INPUT_OTLP: ${{ github.event.inputs.otlp }}
@@ -342,12 +349,13 @@ jobs:
             const jsonObjectValid = (value) => {
               try { const parsed = JSON.parse(value); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed); } catch { return false; }
             };
-            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [namespace=debug|trace] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
+            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [mempool[=DELAY[,FRACTION]]] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [namespace=debug|trace] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
             let corpus, callClass, callMethods, callRps, callDuration, callPasses, callConcurrency, callTopGas;
             let callTracer, callTracerConfig, callTraceOptions, callNamespace;
             let bigBlocksTargetGas = '';
             let reorg = '';
+            let mempool = '';
             let explicitBlocks = false;
             let explicitWarmup = false;
             let explicitRunPairs = false;
@@ -366,6 +374,13 @@ jobs:
               value = String(value || '');
               if (value === '') return '';
               if (/^[1-9]\d*$/.test(value)) return value;
+              return null;
+            };
+            // `true` uses txgen's defaults; otherwise a delay, optionally followed by a fraction.
+            const parseMempool = (value) => {
+              value = String(value || '');
+              if (value === '' || value === 'false') return '';
+              if (value === 'true' || /^\d+(ms|s)(,(0?\.\d*[1-9]\d*|1(\.0*)?))?$/.test(value)) return value;
               return null;
             };
             const benchRunOrder = (runPairs) => {
@@ -399,6 +414,11 @@ jobs:
               reorg = parseReorg((process.env.INPUT_REORG || ''));
               if (reorg === null) {
                 core.setFailed(`Invalid reorg value: ${process.env.INPUT_REORG || ''} (must be a positive integer)`);
+                return;
+              }
+              mempool = parseMempool((process.env.INPUT_MEMPOOL || ''));
+              if (mempool === null) {
+                core.setFailed(`Invalid mempool value: ${process.env.INPUT_MEMPOOL || ''} (must be true, a delay like 200ms, or a delay and fraction like 200ms,0.5)`);
                 return;
               }
               bal = (process.env.INPUT_BAL || '') || 'false';
@@ -489,7 +509,7 @@ jobs:
               const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes], ['class', validCallClasses], ['namespace', validNamespaces]]);
               const durationArgs = new Set(['wait-time', 'block-time', 'duration']);
               const stringArgs = new Set(['baseline-args', 'feature-args', 'txgen-ref']);
-              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
+              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', mempool: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -505,6 +525,8 @@ jobs:
                     defaults[part] = 'true';
                   } else if (part === 'reorg') {
                     defaults[part] = '5';
+                  } else if (part === 'mempool') {
+                    defaults[part] = 'true';
                   } else if (boolArgs.has(part)) {
                     defaults[part] = 'true';
                   } else {
@@ -531,6 +553,13 @@ jobs:
                     defaults[key] = parsed;
                   } else {
                     invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                  }
+                } else if (key === 'mempool') {
+                  const parsed = parseMempool(value);
+                  if (parsed !== null) {
+                    defaults[key] = parsed;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be true, false, a delay like 200ms, or a delay and fraction like 200ms,0.5)`);
                   }
                 } else if (key === 'corpus') {
                   if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
@@ -626,6 +655,7 @@ jobs:
               bigBlocks = parsedBigBlocks.enabled;
               bigBlocksTargetGas = parsedBigBlocks.targetGas;
               reorg = defaults.reorg;
+              mempool = defaults.mempool;
               bal = defaults.bal;
               var runPairs = defaults['run-pairs'];
               var otlp = defaults.otlp;
@@ -655,15 +685,15 @@ jobs:
               featureNodeArgs = [featureNodeArgs, '--debug.skip-state-root'].filter(Boolean).join(' ');
             }
 
-            const isBigBlocks = bigBlocks === 'true';
+            const useBigBlockDefaults = bigBlocks === 'true';
             // In call mode `blocks` counts the chain blocks a static corpus is generated
             // from and `warmup` is a warmup duration in seconds.
             const isCall = mode === 'call';
             if (!explicitBlocks) {
-              blocks = isCall ? '20' : defaultBlocks(isBigBlocks);
+              blocks = isCall ? '20' : defaultBlocks(useBigBlockDefaults);
             }
             if (!explicitRunPairs) {
-              runPairs = defaultRunPairs(isBigBlocks);
+              runPairs = defaultRunPairs(useBigBlockDefaults);
             }
             if (!/^\d+$/.test(blocks)) {
               core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
@@ -682,6 +712,15 @@ jobs:
             }
             const runOrder = benchRunOrder(runPairs);
 
+            // Historical block headers lack a BAL hash. Use the existing big-block
+            // payload format to retain BALs, including when replaying older baseline refs.
+            if (mode === 'engine' && bal !== 'false' && bigBlocks !== 'true') {
+              bigBlocks = 'true';
+              bigBlocksTargetGas = '1';
+            }
+
+            const isBigBlocks = bigBlocks === 'true';
+
             if (!validBalModes.has(bal)) {
               core.setFailed(`Invalid bal mode: ${bal}`);
               return;
@@ -692,6 +731,14 @@ jobs:
             }
             if (mode !== 'engine' && (isBigBlocks || reorg || bal !== 'false')) {
               core.setFailed(`${mode} mode does not support big-blocks, reorg, or BAL`);
+              return;
+            }
+            if (isBigBlocks && reorg) {
+              core.setFailed('reorg is not supported with big-blocks or BAL (reth-bb cannot build reorg blocks)');
+              return;
+            }
+            if (mempool && (mode !== 'engine' || isBigBlocks || reorg)) {
+              core.setFailed('mempool is only supported in Engine mode without big-blocks or reorg');
               return;
             }
             if (mode !== 'rpc' && blockTime) {
@@ -786,6 +833,7 @@ jobs:
             core.setOutput('reorg', reorg);
             core.setOutput('bal', bal);
             core.setOutput('wait-time', waitTime);
+            core.setOutput('mempool', mempool);
             core.setOutput('block-time', blockTime);
             core.setOutput('baseline-args', baselineNodeArgs);
             core.setOutput('feature-args', featureNodeArgs);
@@ -845,6 +893,7 @@ jobs:
           INPUT_TRACER: ${{ steps.args.outputs.tracer }}
           INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
           INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
           INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
@@ -940,6 +989,8 @@ jobs:
             const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = process.env.INPUT_WAIT_TIME;
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.INPUT_MEMPOOL;
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
             const blockTimeVal = process.env.INPUT_BLOCK_TIME;
             const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
@@ -949,7 +1000,7 @@ jobs:
             const blocksDesc = mode === 'call'
               ? `${blocks} corpus blocks, ${warmup}s warmup`
               : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -997,6 +1048,7 @@ jobs:
           INPUT_TRACER: ${{ steps.args.outputs.tracer }}
           INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
           INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
           INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
@@ -1050,6 +1102,8 @@ jobs:
             const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = process.env.INPUT_WAIT_TIME;
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.INPUT_MEMPOOL;
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
             const blockTimeVal = process.env.INPUT_BLOCK_TIME;
             const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
@@ -1059,7 +1113,7 @@ jobs:
             const blocksDesc = mode === 'call'
               ? `${blocks} corpus blocks, ${warmup}s warmup`
               : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -1138,6 +1192,7 @@ jobs:
       BENCH_REORG: ${{ needs.bench-ack.outputs.reorg }}
       BENCH_BAL: ${{ needs.bench-ack.outputs.bal }}
       BENCH_WAIT_TIME: ${{ needs.bench-ack.outputs.wait-time }}
+      BENCH_MEMPOOL: ${{ needs.bench-ack.outputs.mempool }}
       BENCH_BLOCK_TIME: ${{ needs.bench-ack.outputs.block-time }}
       BENCH_BASELINE_ARGS: ${{ needs.bench-ack.outputs.baseline-args }}
       BENCH_FEATURE_ARGS: ${{ needs.bench-ack.outputs.feature-args }}
@@ -1271,6 +1326,8 @@ jobs:
             const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
             const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.BENCH_MEMPOOL || '';
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
             const blockTimeVal = process.env.BENCH_BLOCK_TIME || '';
             const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
             const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
@@ -1280,7 +1337,7 @@ jobs:
             const blocksDesc = mode === 'call'
               ? `${blocks} corpus blocks, ${warmup}s warmup`
               : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             core.exportVariable('BENCH_CONFIG', config);
 
             const pr = process.env.BENCH_PR;
@@ -1620,7 +1677,7 @@ jobs:
 
           quote_arg() {
             local value="$1"
-            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+-]+$ ]]; then
+            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+,-]+$ ]]; then
               printf '%s' "$value"
             else
               printf "'%s'" "${value//\'/\'\\\'\'}"
@@ -1662,6 +1719,11 @@ jobs:
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
           [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
           [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
+          if [ "$BENCH_MEMPOOL" = "true" ]; then
+            derek_cmd+=(mempool)
+          elif [ -n "$BENCH_MEMPOOL" ]; then
+            derek_cmd+=(mempool="$BENCH_MEMPOOL")
+          fi
           [ -n "$BENCH_BLOCK_TIME" ] && derek_cmd+=(block-time="$BENCH_BLOCK_TIME")
           [ -n "$BENCH_BASELINE_ARGS" ] && derek_cmd+=(baseline-args="$BENCH_BASELINE_ARGS")
           [ -n "$BENCH_FEATURE_ARGS" ] && derek_cmd+=(feature-args="$BENCH_FEATURE_ARGS")
@@ -1941,7 +2003,7 @@ jobs:
       # Results & charts
       - name: Upload raw results
         if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-raw-results
           # Replayed corpora can contain third-party traffic, so only their
@@ -2108,7 +2170,7 @@ jobs:
       - name: Upload results
         id: upload-results
         if: "!cancelled()"
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-results
           # Replayed corpora can contain third-party traffic, so only their

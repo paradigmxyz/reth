@@ -914,6 +914,33 @@ async fn test_admin_external_ip() -> eyre::Result<()> {
     Ok(())
 }
 
+// <https://github.com/paradigmxyz/reth/issues/27867>
+#[tokio::test]
+async fn test_disable_auth_server_skips_jwt_secret() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let missing_dir = tempfile::tempdir()?;
+    let missing = missing_dir.path().join("missing-jwt.hex");
+    for auth_jwtsecret in [None, Some(missing.clone())] {
+        let mut rpc = RpcServerArgs::default().with_unused_ports();
+        rpc.disable_auth_server = true;
+        rpc.auth_jwtsecret = auth_jwtsecret;
+        let node_config = NodeConfig::test()
+            .with_chain(Arc::new(test_chain_spec_builder().build()))
+            .with_unused_ports()
+            .with_rpc(rpc);
+        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
+            .testing_node(Runtime::test())
+            .node(EthereumNode::default())
+            .launch()
+            .await?;
+        assert!(!node.data_dir.jwt().exists());
+    }
+    assert!(!missing.exists());
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_admin_node_info_uses_discv5_port_when_discv4_is_disabled() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();

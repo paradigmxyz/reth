@@ -66,7 +66,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, validate_request::ValidateRequestHeaderLayer};
 
 pub use cors::CorsDomainError;
 
@@ -1460,7 +1460,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 let server = ServerBuilder::new()
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
-                            .option_layer(Self::maybe_cors_layer(cors)?)
+                            .option_layer(Self::maybe_cors_layer(cors.clone())?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_decompression_layer(
                                 self.http_max_request_body_size,
@@ -1470,6 +1470,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                                 http_socket_addr,
                                 self.http_disable_compression,
                                 self.http_compression_algorithms.as_deref(),
+                            ))
+                            .layer(ValidateRequestHeaderLayer::custom(
+                                cors::WsOriginValidator::new(cors.as_deref())?,
                             )),
                     )
                     .set_rpc_middleware(
@@ -1524,7 +1527,10 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                        .layer(ValidateRequestHeaderLayer::custom(cors::WsOriginValidator::new(
+                            self.ws_cors_domains.as_deref(),
+                        )?)),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()

@@ -332,8 +332,11 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
     // Setup 10 nodes
-    let (mut nodes, wallet) =
-        EthereumNode::test_setup(10, chain_spec).with_connect_nodes(false).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(10, chain_spec)
+        .with_connect_nodes(false)
+        .with_restartable_nodes()
+        .build()
+        .await?;
     let mut account = wallet.account(0);
 
     // Connect all nodes to the first one
@@ -357,6 +360,11 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     // Wait until all nodes have the transaction
     for node in &nodes {
         node.wait_for_pooled([tx_hash]).await?;
+    }
+
+    // Close each database before process exit can run libmdbx's global destructor.
+    for node in nodes {
+        node.stop().await?;
     }
 
     Ok(())

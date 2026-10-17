@@ -1442,7 +1442,16 @@ where
     ///   `RocksDB` is still open [`DATABASE_RELEASE_TIMEOUT`] after the node shut down.
     ///
     /// Drop such handles before stopping the node.
-    pub async fn stop(mut self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+    pub async fn stop(self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+        self.stop_with_release_timeout(DATABASE_RELEASE_TIMEOUT).await
+    }
+
+    /// Stops the node like [`Self::stop`], but waits at most `release_timeout` instead of
+    /// [`DATABASE_RELEASE_TIMEOUT`] for the database and `RocksDB` to be released.
+    pub async fn stop_with_release_timeout(
+        mut self,
+        release_timeout: Duration,
+    ) -> eyre::Result<StoppedNode<Node, AddOns>> {
         let Some(NodeRestart { database, relaunch }) = self.restart.take() else {
             bail!(
                 "the node is not restartable, launch it with \
@@ -1465,7 +1474,7 @@ where
         .await?;
         ensure!(shut_down, "the node did not shut down within {WAIT_TIMEOUT:?}");
 
-        close_database(database, &data_dir).await?;
+        close_database(database, &data_dir, release_timeout).await?;
         Ok(StoppedNode { data_dir, relaunch, remove_data_dir: true })
     }
 
@@ -1518,8 +1527,12 @@ async fn wait_for_committed_chain<N: NodePrimitives>(
 /// database without removing its datadir, and waits until `RocksDB` is closed.
 ///
 /// Returns an error if the database or `RocksDB` is still open afterwards.
-async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<()> {
-    let released = tokio::time::timeout(DATABASE_RELEASE_TIMEOUT, async {
+async fn close_database(
+    database: TmpDB,
+    data_dir: &ChainPath<DataDirPath>,
+    release_timeout: Duration,
+) -> eyre::Result<()> {
+    let released = tokio::time::timeout(release_timeout, async {
         while Arc::strong_count(&database) > 1 {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -1527,9 +1540,9 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     .await;
     if released.is_err() {
         bail!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
-             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
-             of `inner.provider`, before stopping it"
+            "the database of the stopped node is still in use {release_timeout:?} after the node \
+             shut down: drop all handles that hold a provider of the node, e.g. a clone of \
+             `inner.provider`, before stopping it"
         )
     }
     let database = Arc::into_inner(database)
@@ -1547,7 +1560,7 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     // Providers drop their database handle before their `RocksDB` handle, whose drop flushes and
     // closes `RocksDB`, so the last provider can still be closing it. `RocksDB` does not open a
     // database twice in a process either, so wait until opening it succeeds.
-    let deadline = Instant::now() + DATABASE_RELEASE_TIMEOUT;
+    let deadline = Instant::now() + release_timeout;
     loop {
         let path = data_dir.rocksdb();
         let opened = tokio::task::spawn_blocking(move || {
@@ -1558,8 +1571,8 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
             Result::Ok(()) => return Ok(()),
             Err(err) if Instant::now() >= deadline => {
                 return Err(err).wrap_err(format!(
-                    "the RocksDB of the stopped node is still open {DATABASE_RELEASE_TIMEOUT:?} \
-                     after the node shut down: drop all handles of it, e.g. of \
+                    "the RocksDB of the stopped node is still open {release_timeout:?} after \
+                     the node shut down: drop all handles of it, e.g. of \
                      `inner.provider.rocksdb_provider()`, before stopping the node"
                 ))
             }
