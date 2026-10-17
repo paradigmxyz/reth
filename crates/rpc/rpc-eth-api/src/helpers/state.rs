@@ -417,6 +417,53 @@ pub trait LoadState:
         }
     }
 
+    /// Executes `f` with the EVM environment and state at the given [`BlockId`] on a blocking IO
+    /// task.
+    ///
+    /// For `pending`, both come from one source: a local pending block supplies its header and
+    /// executed state, and otherwise the state is pinned to the block returned by
+    /// [`Self::evm_env_at`]. A chain-specific pending state without a header is paired with the
+    /// current pending environment; return [`PendingStateSource::Block`] to pin both.
+    fn spawn_blocking_io_with_state_and_env<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let pending =
+                if at.is_pending() { self.local_pending_block_or_state().await? } else { None };
+            let (evm_env, at) = match &pending {
+                Some(PendingStateSource::Block(block)) => {
+                    (self.evm_env_for_header(block.block().sealed_block().sealed_header())?, at)
+                }
+                Some(PendingStateSource::State(_)) => {
+                    (self.pending_block_env_and_cfg()?.evm_env, at)
+                }
+                None => self.evm_env_at(at).await?,
+            };
+
+            self.spawn_blocking_io(move |this| {
+                let state = match pending {
+                    Some(PendingStateSource::Block(block)) => this
+                        .provider()
+                        .state_with_block_appended(block.parent_hash(), block.executed_block),
+                    Some(PendingStateSource::State(state)) => Ok(state),
+                    None => this.provider().state_by_block_id(at),
+                }
+                .map_err(Self::Error::from_eth_err)?;
+                f(this, state, evm_env)
+            })
+            .await
+        }
+    }
+
     /// Returns the EVM environment for the given sealed header.
     fn evm_env_for_header(
         &self,
