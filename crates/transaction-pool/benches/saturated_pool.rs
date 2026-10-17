@@ -224,7 +224,6 @@ fn bench_update_accounts(c: &mut Criterion) {
     assert!(size.pending >= 9_000, "pending pool not saturated: {size:?}");
 
     let (senders, pool_senders) = senders_for_update_bench(&pool, &mut counter);
-    assert_eq!(pool_senders, 4_000);
 
     // the reported nonce stays put so the transactions are re-evaluated rather than discarded,
     // which keeps every iteration doing the same amount of work
