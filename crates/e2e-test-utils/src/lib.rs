@@ -28,6 +28,9 @@ mod payload;
 #[cfg(feature = "chain-import")]
 pub mod setup_import;
 
+/// Helpers for producing logs and driving the `eth_getLogs` and filter RPC surface
+pub mod logs;
+
 /// Helper for network operations
 mod network;
 
