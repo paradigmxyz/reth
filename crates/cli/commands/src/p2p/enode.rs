@@ -10,8 +10,6 @@ use std::{
 };
 
 /// Print the enode identifier for a given secret key.
-///
-/// The secret key file must already exist.
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Path to the secret key file for discovery.
