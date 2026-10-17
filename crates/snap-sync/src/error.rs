@@ -118,14 +118,16 @@ pub enum SnapSyncError {
         version: Option<u64>,
     },
     /// A persisted progress record that cannot be decoded.
-    #[error("{key} record is unreadable")]
+    #[error("{key} record is unreadable: {source}")]
     UnreadableRecord {
         /// Metadata key the record is stored under.
         key: &'static str,
+        /// Why the record could not be decoded.
+        source: serde_json::Error,
     },
     /// A blocking task panicked or the runtime shut down before it finished.
     #[error("blocking task failed: {0}")]
-    BlockingTask(String),
+    BlockingTask(#[source] Box<dyn core::error::Error + Send + Sync>),
     /// A range was downloaded from somewhere other than the next key to cover.
     #[error("account range starts at {got}, coverage continues at {expected:?}")]
     OutOfOrderRange {
@@ -214,8 +216,8 @@ pub enum SnapSyncError {
 
 impl SnapSyncError {
     /// Wraps the failure of a blocking task, which is a panic or a shutting-down runtime.
-    pub(crate) fn blocking_task(error: impl std::fmt::Display) -> Self {
-        Self::BlockingTask(error.to_string())
+    pub(crate) fn blocking_task(error: impl core::error::Error + Send + Sync + 'static) -> Self {
+        Self::BlockingTask(Box::new(error))
     }
 
     /// Whether the node's progress resolves this error, as new peers serve the state or missing
