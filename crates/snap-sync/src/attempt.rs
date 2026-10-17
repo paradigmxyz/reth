@@ -296,7 +296,8 @@ fn ensure_header_root(
         .filter(|header| header.hash() == target.hash)
         .ok_or(SnapSyncError::NonCanonicalBlock { block: target.number, hash: target.hash })?;
     if header.state_root() != generation.state_root() {
-        return Err(SnapSyncError::RootMismatch {
+        return Err(SnapSyncError::HeaderRootMismatch {
+            block: target.number,
             expected: header.state_root(),
             got: generation.state_root(),
         })
@@ -524,12 +525,12 @@ mod tests {
 
         assert!(matches!(
             provider.start_snap_attempt(wrong(1)),
-            Err(SnapSyncError::RootMismatch { .. })
+            Err(SnapSyncError::HeaderRootMismatch { .. })
         ));
         let write = provider.start_snap_attempt(generation(1)).unwrap();
         assert!(matches!(
             provider.advance_snap_pivot(write, wrong(2)),
-            Err(SnapSyncError::RootMismatch { .. })
+            Err(SnapSyncError::HeaderRootMismatch { .. })
         ));
         provider.authorize_snap_write(write).unwrap();
     }
