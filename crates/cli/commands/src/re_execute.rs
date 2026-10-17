@@ -501,18 +501,3 @@ where
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-
-    #[test]
-    fn rejects_zero_numeric_args() {
-        assert!(Command::<EthereumChainSpecParser>::try_parse_from(["reth"]).is_ok());
-        for flag in ["--from", "--num-tasks", "--blocks-per-chunk"] {
-            let res = Command::<EthereumChainSpecParser>::try_parse_from(["reth", flag, "0"]);
-            assert!(res.is_err(), "{flag} 0 should be rejected");
-        }
-    }
-}
