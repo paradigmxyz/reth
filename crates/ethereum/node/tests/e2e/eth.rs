@@ -74,8 +74,10 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_restartable_nodes()
+        .build_single()
+        .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     node.inject_and_advance(raw_tx).await?;
@@ -103,6 +105,10 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 
     let db_block = node.inner.provider.last_block_number()?;
     assert_eq!(db_block, 1, "Database should have persisted block 1");
+
+    // Stop the node so its database is closed before the test process exits. Otherwise node
+    // threads can still use RocksDB while the process tears down, which aborts.
+    node.stop().await?;
 
     Ok(())
 }

@@ -538,7 +538,7 @@ pub struct EngineArgs {
     #[arg(
         long = "engine.state-root-task-timeout",
         value_parser = humantime::parse_duration,
-        default_value = DefaultEngineValues::get_global().state_root_task_timeout.as_deref().unwrap_or("4s"),
+        default_value = Resettable::from(DefaultEngineValues::get_global().state_root_task_timeout.as_ref().map(|v| v.as_str().into())),
     )]
     pub state_root_task_timeout: Option<Duration>,
 
