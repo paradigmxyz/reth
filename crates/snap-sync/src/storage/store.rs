@@ -282,9 +282,12 @@ impl<T: MetadataProvider> SnapStorageStore for T {
         if chunk.next.is_none() {
             // Skipped accounts have empty storage at this pivot. Clear earlier attempts' slots
             // before the completion watermark makes them eligible for reuse and BAL updates.
-            let start = complete
-                .map_or(origin, |account| (U256::from_be_bytes(account.0) + U256::ONE).into());
-            self.remove::<tables::HashedStorages>(start..chunk.account)?;
+            let start = complete.map_or(Some(origin), |account| {
+                U256::from_be_bytes(account.0).checked_add(U256::ONE).map(B256::from)
+            });
+            if let Some(start) = start {
+                self.remove::<tables::HashedStorages>(start..chunk.account)?;
+            }
         }
         if chunk.from.is_zero() {
             self.remove::<tables::HashedStorages>(chunk.account..=chunk.account)?;
@@ -315,8 +318,7 @@ pub(crate) fn persisted_storage_root(tx: &impl DbTx, account: B256) -> Result<B2
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, generation, hashed_factory, insert_generation_headers, state_root,
-        storage_root_of, stored_slots,
+        account, generation, hashed_factory_with_roots, state_root, storage_root_of, stored_slots,
     };
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
@@ -344,11 +346,10 @@ mod tests {
 
     // An attempt whose account coverage has not reached the contract yet.
     fn started() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
-        let factory = hashed_factory();
-        insert_generation_headers(&factory);
-        let provider = factory.database_provider_rw().unwrap();
         let mut contract = account(1);
         contract.storage_root = root();
+        let factory = hashed_factory_with_roots(&[state_root(&[(CONTRACT, contract)])]);
+        let provider = factory.database_provider_rw().unwrap();
         let generation = generation(1, state_root(&[(CONTRACT, contract)]));
         let write = provider.start_snap_attempt(generation).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -439,7 +440,7 @@ mod tests {
         let first = chunk(0..1, B256::ZERO, Some(slot(2)));
         provider.commit_storage_chunk(write, B256::ZERO, first).unwrap();
         let advanced =
-            provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(0xcc))).unwrap();
+            provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(2))).unwrap();
         provider.commit().unwrap();
         (factory, write, advanced)
     }
@@ -504,7 +505,7 @@ mod tests {
 
         // Both stay resumable, even across another pivot move.
         let advanced =
-            provider.advance_snap_pivot(advanced, generation(3, B256::repeat_byte(0xdd))).unwrap();
+            provider.advance_snap_pivot(advanced, generation(3, B256::repeat_byte(3))).unwrap();
         let progress = provider.storage_progress(advanced, B256::ZERO).unwrap();
         assert_eq!(progress.resume_at(before), Some(slot(2)));
         assert_eq!(progress.resume_at(CONTRACT), Some(slot(2)));

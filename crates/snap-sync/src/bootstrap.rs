@@ -601,6 +601,8 @@ enum Wait {
 mod tests {
     use super::*;
     use crate::{
+        common::SnapRecord,
+        reorg::StoredAncestry,
         test_utils::{
             account, account_range, hashed_factory, header, key, policy, state_root,
             storage_ranges, storage_root_of, stored_slots, verified_range, ReorgFactoryExt,
@@ -611,14 +613,14 @@ mod tests {
     use alloy_eip7928::{
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
     };
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_primitives_traits::{Account, AlloyBlockHeader, SealedHeader};
+    use reth_primitives_traits::{Account, AlloyBlockHeader, Header, SealedHeader};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
         ProviderFactory,
@@ -1080,15 +1082,24 @@ mod tests {
     async fn a_reorged_pivot_without_kept_blocks_restarts_the_attempt() {
         let accounts = accounts();
         let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        // A previous run anchored to a block the canonical chain no longer holds.
+        let blocks = chain(3, state_root(&accounts));
+        insert_headers(&factory, &blocks);
+        // A previous run anchored to a block the canonical chain then replaced.
         let provider = factory.database_provider_rw().unwrap();
-        let orphaned = SnapGeneration::new(
-            BlockNumHash::new(2, B256::repeat_byte(0xee)),
-            state_root(&accounts),
-        );
+        let orphaned = SnapGeneration::new(blocks[2].num_hash(), state_root(&accounts));
         provider.start_snap_attempt(orphaned).unwrap();
+        StoredAncestry::clear(&provider).unwrap();
         provider.commit().unwrap();
+        let mut replaced = chain(3, state_root(&accounts));
+        replaced[2] = SealedHeader::seal_slow(Header {
+            extra_data: Bytes::from_static(&[1]),
+            ..replaced[2].header().clone()
+        });
+        replaced[3] = SealedHeader::seal_slow(Header {
+            parent_hash: replaced[2].hash(),
+            ..replaced[3].header().clone()
+        });
+        factory.replace_headers_after(1, &replaced[2..]);
         let orphaned = attempt_id(&factory);
         let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
 
@@ -1097,7 +1108,7 @@ mod tests {
         let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
             panic!("the state is complete: {outcome:?}")
         };
-        assert_ne!(pivot.hash, B256::repeat_byte(0xee));
+        assert_ne!(pivot.hash, blocks[2].hash());
         assert_ne!(attempt_id(&factory), orphaned);
     }
 
