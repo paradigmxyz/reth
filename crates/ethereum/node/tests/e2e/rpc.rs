@@ -20,7 +20,8 @@ use alloy_rpc_types_eth::{
     AccessListResult, TransactionRequest,
 };
 use alloy_rpc_types_trace::geth::{
-    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
+    CallConfig, ChainBlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracingOptions,
+    GethTrace, TraceResult,
 };
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -314,6 +315,88 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     assert_eq!(terminal.block, U256::from(3));
     assert!(terminal.traces.is_empty());
     subscription.unsubscribe().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_call_tracer_log_index() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_node_config_modifier(|mut config| {
+            config.rpc.rpc_state_cache.cache_computed_bals = true;
+            config
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    // PUSH0 PUSH0 LOG0 STOP emits one log and deploys no code.
+    let emit_log = TransactionRequest::default()
+        .with_deploy_code(Bytes::from_static(&[0x5f, 0x5f, 0xa0, 0x00]))
+        .with_gas_limit(100_000);
+    let first = provider.send_transaction(emit_log.clone()).await?;
+    let second = provider.send_transaction(emit_log).await?;
+    node.advance_block().await?;
+    let first = first.successful_receipt().await?;
+    let second = second.successful_receipt().await?;
+    assert_eq!(first.block_hash, second.block_hash);
+    assert_eq!(first.inner.logs()[0].log_index, Some(0));
+    assert_eq!(second.inner.logs()[0].log_index, Some(1));
+
+    let block_hash = second.block_hash.unwrap();
+    let cache = node.rpc.inner.eth_api().cache();
+    for use_bal in [false, true] {
+        if use_bal {
+            let _: BlockAccessList =
+                provider.raw_request("eth_getBlockAccessList".into(), (block_hash,)).await?;
+        }
+        assert_eq!(
+            cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_some(),
+            use_bal
+        );
+
+        for receipt in [&first, &second] {
+            for (tracer, config) in [
+                ("callTracer", serde_json::json!({ "withLog": true })),
+                ("erc7562Tracer", serde_json::json!({ "withLog": true })),
+                ("muxTracer", serde_json::json!({ "callTracer": { "withLog": true } })),
+            ] {
+                let opts = serde_json::from_value(serde_json::json!({
+                    "tracer": tracer, "tracerConfig": config
+                }))?;
+                let trace =
+                    provider.debug_trace_transaction(receipt.transaction_hash, opts).await?;
+                let index = match trace {
+                    GethTrace::CallTracer(frame) => frame.logs[0].index,
+                    GethTrace::Erc7562Tracer(frame) => frame.logs[0].index,
+                    GethTrace::MuxTracer(mut frame) => {
+                        let GethTrace::CallTracer(frame) =
+                            frame.0.remove(&GethDebugBuiltInTracerType::CallTracer.into()).unwrap()
+                        else {
+                            panic!("expected mux call trace")
+                        };
+                        frame.logs[0].index
+                    }
+                    _ => panic!("expected call logs"),
+                };
+                assert_eq!(index, receipt.inner.logs()[0].log_index, "{tracer}, BAL: {use_bal}");
+            }
+        }
+    }
+
+    let opts = GethDebugTracingOptions::call_tracer(CallConfig::default().with_log());
+    let traces = provider
+        .debug_trace_block_by_number(BlockNumberOrTag::Number(second.block_number.unwrap()), opts)
+        .await?;
+    assert_eq!(traces.len(), 2);
+    for (trace, receipt) in traces.iter().zip([first, second]) {
+        let TraceResult::Success { result: GethTrace::CallTracer(frame), .. } = trace else {
+            panic!("expected call trace")
+        };
+        assert_eq!(frame.logs[0].index, receipt.inner.logs()[0].log_index);
+    }
 
     Ok(())
 }

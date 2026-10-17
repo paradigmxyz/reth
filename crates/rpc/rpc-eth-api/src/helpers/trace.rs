@@ -127,6 +127,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                         as usize,
                     tx,
                     bal.as_deref(),
+                    |_, _| {},
                 )?;
                 f(tx_info, inspector, res, db)
             })
@@ -164,7 +165,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             &mut evm,
             block.transactions_recovered(),
             target_tx_index,
-        )
+        )?;
+        Ok(())
     }
 
     /// Executes the target transaction with the configured inspector on the state right before
@@ -173,15 +175,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// If the block's cached BAL is given, the state is positioned by attaching the BAL at the
     /// target index, see [`attach_bal_before_tx`]. Otherwise all transactions before the target
     /// transaction are replayed without inspection first.
-    #[expect(clippy::type_complexity)]
-    fn inspect_transaction_in_block<'a>(
+    ///
+    /// `before_inspect` configures the inspector after replay, receiving the number of replayed
+    /// logs (zero when a BAL is used).
+    #[expect(clippy::type_complexity, clippy::too_many_arguments)]
+    fn inspect_transaction_in_block<'a, I: InspectorFor<Self::Evm, &'a mut StateCacheDb>>(
         &self,
         block: &RecoveredBlock<BlockTy<Self::Primitives>>,
         db: &'a mut StateCacheDb,
-        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
+        inspector: I,
         target_tx_index: usize,
         target_tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
         bal: Option<&DecodedBal<Arc<RevmBal>>>,
+        before_inspect: impl FnOnce(&mut I, usize),
     ) -> Result<(ResultAndState<HaltReasonFor<Self::Evm>>, EvmEnvFor<Self::Evm>), Self::Error> {
         if let Some(bal) = bal {
             // the BAL also covers the block's pre-execution changes
@@ -193,15 +199,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
 
+        let mut log_count = 0;
         if bal.is_none() {
             evm.disable_inspector();
-            self.replay_transactions_until_with_evm(
+            log_count = self.replay_transactions_until_with_evm(
                 &mut evm,
                 block.transactions_recovered(),
                 target_tx_index,
             )?;
             evm.enable_inspector();
         }
+
+        before_inspect(evm.components_mut().1, log_count);
 
         let res = evm.transact(target_tx_env).map_err(Self::Error::from_evm_err)?;
 
