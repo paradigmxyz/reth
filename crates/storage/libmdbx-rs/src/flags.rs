@@ -148,7 +148,6 @@ pub struct EnvironmentFlags {
     pub mode: Mode,
     pub no_rdahead: bool,
     pub no_meminit: bool,
-    pub coalesce: bool,
     pub liforeclaim: bool,
 }
 
@@ -189,10 +188,6 @@ impl EnvironmentFlags {
 
         if self.no_meminit {
             flags |= ffi::MDBX_NOMEMINIT;
-        }
-
-        if self.coalesce {
-            flags |= ffi::MDBX_COALESCE;
         }
 
         if self.liforeclaim {

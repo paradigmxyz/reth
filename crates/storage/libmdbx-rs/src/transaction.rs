@@ -214,8 +214,10 @@ where
     /// The returned database handle may be shared among any transaction in the environment.
     ///
     /// The database name may not contain the null character.
+    ///
+    /// The database is opened with the flags it was created with.
     pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
-        Database::new(self, name, 0)
+        Database::new(self, name, ffi::MDBX_DB_ACCEDE)
     }
 
     /// Gets the option flags for the given database in the transaction.
