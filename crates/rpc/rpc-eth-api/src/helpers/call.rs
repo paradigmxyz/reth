@@ -782,18 +782,19 @@ pub trait Call:
     /// [`Trace::inspect_transaction_in_block`] to replay without inspection and trace the target.
     ///
     /// If the target index is greater than or equal to the iterator length, all transactions are
-    /// replayed.
+    /// replayed. Returns the number of logs emitted by the replayed transactions.
     fn replay_transactions_until_with_evm<'a, DB, I, Txs>(
         &self,
         evm: &mut EvmFor<Self::Evm, DB, I>,
         transactions: Txs,
         target_tx_index: usize,
-    ) -> Result<(), Self::Error>
+    ) -> Result<usize, Self::Error>
     where
         DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
         Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
+        let mut log_count = 0;
         for (index, tx) in transactions.into_iter().enumerate() {
             if index == target_tx_index {
                 // reached the target transaction
@@ -801,9 +802,10 @@ pub trait Call:
             }
 
             let tx_env = self.evm_config().tx_env(tx);
-            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+            let result = evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
+            log_count += result.logs().len();
         }
-        Ok(())
+        Ok(log_count)
     }
 
     ///

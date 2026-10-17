@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -10,7 +10,7 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    erc7562::Erc7562Config, ChainBlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracerType,
+    ChainBlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracerType,
     GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
@@ -31,7 +31,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{utils::calculate_gas_used_and_next_log_index, EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -322,7 +322,7 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
-        let (transaction, block, bal) =
+        let (transaction, block, mut bal) =
             match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
                 Some(res) => res,
@@ -336,24 +336,27 @@ where
         let index =
             tx_info.index.expect("transaction_and_block only returns block transactions") as usize;
 
-        // log indices are block-level, so the trace continues after the logs of the preceding
-        // transactions; without receipts (pruned) numbering falls back to the transaction
-        let next_log_index = if records_call_logs(&opts) {
-            self.eth_api()
+        // Replay already counts preceding logs. Only the BAL fast path needs receipts.
+        let mut next_log_index = 0;
+        if index > 0 && bal.is_some() && records_call_logs(&opts) {
+            if let Some(receipts) = self
+                .eth_api()
                 .cache()
                 .get_receipts(block.hash())
                 .await
                 .map_err(Eth::Error::from_eth_err)?
-                .map(|receipts| calculate_gas_used_and_next_log_index(index as u64, &receipts).1)
-                .unwrap_or_default()
-        } else {
-            0
-        };
+            {
+                next_log_index =
+                    receipts.iter().take(index).map(|receipt| receipt.logs().len()).sum();
+            } else {
+                // Replay when receipts are pruned to retain block-level log indices.
+                bal = None;
+            }
+        }
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                inspector.set_next_log_index(next_log_index);
                 let tx_env = eth_api.evm_config().tx_env(&tx);
                 let (res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
@@ -362,6 +365,9 @@ where
                     index,
                     tx_env.clone(),
                     bal.as_deref(),
+                    |inspector, replayed_logs| {
+                        inspector.set_next_log_index(next_log_index + replayed_logs)
+                    },
                 )?;
 
                 let trace = inspector
@@ -1481,31 +1487,6 @@ struct BadBlockStore<B: BlockTrait> {
     limit: usize,
 }
 
-/// Returns whether the options select a callTracer or erc7562Tracer with `withLog`, directly or
-/// as the callTracer of a muxTracer.
-fn records_call_logs(opts: &GethDebugTracingOptions) -> bool {
-    let config = opts.tracer_config.clone();
-    match &opts.tracer {
-        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer)) => {
-            config.into_call_config().is_ok_and(|config| config.with_log.unwrap_or_default())
-        }
-        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::Erc7562Tracer)) => {
-            config
-                .from_value::<Erc7562Config>()
-                .is_ok_and(|config| config.with_log.unwrap_or_default())
-        }
-        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)) => config
-            .into_mux_config()
-            .ok()
-            .and_then(|mux| {
-                mux.0.get(&GethDebugBuiltInTracerType::CallTracer.into()).cloned().flatten()
-            })
-            .and_then(|config| config.into_call_config().ok())
-            .is_some_and(|config| config.with_log.unwrap_or_default()),
-        _ => false,
-    }
-}
-
 /// A cached bad block paired with the reason it was rejected.
 #[derive(Clone, Debug)]
 struct BadBlockEntry<B: BlockTrait> {
@@ -1553,6 +1534,21 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     fn default() -> Self {
         Self::new(64)
     }
+}
+
+/// Whether the tracer requests call logs. Inspector construction validates the full config.
+fn records_call_logs(opts: &GethDebugTracingOptions) -> bool {
+    let config = match &opts.tracer {
+        Some(GethDebugTracerType::BuiltInTracer(
+            GethDebugBuiltInTracerType::CallTracer | GethDebugBuiltInTracerType::Erc7562Tracer,
+        )) => Some(&opts.tracer_config.0),
+        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)) => {
+            opts.tracer_config.0.get("callTracer")
+        }
+        _ => None,
+    };
+    config.and_then(|config| config.get("withLog")).and_then(serde_json::Value::as_bool) ==
+        Some(true)
 }
 
 #[cfg(test)]
