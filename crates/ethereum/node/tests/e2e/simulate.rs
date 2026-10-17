@@ -8,6 +8,7 @@ use alloy_rpc_types_eth::{
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
+use revm::primitives::eip7825::TX_GAS_LIMIT_CAP;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -187,7 +188,7 @@ async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::R
     let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
     assert_eq!(txs.len(), 1);
     assert_eq!(txs[0].gas_limit(), 30_000_000);
-    assert!(txs[0].gas_limit() > (1 << 24));
+    assert!(txs[0].gas_limit() > TX_GAS_LIMIT_CAP);
 
     Ok(())
 }
@@ -201,6 +202,86 @@ async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_osaka() -> e
 async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_amsterdam() -> eyre::Result<()>
 {
     assert_validation_uses_remaining_gas(EthereumHardfork::Amsterdam).await
+}
+
+#[tokio::test]
+async fn test_simulate_v1_validation_omitted_gas_uses_remaining_state_gas_amsterdam(
+) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let contract = Address::with_last_byte(0x42);
+    let call =
+        TransactionRequest::default().to(contract).max_fee_per_gas(0).max_priority_fee_per_gas(0);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(30_000_000),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(StateOverride::from_iter([(
+            contract,
+            AccountOverride::default().with_code(bytes!("0x00")),
+        )]))
+        .call(call.clone().gas_limit(100_000))
+        .call(call);
+    let payload =
+        SimulatePayload::default().with_validation().with_full_transactions().extend(sim_block);
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert!(result[0].calls.iter().all(|call| call.status));
+    assert!(result[0].calls[0].gas_used > 0);
+    let txs = result[0].inner.transactions.as_transactions().expect("expected full transactions");
+    assert_eq!(txs[1].gas_limit(), 30_000_000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_execution_gas_cap_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let contract = Address::with_last_byte(0x42);
+    let sim_block = SimBlock::default()
+        .with_block_overrides(BlockOverrides {
+            gas_limit: Some(30_000_000),
+            base_fee: Some(U256::ZERO),
+            ..Default::default()
+        })
+        .with_state_overrides(StateOverride::from_iter([(
+            contract,
+            // Return the remaining gas using GAS.
+            AccountOverride::default().with_code(bytes!("0x5a5f5260205ff3")),
+        )]))
+        .call(
+            TransactionRequest::default()
+                .to(contract)
+                .max_fee_per_gas(0)
+                .max_priority_fee_per_gas(0),
+        );
+
+    for validation in [false, true] {
+        let mut payload = SimulatePayload::default().extend(sim_block.clone());
+        payload.validation = validation;
+
+        let result: Vec<SimulatedBlock> =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+        assert!(result[0].calls[0].status);
+        let gas = U256::from_be_slice(&result[0].calls[0].return_data);
+        assert_eq!(gas > U256::from(TX_GAS_LIMIT_CAP), !validation);
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
