@@ -17,7 +17,6 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     MetadataWriter, StageCheckpointWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::{fmt, future::Future};
 use tokio_util::sync::CancellationToken;
@@ -165,7 +164,10 @@ where
                         Step::Continue
                     }
                     // Progress this build cannot read is unusable, so the attempt starts over.
-                    Err(error @ SnapSyncError::UnsupportedRecord { .. }) => {
+                    Err(
+                        error @ (SnapSyncError::UnsupportedRecord { .. } |
+                        SnapSyncError::UnreadableRecord { .. }),
+                    ) => {
                         info!(target: "sync::snap", %error, "Snap progress is unreadable, restarting");
                         Step::Restart
                     }
@@ -213,7 +215,7 @@ where
             }
         }
 
-        session.select(&provider, head, self.context.finalized())?;
+        session.select(&provider, head, self.context.finalized()?)?;
         let Some(generation) = session.start() else {
             // A head without a block access list predates them, so no block under it can anchor.
             // Once the staged pipeline executes past genesis, the node stays on it. The first
@@ -323,7 +325,7 @@ where
             info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
-        let generation = self.policy.select(&provider, head, self.context.finalized())?;
+        let generation = self.policy.select(&provider, head, self.context.finalized()?)?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
         // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
@@ -355,7 +357,7 @@ where
         let provider = self.factory.database_provider_rw()?;
         let from = self.pivot()?;
         let Some(advanced) =
-            self.session.advance(&provider, write, head, self.context.finalized())?
+            self.session.advance(&provider, write, head, self.context.finalized()?)?
         else {
             return Ok(write)
         };
@@ -502,7 +504,7 @@ where
                 Ok(())
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     // Pivot of the attempt being driven.
@@ -555,13 +557,16 @@ pub trait SnapSyncContext: Send {
     /// Highest block whose canonical header is downloaded.
     fn head(&self) -> Result<u64, SnapSyncError>;
 
-    /// Latest finalized block, preferred as the pivot when recent enough.
-    fn finalized(&self) -> Option<u64> {
-        None
+    /// Latest finalized block, preferred as the pivot when recent enough. `None` if no finalized
+    /// block is known locally yet.
+    fn finalized(&self) -> Result<Option<u64>, SnapSyncError> {
+        Ok(None)
     }
 
-    /// Waits until the head moves past `head` or new peers connect, returning `false` once no
-    /// further progress will come.
+    /// Waits for a reason to retry the stalled step and returns `true` if one came, such as new
+    /// peers connecting or a retry delay passing. Returns `false` if the run should stop instead,
+    /// so the caller can refresh its headers, as when a new target arrived or the source of
+    /// targets is gone.
     fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
 }
 
@@ -1180,29 +1185,34 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_progress_restarts_the_attempt() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
-        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        // Another build rewrote the coverage the attempt resumes from.
-        let provider = factory.database_provider_rw().unwrap();
-        let stale = provider.active_snap_write().unwrap().unwrap();
-        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
-        provider.commit().unwrap();
+        // A record another build wrote, and one that is not a record at all.
+        for record in [br#"{"version":999}"#.as_slice(), b"not json"] {
+            let accounts = accounts();
+            let factory = hashed_factory();
+            insert_chain(&factory, 3, state_root(&accounts));
+            let (_, mut stopped) =
+                scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
+            assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+            // Another build rewrote the coverage the attempt resumes from.
+            let provider = factory.database_provider_rw().unwrap();
+            let stale = provider.active_snap_write().unwrap().unwrap();
+            provider.write_metadata("snap_account_coverage", record.to_vec()).unwrap();
+            provider.commit().unwrap();
 
-        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-        let outcome = restarted.run().await.unwrap();
+            let (_, mut restarted) =
+                scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+            let outcome = restarted.run().await.unwrap();
 
-        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_ne!(write.attempt(), stale.attempt());
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(matches!(
-            provider.authorize_snap_write(stale),
-            Err(SnapSyncError::StaleWrite { .. })
-        ));
+            let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
+                panic!("the state is complete: {outcome:?}")
+            };
+            assert_ne!(write.attempt(), stale.attempt());
+            let provider = factory.database_provider_ro().unwrap();
+            assert!(matches!(
+                provider.authorize_snap_write(stale),
+                Err(SnapSyncError::StaleWrite { .. })
+            ));
+        }
     }
 
     #[tokio::test]
