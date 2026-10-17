@@ -69,8 +69,10 @@ where
     }
 
     // Look up the last tx number for the snapshot block from BlockBodyIndices
-    let tx_number =
-        tx.get::<tables::BlockBodyIndices>(snapshot_block)?.map(|indices| indices.last_tx_num());
+    // `None` if there is no transaction up to the snapshot block
+    let tx_number = tx
+        .get::<tables::BlockBodyIndices>(snapshot_block)?
+        .and_then(|indices| indices.next_tx_num().checked_sub(1));
 
     for (segment, prune_mode) in &checkpoints {
         let (block_number, tx_number) = match segment {
