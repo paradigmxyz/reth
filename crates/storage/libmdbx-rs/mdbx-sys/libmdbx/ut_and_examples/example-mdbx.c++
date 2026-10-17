@@ -51,10 +51,18 @@ static bool doit(const mdbx::path &database_pathname) {
 
   auto txn = env.start_write();
   auto map = txn.create_map("table-ordinals", mdbx::key_mode::ordinal, mdbx::value_mode::single);
+  uint64_t zero = 0;
+  txn.insert(map, mdbx::slice::wrap(zero), "0");
   txn.insert(map, buffer::key_from_u64(42), "a");
   txn.insert(map, buffer::key_from_double(0.1), mdbx::slice("b"));
   txn.insert(map, buffer::key_from_jsonInteger(1), buffer("c"));
   txn.insert(map, mdbx::slice::wrap(uint64_t(0xaBad1dea)), buffer::base58("aBad1dea"));
+
+  mdbx::slice reserve;
+  /* [[may_unused]] */ auto value = txn.replace_reserve<buffer>(map, mdbx::slice::wrap(zero), 100, reserve);
+  memset(reserve.data(), 'Z', reserve.size());
+  /* [[may_unused]] */ value = txn.replace<buffer>(map, mdbx::slice::wrap(zero), "1");
+  /* [[may_unused]] */ value = txn.extract<buffer>(map, mdbx::slice::wrap(zero));
 
   auto cursor = txn.open_cursor(map);
   cursor.to_first();
