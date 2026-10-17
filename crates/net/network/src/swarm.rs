@@ -111,9 +111,15 @@ impl<N: NetworkPrimitives> Swarm<N> {
 }
 
 impl<N: NetworkPrimitives> Swarm<N> {
-    /// Triggers a new outgoing connection to the given node
-    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
-        self.sessions.dial_outbound(remote_addr, remote_id)
+    /// Triggers an outgoing connection, returning whether a session was started.
+    pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) -> bool {
+        if let Err(err) = self.sessions.try_dial_outbound(remote_addr, remote_id) {
+            trace!(target: "net", %err, "Outgoing connection rejected, capacity already reached.");
+            // Leave retries to the refill timer so a saturated session manager cannot busy-loop.
+            self.peers_mut().on_outgoing_pending_session_gracefully_closed(&remote_id);
+            return false
+        }
+        true
     }
 
     /// Handles a polled [`SessionEvent`]
@@ -239,8 +245,9 @@ impl<N: NetworkPrimitives> Swarm<N> {
     fn on_state_action(&mut self, event: StateAction<N>) -> Option<SwarmEvent<N>> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
-                self.dial_outbound(remote_addr, peer_id);
-                return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                if self.dial_outbound(remote_addr, peer_id) {
+                    return Some(SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id })
+                }
             }
             StateAction::Disconnect { peer_id, reason } => {
                 self.sessions.disconnect(peer_id, reason);
@@ -328,7 +335,8 @@ impl<N: NetworkPrimitives> Stream for Swarm<N> {
             }
 
             // poll all sessions
-            match this.sessions.poll(cx) {
+            match this.sessions.poll(cx, |peer_id| this.state.peers().has_inbound_capacity(peer_id))
+            {
                 Poll::Pending => {}
                 Poll::Ready(event) => {
                     if let Some(event) = this.on_session_event(event) {

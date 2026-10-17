@@ -173,8 +173,10 @@ mod tests {
     #[test]
     fn rejects_incomplete_bundles_without_changing_cache() {
         let cache = BlobValidationCache::default();
-        let mut v2 = valid_v2_bundle(b"blob");
-        v2.proofs.pop();
+        let mut v2 = BlobsBundleV2::empty();
+        v2.blobs.push(Blob::default());
+        v2.commitments.push(Bytes48::ZERO);
+        v2.proofs = vec![Bytes48::ZERO; CELLS_PER_EXT_BLOB - 1];
         assert!(matches!(cache.validate(v2), Err(ValidationApiError::InvalidBlobsBundle)));
         assert!(cache.entries.lock().is_empty());
     }

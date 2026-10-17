@@ -597,6 +597,8 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
     // The cross block cache is allocated up front, and the default of 4 GiB is far more than tests
     // need. The size is in MiB.
     config.engine.cross_block_cache_size = 1;
+    // Most tests never validate a blob, so only load the KZG trusted setup when needed.
+    config.debug.lazy_kzg_settings = true;
     config
 }
 
