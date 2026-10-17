@@ -2,21 +2,6 @@ use alloy_primitives::B256;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidAddressLength {
-    pub actual: usize,
-}
-
-pub fn address_target_node(value_ssz: &[u8]) -> Result<B256, InvalidAddressLength> {
-    if value_ssz.len() != 20 {
-        return Err(InvalidAddressLength { actual: value_ssz.len() });
-    }
-
-    let mut node = [0_u8; 32];
-    node[..20].copy_from_slice(value_ssz);
-    Ok(B256::from(node))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofError {
     ZeroGindex,
     WrongBranchLength { expected: usize, actual: usize },

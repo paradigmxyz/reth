@@ -39,13 +39,6 @@ pub struct GasAmounts {
 }
 
 impl GasAmounts {
-    pub fn to_ssz_bytes(self) -> [u8; 16] {
-        let mut bytes = [0; 16];
-        bytes[..8].copy_from_slice(&self.regular.to_le_bytes());
-        bytes[8..].copy_from_slice(&self.blob.to_le_bytes());
-        bytes
-    }
-
     pub fn tree(self) -> Result<RetainedNode, TreeConstructionError> {
         let Self { regular, blob } = self;
         active_container(vec![uint64(regular), uint64(blob)], 0x03)
@@ -59,13 +52,6 @@ pub struct BlobFeesPerGas {
 }
 
 impl BlobFeesPerGas {
-    pub fn to_ssz_bytes(self) -> [u8; 64] {
-        let mut bytes = [0; 64];
-        bytes[..32].copy_from_slice(&self.regular.to_le_bytes::<32>());
-        bytes[32..].copy_from_slice(&self.blob.to_le_bytes::<32>());
-        bytes
-    }
-
     pub fn tree(self) -> Result<RetainedNode, TreeConstructionError> {
         let Self { regular, blob } = self;
         active_container(
@@ -200,6 +186,7 @@ fn active_container(
 mod tests {
     use super::*;
     use alloy_primitives::b256;
+    use ssz::Encode;
 
     fn summary() -> ExecutionSummary {
         ExecutionSummary {
@@ -227,12 +214,16 @@ mod tests {
     #[test]
     fn gas_and_fees_preserve_full_width_little_endian_bytes() {
         let gas = GasAmounts { regular: 1, blob: u64::MAX };
-        assert_eq!(&gas.to_ssz_bytes()[..8], &1_u64.to_le_bytes());
-        assert_eq!(&gas.to_ssz_bytes()[8..], &[0xff; 8]);
+        let gas_bytes = gas.as_ssz_bytes();
+        assert_eq!(gas_bytes.len(), 16);
+        assert_eq!(&gas_bytes[..8], &1_u64.to_le_bytes());
+        assert_eq!(&gas_bytes[8..], &[0xff; 8]);
         let fees = BlobFeesPerGas { regular: U256::MAX, blob: U256::from(1) << 255 };
-        assert_eq!(&fees.to_ssz_bytes()[..32], &[0xff; 32]);
-        assert_eq!(fees.to_ssz_bytes()[63], 0x80);
-        assert!(fees.to_ssz_bytes()[32..63].iter().all(|byte| *byte == 0));
+        let fee_bytes = fees.as_ssz_bytes();
+        assert_eq!(fee_bytes.len(), 64);
+        assert_eq!(&fee_bytes[..32], &[0xff; 32]);
+        assert_eq!(fee_bytes[63], 0x80);
+        assert!(fee_bytes[32..63].iter().all(|byte| *byte == 0));
         for tree in [gas.tree().unwrap(), fees.tree().unwrap()] {
             assert_eq!(tree.children().unwrap()[1].root(), B256::right_padding_from(&[3]));
         }

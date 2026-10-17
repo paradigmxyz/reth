@@ -20,7 +20,7 @@ pub use components::{
     ComponentSnapshot,
 };
 pub use path::{parse_path, ParseError, PathToken};
-pub use proof::{address_target_node, verify_branch, InvalidAddressLength, ProofError};
+pub use proof::{verify_branch, ProofError};
 pub use proof_access::ProofAccessError;
 pub use query_service::{
     query_snapshot, verify_query_response, QueryError, QueryHandler, QueryRequest, QueryResponse,
@@ -51,3 +51,6 @@ pub use selection_executor::SelectionExecutor;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod test_utils;

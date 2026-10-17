@@ -104,23 +104,33 @@ fn rpc_error(error: QueryError) -> ErrorObjectOwned {
 mod tests {
     use super::*;
     use crate::{
-        verify_query_response, QueryService, ReceiptSelection, SelectionLimits, SelectionOperation,
-        SelectionRequest,
+        test_utils::{self, TestQueryService},
+        verify_query_response, FilterOutput, FilterPredicate, ReceiptSelection, SelectionLimits,
+        SelectionOperation, SelectionRequest,
     };
     use alloy_primitives::B256;
     use jsonrpsee::core::server::Methods;
     use reth_provider::ProviderError;
-    use reth_pureth_receipt::{
-        HistoricalAcquisitionError, MULTIPLE_LOGS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
-    };
+    use reth_pureth_receipt::HistoricalAcquisitionError;
     use std::{
         io::{Read, Write},
         net::TcpStream,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
-    fn module() -> Methods {
-        PurethRpc::new(QueryService::new().unwrap()).into_rpc().into()
+    fn module() -> (Methods, B256, B256) {
+        let (provider, hash) = test_utils::provider(1);
+        let root = reth_pureth_receipt::RethRootProvider::new(provider.clone())
+            .lookup(hash, reth_pureth_receipt::ObjectKind::Receipts)
+            .unwrap()
+            .root();
+        (
+            PurethRpc::new(crate::QueryService::from_blockchain_provider(provider))
+                .into_rpc()
+                .into(),
+            hash,
+            root,
+        )
     }
 
     fn request(block_hash: B256) -> QueryRequest {
@@ -158,12 +168,11 @@ mod tests {
 
     #[tokio::test]
     async fn installed_rpc_returns_eip_selections_without_runtime_identifiers() {
-        let module = module();
+        let (module, hash, root) = module();
         assert!(module.method("pureth_query").is_some());
-        let request = request(SINGLETON_BLOCK_HASH);
+        let request = request(hash);
         let result = call(&module, serde_json::to_value(&request).unwrap()).await;
         let response: QueryResponse = serde_json::from_value(result["result"].clone()).unwrap();
-        let root = response.selection.root;
         verify_query_response(&request, &response, root, SelectionLimits::default()).unwrap();
         assert_eq!(response.selection.results[0].values_ssz[0].as_ref(), &[1]);
         assert_eq!(response.selection.results[1].values_ssz[0].as_ref(), &[0x22; 32]);
@@ -181,9 +190,8 @@ mod tests {
 
     #[tokio::test]
     async fn installed_rpc_filters_and_proves_no_match_results() {
-        use crate::{FilterOutput, FilterPredicate};
-        let module = module();
-        let mut request = request(MULTIPLE_LOGS_BLOCK_HASH);
+        let (module, hash, root) = module();
+        let mut request = request(hash);
         request.selection.selections = vec![ReceiptSelection {
             path: ".".into(),
             operation: SelectionOperation::Filter {
@@ -195,12 +203,7 @@ mod tests {
         }];
         let result = call(&module, serde_json::to_value(&request).unwrap()).await;
         let response: QueryResponse = serde_json::from_value(result["result"].clone()).unwrap();
-        let provider = reth_pureth_receipt::DeterministicProvider::new().unwrap();
-        let snapshot = provider
-            .lookup(MULTIPLE_LOGS_BLOCK_HASH, reth_pureth_receipt::ObjectKind::Receipts)
-            .unwrap();
-        verify_query_response(&request, &response, snapshot.root(), SelectionLimits::default())
-            .unwrap();
+        verify_query_response(&request, &response, root, SelectionLimits::default()).unwrap();
         assert!(response.selection.results[0].values_ssz.is_empty());
         assert_eq!(response.selection.results[0].matches, Some(Vec::new()));
         assert!(response.selection.multiproof.is_some());
@@ -208,9 +211,9 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_rejects_obsolete_wire_fields_and_distinguishes_missing_blocks() {
-        let module = module();
+        let (module, hash, _) = module();
         for field in ["schema_id", "producer_revision", "path", "include_proof"] {
-            let mut json = serde_json::to_value(request(SINGLETON_BLOCK_HASH)).unwrap();
+            let mut json = serde_json::to_value(request(hash)).unwrap();
             json[field] = serde_json::json!("obsolete");
             assert_eq!(call(&module, json).await["error"]["code"], -32602);
         }
@@ -219,7 +222,7 @@ mod tests {
                 ["error"]["code"],
             -32001
         );
-        let mut invalid = request(SINGLETON_BLOCK_HASH);
+        let mut invalid = request(hash);
         invalid.selection.selections[0].path = "[9].status".to_owned();
         assert_eq!(
             call(&module, serde_json::to_value(invalid).unwrap()).await["error"]["code"],
@@ -229,8 +232,8 @@ mod tests {
 
     #[tokio::test]
     async fn value_only_rpc_is_explicitly_unverified() {
-        let module = module();
-        let mut request = request(MULTIPLE_LOGS_BLOCK_HASH);
+        let (module, hash, _) = module();
+        let mut request = request(hash);
         request.selection.selections[0].path = "[0].logs[1].address".to_owned();
         request.selection.include_proof = false;
         let result = call(&module, serde_json::to_value(&request).unwrap()).await;
@@ -292,7 +295,7 @@ mod tests {
 
     struct CountingHandler {
         calls: Arc<AtomicUsize>,
-        service: QueryService,
+        service: TestQueryService,
     }
 
     impl QueryHandler for CountingHandler {
@@ -308,14 +311,13 @@ mod tests {
 
     #[tokio::test]
     async fn installed_rpc_bounds_raw_named_and_positional_params_before_dispatch() {
+        let (service, hash) = test_utils::service();
         let calls = Arc::new(AtomicUsize::new(0));
-        let module: Methods = PurethRpc::new(CountingHandler {
-            calls: Arc::clone(&calls),
-            service: QueryService::new().unwrap(),
-        })
-        .into_rpc()
-        .into();
-        let json = serde_json::to_string(&request(SINGLETON_BLOCK_HASH)).unwrap();
+        let module: Methods =
+            PurethRpc::new(CountingHandler { calls: Arc::clone(&calls), service })
+                .into_rpc()
+                .into();
+        let json = serde_json::to_string(&request(hash)).unwrap();
         for named in [false, true] {
             for length in [65_535, 65_536, 65_537, 70_000] {
                 let wrapper =
@@ -361,18 +363,15 @@ mod tests {
 
     #[tokio::test]
     async fn http_rpc_rejects_oversized_raw_params_before_query_handler() {
+        let (service, hash) = test_utils::service();
         let calls = Arc::new(AtomicUsize::new(0));
         let server =
             jsonrpsee::server::ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
         let address = server.local_addr().unwrap();
         let handle = server.start(
-            PurethRpc::new(CountingHandler {
-                calls: Arc::clone(&calls),
-                service: QueryService::new().unwrap(),
-            })
-            .into_rpc(),
+            PurethRpc::new(CountingHandler { calls: Arc::clone(&calls), service }).into_rpc(),
         );
-        let json = serde_json::to_string(&request(SINGLETON_BLOCK_HASH)).unwrap();
+        let json = serde_json::to_string(&request(hash)).unwrap();
         let raw = format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"pureth_query\",\"params\":{{{}\"request\":{json}}}}}", " ".repeat(70_000));
         let response = tokio::task::spawn_blocking(move || {
             let mut socket = TcpStream::connect(address).unwrap();

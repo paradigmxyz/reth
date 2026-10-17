@@ -1,8 +1,6 @@
 use super::*;
-use crate::{ReceiptSelection, SelectionOperation};
-use reth_pureth_receipt::{
-    test_utils, MULTIPLE_LOGS_BLOCK_HASH, PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
-};
+use crate::{test_utils, FilterOutput, FilterPredicate, ReceiptSelection, SelectionOperation};
+use reth_pureth_receipt::test_utils as receipt_test_utils;
 
 fn request(block_hash: B256, path: &str) -> QueryRequest {
     QueryRequest {
@@ -19,16 +17,15 @@ fn request(block_hash: B256, path: &str) -> QueryRequest {
 }
 
 #[test]
-fn deterministic_cases_join_the_exact_stored_eip_snapshot() {
-    let provider = DeterministicProvider::new().unwrap();
-    for (hash, path, address) in [
-        (SINGLETON_BLOCK_HASH, "[0].logs[0].address", 0x11),
-        (MULTIPLE_LOGS_BLOCK_HASH, "[0].logs[1].address", 0x33),
-        (PROGRESSIVE_RECEIPTS_BLOCK_HASH, "[5].logs[0].address", 0x16),
+fn provider_cases_join_the_acquired_eip_snapshot() {
+    for (count, path, address) in [
+        (1, "[0].logs[0].address", 0x11),
+        (2, "[0].logs[1].address", 0x33),
+        (6, "[5].logs[0].address", 0x11),
     ] {
-        let snapshot = provider.lookup(hash, ObjectKind::Receipts).unwrap();
-        let request = request(hash, path);
-        let response = query_snapshot(&request, snapshot, SelectionLimits::default()).unwrap();
+        let snapshot = test_utils::snapshot(count);
+        let request = request(snapshot.block_hash(), path);
+        let response = query_snapshot(&request, &snapshot, SelectionLimits::default()).unwrap();
         assert_eq!(response.selection.root, snapshot.root());
         assert_eq!(response.selection.root, snapshot.receipt_snapshot().tree().root());
         assert_eq!(response.selection.results[0].values_ssz[0].as_ref(), &[address; 20]);
@@ -39,17 +36,12 @@ fn deterministic_cases_join_the_exact_stored_eip_snapshot() {
 
 #[test]
 fn filters_use_the_existing_service_and_validate_predicates_before_lookup() {
-    use crate::{FilterOutput, FilterPredicate};
-    let provider = DeterministicProvider::new().unwrap();
-    let snapshot = provider.lookup(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ObjectKind::Receipts).unwrap();
-    let mut query = request(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ".");
+    let snapshot = test_utils::snapshot(6);
+    let mut query = request(snapshot.block_hash(), ".");
     query.selection.selections[0].operation =
         SelectionOperation::Filter { output: FilterOutput::Receipts, predicates: Vec::new() };
-    let response = query_snapshot(&query, snapshot, SelectionLimits::default()).unwrap();
-    assert_eq!(
-        response.selection.results[0].values_ssz.len(),
-        snapshot.receipt_snapshot().receipts().len()
-    );
+    let response = query_snapshot(&query, &snapshot, SelectionLimits::default()).unwrap();
+    assert_eq!(response.selection.results[0].values_ssz.len(), 6);
     verify_query_response(&query, &response, snapshot.root(), SelectionLimits::default()).unwrap();
     query.block_hash = B256::ZERO;
     query.selection.selections[0].operation = SelectionOperation::Filter {
@@ -57,14 +49,15 @@ fn filters_use_the_existing_service_and_validate_predicates_before_lookup() {
         predicates: vec![FilterPredicate::GasUsed { min: 2, max: 1 }],
     };
     assert!(matches!(
-        QueryService::new().unwrap().query(query),
+        test_utils::service().0.query(query),
         Err(QueryError::Selection(SelectionError::OutOfBounds))
     ));
 }
 
 #[test]
 fn historical_query_uses_eip_tree_and_preserves_source_context() {
-    let (provider, hash) = test_utils::historical_provider(Some(test_utils::singleton_receipts()));
+    let (provider, hash) =
+        receipt_test_utils::historical_provider(Some(receipt_test_utils::singleton_receipts()));
     let expected_root =
         RethRootProvider::new(provider.clone()).lookup(hash, ObjectKind::Receipts).unwrap().root();
     let service = QueryService::from_blockchain_provider(provider);
@@ -79,11 +72,12 @@ fn historical_query_uses_eip_tree_and_preserves_source_context() {
 
 #[test]
 fn self_consistent_proofs_from_another_block_do_not_replace_the_expected_root() {
-    let provider = DeterministicProvider::new().unwrap();
-    let expected_root = provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts).unwrap().root();
-    let requested = request(SINGLETON_BLOCK_HASH, "[0].status");
-    let alternate = request(MULTIPLE_LOGS_BLOCK_HASH, "[0].status");
-    let mut response = QueryService::from_provider(provider).query(alternate).unwrap();
+    let expected = test_utils::snapshot(1);
+    let expected_root = expected.root();
+    let requested = request(expected.block_hash(), "[0].status");
+    let (provider, hash) = test_utils::provider(2);
+    let alternate = request(hash, "[0].status");
+    let mut response = QueryService::from_blockchain_provider(provider).query(alternate).unwrap();
     response.block_hash = requested.block_hash;
     assert_ne!(response.selection.root, expected_root);
     assert!(verify_query_response(
@@ -101,14 +95,14 @@ fn self_consistent_proofs_from_another_block_do_not_replace_the_expected_root() 
 
 #[test]
 fn missing_receipts_and_conversion_failures_keep_typed_causes() {
-    let (provider, hash) = test_utils::historical_provider(None);
+    let (provider, hash) = receipt_test_utils::historical_provider(None);
     assert!(matches!(
         QueryService::from_blockchain_provider(provider).query(request(hash, "[0].status")),
         Err(QueryError::Acquisition(HistoricalAcquisitionError::ReceiptsUnavailable))
     ));
-    let mut receipts = test_utils::singleton_receipts();
+    let mut receipts = receipt_test_utils::singleton_receipts();
     receipts[0].tx_type = alloy_consensus::TxType::Eip1559;
-    let (provider, hash) = test_utils::historical_provider(Some(receipts));
+    let (provider, hash) = receipt_test_utils::historical_provider(Some(receipts));
     assert!(matches!(
         QueryService::from_blockchain_provider(provider).query(request(hash, "[0].status")),
         Err(QueryError::Acquisition(HistoricalAcquisitionError::Snapshot(
@@ -119,7 +113,7 @@ fn missing_receipts_and_conversion_failures_keep_typed_causes() {
 
 #[test]
 fn invalid_request_and_cancellation_are_checked_before_lookup() {
-    let service = QueryService::new().unwrap();
+    let (service, _) = test_utils::service();
     let mut invalid = request(B256::ZERO, "[0].status");
     invalid.object = "withdrawals".to_owned();
     assert!(matches!(service.query(invalid), Err(QueryError::UnsupportedObject)));
@@ -138,7 +132,7 @@ fn invalid_request_and_cancellation_are_checked_before_lookup() {
 
 #[test]
 fn malformed_paths_and_range_expansion_fail_before_lookup() {
-    let service = QueryService::new().unwrap();
+    let (service, _) = test_utils::service();
     for path in ["", "not_a_path", "[01].status", "[18446744073709551616].status"] {
         assert!(matches!(
             service.query(request(B256::ZERO, path)),
@@ -176,25 +170,28 @@ fn malformed_paths_and_range_expansion_fail_before_lookup() {
 
 #[test]
 fn mismatched_snapshot_identity_is_not_substituted() {
-    let provider = DeterministicProvider::new().unwrap();
-    let snapshot = provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+    let snapshot = test_utils::snapshot(1);
     assert!(matches!(
-        query_snapshot(
-            &request(MULTIPLE_LOGS_BLOCK_HASH, "[0].status"),
-            snapshot,
-            SelectionLimits::default()
-        ),
+        query_snapshot(&request(B256::ZERO, "[0].status"), &snapshot, SelectionLimits::default()),
         Err(QueryError::InvalidSnapshot)
     ));
 }
 
 #[test]
 fn response_verification_rejects_wrong_identity_values_roots_and_witnesses() {
-    let service = QueryService::new().unwrap();
-    let request = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
+    let (service, hash) = test_utils::service();
+    let request = request(hash, "[0].logs[0].address");
     let response = service.query(request.clone()).unwrap();
     let root = response.selection.root;
-    for mutation in 0..8 {
+    for length in [19, 21] {
+        let mut changed = response.clone();
+        changed.selection.results[0].values_ssz[0] =
+            alloy_primitives::Bytes::from(vec![0x11; length]);
+        assert!(
+            verify_query_response(&request, &changed, root, SelectionLimits::default()).is_err()
+        );
+    }
+    for mutation in 0..9 {
         let mut changed = response.clone();
         match mutation {
             0 => changed.block_hash = B256::ZERO,
@@ -207,7 +204,8 @@ fn response_verification_rejects_wrong_identity_values_roots_and_witnesses() {
                     alloy_primitives::Bytes::from(vec![0; 20])
             }
             6 => changed.selection.multiproof.as_mut().unwrap().targets[0][0] ^= 1,
-            _ => changed.selection.multiproof.as_mut().unwrap().helpers.push(B256::ZERO),
+            7 => changed.selection.multiproof.as_mut().unwrap().helpers.push(B256::ZERO),
+            _ => changed.root_context = "deterministic_test_data".to_owned(),
         }
         assert!(
             verify_query_response(&request, &changed, root, SelectionLimits::default()).is_err()
@@ -220,8 +218,9 @@ fn response_verification_rejects_wrong_identity_values_roots_and_witnesses() {
 
 #[test]
 fn strict_wire_decode_rejects_old_request_and_response_fields() {
-    let request = request(SINGLETON_BLOCK_HASH, "[0].status");
-    let response = QueryService::new().unwrap().query(request.clone()).unwrap();
+    let (service, hash) = test_utils::service();
+    let request = request(hash, "[0].status");
+    let response = service.query(request.clone()).unwrap();
     for field in ["schema_id", "producer_revision", "path", "gindex"] {
         let mut value = serde_json::to_value(&request).unwrap();
         value[field] = serde_json::json!("obsolete");
@@ -234,8 +233,8 @@ fn strict_wire_decode_rejects_old_request_and_response_fields() {
 
 #[test]
 fn service_limits_cover_the_full_envelope() {
-    let service = QueryService::new()
-        .unwrap()
+    let service = test_utils::service()
+        .0
         .with_limits(SelectionLimits { request_bytes: 10, ..Default::default() });
     assert!(matches!(
         service.query(request(B256::ZERO, "[0].status")),
