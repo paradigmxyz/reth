@@ -1,4 +1,7 @@
-use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
+use crate::{
+    database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
+    OverlayBuilder, StateTrieOverlay,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
@@ -22,6 +25,7 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
+    proof_v2::ProofCursorMetrics,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
@@ -39,7 +43,14 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
+use std::{
+    cell::{OnceCell, RefCell},
+    fmt,
+    ops::Deref,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -59,6 +70,8 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_cache: StateTrieOverlayCache,
     /// Metrics for provider factory operations.
     metrics: OverlayStateProviderFactoryMetrics,
+    /// Cursor metric handles shared by the multiproof calculators of every provider.
+    proof_cursor_metrics: ProofCursorMetrics,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -69,11 +82,19 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             overlay_builder,
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
+            proof_cursor_metrics: Default::default(),
         }
     }
 
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
+    ///
+    /// Trie cursors, hashed cursors and [`StateProofProvider::multiproof_v2`] of the resulting
+    /// providers then read durable database state only, which is valid solely for revealing nodes
+    /// into that reused sparse trie. Methods that layer the overlay into their input, such as state
+    /// and storage roots, account and storage proofs, V1 multiproofs, witnesses and
+    /// [`HashedPostStateProvider::hashed_post_state`], return
+    /// [`ProviderError::UnsupportedProvider`].
     pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
@@ -112,61 +133,56 @@ where
 
         let is_v2 = provider.cached_storage_settings().is_v2();
         self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::new_with_caches(
-            provider,
-            self.overlay_builder.clone(),
+        Ok(OverlayStateProvider::from_parts(
+            OwnedProvider(provider),
+            Some(self.overlay_builder.clone()),
             Arc::clone(&self.state_trie_overlay_cache),
             self.metrics.clone(),
+            self.proof_cursor_metrics.clone(),
             is_v2,
         ))
     }
 }
 
 /// State provider with lazily resolved state trie and execution overlays.
-pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
-    provider: Provider,
+pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider,
+{
+    /// Multiproof calculator reused across requests with the same `requires_masks` flag.
+    ///
+    /// It borrows `provider`'s transaction and the state trie overlays, so `Drop` releases it
+    /// first.
+    multiproof_calculator:
+        RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
+    /// Pinned so the transaction borrowed by `multiproof_calculator` keeps a stable address.
+    provider: Pin<Box<Provider>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
+    proof_cursor_metrics: ProofCursorMetrics,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
 }
 
-impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
+impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
     /// Creates an overlay state provider over an already-open database provider.
     pub fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        Self::new_with_caches(
-            provider,
-            overlay_builder,
+        Self::from_parts(
+            OwnedProvider(provider),
+            Some(overlay_builder),
+            Default::default(),
             Default::default(),
             Default::default(),
             is_v2,
         )
-    }
-
-    const fn new_with_caches(
-        provider: Provider,
-        overlay_builder: OverlayBuilder<N>,
-        state_trie_overlay_cache: StateTrieOverlayCache,
-        metrics: OverlayStateProviderFactoryMetrics,
-        is_v2: bool,
-    ) -> Self {
-        Self {
-            provider: OwnedProvider(provider),
-            overlay_builder: Some(overlay_builder),
-            state_trie_overlay_cache,
-            metrics,
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::new(),
-            is_v2,
-        }
     }
 
     #[cfg(test)]
@@ -175,39 +191,37 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
         execution_overlay: Arc<ExecutionOverlay>,
         is_v2: bool,
     ) -> Self {
-        Self {
-            provider: OwnedProvider(provider),
-            overlay_builder: None,
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::from(CachedExecutionOverlay {
-                overlay: execution_overlay,
-                historical_fallback: None,
-            }),
+        let mut provider = Self::from_parts(
+            OwnedProvider(provider),
+            None,
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
-        }
+        );
+        provider.execution_overlay = OnceCell::from(CachedExecutionOverlay {
+            overlay: execution_overlay,
+            historical_fallback: None,
+        });
+        provider
     }
 }
 
-impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
+impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
     /// Creates an overlay state provider over a borrowed database provider.
     pub fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
     where
         Provider: StorageSettingsCache,
     {
         let is_v2 = provider.cached_storage_settings().is_v2();
-        Self {
+        Self::from_parts(
             provider,
-            overlay_builder: Some(overlay_builder),
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::new(),
-            state_trie_overlay_with_trie_changesets: OnceCell::new(),
-            execution_overlay: OnceCell::new(),
+            Some(overlay_builder),
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
-        }
+        )
     }
 
     pub(crate) fn new_with_state_trie(
@@ -215,24 +229,49 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
         state_trie_overlay: StateTrieOverlay,
         is_v2: bool,
     ) -> Self {
-        Self {
+        let mut provider = Self::from_parts(
             provider,
-            overlay_builder: None,
-            state_trie_overlay_cache: Default::default(),
-            metrics: Default::default(),
-            state_trie_overlay: OnceCell::from(state_trie_overlay.clone()),
-            state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
-            execution_overlay: OnceCell::new(),
+            None,
+            Default::default(),
+            Default::default(),
+            Default::default(),
             is_v2,
-        }
+        );
+        provider.state_trie_overlay = OnceCell::from(state_trie_overlay.clone());
+        provider.state_trie_overlay_with_trie_changesets = OnceCell::from(state_trie_overlay);
+        provider
     }
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: Sized,
+    Provider::Target: DBProvider,
 {
+    /// Creates a provider whose overlays resolve lazily and that has no cached multiproof
+    /// calculator.
+    fn from_parts(
+        provider: Provider,
+        overlay_builder: Option<OverlayBuilder<N>>,
+        state_trie_overlay_cache: StateTrieOverlayCache,
+        metrics: OverlayStateProviderFactoryMetrics,
+        proof_cursor_metrics: ProofCursorMetrics,
+        is_v2: bool,
+    ) -> Self {
+        Self {
+            multiproof_calculator: RefCell::new(None),
+            provider: Box::pin(provider),
+            overlay_builder,
+            state_trie_overlay_cache,
+            metrics,
+            proof_cursor_metrics,
+            state_trie_overlay: OnceCell::new(),
+            state_trie_overlay_with_trie_changesets: OnceCell::new(),
+            execution_overlay: OnceCell::new(),
+            is_v2,
+        }
+    }
+
     fn provider(&self) -> &Provider::Target {
         &self.provider
     }
@@ -382,10 +421,21 @@ where
     }
 }
 
+impl<Provider, N: NodePrimitives> Drop for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider,
+{
+    fn drop(&mut self) {
+        // The calculator borrows the transaction and overlays, so release it before the fields.
+        self.multiproof_calculator.get_mut().take();
+    }
+}
+
 impl<Provider, N: NodePrimitives> fmt::Debug for OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: fmt::Debug + Sized,
+    Provider::Target: DBProvider + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OverlayStateProvider")
@@ -698,20 +748,37 @@ where
 
     fn multiproof_v2(
         &self,
-        input: TrieInput,
         targets: MultiProofTargetsV2,
+        requires_masks: bool,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
-        })
+        // Avoid resolving the overlay when there is nothing to prove.
+        if targets.is_empty() {
+            return Ok(DecodedMultiProofV2::default())
+        }
+        let mut calculator_slot = self.multiproof_calculator.borrow_mut();
+        let cached = match &mut *calculator_slot {
+            Some(cached) if cached.requires_masks == requires_masks => cached,
+            slot => {
+                let input = self.state_trie_overlay(requires_masks)?.input();
+                // SAFETY: The transaction lives behind `provider`, which is pinned or borrowed for
+                // the provider's lifetime, and the overlay allocations live in `OnceCell`s that are
+                // never reset. `Drop` releases the calculator before either, and the calculator
+                // never leaves this provider, which is not `Sync`. An owned
+                // transaction therefore only moves between threads together with
+                // the calculator. A borrowed provider is `Send` only if it is
+                // `Sync`, in which case its transaction may be shared.
+                let calculator = unsafe {
+                    OverlayMultiProofCalculator::new(
+                        self.provider().tx(),
+                        input,
+                        self.is_v2,
+                        self.proof_cursor_metrics.clone(),
+                    )
+                };
+                slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
+            }
+        };
+        cached.calculator.multiproof(targets)
     }
 
     fn witness(
@@ -998,11 +1065,8 @@ type DbStateRoot<'a, TX, A> =
     StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbStorageRoot<'a, TX, A> =
     StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbStorageProof<'a, TX, A> = TrieStorageProof<
-    'static,
-    DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
+type DbStorageProof<'a, TX, A> =
+    TrieStorageProof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 type DbProof<'a, TX, A> =
     Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
 
@@ -1016,6 +1080,13 @@ impl<Provider> Deref for OwnedProvider<Provider> {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
+}
+
+/// Multiproof calculator cached by [`OverlayStateProvider`].
+struct CachedMultiProofCalculator<TX: DbTx + 'static> {
+    /// Whether the calculator returns masks that match the stored trie.
+    requires_masks: bool,
+    calculator: OverlayMultiProofCalculator<TX>,
 }
 
 fn into_database_error(error: ProviderError) -> DatabaseError {
