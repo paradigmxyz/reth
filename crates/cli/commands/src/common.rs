@@ -214,10 +214,20 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
         .with_bal_store(bal_store);
 
-        // Check for consistency between database and static files.
+        // Check for consistency between database and static files. Read-write access must heal
+        // RocksDB before static files are pruned, since RocksDB healing reads the changesets that
+        // static file healing removes.
         if !access.skips_consistency_check() &&
-            let Some(unwind_target) =
+            let Some(unwind_target) = if access.is_read_write() {
+                let (rocksdb_unwind, static_file_unwind) = factory.check_consistency()?;
+                rocksdb_unwind
+                    .into_iter()
+                    .chain(static_file_unwind)
+                    .min()
+                    .map(PipelineTarget::Unwind)
+            } else {
                 factory.static_file_provider().check_consistency(&factory.provider()?)?
+            }
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
@@ -372,6 +382,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Address;
+    use clap::Parser;
+    use reth_db_api::{
+        models::{AccountBeforeTx, ShardedKey},
+        tables, BlockNumberList,
+    };
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_node_ethereum::EthereumNode;
+    use reth_provider::{
+        providers::StaticFileWriter, RocksDBProviderFactory, StaticFileProviderFactory,
+    };
+    use reth_static_file_types::StaticFileSegment;
 
     #[test]
     fn inconsistent_access_rights_skip_consistency_checks() {
@@ -383,5 +405,45 @@ mod tests {
         assert!(AccessRights::RoInconsistent.is_read_only_inconsistent());
         assert!(AccessRights::RoInconsistent.skips_consistency_check());
         assert!(!AccessRights::RO.skips_consistency_check());
+    }
+
+    #[test]
+    fn rw_init_heals_rocksdb_history_before_pruning_changesets() {
+        let datadir = tempfile::tempdir().unwrap();
+        let args = EnvironmentArgs::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--datadir",
+            datadir.path().to_str().unwrap(),
+            "--chain",
+            "dev",
+        ]);
+        let runtime = reth_tasks::Runtime::test();
+        let address = Address::repeat_byte(0xaa);
+        let key = ShardedKey::new(address, u64::MAX);
+
+        {
+            // Simulate a crash after static files and RocksDB were committed for block 1, but
+            // before the MDBX commit advanced the stage checkpoints.
+            let factory = args.init::<EthereumNode>(AccessRights::RW, runtime.clone()).unwrap();
+            let factory = factory.provider_factory;
+            let static_files = factory.static_file_provider();
+            let mut writer =
+                static_files.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer
+                .append_account_changeset(vec![AccountBeforeTx { address, info: None }], 1)
+                .unwrap();
+            writer.commit().unwrap();
+            drop(writer);
+            factory
+                .rocksdb_provider()
+                .put::<tables::AccountsHistory>(key.clone(), &BlockNumberList::new_pre_sorted([1]))
+                .unwrap();
+        }
+
+        let env = args.init::<EthereumNode>(AccessRights::RW, runtime).unwrap();
+        assert_eq!(
+            env.provider_factory.rocksdb_provider().get::<tables::AccountsHistory>(key).unwrap(),
+            None
+        );
     }
 }
