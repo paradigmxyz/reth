@@ -260,6 +260,7 @@ impl SnapSyncError {
             Self::NoAttempt |
             Self::StaleWrite { .. } |
             Self::RootMismatch { .. } |
+            Self::HeaderRootMismatch { .. } |
             Self::NoCatchUpProgress |
             Self::MissingHeader { .. } |
             Self::OutOfOrderBlock { .. } |
