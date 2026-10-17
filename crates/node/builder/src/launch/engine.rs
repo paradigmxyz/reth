@@ -361,7 +361,23 @@ impl<B> EngineNodeLauncher<B> {
             // tree handler to prevent re-execution if that block is received as payload from
             // the CL
             loop {
+                // Shutdown also drops the backfill task, which the orchestrator reports as a fatal
+                // error. Check the signal first so the engine thread is still terminated.
                 tokio::select! {
+                    biased;
+
+                    _guard = &mut on_graceful_shutdown => {
+                        // Shutdown signal received.
+                        // Send Terminate so the engine OS thread can exit cleanly before we
+                        // drop the orchestrator.
+                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
+                        let (done_tx, done_rx) = oneshot::channel();
+                        orchestrator.handler_mut().handler_mut().on_event(
+                            FromOrchestrator::Terminate { tx: done_tx }.into()
+                        );
+                        let _ = done_rx.await;
+                        break;
+                    }
                     event = orchestrator.next() => {
                         let Some(event) = event else { break };
                         debug!(target: "reth::cli", "Event: {event}");
@@ -422,18 +438,6 @@ impl<B> EngineNodeLauncher<B> {
                                 FromOrchestrator::Terminate { tx: req.done_tx }.into()
                             );
                         }
-                    }
-                    _guard = &mut on_graceful_shutdown => {
-                        // Shutdown signal received.
-                        // Send Terminate so the engine OS thread can exit cleanly before we
-                        // drop the orchestrator.
-                        debug!(target: "reth::cli", "shutdown signal received, terminating engine");
-                        let (done_tx, done_rx) = oneshot::channel();
-                        orchestrator.handler_mut().handler_mut().on_event(
-                            FromOrchestrator::Terminate { tx: done_tx }.into()
-                        );
-                        let _ = done_rx.await;
-                        break;
                     }
                 }
             }
