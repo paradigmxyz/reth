@@ -177,11 +177,13 @@ fn unpack_static_file<R: Read>(
     let mut current = root.clone();
     for part in relative_path.components() {
         current.push(part);
-        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
-            eyre::ensure!(
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => eyre::ensure!(
                 !metadata.file_type().is_symlink(),
                 "Static file archive path contains a symlink"
-            );
+            ),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
         }
     }
     if relative_path.as_os_str().is_empty() {

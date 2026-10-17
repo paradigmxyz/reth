@@ -14,7 +14,7 @@
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS,
 #               BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_RPS,
 #               BENCH_CALL_DURATION, BENCH_CALL_PASSES, BENCH_CALL_CONCURRENCY,
-#               BENCH_REORG, BENCH_BAL,
+#               BENCH_REORG, BENCH_BAL, BENCH_MEMPOOL,
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BLOCK_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
@@ -515,6 +515,19 @@ if [ "$EXECUTION_MODE" = "engine" ] && [ -n "${BENCH_WAIT_TIME:-}" ]; then
 fi
 if [ -n "${BENCH_REORG:-}" ]; then
   TXGEN_SEND_ARGS+=(--reorg "$BENCH_REORG")
+fi
+# Submits each block's transactions to the txpool before its payload, so
+# that features acting on pool transactions see them. BENCH_MEMPOOL is
+# `true` for txgen's defaults, DELAY, or DELAY,FRACTION.
+if [ "$EXECUTION_MODE" = "engine" ] && [ -n "${BENCH_MEMPOOL:-}" ]; then
+  TXGEN_SEND_ARGS+=(--mempool)
+  if [ "$BENCH_MEMPOOL" != "true" ]; then
+    IFS=, read -r MEMPOOL_DELAY MEMPOOL_FRACTION <<< "$BENCH_MEMPOOL"
+    TXGEN_SEND_ARGS+=(--mempool-delay "$MEMPOOL_DELAY")
+    if [ -n "$MEMPOOL_FRACTION" ]; then
+      TXGEN_SEND_ARGS+=(--mempool-fraction "$MEMPOOL_FRACTION")
+    fi
+  fi
 fi
 
 WARMUP="${BENCH_WARMUP_BLOCKS:-0}"

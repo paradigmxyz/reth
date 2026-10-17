@@ -515,8 +515,9 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
 - **`stop` needs the database to itself.** `stop` and `restart` consume the context and wait until
   the harness holds the last handle of the node's database. A clone of `inner.provider`, a
   `NodeClient` from `to_node_client`, or a handle of `inner.provider.rocksdb_provider()` makes them
-  fail after `node::DATABASE_RELEASE_TIMEOUT` (10 seconds), an open `database_provider_ro`
-  transaction right away. Drop those first. Payloads, `MinedBlock` with its `chain`, clones of
+  fail after `node::DATABASE_RELEASE_TIMEOUT` (10 seconds, or the timeout passed to
+  `stop_with_release_timeout`), an open `database_provider_ro` transaction right away. Drop those
+  first. Payloads, `MinedBlock` with its `chain`, clones of
   `node.engine` and alloy providers do not hold the database.
 - **A restart keeps the chain, not the context.** Stopping persists every canonical block and saves
   the local transactions of the pool, which the node reinserts when it starts; blocks that are not

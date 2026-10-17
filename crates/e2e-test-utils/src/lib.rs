@@ -25,6 +25,7 @@ pub mod wallet;
 mod payload;
 
 /// Helper for setting up nodes with pre-imported chain data
+#[cfg(feature = "chain-import")]
 pub mod setup_import;
 
 /// Helper for network operations

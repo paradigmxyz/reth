@@ -6,6 +6,7 @@ use crate::common::CliNodeTypes;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::hash_or_num_value_parser;
@@ -171,14 +172,15 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         &self,
     ) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
     where
-        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
+        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         // Load configuration
-        let mut config = Config::from_path(&config_path).unwrap_or_default();
+        let mut config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 

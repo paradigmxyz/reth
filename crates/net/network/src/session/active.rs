@@ -2113,7 +2113,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, async move |mut client_stream| {
-            let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(1), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 

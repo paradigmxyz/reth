@@ -13,8 +13,8 @@ use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
 use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProvider,
-    StateProviderFactory, TransactionVariant,
+    BlockReader, Chain, ExecutionOutcome, ProviderError, StateProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -41,7 +41,7 @@ pub struct BackfillJob<E, P> {
 impl<E, P> Iterator for BackfillJob<E, P>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
+    P: BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain<E::Primitives>>;
 
@@ -57,7 +57,7 @@ where
 impl<E, P> BackfillJob<E, P>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
+    P: BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
     pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
@@ -170,7 +170,7 @@ pub struct SingleBlockBackfillJob<E, P> {
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    P: BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
         RecoveredBlock<P::Block>,
@@ -185,7 +185,7 @@ where
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
     E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory,
+    P: BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
     pub fn into_stream(

@@ -125,14 +125,14 @@ impl BanList {
     /// Bans the IP until the timestamp.
     ///
     /// This does not ban non-global IPs.
-    /// If the IP is already banned, the timeout will be updated to the new value.
+    /// An existing ban is only extended; indefinite bans remain indefinite.
     pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.ban_ip_with(ip, Some(until));
     }
 
     /// Bans the peer until the timestamp.
     ///
-    /// If the peer is already banned, the timeout will be updated to the new value.
+    /// An existing ban is only extended; indefinite bans remain indefinite.
     pub fn ban_peer_until(&mut self, node_id: PeerId, until: Instant) {
         self.ban_peer_with(node_id, Some(until));
     }
@@ -151,20 +151,31 @@ impl BanList {
 
     /// Bans the peer indefinitely or until the given timeout.
     ///
-    /// If the peer is already banned, the timeout will be updated to the new value.
+    /// An existing ban is only extended; indefinite bans remain indefinite.
     pub fn ban_peer_with(&mut self, node_id: PeerId, until: Option<Instant>) {
-        self.banned_peers.insert(node_id, until);
+        self.banned_peers
+            .entry(node_id)
+            .and_modify(|current| extend_ban(current, until))
+            .or_insert(until);
     }
 
     /// Bans the ip indefinitely or until the given timeout.
     ///
     /// This does not ban non-global IPs.
-    /// If the IP is already banned, the timeout will be updated to the new value.
+    /// An existing ban is only extended; indefinite bans remain indefinite.
     pub fn ban_ip_with(&mut self, ip: IpAddr, until: Option<Instant>) {
         if is_global(&ip) {
-            self.banned_ips.insert(ip, until);
+            self.banned_ips
+                .entry(ip)
+                .and_modify(|current| extend_ban(current, until))
+                .or_insert(until);
         }
     }
+}
+
+/// Extends a ban, treating no deadline as an indefinite ban.
+fn extend_ban(current: &mut Option<Instant>, until: Option<Instant>) {
+    *current = current.zip(until).map(|(current, until)| current.max(until));
 }
 
 #[cfg(test)]
@@ -213,6 +224,37 @@ mod tests {
         ip = IpAddr::from([172, 16, 0, 0]);
         banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn bans_only_extend_until_explicitly_removed() {
+        let now = Instant::now();
+        let later = now + std::time::Duration::from_secs(60);
+        let peer = PeerId::repeat_byte(1);
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        for (initial, update, expected) in [
+            (None, Some(now), None),
+            (Some(later), Some(now), Some(later)),
+            (Some(now), Some(later), Some(later)),
+            (Some(now), None, None),
+        ] {
+            let mut bans = BanList::default();
+            bans.ban_peer_with(peer, initial);
+            bans.ban_ip_with(ip, initial);
+            bans.ban_peer_with(peer, update);
+            bans.ban_ip_with(ip, update);
+            assert_eq!(bans.banned_peers[&peer], expected);
+            assert_eq!(bans.banned_ips[&ip], expected);
+            bans.evict(now + std::time::Duration::from_secs(1));
+            assert!(bans.is_banned(&peer, &ip));
+            bans.unban_peer(&peer);
+            bans.unban_ip(&ip);
+            assert!(!bans.is_banned(&peer, &ip));
+            bans.ban_peer_until(peer, now);
+            bans.ban_ip_until(ip, now);
+            bans.evict(later);
+            assert!(!bans.is_banned(&peer, &ip));
+        }
     }
 }
 
