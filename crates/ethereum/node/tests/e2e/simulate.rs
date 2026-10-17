@@ -347,9 +347,9 @@ async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
 async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (node, wallet) =
+    let (node, _) =
         EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
-    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+    let provider = node.rpc_provider();
 
     let from = address!("0xc000000000000000000000000000000000000000");
     let to = address!("0xc100000000000000000000000000000000000000");
@@ -358,7 +358,6 @@ async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
             from,
             AccountOverride::default().with_nonce(u64::MAX),
         )]))
-        .call(TransactionRequest::default().from(from).to(to))
         .call(TransactionRequest::default().from(from).to(to));
 
     for validation in [false, true] {
@@ -372,6 +371,7 @@ async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
         let err = err.as_error_resp().expect("expected JSON-RPC error response");
 
         assert_eq!(err.code, -32603);
+        assert_eq!(err.message, "nonce has max value");
         assert!(err.data.is_none());
     }
 
