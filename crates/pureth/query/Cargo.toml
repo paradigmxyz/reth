@@ -1,0 +1,35 @@
+[package]
+name = "reth-pureth-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+reth-chainspec.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-provider.workspace = true
+reth-pureth-receipt.workspace = true
+reth-pureth-ssz.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+ethereum_ssz.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+alloy-rpc-types-eth.workspace = true
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+alloy-consensus.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-pureth-receipt = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
