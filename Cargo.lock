@@ -8141,6 +8141,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-api",
  "reth-tasks",
+ "reth-testing-utils",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
