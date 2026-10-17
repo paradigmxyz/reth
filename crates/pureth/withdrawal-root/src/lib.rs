@@ -1,9 +1,6 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
-use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{b256, B256};
-use sha2::{Digest, Sha256};
-use tree_hash::{merkle_root, mix_in_length, TreeHash};
 
 mod codec;
 mod snapshot;
@@ -17,55 +14,59 @@ pub use snapshot::{WithdrawalSnapshot, WithdrawalSnapshotError};
 const WITHDRAWAL_ACTIVE_FIELDS: B256 =
     b256!("0x0f00000000000000000000000000000000000000000000000000000000000000");
 
-pub fn progressive_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
-    let roots = withdrawals.iter().map(withdrawal_root).collect::<Vec<_>>();
-    mix_in_length(&progressive_root(&roots), withdrawals.len())
-}
-
-fn withdrawal_root(withdrawal: &Withdrawal) -> B256 {
-    let Withdrawal { index, validator_index, address, amount } = withdrawal;
-    let fields = [
-        index.tree_hash_root(),
-        validator_index.tree_hash_root(),
-        address.tree_hash_root(),
-        amount.tree_hash_root(),
-    ];
-    hash_pair(progressive_root(&fields), WITHDRAWAL_ACTIVE_FIELDS)
-}
-
-fn progressive_root(roots: &[B256]) -> B256 {
-    fn recurse(roots: &[B256], group_size: usize) -> B256 {
-        if roots.is_empty() {
-            return B256::ZERO;
-        }
-
-        let split = roots.len().min(group_size);
-        let bytes = roots[..split].iter().flat_map(|root| root.iter().copied()).collect::<Vec<_>>();
-        let left = merkle_root(&bytes, group_size);
-        let right = if split == roots.len() {
-            B256::ZERO
-        } else {
-            let next_group_size =
-                group_size.checked_mul(4).expect("progressive group size overflow");
-            recurse(&roots[split..], next_group_size)
-        };
-        hash_pair(left, right)
-    }
-
-    recurse(roots, 1)
-}
-
-fn hash_pair(left: B256, right: B256) -> B256 {
-    let mut bytes = [0; 64];
-    bytes[..32].copy_from_slice(left.as_slice());
-    bytes[32..].copy_from_slice(right.as_slice());
-    B256::from(<[u8; 32]>::from(Sha256::digest(bytes)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::Address;
+    use sha2::{Digest, Sha256};
+    use tree_hash::{merkle_root, mix_in_length, TreeHash};
+
+    fn reference_root(withdrawals: &[Withdrawal]) -> B256 {
+        let roots = withdrawals.iter().map(withdrawal_root).collect::<Vec<_>>();
+        mix_in_length(&progressive_root(&roots), withdrawals.len())
+    }
+
+    fn withdrawal_root(withdrawal: &Withdrawal) -> B256 {
+        let Withdrawal { index, validator_index, address, amount } = withdrawal;
+        let fields = [
+            index.tree_hash_root(),
+            validator_index.tree_hash_root(),
+            address.tree_hash_root(),
+            amount.tree_hash_root(),
+        ];
+        hash_pair(progressive_root(&fields), WITHDRAWAL_ACTIVE_FIELDS)
+    }
+
+    fn progressive_root(roots: &[B256]) -> B256 {
+        fn recurse(roots: &[B256], group_size: usize) -> B256 {
+            if roots.is_empty() {
+                return B256::ZERO;
+            }
+
+            let split = roots.len().min(group_size);
+            let bytes =
+                roots[..split].iter().flat_map(|root| root.iter().copied()).collect::<Vec<_>>();
+            let left = merkle_root(&bytes, group_size);
+            let right = if split == roots.len() {
+                B256::ZERO
+            } else {
+                let next_group_size =
+                    group_size.checked_mul(4).expect("progressive group size overflow");
+                recurse(&roots[split..], next_group_size)
+            };
+            hash_pair(left, right)
+        }
+
+        recurse(roots, 1)
+    }
+
+    fn hash_pair(left: B256, right: B256) -> B256 {
+        let mut bytes = [0; 64];
+        bytes[..32].copy_from_slice(left.as_slice());
+        bytes[32..].copy_from_slice(right.as_slice());
+        B256::from(<[u8; 32]>::from(Sha256::digest(bytes)))
+    }
 
     fn withdrawal_a() -> Withdrawal {
         Withdrawal { index: 1, validator_index: 2, address: Address::repeat_byte(0x11), amount: 3 }
@@ -90,11 +91,11 @@ mod tests {
     #[test]
     fn empty_and_singleton_roots_match_reference() {
         assert_eq!(
-            progressive_withdrawals_root(&[]),
+            reference_root(&[]),
             b256!("0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b")
         );
         assert_eq!(
-            progressive_withdrawals_root(&[withdrawal_a()]),
+            reference_root(&[withdrawal_a()]),
             b256!("0x48cd06fcb026799de708515f04feaf9a67753755627c208dddbc4b7739348542")
         );
     }
@@ -106,15 +107,15 @@ mod tests {
         let mutated = Withdrawal { amount: 4, ..a };
 
         assert_eq!(
-            progressive_withdrawals_root(&[mutated]),
+            reference_root(&[mutated]),
             b256!("0x98085deb6869c7070c58427174a003aa8f37040866062a779027cc4aaa26ddcf")
         );
         assert_eq!(
-            progressive_withdrawals_root(&[a, b]),
+            reference_root(&[a, b]),
             b256!("0x3f062776a629a4ac834b9c28c068375223340848f02368cf852215e937dad7e9")
         );
         assert_eq!(
-            progressive_withdrawals_root(&[b, a]),
+            reference_root(&[b, a]),
             b256!("0x00dfbb0f5cffdb7408edd6fb371e7503beb55b7f71a267c759e6805472fff887")
         );
     }
@@ -273,7 +274,7 @@ mod tests {
     #[test]
     fn withdrawal_snapshot_preserves_values_bytes_and_root() {
         let withdrawals = vec![withdrawal_a(), withdrawal_b()];
-        let expected_root = progressive_withdrawals_root(&withdrawals);
+        let expected_root = reference_root(&withdrawals);
         let expected_bytes = encode_withdrawals(&withdrawals).unwrap();
 
         let snapshot = WithdrawalSnapshot::build(withdrawals.clone()).unwrap();
@@ -322,7 +323,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let expected_root = progressive_withdrawals_root(&withdrawals);
+            let expected_root = reference_root(&withdrawals);
             let snapshot = WithdrawalSnapshot::build(withdrawals).unwrap();
 
             assert_eq!(snapshot.root(), expected_root);

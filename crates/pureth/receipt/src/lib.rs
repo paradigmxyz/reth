@@ -9,9 +9,8 @@ pub use eip6466::{
     Log, Receipt, ReceiptConstructionError, ReceiptSerializationError, Receipts, SetCodeReceipt,
 };
 pub use provider::{
-    CanonicalityStatus, DeterministicProvider, HistoricalAcquisitionError, LookupError, ObjectKind,
-    ProviderBuildError, ProviderSnapshot, RethRootProvider, RethRootProviderError, RootContext,
-    MULTIPLE_LOGS_BLOCK_HASH, PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
+    CanonicalityStatus, HistoricalAcquisitionError, LookupError, ObjectKind, ProviderSnapshot,
+    RethRootProvider, RethRootProviderError, RootContext,
 };
 pub use tree::{RetainedNode, TreeConstructionError};
 
