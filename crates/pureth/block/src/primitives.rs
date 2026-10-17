@@ -40,12 +40,15 @@ impl ExecutionHeader {
     }
 
     pub fn from_summary(summary: ExecutionSummary) -> Result<Self, PrimitiveError> {
+        Self::from_summary_snapshot(&ExecutionSummarySnapshot::build(summary)?)
+    }
+
+    fn from_summary_snapshot(snapshot: &ExecutionSummarySnapshot) -> Result<Self, PrimitiveError> {
+        let summary = snapshot.summary();
         let base_fee = u64::try_from(summary.base_fees_per_gas.regular)
             .map_err(|_| PrimitiveError::UnsupportedFeeRange)?;
         let blob_fee = u128::try_from(summary.base_fees_per_gas.blob)
             .map_err(|_| PrimitiveError::UnsupportedFeeRange)?;
-        let snapshot = ExecutionSummarySnapshot::build(summary)?;
-        let summary = snapshot.summary();
         let native = Header {
             parent_hash: summary.parent_hash,
             ommers_hash: alloy_primitives::keccak256([0xc0]),
@@ -79,7 +82,7 @@ impl ExecutionHeader {
     }
 
     pub fn from_payload(payload: &ExecutionPayloadSnapshot) -> Result<Self, PrimitiveError> {
-        Self::from_summary(payload.summary().summary().clone())
+        Self::from_summary_snapshot(payload.summary())
     }
 
     pub const fn is_ssz(&self) -> bool {
@@ -279,6 +282,24 @@ impl ExecutionBody {
         native: EthereumBody,
     ) -> Result<Self, PrimitiveError> {
         Self::try_from(BodyEncoding { native, ssz: header.is_ssz() })
+    }
+
+    pub fn from_payload(
+        payload: &ExecutionPayloadSnapshot,
+        native: EthereumBody,
+    ) -> Result<Self, PrimitiveError> {
+        let components = payload.components();
+        if !native.ommers.is_empty() ||
+            native.withdrawals.as_ref().map(|values| values.as_slice()) !=
+                Some(components.withdrawals.withdrawals()) ||
+            convert_transactions(&native.transactions)? != components.transactions.transactions()
+        {
+            return Err(PrimitiveError::InvalidBody);
+        }
+        Ok(Self {
+            native,
+            roots: Some((components.transactions.root(), components.withdrawals.root())),
+        })
     }
 
     pub const fn is_ssz(&self) -> bool {
