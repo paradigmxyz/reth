@@ -19,7 +19,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{bail, ensure, eyre, Ok, WrapErr};
+use eyre::{bail, ensure, eyre, Ok, OptionExt, WrapErr};
 use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
@@ -42,7 +42,8 @@ use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::RocksDBProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions, Chain,
-    DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, PruneCheckpointReader, SnapAttempt,
+    StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
@@ -1001,6 +1002,14 @@ where
             .unwrap()
             .unwrap()
             .hash()
+    }
+
+    /// Returns the snap attempt the node persisted.
+    pub fn snap_attempt(&self) -> eyre::Result<SnapAttempt>
+    where
+        <Node::Provider as DatabaseProviderFactory>::Provider: MetadataProvider,
+    {
+        self.inner.provider.database_provider_ro()?.snap_attempt()?.ok_or_eyre("no snap attempt")
     }
 
     /// Sends FCU and waits for the node to sync to the given block.

@@ -523,8 +523,7 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
   the local transactions of the pool, which the node reinserts when it starts; blocks that are not
   canonical, e.g. only submitted or reorged out, are lost. Unless it mines in dev mode, the
   restarted node gets a forkchoice update that restates the head, safe and finalized blocks it
-  persisted.
-  It also gets a new `NodeTestContext`: its finality policy is `Finality::Head` again,
+  persisted. It also gets a new `NodeTestContext`: its finality policy is `Finality::Head` again,
   and its `canonical_stream` only sees notifications from the restart on.
 - **An unfinished snap sync needs a target after restart.** The node may have saved headers before
   downloading and verifying their state. The harness therefore skips the automatic forkchoice

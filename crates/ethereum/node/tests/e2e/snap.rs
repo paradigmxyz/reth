@@ -58,6 +58,12 @@ const FINALIZED: u64 = 32;
 // at block 32.
 const INITIAL_HEAD: u64 = 100;
 
+// Runtime that increments slot 0: PUSH0 SLOAD PUSH1 1 ADD PUSH0 SSTORE STOP.
+const INCREMENTER: Bytes = bytes!("5f546001015f5500");
+
+// Init code that returns `INCREMENTER`: PUSH8 runtime PUSH0 MSTORE PUSH1 8 PUSH1 24 RETURN.
+const INCREMENTER_INIT_CODE: Bytes = bytes!("675f546001015f55005f5260086018f3");
+
 // A node on `fork` that serves snap/2 from the storage layout snap writes, and picks its backfill
 // from `--snap.v2` like `reth node` does.
 fn snap_setup(fork: EthereumHardfork, runtime: Runtime) -> E2ETestSetupBuilder<EthereumNode> {
@@ -115,7 +121,7 @@ fn incrementer_init_code() -> Bytes {
     for slot in 1..=16 {
         init_code.extend_from_slice(&[0x60, slot, 0x60, slot, 0x55]);
     }
-    init_code.extend_from_slice(&bytes!("675f546001015f55005f5260086018f3"));
+    init_code.extend_from_slice(&INCREMENTER_INIT_CODE);
     init_code.into()
 }
 
@@ -139,7 +145,7 @@ async fn a_fresh_node_snap_syncs_to_the_head() -> eyre::Result<()> {
         .await?;
 
     // The state at the pivot came from snap, not from executing the chain.
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let attempt = client.snap_attempt()?;
     let pivot = server.inner.provider.sealed_header(FINALIZED)?.unwrap();
     assert!(attempt.is_verified());
     assert_eq!(attempt.pivot(), pivot.num_hash());
@@ -174,8 +180,6 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
         snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
     let mut account = wallet.account(0).with_fees(2_000_000_000, 1_000_000_000);
 
-    // The runtime increments slot 0: PUSH0 SLOAD PUSH1 1 ADD PUSH0 SSTORE STOP.
-    let code = bytes!("5f546001015f5500");
     let contract = account.next_contract_address();
     server
         .mine([account.deploy(incrementer_init_code()).gas_limit(8_000_000).await])
@@ -185,15 +189,11 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
 
     let control = SnapControl::with_response_bytes(256);
-    let code_hash = keccak256(&code);
+    let code_hash = keccak256(&INCREMENTER);
     let bytecode = control.pause_on(move |request| {
         matches!(request, SnapProtocolMessage::GetByteCodes(request) if request.hashes.contains(&code_hash))
     });
-    let setup = snap_setup(EthereumHardfork::Amsterdam, runtime)
-        .with_snap_control(&control)
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        });
+    let setup = snap_setup(EthereumHardfork::Amsterdam, runtime).with_snap_control(&control);
     let client = syncing_client(&mut server, setup).await?;
     let status = client
         .engine
@@ -201,7 +201,7 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
         .await?;
     assert_eq!(status.payload_status.status, PayloadStatusEnum::Syncing);
     bytecode.reached().await?;
-    let pending = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let pending = client.snap_attempt()?;
     assert!(!pending.is_verified());
     assert_eq!(
         client.inner.provider.get_stage_checkpoint(StageId::Finish)?.unwrap().block_number,
@@ -216,12 +216,12 @@ async fn a_snap_synced_node_executes_downloaded_contract_code() -> eyre::Result<
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
 
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let attempt = client.snap_attempt()?;
     assert!(attempt.is_verified());
     assert_eq!(attempt.id(), pending.id());
     assert_eq!(attempt.pivot().number, CHAIN_LENGTH);
     let provider = client.rpc_provider();
-    assert_eq!(provider.get_code_at(contract).await?, code);
+    assert_eq!(provider.get_code_at(contract).await?, INCREMENTER);
     assert_eq!(provider.get_storage_at(contract, U256::ZERO).await?, U256::ONE);
     for slot in 1..=16 {
         assert_eq!(provider.get_storage_at(contract, U256::from(slot)).await?, U256::from(slot));
@@ -245,16 +245,12 @@ async fn a_completed_snap_sync_survives_restart() -> eyre::Result<()> {
     let (mut server, _) = snap_setup(EthereumHardfork::Amsterdam, runtime).build_single().await?;
     server.advance_blocks(CHAIN_LENGTH).await?;
     let control = SnapControl::default();
-    let setup = snap_node(EthereumHardfork::Amsterdam)
-        .with_restartable_nodes()
-        .with_snap_control(&control)
-        .with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        });
+    let setup =
+        snap_node(EthereumHardfork::Amsterdam).with_restartable_nodes().with_snap_control(&control);
     let client = syncing_client(&mut server, setup).await?;
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let attempt = client.snap_attempt()?;
     assert!(attempt.is_verified());
     control.take_requests();
 
@@ -331,7 +327,7 @@ async fn partial_storage_resumes_after_restart() -> eyre::Result<()> {
     resumed.release();
     client.sync_to(server.block_hash(CHAIN_LENGTH)).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let attempt = client.snap_attempt()?;
     assert_eq!(attempt.id(), write.attempt());
     assert!(attempt.is_verified());
     assert_trie_consistency(&client.inner.provider)?;
@@ -402,7 +398,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
     client.engine.forkchoice_updated(ForkchoiceState::same_hash(server.block_hash(target))).await?;
     downloaded.release();
     bals.reached().await?;
-    let advanced = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let advanced = client.snap_attempt()?;
     assert_eq!(advanced.id(), attempt.id());
     assert_eq!(advanced.pivot().number, target);
     assert!(!advanced.is_verified());
@@ -435,7 +431,7 @@ async fn an_expired_pivot_advances_with_bals_without_restarting() -> eyre::Resul
             .all(|starting_hash| starting_hash >= origin),
         "downloaded account ranges must be retained"
     );
-    let completed = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let completed = client.snap_attempt()?;
     assert_eq!(completed.id(), attempt.id());
     assert_eq!(completed.pivot(), advanced.pivot());
     assert!(completed.is_verified());
@@ -472,7 +468,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
     let mut client = syncing_client(&mut server, setup).await?;
     client.engine.forkchoice_updated(ForkchoiceState::same_hash(head)).await?;
     continuation.reached().await?;
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let attempt = client.snap_attempt()?;
     let stopped = server.stop().await?;
     poll_until("the only serving peer to disconnect", || async {
         Ok((client.inner.network.num_connected_peers() == 0).then_some(()))
@@ -483,7 +479,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
         Duration::from_secs(1),
         "the incomplete attempt to remain unpublished without peers",
         || async {
-            let current = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+            let current = client.snap_attempt()?;
             Ok(current.id() == attempt.id() &&
                 !current.is_verified() &&
                 client
@@ -500,7 +496,7 @@ async fn a_download_resumes_when_its_only_peer_returns() -> eyre::Result<()> {
     server.connect(&mut client).await;
     client.sync_to(head).await?;
     client.wait_for_persisted_block(CHAIN_LENGTH).await?;
-    let completed = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let completed = client.snap_attempt()?;
     assert_eq!(completed.id(), attempt.id());
     assert!(completed.is_verified());
     assert_trie_consistency(&client.inner.provider)?;
@@ -546,8 +542,9 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         .await?
         .ensure_success()?;
     server.advance_blocks(INITIAL_HEAD - 33).await?;
-    // No finalized pivot is supplied, so the initial pivot is HEAD - 64 = 36.
-    let orphaned_hashes: Vec<_> = (33..=36).map(|number| server.block_hash(number)).collect();
+    // No finalized pivot is supplied, so the initial pivot is the default distance behind the head.
+    let pivot = INITIAL_HEAD - DEFAULT_HEAD_DISTANCE;
+    let orphaned_hashes: Vec<_> = (33..=pivot).map(|number| server.block_hash(number)).collect();
     let control = SnapControl::with_response_bytes(256);
     let downloaded = control.pause_on(move |request| {
         matches!(request,
@@ -559,8 +556,8 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
     let client = syncing_client(&mut server, setup).await?;
     client.update_optimistic_forkchoice(server.block_hash(INITIAL_HEAD)).await?;
     downloaded.reached().await?;
-    let attempt = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
-    assert_eq!(attempt.pivot().number, 36);
+    let attempt = client.snap_attempt()?;
+    assert_eq!(attempt.pivot().number, pivot);
     let stopped = client.stop().await?;
 
     // Both branches change slot 0, but only the orphan changes slot 1 and only the new fork
@@ -595,10 +592,7 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         "header catch-up must replace the old branch before recovering snap state"
     );
     recovery.reached().await?;
-    assert_eq!(
-        client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap().id(),
-        attempt.id()
-    );
+    assert_eq!(client.snap_attempt()?.id(), attempt.id());
     recovery.release();
     client
         .sync_to_forkchoice(ForkchoiceState {
@@ -621,15 +615,15 @@ async fn a_reorged_pivot_repairs_orphaned_storage() -> eyre::Result<()> {
         .collect();
     let expected: Vec<_> = orphaned_hashes
         .into_iter()
-        .chain((33..=37).map(|number| server.block_hash(number)))
+        .chain((33..=pivot + 1).map(|number| server.block_hash(number)))
         .collect();
     assert_eq!(requested_blocks, expected);
     assert!(requests.iter().any(|request| matches!(request,
         SnapProtocolMessage::GetAccountRange(request) if request.starting_hash == contract_hash && request.limit_hash == contract_hash
     )), "the downloaded contract must be repaired at the new pivot");
-    let completed = client.inner.provider.database_provider_ro()?.snap_attempt()?.unwrap();
+    let completed = client.snap_attempt()?;
     assert_eq!(completed.id(), attempt.id());
-    assert_eq!(completed.pivot().number, 37);
+    assert_eq!(completed.pivot().number, pivot + 1);
     assert!(completed.is_verified());
     for (slot, value) in [(0, 22), (1, 0), (2, 9)] {
         assert_eq!(
@@ -649,11 +643,8 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
         snap_setup(EthereumHardfork::Amsterdam, runtime.clone()).build_single().await?;
     let mut account = wallet.account(0);
 
-    // The runtime increments slot 0: PUSH0 SLOAD PUSH1 1 ADD PUSH0 SSTORE STOP.
-    let code = bytes!("5f546001015f5500");
-    let init_code = bytes!("675f546001015f55005f5260086018f3");
     let contract = account.next_contract_address();
-    server.mine([account.deploy(init_code).await]).await?.ensure_success()?;
+    server.mine([account.deploy(INCREMENTER_INIT_CODE).await]).await?.ensure_success()?;
     server.mine([account.call(contract, Bytes::new()).await]).await?.ensure_success()?;
     server.advance_blocks(CHAIN_LENGTH - 2).await?;
     let pivot = server.inner.provider.sealed_header(CHAIN_LENGTH)?.unwrap();
@@ -670,11 +661,8 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
     assert_eq!(server.current_forkchoice_state()?.finalized_block_hash, pivot.hash());
     assert_ne!(pivot.state_root, head.state_root);
 
-    let setup =
-        snap_setup(EthereumHardfork::Amsterdam, runtime).with_tree_config_modifier(|config| {
-            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-        });
-    let client = syncing_client(&mut server, setup).await?;
+    let client =
+        syncing_client(&mut server, snap_setup(EthereumHardfork::Amsterdam, runtime)).await?;
 
     // sync_to would finalize the head too, removing the blocks the pipeline must execute.
     let state = ForkchoiceState {
@@ -697,7 +685,7 @@ async fn a_fresh_node_executes_blocks_after_an_optimistic_snap_pivot() -> eyre::
         assert_eq!(persisted.get_stage_checkpoint(stage)?.unwrap().block_number, head.number);
     }
     let provider = client.rpc_provider();
-    assert_eq!(provider.get_code_at(contract).await?, code);
+    assert_eq!(provider.get_code_at(contract).await?, INCREMENTER);
     assert_eq!(
         provider.get_storage_at(contract, U256::ZERO).await?,
         U256::from(DEFAULT_HEAD_DISTANCE + 1)

@@ -195,6 +195,7 @@ impl<C: SnapClient + Clone + 'static> ControlledSnapClient<C> {
         let client = self.inner.clone();
         Box::pin(async move {
             if let Some(mut released) = released {
+                // An error means the gate was dropped, which releases the request too.
                 let _ = released.wait_for(|state| matches!(state, GateState::Released)).await;
             }
             send(&client).await
