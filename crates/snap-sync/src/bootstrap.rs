@@ -17,7 +17,6 @@ use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     MetadataWriter, StageCheckpointWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::{fmt, future::Future};
 use tokio_util::sync::CancellationToken;
@@ -165,7 +164,10 @@ where
                         Step::Continue
                     }
                     // Progress this build cannot read is unusable, so the attempt starts over.
-                    Err(error @ SnapSyncError::UnsupportedRecord { .. }) => {
+                    Err(
+                        error @ (SnapSyncError::UnsupportedRecord { .. } |
+                        SnapSyncError::UnreadableRecord { .. }),
+                    ) => {
                         info!(target: "sync::snap", %error, "Snap progress is unreadable, restarting");
                         Step::Restart
                     }
@@ -502,7 +504,7 @@ where
                 Ok(())
             })
             .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .map_err(SnapSyncError::blocking_task)?
     }
 
     // Pivot of the attempt being driven.
@@ -1172,29 +1174,34 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_progress_restarts_the_attempt() {
-        let accounts = accounts();
-        let factory = hashed_factory();
-        insert_chain(&factory, 3, state_root(&accounts));
-        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
-        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        // Another build rewrote the coverage the attempt resumes from.
-        let provider = factory.database_provider_rw().unwrap();
-        let stale = provider.active_snap_write().unwrap().unwrap();
-        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
-        provider.commit().unwrap();
+        // A record another build wrote, and one that is not a record at all.
+        for record in [br#"{"version":999}"#.as_slice(), b"not json"] {
+            let accounts = accounts();
+            let factory = hashed_factory();
+            insert_chain(&factory, 3, state_root(&accounts));
+            let (_, mut stopped) =
+                scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
+            assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+            // Another build rewrote the coverage the attempt resumes from.
+            let provider = factory.database_provider_rw().unwrap();
+            let stale = provider.active_snap_write().unwrap().unwrap();
+            provider.write_metadata("snap_account_coverage", record.to_vec()).unwrap();
+            provider.commit().unwrap();
 
-        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
-        let outcome = restarted.run().await.unwrap();
+            let (_, mut restarted) =
+                scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+            let outcome = restarted.run().await.unwrap();
 
-        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
-            panic!("the state is complete: {outcome:?}")
-        };
-        assert_ne!(write.attempt(), stale.attempt());
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(matches!(
-            provider.authorize_snap_write(stale),
-            Err(SnapSyncError::StaleWrite { .. })
-        ));
+            let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
+                panic!("the state is complete: {outcome:?}")
+            };
+            assert_ne!(write.attempt(), stale.attempt());
+            let provider = factory.database_provider_ro().unwrap();
+            assert!(matches!(
+                provider.authorize_snap_write(stale),
+                Err(SnapSyncError::StaleWrite { .. })
+            ));
+        }
     }
 
     #[tokio::test]

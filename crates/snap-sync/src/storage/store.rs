@@ -556,5 +556,15 @@ mod tests {
                 Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
+
+        for record in [b"not json".to_vec(), br#"{"version":2}"#.to_vec()] {
+            let provider = factory.database_provider_rw().unwrap();
+            provider.write_metadata(StoredProgress::KEY, record).unwrap();
+
+            assert!(matches!(
+                provider.storage_progress(write, B256::ZERO),
+                Err(SnapSyncError::UnreadableRecord { .. })
+            ));
+        }
     }
 }
