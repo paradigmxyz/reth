@@ -2939,6 +2939,7 @@ mod tests {
                 state: ConnectionState::Connected,
             },
         );
+        service.received_pongs.on_pong(id, addr.ip());
         let ping = |service: &Discv4Service, rng: &mut rand_08::rngs::ThreadRng| Ping {
             from: rng_endpoint(rng),
             to: rng_endpoint(rng),
@@ -3652,6 +3653,7 @@ mod tests {
     }
 
     fn insert_proven_node(service: &mut Discv4Service, record: NodeRecord) {
+        service.received_pongs.on_pong(record.id, record.address);
         let key = kad_key(record.id);
         let _ = service.kbuckets.insert_or_update(
             &key,
