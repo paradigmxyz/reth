@@ -18,6 +18,8 @@ const INDEX_HTML_FILE: &str = "index.html";
 /// Accesses the network over HTTP.
 pub trait HttpClient {
     /// Makes an HTTP GET request to `url`. Returns a stream of response body bytes.
+    ///
+    /// Returns an error for unsuccessful HTTP responses instead of streaming their error bodies.
     fn get<U: IntoUrl + Send + Sync>(
         &self,
         url: U,
@@ -32,7 +34,7 @@ impl HttpClient for Client {
         &self,
         url: U,
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Unpin> {
-        let response = Self::get(self, url).send().await?;
+        let response = Self::get(self, url).send().await?.error_for_status()?;
 
         Ok(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
     }
@@ -386,7 +388,12 @@ async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        path::PathBuf,
+        thread,
+    };
     use test_case::test_case;
 
     impl EraClient<Client> {
@@ -438,5 +445,40 @@ mod tests {
         // with_era_type overrides to Era1
         let client = client.with_era_type(EraFileType::Era1);
         assert_eq!(client.era_type, EraFileType::Era1);
+    }
+
+    #[test_case(reqwest::StatusCode::NOT_FOUND)]
+    #[test_case(reqwest::StatusCode::INTERNAL_SERVER_ERROR)]
+    #[tokio::test]
+    async fn failed_http_responses_are_not_downloaded(status: reqwest::StatusCode) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let server = thread::spawn(move || {
+            // Three archive attempts followed by one index request.
+            for _ in 0..4 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                socket.read(&mut request).unwrap();
+                write!(
+                    socket,
+                    "HTTP/1.1 {} {}\r\nContent-Length: 5\r\nConnection: close\r\n\r\nerror",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap(),
+                )
+                .unwrap();
+            }
+        });
+        let folder = tempfile::tempdir().unwrap();
+        let mut client = EraClient::new(Client::new(), url.clone(), folder.path());
+        let filename = "mainnet-00000-deadbeef.era";
+
+        let error = client.download_to_file(url.join(filename).unwrap()).await.unwrap_err();
+        assert_eq!(error.downcast_ref::<reqwest::Error>().unwrap().status(), Some(status));
+        assert!(!folder.path().join(filename).exists());
+
+        let error = client.fetch_file_list().await.unwrap_err();
+        assert_eq!(error.downcast_ref::<reqwest::Error>().unwrap().status(), Some(status));
+        assert!(!folder.path().join(INDEX_HTML_FILE).exists());
+        server.join().unwrap();
     }
 }
