@@ -110,8 +110,8 @@ impl<W: Write> E2StoreWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::e2s::types::{SLOT_INDEX, VERSION};
-    use std::io::Cursor;
+    use crate::e2s::types::{Header, SLOT_INDEX, VERSION};
+    use std::io::{self, Cursor, ErrorKind};
 
     fn create_slot_index_data(starting_slot: u64, offsets: &[i64]) -> Vec<u8> {
         // Format: starting-slot | index | index | index ... | count
@@ -424,5 +424,80 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn truncated_record_headers_are_not_clean_eof() {
+        let mut header = Vec::new();
+        Header::new([0x42, 0x42], 0).write(&mut header).unwrap();
+
+        for prefix_len in 0..=Header::SIZE {
+            let mut data = Vec::new();
+            Version.encode(&mut data).unwrap();
+            data.extend_from_slice(&header[..prefix_len]);
+            let result = E2StoreReader::new(Cursor::new(data)).entries();
+
+            if prefix_len == 0 || prefix_len == Header::SIZE {
+                assert_eq!(result.unwrap().len(), 1 + usize::from(prefix_len != 0));
+            } else {
+                let E2sError::Io(err) = result.unwrap_err() else {
+                    panic!("expected a truncated header I/O error");
+                };
+                assert_eq!(err.kind(), ErrorKind::UnexpectedEof, "prefix length {prefix_len}");
+            }
+        }
+    }
+
+    #[test]
+    fn record_header_retries_interruptions_and_short_reads() {
+        let mut reader = HeaderReader {
+            error: Some(ErrorKind::Interrupted),
+            bytes: &[0; Header::SIZE],
+            max_read: 1,
+            reads: 0,
+        };
+        assert_eq!(Header::read(&mut reader).unwrap(), Some(Header::new([0, 0], 0)));
+        assert_eq!(Header::read(&mut reader).unwrap(), None);
+    }
+
+    #[test]
+    fn record_header_preserves_reader_errors() {
+        for kind in [ErrorKind::UnexpectedEof, ErrorKind::PermissionDenied] {
+            let mut reader = HeaderReader { error: Some(kind), bytes: &[], max_read: 1, reads: 0 };
+            let E2sError::Io(err) = Header::read(&mut reader).unwrap_err() else {
+                panic!("expected a reader I/O error");
+            };
+            assert_eq!(err.kind(), kind);
+        }
+    }
+
+    #[test]
+    fn record_header_reads_complete_header_once() {
+        let mut reader = HeaderReader {
+            error: None,
+            bytes: &[0; Header::SIZE],
+            max_read: Header::SIZE,
+            reads: 0,
+        };
+        assert_eq!(Header::read(&mut reader).unwrap(), Some(Header::new([0, 0], 0)));
+        assert_eq!(reader.reads, 1);
+    }
+
+    struct HeaderReader {
+        error: Option<ErrorKind>,
+        bytes: &'static [u8],
+        max_read: usize,
+        reads: usize,
+    }
+
+    impl Read for HeaderReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.reads += 1;
+            if let Some(kind) = self.error.take() {
+                return Err(io::Error::from(kind));
+            }
+            let len = buf.len().min(self.max_read);
+            self.bytes.read(&mut buf[..len])
+        }
     }
 }

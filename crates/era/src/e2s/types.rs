@@ -43,14 +43,19 @@ impl Header {
         Self { header_type, length, reserved: 0 }
     }
 
-    /// Read header from a reader
+    /// Read a header, returning `None` only at a record boundary with no bytes remaining.
+    /// A partially read header returns an [`io::ErrorKind::UnexpectedEof`] error.
     pub fn read<R: Read>(reader: &mut R) -> Result<Option<Self>, E2sError> {
-        let mut header_bytes = [0u8; 8];
-        match reader.read_exact(&mut header_bytes) {
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-            Err(e) => return Err(e.into()),
-        }
+        let mut header_bytes = [0u8; Self::SIZE];
+        let bytes_read = loop {
+            match reader.read(&mut header_bytes) {
+                Ok(0) => return Ok(None),
+                Ok(bytes_read) => break bytes_read,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e.into()),
+            }
+        };
+        reader.read_exact(&mut header_bytes[bytes_read..])?;
 
         let header: Self = match ssz::Decode::from_ssz_bytes(&header_bytes) {
             Ok(h) => h,
