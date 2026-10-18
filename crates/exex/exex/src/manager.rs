@@ -606,10 +606,11 @@ impl<N: NodePrimitives> ExExManagerHandle<N> {
         self.exex_tx.send((source, notification))
     }
 
-    /// Asynchronously send a notification over the channel to all execution extensions.
+    /// Waits for manager readiness, then enqueues a notification for the execution extensions.
     ///
-    /// The returned future resolves when the notification has been delivered. If there is no
-    /// capacity in the channel, the future will wait.
+    /// The returned future resolves when the manager accepts the notification into its channel.
+    /// It does not wait for the manager to forward it to individual extensions or for extensions
+    /// to process it. If the manager reports no capacity, the future waits until it is ready.
     pub async fn send_async(
         &mut self,
         source: ExExNotificationSource,

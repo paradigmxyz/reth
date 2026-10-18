@@ -19,9 +19,10 @@
 //! `ExEx`'s **SHOULD** emit an `ExExEvent::FinishedHeight` event to signify what blocks have been
 //! processed. This event is used by Reth to determine what state can be pruned.
 //!
-//! An `ExEx` will only receive notifications for blocks greater than the block emitted in the
-//! event. To clarify: if the `ExEx` emits `ExExEvent::FinishedHeight(0)` it will receive
-//! notifications for any `block_number > 0`.
+//! The manager skips a committed-chain notification only when its tip is at or below the reported
+//! finished height. A forwarded batch can still include blocks at or below that height. Reorg and
+//! revert notifications are forwarded even when they affect already-finished blocks, so extensions
+//! must handle those changes as well.
 //!
 //! # Examples, Assumptions, and Invariants
 //!
