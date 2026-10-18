@@ -89,6 +89,12 @@ pub struct Era1Reader<R: Read> {
 }
 
 /// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
+///
+/// Starts at the beginning of the file, validates the version before yielding blocks,
+/// and checks for unmatched tuple
+/// components and required accumulator/index records at EOF. Completion errors
+/// are yielded as a final error, after which iteration ends. Stopping early skips
+/// the completion checks. This does not recompute the accumulator or verify index offsets.
 #[derive(Debug)]
 pub struct BlockTupleIterator<R: Read> {
     reader: E2StoreReader<R>,
@@ -99,6 +105,7 @@ pub struct BlockTupleIterator<R: Read> {
     other_entries: Vec<Entry>,
     accumulator: Option<Accumulator>,
     block_index: Option<BlockIndex>,
+    state: BlockTupleState,
 }
 
 impl<R: Read> BlockTupleIterator<R> {
@@ -112,6 +119,7 @@ impl<R: Read> BlockTupleIterator<R> {
             other_entries: Default::default(),
             accumulator: None,
             block_index: None,
+            state: BlockTupleState::Start,
         }
     }
 }
@@ -120,14 +128,32 @@ impl<R: Read + Seek> Iterator for BlockTupleIterator<R> {
     type Item = Result<BlockTuple, E2sError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_result().transpose()
+        let result = self.next_result();
+        if !matches!(result, Ok(Some(_))) {
+            self.state = BlockTupleState::Finished;
+        }
+        result.transpose()
     }
 }
 
+impl<R: Read + Seek> std::iter::FusedIterator for BlockTupleIterator<R> {}
+
 impl<R: Read + Seek> BlockTupleIterator<R> {
     fn next_result(&mut self) -> Result<Option<BlockTuple>, E2sError> {
+        match self.state {
+            BlockTupleState::Start => {
+                self.state = BlockTupleState::Reading;
+                if self.reader.read_version()?.is_none() {
+                    return Err(E2sError::Ssz("Empty Era1 file".to_string()));
+                }
+            }
+            BlockTupleState::Reading => {}
+            BlockTupleState::Finished => return Ok(None),
+        }
+
         loop {
             let Some(entry) = self.reader.read_next_entry()? else {
+                self.validate_end()?;
                 return Ok(None);
             };
 
@@ -175,6 +201,26 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
             }
         }
     }
+
+    fn validate_end(&self) -> Result<(), E2sError> {
+        if self.headers.len() != self.bodies.len() ||
+            self.headers.len() != self.receipts.len() ||
+            self.headers.len() != self.difficulties.len()
+        {
+            return Err(E2sError::Ssz(format!(
+                "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
+                self.headers.len(), self.bodies.len(), self.receipts.len(), self.difficulties.len()
+            )));
+        }
+
+        if self.accumulator.is_none() {
+            return Err(E2sError::Ssz("Era1 file missing accumulator entry".to_string()));
+        }
+        if self.block_index.is_none() {
+            return Err(E2sError::Ssz("Era1 file missing block index entry".to_string()));
+        }
+        Ok(())
+    }
 }
 
 impl<R: Read + Seek> StreamReader<R> for Era1Reader<R> {
@@ -186,7 +232,9 @@ impl<R: Read + Seek> StreamReader<R> for Era1Reader<R> {
         Self { reader: E2StoreReader::new(reader) }
     }
 
-    /// Returns an iterator of [`BlockTuple`] streaming from `reader`.
+    /// Returns a streaming iterator from the beginning of the file that validates the version
+    /// and, when fully consumed, checks tuple completeness and required trailer records.
+    /// See [`BlockTupleIterator`].
     fn iter(self) -> BlockTupleIterator<R> {
         BlockTupleIterator::new(self.reader)
     }
@@ -199,38 +247,11 @@ impl<R: Read + Seek> StreamReader<R> for Era1Reader<R> {
 impl<R: Read + Seek> Era1Reader<R> {
     /// Reads and parses an Era1 file from the underlying reader, assembling all components
     /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
-    pub fn read_and_assemble(mut self, network_name: String) -> Result<Era1File, E2sError> {
-        // Validate version entry
-        let _version_entry = match self.reader.read_version()? {
-            Some(entry) if entry.is_version() => entry,
-            Some(_) => return Err(E2sError::Ssz("First entry is not a Version entry".to_string())),
-            None => return Err(E2sError::Ssz("Empty Era1 file".to_string())),
-        };
-
+    pub fn read_and_assemble(self, network_name: String) -> Result<Era1File, E2sError> {
         let mut iter = self.iter();
         let blocks = (&mut iter).collect::<Result<Vec<_>, _>>()?;
 
-        let BlockTupleIterator {
-            headers,
-            bodies,
-            receipts,
-            difficulties,
-            other_entries,
-            accumulator,
-            block_index,
-            ..
-        } = iter;
-
-        // Ensure we have matching counts for block components
-        if headers.len() != bodies.len() ||
-            headers.len() != receipts.len() ||
-            headers.len() != difficulties.len()
-        {
-            return Err(E2sError::Ssz(format!(
-                "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
-                headers.len(), bodies.len(), receipts.len(), difficulties.len()
-            )));
-        }
+        let BlockTupleIterator { other_entries, accumulator, block_index, .. } = iter;
 
         let accumulator = accumulator
             .ok_or_else(|| E2sError::Ssz("Era1 file missing accumulator entry".to_string()))?;
@@ -253,6 +274,14 @@ impl<R: Read + Seek> Era1Reader<R> {
 
         Ok(Era1File::new(group, id))
     }
+}
+
+/// Progress through the version, records, and terminal result of an Era1 stream.
+#[derive(Debug)]
+enum BlockTupleState {
+    Start,
+    Reading,
+    Finished,
 }
 
 /// Writer for Era1 files that builds on top of [`E2StoreWriter`]
@@ -403,7 +432,10 @@ impl<W: Write> Era1Writer<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::file_ops::{FileReader, FileWriter};
+    use crate::{
+        common::file_ops::{FileReader, FileWriter},
+        e2s::types::{Header, VERSION},
+    };
     use alloy_primitives::{B256, U256};
     use std::io::Cursor;
     use tempfile::tempdir;
@@ -526,5 +558,139 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn streaming_and_whole_file_reject_invalid_completion() {
+        let block = create_test_block(1000, 32);
+        let version = Entry::new(VERSION, Vec::new());
+        let accumulator = Accumulator::new(B256::ZERO).to_entry();
+        let index = BlockIndex::new(1000, vec![0]).to_entry();
+        let block_entries = [
+            block.header.to_entry(),
+            block.body.to_entry(),
+            block.receipts.to_entry(),
+            block.total_difficulty.to_entry(),
+        ];
+
+        let cases = [
+            (Vec::new(), "Empty Era1 file"),
+            (vec![accumulator.clone(), index.clone()], "First entry must be a Version entry"),
+            (vec![version.clone()], "Era1 file missing accumulator entry"),
+            (vec![version.clone(), accumulator.clone()], "Era1 file missing block index entry"),
+            (vec![version.clone(), index.clone()], "Era1 file missing accumulator entry"),
+            (
+                [vec![version.clone()], block_entries.to_vec()].concat(),
+                "Era1 file missing accumulator entry",
+            ),
+            (
+                [vec![version.clone()], block_entries.to_vec(), vec![accumulator.clone()]].concat(),
+                "Era1 file missing block index entry",
+            ),
+            (
+                vec![version.clone(), accumulator.clone(), accumulator.clone(), index.clone()],
+                "Multiple accumulator entries found",
+            ),
+            (
+                vec![version.clone(), accumulator.clone(), index.clone(), index.clone()],
+                "Multiple block index entries found",
+            ),
+        ];
+
+        for (entries, expected) in cases {
+            assert_readers_reject(&entries, expected);
+        }
+
+        for (component, counts) in block_entries.iter().zip([
+            "headers=1, bodies=0, receipts=0, difficulties=0",
+            "headers=0, bodies=1, receipts=0, difficulties=0",
+            "headers=0, bodies=0, receipts=1, difficulties=0",
+            "headers=0, bodies=0, receipts=0, difficulties=1",
+        ]) {
+            let entries = [version.clone(), component.clone(), accumulator.clone(), index.clone()];
+            assert_readers_reject(
+                &entries,
+                &format!("Mismatched block component counts: {counts}"),
+            );
+        }
+    }
+
+    #[test]
+    fn streaming_validates_trailer_after_yielding_blocks() {
+        let file = create_test_era1_file(1000, 1, "testnet");
+        let mut buffer = Vec::new();
+        {
+            let mut writer = Era1Writer::new(&mut buffer);
+            writer.write_block(&file.group.blocks[0]).unwrap();
+            writer.flush().unwrap();
+        }
+
+        let mut iter = Era1Reader::new(Cursor::new(buffer)).iter();
+        assert_eq!(iter.next().unwrap().unwrap().header.data, file.group.blocks[0].header.data);
+        let E2sError::Ssz(err) = iter.next().unwrap().unwrap_err() else {
+            panic!("expected a missing accumulator error");
+        };
+        assert_eq!(err, "Era1 file missing accumulator entry");
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn streaming_accepts_complete_files_and_preserves_other_entries() {
+        for block_count in [0, 2] {
+            let mut file = create_test_era1_file(1000, block_count, "testnet");
+            file.group.add_entry(Entry::new([0x42, 0x42], vec![1, 2, 3]));
+            let mut buffer = Vec::new();
+            {
+                let mut writer = Era1Writer::new(&mut buffer);
+                writer.write_file(&file).unwrap();
+            }
+
+            let mut iter = Era1Reader::new(Cursor::new(&buffer)).iter();
+            assert_eq!((&mut iter).collect::<Result<Vec<_>, _>>().unwrap().len(), block_count);
+            assert!(iter.next().is_none());
+            assert!(iter.next().is_none());
+
+            let assembled =
+                Era1Reader::new(Cursor::new(buffer)).read("testnet".to_string()).unwrap();
+            assert_eq!(assembled.group.other_entries.len(), 1);
+            assert_eq!(assembled.group.other_entries[0].entry_type, [0x42, 0x42]);
+            assert_eq!(assembled.group.other_entries[0].data, [1, 2, 3]);
+        }
+    }
+
+    #[test]
+    fn streaming_io_error_terminates_iteration() {
+        let mut data = Vec::new();
+        Version.encode(&mut data).unwrap();
+        Header::new(COMPRESSED_HEADER, 1).write(&mut data).unwrap();
+        let mut iter = Era1Reader::new(Cursor::new(data)).iter();
+        let E2sError::Io(err) = iter.next().unwrap().unwrap_err() else {
+            panic!("expected a partial payload I/O error");
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(iter.next().is_none());
+    }
+
+    fn assert_readers_reject(entries: &[Entry], expected: &str) {
+        let mut data = Vec::new();
+        for entry in entries {
+            entry.write(&mut data).unwrap();
+        }
+
+        let mut iter = Era1Reader::new(Cursor::new(&data)).iter();
+        let E2sError::Ssz(err) = (&mut iter).collect::<Result<Vec<_>, _>>().unwrap_err() else {
+            panic!("expected an ERA1 validation error");
+        };
+        assert_eq!(err, expected);
+        assert!(iter.next().is_none());
+        assert!(iter.next().is_none());
+
+        let E2sError::Ssz(err) =
+            Era1Reader::new(Cursor::new(data)).read("testnet".to_string()).unwrap_err()
+        else {
+            panic!("expected an ERA1 validation error");
+        };
+        assert_eq!(err, expected);
     }
 }
