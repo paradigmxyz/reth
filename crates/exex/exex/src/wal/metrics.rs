@@ -11,8 +11,8 @@ pub(super) struct Metrics {
     pub notifications_count: Gauge,
     /// Number of committed blocks in WAL
     pub committed_blocks_count: Gauge,
-    /// Lowest committed block height in WAL
+    /// Lowest committed block height in WAL, or zero when empty.
     pub lowest_committed_block_height: Gauge,
-    /// Highest committed block height in WAL
+    /// Highest committed block height in WAL, or zero when empty.
     pub highest_committed_block_height: Gauge,
 }

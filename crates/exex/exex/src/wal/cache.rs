@@ -1,13 +1,17 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashSet},
+    collections::{binary_heap::PeekMut, BinaryHeap, HashSet},
 };
 
+use super::WalResult;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::FbHashMap, BlockNumber, B256};
 use reth_exex_types::ExExNotification;
 use reth_node_api::NodePrimitives;
+
+#[cfg(test)]
+use itertools::Itertools;
 
 /// The block cache of the WAL.
 ///
@@ -15,11 +19,12 @@ use reth_node_api::NodePrimitives;
 /// notification corresponding to a block or a block corresponding to a hash.
 #[derive(Debug, Default)]
 pub struct BlockCache {
-    /// A min heap of `(Block Number, File ID)` tuples.
+    /// A min heap of `(Block Number, File ID, Size in Bytes)` tuples.
     ///
     /// Contains one highest block in notification. In a notification with both committed and
-    /// reverted chain, the highest block is chosen between both chains.
-    pub(super) notification_max_blocks: BinaryHeap<Reverse<(BlockNumber, u32)>>,
+    /// reverted chain, the highest block is chosen between both chains. The size recorded at write
+    /// or reopen lets finalization account for files that are already missing.
+    pub(super) notification_max_blocks: BinaryHeap<Reverse<(BlockNumber, u32, u64)>>,
     /// A mapping of committed blocks `Block Hash -> Block`.
     ///
     /// For each [`ExExNotification::ChainCommitted`] notification, there will be an entry per
@@ -42,25 +47,33 @@ impl BlockCache {
         self.committed_blocks.len()
     }
 
-    /// Removes all files from the cache that has notifications with a tip block less than or equal
-    /// to the given block number.
+    /// Removes notifications with a tip at or below the given block number.
     ///
-    /// # Returns
-    ///
-    /// A set of file IDs that were removed.
-    pub(super) fn remove_before(&mut self, block_number: BlockNumber) -> HashSet<u32> {
-        let mut file_ids = HashSet::default();
+    /// Calls `remove` before evicting each notification. On failure, reconciles previously removed
+    /// notifications and leaves the failed notification and all later ones available for retry.
+    pub(super) fn remove_through(
+        &mut self,
+        block_number: BlockNumber,
+        mut remove: impl FnMut(u32, u64) -> WalResult<()>,
+    ) -> WalResult<()> {
+        let mut file_ids = HashSet::new();
+        let mut result = Ok(());
 
-        while let Some(block @ Reverse((max_block, file_id))) =
-            self.notification_max_blocks.peek().copied()
-        {
-            if max_block <= block_number {
-                let popped_block = self.notification_max_blocks.pop().unwrap();
-                debug_assert_eq!(popped_block, block);
-                file_ids.insert(file_id);
-            } else {
-                break
+        while let Some(entry) = self.notification_max_blocks.peek_mut() {
+            let Reverse((max_block, file_id, size)) = *entry;
+            if max_block > block_number {
+                break;
             }
+            if let Err(error) = remove(file_id, size) {
+                result = Err(error);
+                break;
+            }
+            let Reverse((_, file_id, _)) = PeekMut::pop(entry);
+            file_ids.insert(file_id);
+        }
+
+        if file_ids.is_empty() {
+            return result;
         }
 
         let (mut lowest_committed_block_height, mut highest_committed_block_height) = (None, None);
@@ -83,7 +96,7 @@ impl BlockCache {
         self.lowest_committed_block_height = lowest_committed_block_height;
         self.highest_committed_block_height = highest_committed_block_height;
 
-        file_ids
+        result
     }
 
     /// Returns the file ID for the notification containing the given committed block hash, if it
@@ -96,6 +109,7 @@ impl BlockCache {
     pub(super) fn insert_notification_blocks_with_file_id<N: NodePrimitives>(
         &mut self,
         file_id: u32,
+        size: u64,
         notification: &ExExNotification<N>,
     ) {
         let reverted_chain = notification.reverted_chain();
@@ -104,7 +118,7 @@ impl BlockCache {
         let max_block =
             reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number()).max();
         if let Some(max_block) = max_block {
-            self.notification_max_blocks.push(Reverse((max_block, file_id)));
+            self.notification_max_blocks.push(Reverse((max_block, file_id, size)));
         }
 
         if let Some(committed_chain) = &committed_chain {
@@ -131,14 +145,12 @@ impl BlockCache {
             .clone()
             .into_sorted_vec()
             .into_iter()
-            .map(|entry| entry.0)
+            .map(|Reverse((block, file_id, _))| (block, file_id))
             .collect()
     }
 
     #[cfg(test)]
     pub(super) fn committed_blocks_sorted(&self) -> Vec<(B256, u32, CachedBlock)> {
-        use itertools::Itertools;
-
         self.committed_blocks
             .iter()
             .map(|(hash, (file_id, block))| (*hash, *file_id, *block))

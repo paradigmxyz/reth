@@ -63,6 +63,9 @@ where
     ///
     /// The caller should check that all ExExes are on the canonical chain and will not need any
     /// blocks from the WAL below the provided block, inclusive.
+    ///
+    /// A filesystem error can occur after earlier notifications have already been removed. Failed
+    /// and later notifications remain cached, so retrying the same finalized block is safe.
     pub fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
         self.inner.finalize(to_block)
     }
@@ -136,7 +139,7 @@ where
                 "Inserting block cache entries"
             );
 
-            block_cache.insert_notification_blocks_with_file_id(file_id, &notification);
+            block_cache.insert_notification_blocks_with_file_id(file_id, size, &notification);
         }
 
         self.update_metrics(&block_cache, notifications_size as i64);
@@ -155,7 +158,7 @@ where
         let size = self.storage.write_notification(file_id, notification)?;
 
         debug!(target: "exex::wal", ?file_id, "Inserting notification blocks into the block cache");
-        block_cache.insert_notification_blocks_with_file_id(file_id, notification);
+        block_cache.insert_notification_blocks_with_file_id(file_id, size, notification);
 
         self.update_metrics(&block_cache, size as i64);
 
@@ -165,20 +168,23 @@ where
     #[instrument(skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
         let mut block_cache = self.block_cache.write();
-        let file_ids = block_cache.remove_before(to_block.number);
+        let mut removed_notifications = 0_usize;
+        let mut removed_size = 0;
+        let result = block_cache.remove_through(to_block.number, |file_id, size| {
+            self.storage.remove_notification(file_id)?;
+            removed_notifications += 1;
+            // Use the tracked size even when the file was already missing.
+            removed_size += size;
+            Ok(())
+        });
 
-        // Remove notifications from the storage.
-        if file_ids.is_empty() {
-            debug!(target: "exex::wal", "No notifications were finalized from the storage");
-            return Ok(())
+        if removed_notifications > 0 {
+            debug!(target: "exex::wal", ?removed_notifications, ?removed_size, "Storage was finalized");
+            // Reconcile successful deletions even when a later deletion failed.
+            self.update_metrics(&block_cache, -(removed_size as i64));
         }
 
-        let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
-        debug!(target: "exex::wal", ?removed_notifications, ?removed_size, "Storage was finalized");
-
-        self.update_metrics(&block_cache, -(removed_size as i64));
-
-        Ok(())
+        result
     }
 
     fn update_metrics(&self, block_cache: &BlockCache, size_delta: i64) {
@@ -186,13 +192,12 @@ where
         self.metrics.notifications_count.set(block_cache.notification_max_blocks.len() as f64);
         self.metrics.committed_blocks_count.set(block_cache.committed_blocks.len() as f64);
 
-        if let Some(lowest_committed_block_height) = block_cache.lowest_committed_block_height {
-            self.metrics.lowest_committed_block_height.set(lowest_committed_block_height as f64);
-        }
-
-        if let Some(highest_committed_block_height) = block_cache.highest_committed_block_height {
-            self.metrics.highest_committed_block_height.set(highest_committed_block_height as f64);
-        }
+        self.metrics
+            .lowest_committed_block_height
+            .set(block_cache.lowest_committed_block_height.unwrap_or_default() as f64);
+        self.metrics
+            .highest_committed_block_height
+            .set(block_cache.highest_committed_block_height.unwrap_or_default() as f64);
     }
 
     /// Returns an iterator over all notifications in the WAL.
@@ -234,7 +239,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::wal::{cache::CachedBlock, error::WalResult, Wal};
+    use super::{cache::CachedBlock, *};
+    use ::metrics::Gauge;
     use alloy_primitives::B256;
     use itertools::Itertools;
     use reth_ethereum_primitives::EthPrimitives;
@@ -243,7 +249,11 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{
+        cmp::Reverse,
+        collections::BTreeMap,
+        sync::{atomic::AtomicU64, Arc},
+    };
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
         wal.inner
@@ -558,6 +568,107 @@ mod tests {
         wal.commit(&commit_two)?;
         assert_eq!(wal.inner.storage.file_ids()?, vec![0, 1, 3, 4]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn finalize_retries_after_partial_deletion() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let mut wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+        let values = (0..5).map(|_| Arc::new(AtomicU64::new(0))).collect::<Vec<_>>();
+        let metrics = &mut Arc::get_mut(&mut wal.inner).unwrap().metrics;
+        for (gauge, value) in [
+            &mut metrics.size_bytes,
+            &mut metrics.notifications_count,
+            &mut metrics.committed_blocks_count,
+            &mut metrics.lowest_committed_block_height,
+            &mut metrics.highest_committed_block_height,
+        ]
+        .into_iter()
+        .zip(&values)
+        {
+            *gauge = Gauge::from_arc(value.clone());
+        }
+        let metric_values = || {
+            values
+                .iter()
+                .map(|value| f64::from_bits(value.load(Ordering::Relaxed)))
+                .collect::<Vec<_>>()
+        };
+        let mut rng = generators::rng();
+        let blocks = random_block_range(&mut rng, 0..=2, BlockRangeParams::default())
+            .into_iter()
+            .map(|block| block.try_recover())
+            .collect::<Result<Vec<_>, _>>()?;
+        let notifications = blocks
+            .iter()
+            .map(|block| ExExNotification::ChainCommitted {
+                new: Arc::new(Chain::new(vec![block.clone()], Default::default(), BTreeMap::new())),
+            })
+            .collect::<Vec<_>>();
+        for notification in &notifications {
+            wal.commit(notification)?;
+        }
+        let paths = (0..3).map(|id| temp_dir.path().join(format!("{id}.wal"))).collect::<Vec<_>>();
+        let sizes = paths
+            .iter()
+            .map(|path| reth_fs_util::metadata(path).map(|m| m.len()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(metric_values(), [sizes.iter().sum::<u64>() as f64, 3., 3., 0., 2.]);
+
+        // The first deletion succeeds, but a directory at the second file's path prevents
+        // unlinking.
+        let blocked_contents = reth_fs_util::read(&paths[1])?;
+        reth_fs_util::remove_file(&paths[1])?;
+        reth_fs_util::create_dir_all(&paths[1])?;
+        let cutoff = (blocks[2].number, blocks[2].hash()).into();
+        for _ in 0..2 {
+            assert!(matches!(
+                wal.finalize(cutoff),
+                Err(WalError::FsPathError(reth_fs_util::FsPathError::RemoveFile { path, .. }))
+                    if path == paths[1]
+            ));
+            assert!(!paths[0].exists());
+            assert!(paths[2].exists());
+            assert_eq!(wal.inner.block_cache().blocks_sorted(), [(2, 2), (1, 1)]);
+            assert_eq!(metric_values(), [(sizes[1] + sizes[2]) as f64, 2., 2., 1., 2.]);
+            assert!(wal
+                .handle()
+                .get_committed_notification_by_block_hash(&blocks[0].hash())?
+                .is_none());
+            assert_eq!(
+                wal.handle().get_committed_notification_by_block_hash(&blocks[2].hash())?,
+                Some(notifications[2].clone())
+            );
+        }
+
+        // A cutoff below the retained tips leaves the nonempty cache and its gauges unchanged.
+        wal.finalize((blocks[0].number, blocks[0].hash()).into())?;
+        assert_eq!(wal.inner.block_cache().blocks_sorted(), [(2, 2), (1, 1)]);
+        assert_eq!(metric_values(), [(sizes[1] + sizes[2]) as f64, 2., 2., 1., 2.]);
+
+        // Reopening reconstructs the same remaining cache once the obstruction is repaired.
+        reth_fs_util::remove_dir_all(&paths[1])?;
+        reth_fs_util::write(&paths[1], blocked_contents)?;
+        let reopened = Wal::<EthPrimitives>::new(&temp_dir)?;
+        assert_eq!(read_notifications(&reopened)?, notifications[1..]);
+        assert_eq!(reopened.inner.block_cache().blocks_sorted(), [(2, 2), (1, 1)]);
+        assert_eq!(
+            reopened.inner.block_cache().notification_max_blocks.clone().into_sorted_vec(),
+            [Reverse((2, 2, sizes[2])), Reverse((1, 1, sizes[1]))]
+        );
+        drop(reopened);
+
+        // A file removed externally is still retired using its tracked size, including on a clone.
+        reth_fs_util::remove_file(&paths[2])?;
+        wal.clone().finalize(cutoff)?;
+        assert!(wal.inner.block_cache().is_empty());
+        assert_eq!(wal.num_blocks(), 0);
+        assert!(wal.inner.storage.file_ids()?.is_empty());
+        assert_eq!(metric_values(), [0.; 5]);
+        wal.finalize(cutoff)?;
+        assert_eq!(metric_values(), [0.; 5]);
+        assert!(Wal::<EthPrimitives>::new(&temp_dir)?.inner.block_cache().is_empty());
         Ok(())
     }
 }

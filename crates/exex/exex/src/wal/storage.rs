@@ -47,26 +47,12 @@ where
             .ok_or_else(|| WalError::Parse(filename.to_string()))
     }
 
-    /// Removes notification for the given file ID from the storage.
-    ///
-    /// # Returns
-    ///
-    /// The size of the file that was removed in bytes, if any.
+    /// Removes the notification for the given file ID, treating an already missing file as removed.
     #[instrument(skip(self))]
-    fn remove_notification(&self, file_id: u32) -> Option<u64> {
-        let path = self.file_path(file_id);
-        let size = path.metadata().ok()?.len();
-
-        match reth_fs_util::remove_file(self.file_path(file_id)) {
-            Ok(()) => {
-                debug!(target: "exex::wal::storage", "Notification was removed from the storage");
-                Some(size)
-            }
-            Err(err) => {
-                debug!(target: "exex::wal::storage", ?err, "Failed to remove notification from the storage");
-                None
-            }
-        }
+    pub(super) fn remove_notification(&self, file_id: u32) -> WalResult<()> {
+        reth_fs_util::remove_file_if_exists(self.file_path(file_id))?;
+        debug!(target: "exex::wal::storage", "Notification was removed from the storage");
+        Ok(())
     }
 
     /// Returns the file IDs in the storage in ascending order.
@@ -85,28 +71,6 @@ where
 
         file_ids.sort_unstable();
         Ok(file_ids)
-    }
-
-    /// Removes notifications from the storage according to the given list of file IDs.
-    ///
-    /// # Returns
-    ///
-    /// Number of removed notifications and the total size of the removed files in bytes.
-    pub(super) fn remove_notifications(
-        &self,
-        file_ids: impl IntoIterator<Item = u32>,
-    ) -> WalResult<(usize, u64)> {
-        let mut deleted_total = 0;
-        let mut deleted_size = 0;
-
-        for id in file_ids {
-            if let Some(size) = self.remove_notification(id) {
-                deleted_total += 1;
-                deleted_size += size;
-            }
-        }
-
-        Ok((deleted_total, deleted_size))
     }
 
     pub(super) fn iter_notifications<'a>(
