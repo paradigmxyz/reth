@@ -103,13 +103,431 @@ fn single_request(path: &str, operation: SelectionOperation) -> SelectionRequest
     }
 }
 
+fn filter_request(output: FilterOutput, predicates: Vec<FilterPredicate>) -> SelectionRequest {
+    single_request(".", SelectionOperation::Filter { output, predicates })
+}
+
+#[test]
+fn filters_authenticate_matches_and_reject_omissions_positions_and_false_values() {
+    let snapshot = fixture();
+    let request =
+        filter_request(FilterOutput::Receipts, vec![FilterPredicate::Status { value: false }]);
+    let response = run(&snapshot, &request);
+    assert_eq!(
+        response.results[0].matches.as_ref().unwrap(),
+        &[
+            FilterMatch { receipt_index: 1, log_index: None },
+            FilterMatch { receipt_index: 2, log_index: None },
+        ]
+    );
+    for shared in [false, true] {
+        let response = if shared {
+            select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap()
+        } else {
+            response.clone()
+        };
+        let mut changed = response.clone();
+        changed.results[0].values_ssz.pop();
+        changed.results[0].matches.as_mut().unwrap().pop();
+        assert!(verify_receipt_selection(
+            &request,
+            &changed,
+            snapshot.root(),
+            SelectionLimits::default()
+        )
+        .is_err());
+        let mut changed = response.clone();
+        changed.results[0].matches.as_mut().unwrap()[0].receipt_index = 0;
+        assert!(verify_receipt_selection(
+            &request,
+            &changed,
+            snapshot.root(),
+            SelectionLimits::default()
+        )
+        .is_err());
+        let mut changed = response;
+        changed.results[0].values_ssz[0] = Bytes::from(vec![1]);
+        assert!(verify_receipt_selection(
+            &request,
+            &changed,
+            snapshot.root(),
+            SelectionLimits::default()
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn complete_filter_multiproof_matches_the_independent_reference() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/receipt_filter.json")).unwrap();
+    let snapshot = fixture();
+    let request =
+        filter_request(FilterOutput::Receipts, vec![FilterPredicate::Status { value: false }]);
+    let response =
+        select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap();
+    assert_eq!(
+        serde_json::to_value(response.multiproof.as_ref().unwrap()).unwrap(),
+        reference["proof"]
+    );
+    assert_eq!(serde_json::to_value(&response.results[0].matches).unwrap(), reference["matches"]);
+    verify_receipt_selection(
+        &request,
+        &response,
+        reference["root"].as_str().unwrap().parse().unwrap(),
+        SelectionLimits::default(),
+    )
+    .unwrap();
+    let empty = Eip6466ReceiptSnapshot::build(Receipts::new(Vec::new())).unwrap();
+    let response = select_receipt_multiproof(&empty, &request, SelectionLimits::default()).unwrap();
+    verify_receipt_selection(&request, &response, empty.root(), SelectionLimits::default())
+        .unwrap();
+    assert_eq!(response.results[0].matches, Some(Vec::new()));
+}
+
+#[test]
+fn filters_prove_empty_results_and_combine_receipt_and_same_log_predicates() {
+    let snapshot = fixture();
+    let predicates = vec![
+        FilterPredicate::Sender { address: Address::repeat_byte(0x11) },
+        FilterPredicate::Status { value: true },
+        FilterPredicate::GasUsed { min: 21_000, max: 21_000 },
+        FilterPredicate::LogAddress { address: Address::repeat_byte(0x44) },
+        FilterPredicate::LogTopic { position: 1, topic: B256::repeat_byte(0x66) },
+    ];
+    let response = run(&snapshot, &filter_request(FilterOutput::Logs, predicates));
+    assert_eq!(
+        response.results[0].matches,
+        Some(vec![FilterMatch { receipt_index: 0, log_index: Some(0) }])
+    );
+    for predicates in [
+        vec![FilterPredicate::Sender { address: Address::ZERO }],
+        vec![FilterPredicate::LogTopic { position: 3, topic: B256::ZERO }],
+        vec![
+            FilterPredicate::Status { value: false },
+            FilterPredicate::GasUsed { min: 0, max: 21_000 },
+        ],
+    ] {
+        let response = run(&snapshot, &filter_request(FilterOutput::Receipts, predicates));
+        assert_eq!(response.results[0].matches, Some(Vec::new()));
+        assert!(response.results[0].values_ssz.is_empty());
+        assert!(!response.results[0].witnesses.as_ref().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn filter_log_predicates_never_match_across_distinct_logs_and_zero_logs_remain_eligible() {
+    let logs = vec![
+        Log::new(Address::repeat_byte(1), vec![B256::repeat_byte(2)], Bytes::new()).unwrap(),
+        Log::new(Address::repeat_byte(3), vec![B256::repeat_byte(4)], Bytes::new()).unwrap(),
+    ];
+    let snapshot = Eip6466ReceiptSnapshot::build(Receipts::new(vec![
+        Receipt::Basic(BasicReceipt { from_: Address::ZERO, gas_used: 0, status: true, logs }),
+        Receipt::Basic(BasicReceipt {
+            from_: Address::ZERO,
+            gas_used: 0,
+            status: true,
+            logs: vec![],
+        }),
+    ]))
+    .unwrap();
+    let response = run(
+        &snapshot,
+        &filter_request(
+            FilterOutput::Receipts,
+            vec![
+                FilterPredicate::LogAddress { address: Address::repeat_byte(1) },
+                FilterPredicate::LogTopic { position: 0, topic: B256::repeat_byte(4) },
+            ],
+        ),
+    );
+    assert!(response.results[0].values_ssz.is_empty());
+    let response = run(&snapshot, &filter_request(FilterOutput::Receipts, vec![]));
+    assert_eq!(response.results[0].values_ssz.len(), 2);
+    let response = run(&snapshot, &filter_request(FilterOutput::Logs, vec![]));
+    assert_eq!(response.results[0].values_ssz.len(), 2);
+}
+
+#[test]
+fn filter_bounds_are_checked_without_truncation_and_before_provider_work() {
+    let snapshot = fixture();
+    for predicates in [
+        vec![FilterPredicate::GasUsed { min: 2, max: 1 }],
+        vec![FilterPredicate::LogTopic { position: 4, topic: B256::ZERO }],
+    ] {
+        assert_eq!(
+            check_request(
+                &filter_request(FilterOutput::Receipts, predicates),
+                SelectionLimits::default()
+            ),
+            Err(SelectionError::OutOfBounds)
+        );
+    }
+    let request =
+        filter_request(FilterOutput::Receipts, vec![FilterPredicate::Status { value: false }]);
+    for (limits, name) in [
+        (SelectionLimits { predicates: 0, ..Default::default() }, "predicates"),
+        (SelectionLimits { matches: 1, ..Default::default() }, "matches"),
+        (SelectionLimits { targets: 2, ..Default::default() }, "targets"),
+        (SelectionLimits { receipts: 2, ..Default::default() }, "receipts"),
+        (SelectionLimits { logs: 2, ..Default::default() }, "logs"),
+    ] {
+        assert_eq!(
+            select_receipt_multiproof(&snapshot, &request, limits),
+            Err(SelectionError::LimitExceeded(name))
+        );
+    }
+    let mut request = request;
+    request.selections.push(request.selections[0].clone());
+    assert_eq!(
+        select_receipt_multiproof(
+            &snapshot,
+            &request,
+            SelectionLimits { matches: 3, ..Default::default() }
+        ),
+        Err(SelectionError::LimitExceeded("matches"))
+    );
+    assert_eq!(
+        check_request(&request, SelectionLimits { predicates: 1, ..Default::default() }),
+        Err(SelectionError::LimitExceeded("predicates"))
+    );
+    request.selections[0].path = "[0]".into();
+    assert_eq!(
+        check_request(&request, SelectionLimits::default()),
+        Err(SelectionError::InvalidPath)
+    );
+}
+
 fn run(snapshot: &Eip6466ReceiptSnapshot, request: &SelectionRequest) -> SelectionResponse {
     let response = select_receipt_snapshot(snapshot, request, SelectionLimits::default()).unwrap();
     assert_eq!(
         verify_receipt_selection(request, &response, snapshot.root(), SelectionLimits::default()),
         Ok(())
     );
+    let shared = select_receipt_multiproof(snapshot, request, SelectionLimits::default()).unwrap();
+    assert_eq!(
+        shared.results.iter().map(|result| &result.values_ssz).collect::<Vec<_>>(),
+        response.results.iter().map(|result| &result.values_ssz).collect::<Vec<_>>()
+    );
+    verify_receipt_selection(request, &shared, snapshot.root(), SelectionLimits::default())
+        .unwrap();
     response
+}
+
+fn shared_request() -> SelectionRequest {
+    SelectionRequest {
+        selections: vec![
+            ReceiptSelection { path: "[0].from".into(), operation: SelectionOperation::Value {} },
+            ReceiptSelection { path: "[0].status".into(), operation: SelectionOperation::Value {} },
+            ReceiptSelection {
+                path: "[2].authorities".into(),
+                operation: SelectionOperation::Range { start: 0, end: 3 },
+            },
+            ReceiptSelection {
+                path: "[0].logs[0].data".into(),
+                operation: SelectionOperation::Slice { start: 0, end: 33 },
+            },
+        ],
+        include_proof: true,
+    }
+}
+
+#[test]
+fn multiproof_matches_independent_reference_and_compresses_shared_branches() {
+    let snapshot = fixture();
+    let request = shared_request();
+    let response =
+        select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap();
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/receipt_multiproof.json")).unwrap();
+    assert_eq!(
+        serde_json::to_value(response.multiproof.as_ref().unwrap()).unwrap(),
+        reference["proof"]
+    );
+    assert_eq!(serde_json::to_value(response.root).unwrap(), reference["root"]);
+    verify_receipt_selection(&request, &response, snapshot.root(), SelectionLimits::default())
+        .unwrap();
+    let baseline =
+        select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()).unwrap();
+    let baseline_hashes = baseline
+        .results
+        .iter()
+        .flat_map(|result| result.witnesses.as_ref().unwrap())
+        .map(|witness| witness.branch.len() + 1)
+        .sum::<usize>();
+    let proof = response.multiproof.as_ref().unwrap();
+    assert!(proof.targets.len() + proof.helpers.len() < baseline_hashes);
+    assert!(
+        serde_json::to_vec(&response).unwrap().len() < serde_json::to_vec(&baseline).unwrap().len()
+    );
+    let decoded =
+        serde_json::from_slice::<SelectionResponse>(&serde_json::to_vec(&response).unwrap())
+            .unwrap();
+    assert_eq!(decoded, response);
+}
+
+#[test]
+fn multiproof_rejects_mutations_missing_extra_reordered_and_mixed_evidence() {
+    let snapshot = fixture();
+    let request = shared_request();
+    let response =
+        select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap();
+    let rejects = |changed: &SelectionResponse| {
+        assert!(verify_receipt_selection(
+            &request,
+            changed,
+            snapshot.root(),
+            SelectionLimits::default()
+        )
+        .is_err());
+    };
+    for index in 0..response.multiproof.as_ref().unwrap().targets.len() {
+        let mut changed = response.clone();
+        changed.multiproof.as_mut().unwrap().targets[index][0] ^= 1;
+        rejects(&changed);
+    }
+    for index in 0..response.multiproof.as_ref().unwrap().helpers.len() {
+        let mut changed = response.clone();
+        changed.multiproof.as_mut().unwrap().helpers[index][0] ^= 1;
+        rejects(&changed);
+    }
+    for mutation in 0..10 {
+        let mut changed = response.clone();
+        let proof = changed.multiproof.as_mut().unwrap();
+        match mutation {
+            0 => {
+                proof.targets.pop();
+            }
+            1 => {
+                proof.helpers.pop();
+            }
+            2 => proof.targets.push(proof.targets[0]),
+            3 => proof.helpers.push(B256::ZERO),
+            4 => proof.targets.swap(0, 1),
+            5 => proof.targets[0] = B256::ZERO,
+            6 => changed.results[0].witnesses = Some(vec![]),
+            7 => changed.multiproof = None,
+            8 => proof.helpers.swap(0, 1),
+            _ => changed.proof_format = Some(SelectionProofFormat::SingleBranch),
+        }
+        rejects(&changed);
+    }
+}
+
+#[test]
+fn multiproof_rejects_unused_authenticated_targets_and_bounds_both_sides() {
+    let snapshot = fixture();
+    let request = shared_request();
+    let mut superset = request.clone();
+    superset.selections.push(ReceiptSelection {
+        path: "[1].from".into(),
+        operation: SelectionOperation::Value {},
+    });
+    let mut response =
+        select_receipt_multiproof(&snapshot, &superset, SelectionLimits::default()).unwrap();
+    response.results.pop();
+    assert_eq!(
+        verify_receipt_selection(&request, &response, snapshot.root(), SelectionLimits::default()),
+        Err(SelectionError::InvalidProof)
+    );
+    let response =
+        select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap();
+    let proof = response.multiproof.as_ref().unwrap();
+    let limits = SelectionLimits {
+        witness_hashes: proof.targets.len() + proof.helpers.len() - 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        select_receipt_multiproof(&snapshot, &request, limits),
+        Err(SelectionError::LimitExceeded("witness hashes"))
+    );
+    assert_eq!(
+        verify_receipt_selection(&request, &response, snapshot.root(), limits),
+        Err(SelectionError::LimitExceeded("witness hashes"))
+    );
+    let limits = SelectionLimits {
+        response_bytes: serde_json::to_vec(&response).unwrap().len() - 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        select_receipt_multiproof(&snapshot, &request, limits),
+        Err(SelectionError::LimitExceeded("response bytes"))
+    );
+    assert_eq!(
+        verify_receipt_selection(&request, &response, snapshot.root(), limits),
+        Err(SelectionError::LimitExceeded("response bytes"))
+    );
+    let limits = SelectionLimits { source_bytes: 1, ..Default::default() };
+    assert_eq!(
+        select_receipt_multiproof(&snapshot, &request, limits),
+        Err(SelectionError::LimitExceeded("source bytes"))
+    );
+    assert_eq!(
+        verify_receipt_selection(&request, &response, snapshot.root(), limits),
+        Err(SelectionError::LimitExceeded("source bytes"))
+    );
+}
+
+#[test]
+fn overlapping_multiproof_requests_preserve_results_and_shared_byte_chunks() {
+    let snapshot = fixture();
+    let mut request = shared_request();
+    request.selections.push(request.selections[0].clone());
+    request.selections.push(ReceiptSelection {
+        path: "[0].logs[0].data".into(),
+        operation: SelectionOperation::Slice { start: 1, end: 32 },
+    });
+    request
+        .selections
+        .push(ReceiptSelection { path: "[0]".into(), operation: SelectionOperation::Whole {} });
+    let mut response =
+        select_receipt_multiproof(&snapshot, &request, SelectionLimits::default()).unwrap();
+    verify_receipt_selection(&request, &response, snapshot.root(), SelectionLimits::default())
+        .unwrap();
+    assert_eq!(response.results[0].values_ssz, response.results[4].values_ssz);
+    response.results[5].values_ssz[0] = Bytes::from(vec![0; 31]);
+    assert_eq!(
+        verify_receipt_selection(&request, &response, snapshot.root(), SelectionLimits::default()),
+        Err(SelectionError::InvalidValue)
+    );
+}
+
+#[test]
+fn server_multiproofs_remain_verifiable_under_constrained_source_budgets() {
+    let snapshot = fixture();
+    let source =
+        source_budget(&snapshot, SelectionLimits::default(), &AtomicBool::new(false)).unwrap();
+    for request in [
+        shared_request(),
+        single_request(".", SelectionOperation::Whole {}),
+        single_request("[0]", SelectionOperation::Whole {}),
+    ] {
+        let mut successes = 0;
+        for extra in [
+            0,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096,
+            8192,
+            16384,
+            32768,
+            SelectionLimits::default().source_bytes - source,
+        ] {
+            let limits = SelectionLimits { source_bytes: source + extra, ..Default::default() };
+            match select_receipt_multiproof(&snapshot, &request, limits) {
+                Ok(response) => {
+                    verify_receipt_selection(&request, &response, snapshot.root(), limits).unwrap();
+                    successes += 1;
+                }
+                Err(error) => assert_eq!(error, SelectionError::LimitExceeded("source bytes")),
+            }
+        }
+        assert!(successes > 0);
+    }
 }
 
 #[test]
@@ -311,7 +729,7 @@ fn ranges_slices_and_whole_fixed_element_lists_verify() {
 }
 
 #[test]
-fn multiple_selections_reject_semantic_overlap_but_allow_shared_chunks() {
+fn multiple_selections_preserve_duplicate_and_overlapping_results() {
     let snapshot = fixture();
     let request = SelectionRequest {
         selections: vec![
@@ -339,23 +757,18 @@ fn multiple_selections_reject_semantic_overlap_but_allow_shared_chunks() {
     .is_err());
     let mut duplicate = request.clone();
     duplicate.selections.push(duplicate.selections[0].clone());
-    assert_eq!(
-        select_receipt_snapshot(&snapshot, &duplicate, SelectionLimits::default()),
-        Err(SelectionError::DuplicateOrOverlap)
-    );
+    let response = run(&snapshot, &duplicate);
+    assert_eq!(response.results[0].values_ssz, response.results[4].values_ssz);
     let mut overlap = request;
     overlap.selections.push(ReceiptSelection {
         path: "[0].logs[0].data".into(),
         operation: SelectionOperation::Whole {},
     });
-    assert_eq!(
-        select_receipt_snapshot(&snapshot, &overlap, SelectionLimits::default()),
-        Err(SelectionError::DuplicateOrOverlap)
-    );
+    run(&snapshot, &overlap);
 }
 
 #[test]
-fn duplicate_paths_with_different_operations_are_rejected() {
+fn shared_paths_with_different_operations_remain_distinct() {
     let snapshot = fixture();
     let mut request = SelectionRequest {
         selections: vec![
@@ -372,10 +785,19 @@ fn duplicate_paths_with_different_operations_are_rejected() {
     };
     for include_proof in [true, false] {
         request.include_proof = include_proof;
-        assert_eq!(
-            select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()),
-            Err(SelectionError::DuplicateOrOverlap)
-        );
+        let response =
+            select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()).unwrap();
+        assert_eq!(response.results[0].values_ssz[0].len(), 33);
+        assert_eq!(response.results[1].values_ssz[0].as_ref(), 33_u64.to_le_bytes());
+        if include_proof {
+            verify_receipt_selection(
+                &request,
+                &response,
+                snapshot.root(),
+                SelectionLimits::default(),
+            )
+            .unwrap();
+        }
     }
 }
 
@@ -689,7 +1111,7 @@ fn selection_wire_has_no_receipt_schema_or_revision_dispatch() {
         )
         .is_err());
     }
-    for format in ["ssz_single_branch_v1", "multiproof", "pureth-receipt-v0"] {
+    for format in ["ssz_single_branch_v1", "pureth-receipt-v0"] {
         let mut changed = json.clone();
         changed["proof_format"] = serde_json::json!(format);
         assert!(serde_json::from_value::<SelectionResponse>(changed).is_err());
@@ -883,7 +1305,7 @@ fn whole_receipt_budget_follows_nested_shape_and_rejects_excess() {
 }
 
 #[test]
-fn disjoint_slices_and_ranges_share_a_path_without_overlapping_targets() {
+fn disjoint_and_overlapping_slices_and_ranges_share_a_path() {
     let snapshot = fixture();
     let mut request = SelectionRequest {
         selections: vec![
@@ -910,19 +1332,13 @@ fn disjoint_slices_and_ranges_share_a_path_without_overlapping_targets() {
         SelectionOperation::Length {},
     ] {
         request.selections[1].operation = operation;
-        assert_eq!(
-            select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()),
-            Err(SelectionError::DuplicateOrOverlap)
-        );
+        run(&snapshot, &request);
     }
     request.selections[1] = ReceiptSelection {
         path: "[0].logs[0].data[1]".into(),
         operation: SelectionOperation::Value {},
     };
-    assert_eq!(
-        select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()),
-        Err(SelectionError::DuplicateOrOverlap)
-    );
+    run(&snapshot, &request);
 }
 
 #[test]
@@ -989,4 +1405,87 @@ fn structural_budget_covers_retained_trees_at_progressive_boundaries() {
             assert!(bound >= actual, "count={count} length={length} bound={bound} actual={actual}");
         }
     }
+}
+
+#[test]
+fn filter_and_selection_proofs_verify_at_the_first_accepted_source_budget() {
+    let receipt = Receipt::Basic(BasicReceipt {
+        from_: Address::ZERO,
+        gas_used: 21_000,
+        logs: vec![Log::new(Address::ZERO, vec![], Bytes::from(vec![1; 33])).unwrap()],
+        status: true,
+    });
+    for count in [1, 2, 3, 6, 22, 64] {
+        let snapshot =
+            Eip6466ReceiptSnapshot::build(Receipts::new(vec![receipt.clone(); count])).unwrap();
+        for request in [
+            single_request("[0].from", SelectionOperation::Value {}),
+            single_request("[0]", SelectionOperation::Whole {}),
+            single_request("[0].logs[0].data", SelectionOperation::Slice { start: 0, end: 33 }),
+            filter_request(FilterOutput::Receipts, vec![FilterPredicate::Status { value: true }]),
+            filter_request(FilterOutput::Logs, vec![FilterPredicate::Status { value: true }]),
+        ] {
+            for format in [SelectionProofFormat::SingleBranch, SelectionProofFormat::Multiproof] {
+                let select = |source_bytes| {
+                    select_with_format(
+                        &snapshot,
+                        &request,
+                        SelectionLimits { source_bytes, ..Default::default() },
+                        &AtomicBool::new(false),
+                        format,
+                    )
+                };
+                let mut low = 0;
+                let mut high = SelectionLimits::default().source_bytes;
+                select(high).unwrap();
+                while low < high {
+                    let middle = low + (high - low) / 2;
+                    match select(middle) {
+                        Ok(_) => high = middle,
+                        Err(SelectionError::LimitExceeded("source bytes")) => low = middle + 1,
+                        Err(error) => panic!("unexpected error: {error:?}"),
+                    }
+                }
+                let response = select(low).unwrap();
+                verify_receipt_selection(
+                    &request,
+                    &response,
+                    snapshot.root(),
+                    SelectionLimits { source_bytes: low, ..Default::default() },
+                )
+                .unwrap();
+                assert_eq!(select(low - 1), Err(SelectionError::LimitExceeded("source bytes")));
+            }
+        }
+    }
+}
+
+#[test]
+fn scalar_single_branch_verification_accounts_for_values_witnesses_and_cache() {
+    let snapshot = fixture();
+    let request = single_request("[0].from", SelectionOperation::Value {});
+    let response =
+        select_receipt_snapshot(&snapshot, &request, SelectionLimits::default()).unwrap();
+    let witnesses = response.results[0].witnesses.as_ref().unwrap();
+    let required = witnesses.len() * 128 +
+        witnesses.iter().map(|witness| (witness.branch.len() + 1) * 64).sum::<usize>() +
+        40;
+    for source_bytes in [0, required - 1] {
+        assert_eq!(
+            verify_receipt_selection(
+                &request,
+                &response,
+                snapshot.root(),
+                SelectionLimits { source_bytes, ..Default::default() }
+            ),
+            Err(SelectionError::LimitExceeded("source bytes"))
+        );
+    }
+    verify_receipt_selection(
+        &request,
+        &response,
+        snapshot.root(),
+        SelectionLimits { source_bytes: required, ..Default::default() },
+    )
+    .unwrap();
 }

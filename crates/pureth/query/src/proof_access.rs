@@ -35,6 +35,21 @@ pub(crate) fn node_and_branch(
     Ok((current.root(), branch))
 }
 
+pub(crate) fn node_at(root: &RetainedNode, gindex: u128) -> Result<B256, ProofAccessError> {
+    if gindex == 0 {
+        return Err(ProofAccessError::InvalidProof(ProofError::ZeroGindex));
+    }
+    let depth = u128::BITS - 1 - gindex.leading_zeros();
+    let mut current = root;
+    for shift in (0..depth).rev() {
+        current = &current
+            .children()
+            .ok_or(ProofAccessError::MissingChildren { gindex: gindex >> (shift + 1) })?
+            [((gindex >> shift) & 1) as usize];
+    }
+    Ok(current.root())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +83,7 @@ mod tests {
             assert_eq!(tree.root(), expected_root);
             let (actual_target, branch) = node_and_branch(&tree, gindex).unwrap();
             assert_eq!(actual_target, target);
+            assert_eq!(node_at(&tree, gindex), Ok(target));
             assert_eq!(branch, vec![B256::ZERO; depth as usize]);
             assert_eq!(verify_branch(target, gindex, &branch, expected_root), Ok(()));
             assert_eq!(
@@ -88,12 +104,17 @@ mod tests {
             node_and_branch(&leaf, 0),
             Err(ProofAccessError::InvalidProof(ProofError::ZeroGindex)),
         );
+        assert_eq!(node_at(&leaf, 0), Err(ProofAccessError::InvalidProof(ProofError::ZeroGindex)),);
         let mut tree = RetainedNode::zero();
         for _ in 0..64 {
             tree = RetainedNode::pair(RetainedNode::zero(), tree);
         }
         assert_eq!(
             node_and_branch(&tree, (1_u128 << 66) - 1),
+            Err(ProofAccessError::MissingChildren { gindex: (1_u128 << 65) - 1 }),
+        );
+        assert_eq!(
+            node_at(&tree, (1_u128 << 66) - 1),
             Err(ProofAccessError::MissingChildren { gindex: (1_u128 << 65) - 1 }),
         );
     }

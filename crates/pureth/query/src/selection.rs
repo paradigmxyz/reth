@@ -1,6 +1,7 @@
 use crate::{
     compose_gindices, container_field_gindex, parse_path, progressive_chunk_gindex,
-    proof_access::node_and_branch, verify_branch, PathToken,
+    proof_access::{node_and_branch, node_at},
+    verify_branch, PathToken,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use reth_pureth_receipt::{
@@ -44,7 +45,10 @@ pub enum SelectionOperation {
     Presence {},
     Range { start: u64, end: u64 },
     Slice { start: u64, end: u64 },
+    Filter { output: FilterOutput, predicates: Vec<FilterPredicate> },
 }
+
+pub use filter::{FilterMatch, FilterOutput, FilterPredicate};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -52,12 +56,22 @@ pub struct SelectionResponse {
     pub root: B256,
     pub proof_format: Option<SelectionProofFormat>,
     pub results: Vec<SelectionResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiproof: Option<SelectionMultiproof>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionProofFormat {
     SingleBranch,
+    Multiproof,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectionMultiproof {
+    pub targets: Vec<B256>,
+    pub helpers: Vec<B256>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +79,8 @@ pub enum SelectionProofFormat {
 pub struct SelectionResult {
     pub values_ssz: Vec<Bytes>,
     pub witnesses: Option<Vec<SelectionWitness>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matches: Option<Vec<FilterMatch>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +100,8 @@ pub struct SelectionLimits {
     pub source_bytes: usize,
     pub receipts: usize,
     pub logs: usize,
+    pub predicates: usize,
+    pub matches: usize,
 }
 
 impl Default for SelectionLimits {
@@ -97,6 +115,8 @@ impl Default for SelectionLimits {
             source_bytes: 64 * 1024 * 1024,
             receipts: 4096,
             logs: 16_384,
+            predicates: 64,
+            matches: 1024,
         }
     }
 }
@@ -111,7 +131,6 @@ pub enum SelectionError {
     InvalidValue,
     InvalidProof,
     CodecRequired,
-    DuplicateOrOverlap,
     Unverified,
     Cancelled,
     Deadline,
@@ -303,7 +322,7 @@ fn check_padding(
     Ok(())
 }
 
-fn tokens(path: &str) -> Result<Vec<PathToken>, SelectionError> {
+pub(crate) fn tokens(path: &str) -> Result<Vec<PathToken>, SelectionError> {
     if path == "." {
         Ok(Vec::new())
     } else {
@@ -613,7 +632,7 @@ fn whole_structure_budget(
     Ok(())
 }
 
-fn add(
+pub(crate) fn add(
     count: &mut usize,
     amount: usize,
     limit: usize,
@@ -626,7 +645,7 @@ fn add(
     Ok(())
 }
 
-fn remaining_materialization(
+pub(crate) fn remaining_materialization(
     source: usize,
     values: usize,
     hashes: usize,
@@ -645,10 +664,32 @@ fn evaluate(
     read: &mut impl FnMut(u128) -> Result<B256, SelectionError>,
     whole: Option<&[Bytes]>,
     verify_whole: bool,
-    claims: &mut Vec<Vec<PathToken>>,
     targets: &mut usize,
+    matches: &mut usize,
     limits: SelectionLimits,
-) -> Result<Vec<Bytes>, SelectionError> {
+) -> Result<SelectionResult, SelectionError> {
+    if let SelectionOperation::Filter { output, ref predicates } = selection.operation {
+        let positions = filter::scan(output, predicates, read, targets, matches, limits)?;
+        let values = whole.ok_or(SelectionError::CodecRequired)?;
+        if values.len() != positions.len() {
+            return Err(SelectionError::InvalidValue);
+        }
+        for (position, value) in positions.iter().zip(values) {
+            let target = resolve_eip(&position.path(), read)?;
+            if value.len() > limits.response_bytes {
+                return Err(SelectionError::LimitExceeded("value bytes"));
+            }
+            let node = read(target.index)?;
+            if verify_whole && whole_root(target.kind, value, limits.source_bytes)? != node {
+                return Err(SelectionError::InvalidValue);
+            }
+        }
+        return Ok(SelectionResult {
+            values_ssz: values.to_vec(),
+            witnesses: None,
+            matches: Some(positions),
+        });
+    }
     let path = tokens(&selection.path)?;
     let target = resolve_eip(&path, read)?;
     let mut selected = Vec::new();
@@ -672,7 +713,6 @@ fn evaluate(
             for index in start..end {
                 let mut child = path.clone();
                 child.push(PathToken::Index(index));
-                register(claims, child.clone())?;
                 let child_target = resolve_eip(&child, read)?;
                 if matches!(child_target.kind, Kind::Receipt(_) | Kind::Log) {
                     let value = whole
@@ -708,7 +748,6 @@ fn evaluate(
             ) =>
         {
             add(targets, 1, limits.targets, "targets")?;
-            register(claims, path)?;
             let value =
                 whole.and_then(|values| values.first()).ok_or(SelectionError::CodecRequired)?;
             if value.len() > limits.response_bytes {
@@ -737,7 +776,6 @@ fn evaluate(
         }
         SelectionOperation::Value {} | SelectionOperation::Whole {} => {
             add(targets, 1, limits.targets, "targets")?;
-            register(claims, path)?;
             let value = claim_value(target, read)?;
             if matches!(target.kind, Kind::Scalar(1)) && value[0] > 1 {
                 return Err(SelectionError::InvalidValue);
@@ -764,18 +802,9 @@ fn evaluate(
             }
             selected.push(Bytes::from(vec![u8::from(target.kind != Kind::Absent)]));
         }
+        SelectionOperation::Filter { .. } => unreachable!(),
     }
-    Ok(selected)
-}
-
-fn register(claims: &mut Vec<Vec<PathToken>>, path: Vec<PathToken>) -> Result<(), SelectionError> {
-    for previous in claims.iter() {
-        if path.starts_with(previous) || previous.starts_with(&path) {
-            return Err(SelectionError::DuplicateOrOverlap);
-        }
-    }
-    claims.push(path);
-    Ok(())
+    Ok(SelectionResult { values_ssz: selected, witnesses: None, matches: None })
 }
 
 pub(crate) fn check_request(
@@ -790,8 +819,16 @@ pub(crate) fn check_request(
     }
     encoded_size(request, limits.request_bytes, "request bytes")?;
     let mut targets = 0;
-    for (index, selection) in request.selections.iter().enumerate() {
+    let mut predicates = 0;
+    for selection in &request.selections {
         let path = tokens(&selection.path)?;
+        if let SelectionOperation::Filter { predicates: ref items, .. } = selection.operation {
+            if !path.is_empty() {
+                return Err(SelectionError::InvalidPath);
+            }
+            add(&mut predicates, items.len(), limits.predicates, "predicates")?;
+            filter::check_predicates(items)?;
+        }
         let count = match selection.operation {
             SelectionOperation::Range { start, end } | SelectionOperation::Slice { start, end } => {
                 let count = end.checked_sub(start).ok_or(SelectionError::OutOfBounds)?;
@@ -801,27 +838,11 @@ pub(crate) fn check_request(
             _ => 1,
         };
         add(&mut targets, count, limits.targets, "targets")?;
-        for previous in &request.selections[..index] {
-            if tokens(&previous.path)? == path {
-                let bounds = |operation: &SelectionOperation| match operation {
-                    SelectionOperation::Range { start, end } |
-                    SelectionOperation::Slice { start, end } => Some((*start, *end)),
-                    _ => None,
-                };
-                let disjoint = match (bounds(&previous.operation), bounds(&selection.operation)) {
-                    (Some((a, b)), Some((c, d))) => a < b && c < d && (b <= c || d <= a),
-                    _ => false,
-                };
-                if !disjoint {
-                    return Err(SelectionError::DuplicateOrOverlap);
-                }
-            }
-        }
     }
     Ok(())
 }
 
-fn source_budget(
+pub(crate) fn source_budget(
     snapshot: &Eip6466ReceiptSnapshot,
     limits: SelectionLimits,
     cancelled: &AtomicBool,
@@ -882,6 +903,20 @@ pub fn select_receipt_snapshot(
     request: &SelectionRequest,
     limits: SelectionLimits,
 ) -> Result<SelectionResponse, SelectionError> {
+    select_with_format(
+        snapshot,
+        request,
+        limits,
+        &AtomicBool::new(false),
+        SelectionProofFormat::SingleBranch,
+    )
+}
+
+pub fn select_receipt_multiproof(
+    snapshot: &Eip6466ReceiptSnapshot,
+    request: &SelectionRequest,
+    limits: SelectionLimits,
+) -> Result<SelectionResponse, SelectionError> {
     select_with_cancel(snapshot, request, limits, &AtomicBool::new(false))
 }
 
@@ -891,11 +926,35 @@ pub(crate) fn select_with_cancel(
     limits: SelectionLimits,
     cancelled: &AtomicBool,
 ) -> Result<SelectionResponse, SelectionError> {
+    select_with_format(snapshot, request, limits, cancelled, SelectionProofFormat::Multiproof)
+}
+
+fn select_with_format(
+    snapshot: &Eip6466ReceiptSnapshot,
+    request: &SelectionRequest,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+    format: SelectionProofFormat,
+) -> Result<SelectionResponse, SelectionError> {
     check_request(request, limits)?;
     let source_bytes = source_budget(snapshot, limits, cancelled)?;
+    select_with_source(snapshot, request, limits, cancelled, format, source_bytes)
+}
+
+pub(crate) fn select_with_source(
+    snapshot: &Eip6466ReceiptSnapshot,
+    request: &SelectionRequest,
+    limits: SelectionLimits,
+    cancelled: &AtomicBool,
+    format: SelectionProofFormat,
+    source_bytes: usize,
+) -> Result<SelectionResponse, SelectionError> {
+    check_request(request, limits)?;
     let mut results = Vec::new();
-    let mut claims = Vec::new();
+    let mut proof_nodes = BTreeMap::new();
+    let mut proof_order = Vec::new();
     let mut targets = 0;
+    let mut matches = 0;
     let hashes = Cell::new(0);
     let mut value_bytes = 0;
     for selection in &request.selections {
@@ -908,14 +967,34 @@ pub(crate) fn select_with_cancel(
             if let Some(node) = cache.get(&index) {
                 return Ok(*node);
             }
-            let (node, branch) = node_and_branch(snapshot.tree(), index)
-                .map_err(|_| SelectionError::InvalidProof)?;
-            if request.include_proof {
+            let node = if request.include_proof && format == SelectionProofFormat::SingleBranch {
+                let (node, branch) = node_and_branch(snapshot.tree(), index)
+                    .map_err(|_| SelectionError::InvalidProof)?;
                 let mut count = hashes.get();
                 add(&mut count, branch.len() + 1, limits.witness_hashes, "witness hashes")?;
                 hashes.set(count);
                 witnesses.push(SelectionWitness { node, branch });
-            }
+                node
+            } else if let Some(node) = proof_nodes.get(&index) {
+                *node
+            } else {
+                let node =
+                    node_at(snapshot.tree(), index).map_err(|_| SelectionError::InvalidProof)?;
+                if request.include_proof {
+                    let mut count = hashes.get();
+                    add(&mut count, 1, limits.witness_hashes, "witness hashes")?;
+                    remaining_materialization(
+                        source_bytes,
+                        value_bytes,
+                        count,
+                        limits.source_bytes,
+                    )?;
+                    hashes.set(count);
+                    proof_nodes.insert(index, node);
+                    proof_order.push(index);
+                }
+                node
+            };
             cache.insert(index, node);
             Ok(node)
         };
@@ -923,7 +1002,22 @@ pub(crate) fn select_with_cancel(
         let target = resolve_eip(&path, &mut read)?;
         let mut whole = None;
         let mut paths = Vec::new();
-        if matches!(
+        if let SelectionOperation::Filter { output, ref predicates } = selection.operation {
+            let mut planned_targets = targets;
+            let mut planned_matches = matches;
+            paths = filter::scan(
+                output,
+                predicates,
+                &mut read,
+                &mut planned_targets,
+                &mut planned_matches,
+                limits,
+            )?
+            .iter()
+            .map(FilterMatch::path)
+            .collect();
+            whole = Some(Vec::new());
+        } else if matches!(
             selection.operation,
             SelectionOperation::Value {} | SelectionOperation::Whole {}
         ) && matches!(
@@ -984,9 +1078,11 @@ pub(crate) fn select_with_cancel(
                     return Err(SelectionError::Cancelled);
                 }
                 let kind = match (&selection.operation, target.kind) {
+                    (SelectionOperation::Filter { output: FilterOutput::Receipts, .. }, _) |
                     (SelectionOperation::Range { .. }, Kind::Receipts) => {
                         Kind::Receipt(*value.first().ok_or(SelectionError::InvalidValue)?)
                     }
+                    (SelectionOperation::Filter { output: FilterOutput::Logs, .. }, _) |
                     (SelectionOperation::Range { .. }, Kind::Logs) => Kind::Log,
                     (_, kind) => kind,
                 };
@@ -1004,31 +1100,124 @@ pub(crate) fn select_with_cancel(
             )?,
             ..limits
         };
-        let values = evaluate(
+        let mut result = evaluate(
             selection,
             &mut read,
             whole.as_deref(),
             false,
-            &mut claims,
             &mut targets,
+            &mut matches,
             remaining,
         )?;
-        for value in &values {
+        for value in &result.values_ssz {
             add(&mut value_bytes, value.len(), limits.response_bytes, "value bytes")?;
         }
         remaining_materialization(source_bytes, value_bytes, hashes.get(), limits.source_bytes)?;
-        results.push(SelectionResult {
-            values_ssz: values,
-            witnesses: request.include_proof.then_some(witnesses),
-        });
+        result.witnesses = (request.include_proof && format == SelectionProofFormat::SingleBranch)
+            .then_some(witnesses);
+        results.push(result);
     }
+    let multiproof = if request.include_proof && format == SelectionProofFormat::Multiproof {
+        let available = remaining_materialization(
+            source_bytes,
+            value_bytes,
+            hashes.get(),
+            limits.source_bytes,
+        )?;
+        Some(multiproof::build(
+            snapshot.tree(),
+            &proof_nodes,
+            &proof_order,
+            limits,
+            available,
+            cancelled,
+        )?)
+    } else {
+        None
+    };
     let response = SelectionResponse {
         root: snapshot.root(),
-        proof_format: request.include_proof.then_some(SelectionProofFormat::SingleBranch),
+        proof_format: request.include_proof.then_some(format),
         results,
+        multiproof,
     };
     encoded_size(&response, limits.response_bytes, "response bytes")?;
+    if request.include_proof {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(SelectionError::Cancelled);
+        }
+        let available = verification_limits(&response, limits)?.source_bytes;
+        for (selection, result) in request.selections.iter().zip(&response.results) {
+            let target = resolve_eip(&tokens(&selection.path)?, &mut |index| {
+                node_at(snapshot.tree(), index).map_err(|_| SelectionError::InvalidProof)
+            })?;
+            let kind = match (&selection.operation, target.kind) {
+                (SelectionOperation::Filter { output: FilterOutput::Receipts, .. }, _) |
+                (SelectionOperation::Range { .. }, Kind::Receipts) => Some(Kind::Receipt(1)),
+                (SelectionOperation::Filter { output: FilterOutput::Logs, .. }, _) |
+                (SelectionOperation::Range { .. }, Kind::Logs) => Some(Kind::Log),
+                (SelectionOperation::Value {} | SelectionOperation::Whole {}, kind) => Some(kind),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                for value in &result.values_ssz {
+                    let kind = if matches!(kind, Kind::Receipt(_)) {
+                        Kind::Receipt(*value.first().ok_or(SelectionError::InvalidValue)?)
+                    } else {
+                        kind
+                    };
+                    if matches!(
+                        kind,
+                        Kind::Data |
+                            Kind::Topics |
+                            Kind::Authorities |
+                            Kind::Receipt(_) |
+                            Kind::Log |
+                            Kind::Receipts |
+                            Kind::Logs
+                    ) {
+                        check_whole_verification_budget(kind, value, available)?;
+                    }
+                }
+            }
+        }
+    }
     Ok(response)
+}
+
+fn verification_limits(
+    response: &SelectionResponse,
+    limits: SelectionLimits,
+) -> Result<SelectionLimits, SelectionError> {
+    let mut values = 0;
+    let mut cache = 0;
+    let mut hashes = 0;
+    for result in &response.results {
+        for value in &result.values_ssz {
+            add(&mut values, value.len(), limits.response_bytes, "value bytes")?;
+        }
+        if response.proof_format == Some(SelectionProofFormat::SingleBranch) {
+            for witness in result.witnesses.as_ref().ok_or(SelectionError::InvalidProof)? {
+                add(
+                    &mut hashes,
+                    witness.branch.len() + 1,
+                    limits.witness_hashes,
+                    "witness hashes",
+                )?;
+                add(&mut cache, 128, limits.source_bytes, "source bytes")?;
+            }
+        }
+    }
+    if response.proof_format == Some(SelectionProofFormat::Multiproof) {
+        cache = multiproof::proof_work(
+            response.multiproof.as_ref().ok_or(SelectionError::InvalidProof)?,
+            limits,
+        )?;
+    }
+    Ok(SelectionLimits {
+        source_bytes: remaining_materialization(cache, values, hashes, limits.source_bytes)?,
+        ..limits
+    })
 }
 
 pub fn verify_receipt_selection(
@@ -1041,16 +1230,21 @@ pub fn verify_receipt_selection(
     if !request.include_proof {
         return Err(SelectionError::Unverified);
     }
-    if response.root != expected_root ||
-        response.proof_format != Some(SelectionProofFormat::SingleBranch) ||
-        response.results.len() != request.selections.len()
-    {
+    if response.root != expected_root || response.results.len() != request.selections.len() {
         return Err(SelectionError::InvalidContext);
     }
     encoded_size(response, limits.response_bytes, "response bytes")?;
-    let mut claims = Vec::new();
+    if response.proof_format == Some(SelectionProofFormat::Multiproof) {
+        return multiproof::verify(request, response, expected_root, limits);
+    }
+    if response.proof_format != Some(SelectionProofFormat::SingleBranch) ||
+        response.multiproof.is_some()
+    {
+        return Err(SelectionError::InvalidContext);
+    }
     let mut targets = 0;
-    let mut hashes = 0;
+    let mut matches = 0;
+    let verification_limits = verification_limits(response, limits)?;
     for (selection, result) in request.selections.iter().zip(&response.results) {
         let witnesses = result.witnesses.as_ref().ok_or(SelectionError::InvalidProof)?;
         let mut remaining = witnesses.iter();
@@ -1060,23 +1254,22 @@ pub fn verify_receipt_selection(
                 return Ok(*node);
             }
             let witness = remaining.next().ok_or(SelectionError::InvalidProof)?;
-            add(&mut hashes, witness.branch.len() + 1, limits.witness_hashes, "witness hashes")?;
             verify_branch(witness.node, index, &witness.branch, expected_root)
                 .map_err(|_| SelectionError::InvalidProof)?;
             cache.insert(index, witness.node);
             Ok(witness.node)
         };
         resolve_eip(&tokens(&selection.path)?, &mut read)?;
-        let values = evaluate(
+        let evaluated = evaluate(
             selection,
             &mut read,
             Some(result.values_ssz.as_slice()),
             true,
-            &mut claims,
             &mut targets,
-            limits,
+            &mut matches,
+            verification_limits,
         )?;
-        if values != result.values_ssz {
+        if evaluated.values_ssz != result.values_ssz || evaluated.matches != result.matches {
             return Err(SelectionError::InvalidValue);
         }
         if remaining.next().is_some() {
@@ -1133,3 +1326,6 @@ pub(crate) fn encoded_size(
 
 #[cfg(test)]
 mod tests;
+
+mod filter;
+pub(crate) mod multiproof;

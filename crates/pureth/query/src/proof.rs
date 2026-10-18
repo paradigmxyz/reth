@@ -23,7 +23,7 @@ pub enum ProofError {
     RootMismatch,
 }
 
-fn hash_pair(left: &B256, right: &B256) -> B256 {
+pub(crate) fn hash_pair(left: &B256, right: &B256) -> B256 {
     let mut hasher = Sha256::new();
     hasher.update(left);
     hasher.update(right);
