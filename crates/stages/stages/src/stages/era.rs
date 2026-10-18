@@ -420,7 +420,7 @@ mod tests {
         // interpreted when assembling blocks, so placeholder values are fine.
         let component_count = 2;
         let offsets = vec![0; blocks.len() * component_count as usize];
-        let index = DynamicBlockIndex::new(start, component_count, offsets);
+        let index = DynamicBlockIndex::new(start, component_count, offsets).unwrap();
         let group = EreGroup::new(tuples, None, index);
         let file = EreFile::new(group, EreId::new("mainnet", start, blocks.len() as u32));
 

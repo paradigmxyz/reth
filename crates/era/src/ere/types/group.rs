@@ -92,12 +92,26 @@ impl DynamicBlockIndex {
     ///
     /// `offsets` must be block-major with exactly `component_count` entries per block; the encoded
     /// block count is derived as `offsets.len() / component_count`.
-    pub const fn new(
+    ///
+    /// Returns an error if `component_count` is outside 2-5 or the offsets do not contain a whole
+    /// number of blocks. Empty offsets are valid and represent an empty index.
+    pub fn new(
         starting_number: BlockNumber,
         component_count: u64,
         offsets: Vec<i64>,
-    ) -> Self {
-        Self { starting_number, component_count, offsets }
+    ) -> Result<Self, E2sError> {
+        if !(MIN_COMPONENTS_PER_BLOCK..=MAX_COMPONENTS_PER_BLOCK).contains(&component_count) {
+            return Err(E2sError::Ssz(format!(
+                "Invalid component-count for DynamicBlockIndex: expected 2-5, got {component_count}"
+            )));
+        }
+        if !offsets.len().is_multiple_of(component_count as usize) {
+            return Err(E2sError::Ssz(format!(
+                "DynamicBlockIndex has {} offsets, not a multiple of component-count {component_count}",
+                offsets.len()
+            )));
+        }
+        Ok(Self { starting_number, component_count, offsets })
     }
 
     /// Get the starting block number
@@ -112,9 +126,6 @@ impl DynamicBlockIndex {
 
     /// Get the number of blocks covered by this index
     pub const fn block_count(&self) -> usize {
-        if self.component_count == 0 {
-            return 0;
-        }
         self.offsets.len() / self.component_count as usize
     }
 
@@ -129,10 +140,12 @@ impl DynamicBlockIndex {
     /// `[header, body, (receipts)?, (difficulty)?, (proof)?]`, or `None` when the block is outside
     /// the range covered by this index.
     pub fn offsets_for_block(&self, block_number: BlockNumber) -> Option<&[i64]> {
-        if block_number < self.starting_number || self.component_count == 0 {
+        if block_number < self.starting_number {
             return None;
         }
-        let index = (block_number - self.starting_number) as usize;
+        let Ok(index) = usize::try_from(block_number - self.starting_number) else {
+            return None;
+        };
         let cc = self.component_count as usize;
         let start = index.checked_mul(cc)?;
         let end = start.checked_add(cc)?;
@@ -417,7 +430,8 @@ mod tests {
         // 2 blocks, 4 components each = 8 offsets
         let offsets = vec![100, 200, 300, 400, 500, 600, 700, 800];
 
-        let block_index = DynamicBlockIndex::new(starting_number, component_count, offsets.clone());
+        let block_index =
+            DynamicBlockIndex::new(starting_number, component_count, offsets.clone()).unwrap();
 
         let entry = block_index.to_entry();
         assert_eq!(entry.entry_type, DYNAMIC_BLOCK_INDEX);
@@ -438,7 +452,7 @@ mod tests {
             (2u64, vec![-2048, -1024, -512, -256]),
             (5u64, vec![-50, -40, -30, -20, -10, -9, -8, -7, -6, -5]),
         ] {
-            let index = DynamicBlockIndex::new(1000, component_count, offsets);
+            let index = DynamicBlockIndex::new(1000, component_count, offsets).unwrap();
             let recovered = DynamicBlockIndex::from_entry(&index.to_entry()).unwrap();
             assert_eq!(recovered, index);
         }
@@ -451,7 +465,8 @@ mod tests {
         // 3 blocks, 3 components each = 9 offsets
         let offsets = vec![10, 20, 30, 40, 50, 60, 70, 80, 90];
 
-        let block_index = DynamicBlockIndex::new(starting_number, component_count, offsets);
+        let block_index =
+            DynamicBlockIndex::new(starting_number, component_count, offsets).unwrap();
 
         // Block 1000: [10, 20, 30]
         assert_eq!(block_index.offsets_for_block(1000), Some(&[10, 20, 30][..]));
@@ -493,7 +508,7 @@ mod tests {
     #[test]
     fn test_dynamic_block_index_rejects_wrong_length() {
         // Encode a valid index, then drop a trailing byte so the declared count no longer matches.
-        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200, 300, 400]);
+        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200, 300, 400]).unwrap();
         let mut entry = block_index.to_entry();
         entry.data.pop();
 
@@ -511,7 +526,8 @@ mod tests {
         let blocks = vec![sample_block(10), sample_block(15), sample_block(20)];
 
         let accumulator = Accumulator::new(B256::repeat_byte(0xDD));
-        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200, 300, 400, 500, 600]);
+        let block_index =
+            DynamicBlockIndex::new(1000, 2, vec![100, 200, 300, 400, 500, 600]).unwrap();
 
         let group = EreGroup::new(blocks, Some(accumulator.clone()), block_index);
 
@@ -526,7 +542,7 @@ mod tests {
     fn test_ere_group_without_accumulator() {
         // Post-merge files carry no accumulator.
         let blocks = vec![sample_block(10)];
-        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200]);
+        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200]).unwrap();
 
         let group = EreGroup::new(blocks, None, block_index);
 
@@ -538,7 +554,7 @@ mod tests {
     fn test_ere_group_add_entries() {
         let blocks = vec![sample_block(10)];
         let accumulator = Accumulator::new(B256::repeat_byte(0xDD));
-        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200]);
+        let block_index = DynamicBlockIndex::new(1000, 2, vec![100, 200]).unwrap();
 
         let mut group = EreGroup::new(blocks, Some(accumulator), block_index);
         assert_eq!(group.other_entries.len(), 0);
@@ -555,7 +571,8 @@ mod tests {
     fn test_ere_group_with_mismatched_index() {
         // The group is a plain container; it does not validate that block count matches the index.
         let blocks = vec![sample_block(10), sample_block(15)];
-        let index = DynamicBlockIndex::new(2000, 2, vec![100, 200, 300, 400, 500, 600]); // 3 blocks
+        // The index covers three blocks, while the group only contains two.
+        let index = DynamicBlockIndex::new(2000, 2, vec![100, 200, 300, 400, 500, 600]).unwrap();
         let group = EreGroup::new(blocks, None, index);
         assert_eq!(group.blocks.len(), 2);
         assert_eq!(group.index.starting_number(), 2000);
@@ -643,4 +660,41 @@ mod tests {
         assert_eq!(id.to_file_name(), "mainnet-00000-00000000-noproofs-noreceipts.ere");
     }
 
+    #[test]
+    fn dynamic_block_index_constructor_rejects_invalid_components() {
+        for component_count in [0, 1, 6, u64::MAX] {
+            let err = DynamicBlockIndex::new(0, component_count, Vec::new()).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("SSZ error: Invalid component-count for DynamicBlockIndex: expected 2-5, got {component_count}")
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_block_index_constructor_rejects_incomplete_blocks() {
+        for offset_count in [1, 3, 5] {
+            let err = DynamicBlockIndex::new(0, 2, vec![-1; offset_count]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("SSZ error: DynamicBlockIndex has {offset_count} offsets, not a multiple of component-count 2")
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_block_index_constructor_preserves_encoding_invariants() {
+        for component_count in MIN_COMPONENTS_PER_BLOCK..=MAX_COMPONENTS_PER_BLOCK {
+            for block_count in 0..=3 {
+                let index = DynamicBlockIndex::new(
+                    1000,
+                    component_count,
+                    vec![-1; block_count * component_count as usize],
+                )
+                .unwrap();
+                assert_eq!(index.block_count(), block_count);
+                assert_eq!(DynamicBlockIndex::from_entry(&index.to_entry()).unwrap(), index);
+            }
+        }
+    }
 }

@@ -170,7 +170,7 @@ async fn test_ere_file_roundtrip(
             block_number,
             component_count,
             vec![0; component_count as usize],
-        );
+        )?;
         let new_group =
             EreGroup::new(vec![recompressed_block], original_file.group.accumulator.clone(), index);
         let new_file = EreFile::new(new_group, EreId::new(network, block_number, 1));

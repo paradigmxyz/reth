@@ -465,7 +465,7 @@ mod tests {
         // Offsets are placeholders here; the index is stored and read back verbatim, so the values
         // are not interpreted when assembling blocks.
         let offsets = (0..(block_count as u64 * component_count) as i64).collect();
-        let index = DynamicBlockIndex::new(start_block, component_count, offsets);
+        let index = DynamicBlockIndex::new(start_block, component_count, offsets).unwrap();
 
         let accumulator = with_accumulator.then(|| Accumulator::new(B256::repeat_byte(0xAA)));
         let group = EreGroup::new(blocks, accumulator, index);
@@ -596,7 +596,9 @@ mod tests {
             writer.write_entry(&b1.body.to_entry()).unwrap();
             // Only one receipts entry for two blocks.
             writer.write_entry(&CompressedSlimReceipts::new(vec![0xCC; 8]).to_entry()).unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1, 2, 3]).to_entry()).unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1, 2, 3]).unwrap().to_entry())
+                .unwrap();
             writer.flush().unwrap();
         }
 
@@ -644,7 +646,9 @@ mod tests {
             writer.write_entry(&b0.header.to_entry()).unwrap();
             writer.write_entry(&b1.header.to_entry()).unwrap();
             writer.write_entry(&b0.body.to_entry()).unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1, 2, 3]).to_entry()).unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1, 2, 3]).unwrap().to_entry())
+                .unwrap();
             writer.flush().unwrap();
         }
 
@@ -659,8 +663,12 @@ mod tests {
         {
             let mut writer = E2StoreWriter::new(&mut buffer);
             writer.write_version().unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).to_entry()).unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).to_entry()).unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).unwrap().to_entry())
+                .unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).unwrap().to_entry())
+                .unwrap();
             writer.flush().unwrap();
         }
 
@@ -676,7 +684,7 @@ mod tests {
             create_test_block(0, 8, true, false, false),
             create_test_block(1, 8, false, false, false),
         ];
-        let index = DynamicBlockIndex::new(0, 3, vec![0, 1, 2, 3, 4, 5]);
+        let index = DynamicBlockIndex::new(0, 3, vec![0, 1, 2, 3, 4, 5]).unwrap();
         let file = EreFile::new(EreGroup::new(blocks, None, index), EreId::new("testnet", 0, 2));
 
         let err = EreWriter::new(&mut Vec::new()).write_file(&file);
@@ -697,7 +705,7 @@ mod tests {
     fn test_ere_write_rejects_index_block_count_mismatch() {
         // Two blocks but an index that covers only one.
         let mut file = create_test_ere_file(0, 2, "testnet", false, false, false, false);
-        file.group.index = DynamicBlockIndex::new(0, 2, vec![0, 1]);
+        file.group.index = DynamicBlockIndex::new(0, 2, vec![0, 1]).unwrap();
 
         let err = EreWriter::new(&mut Vec::new()).write_file(&file);
         assert!(err.is_err());
@@ -716,7 +724,9 @@ mod tests {
             writer.write_entry(&b1.header.to_entry()).unwrap();
             writer.write_entry(&b0.body.to_entry()).unwrap();
             writer.write_entry(&b1.body.to_entry()).unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1]).to_entry()).unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, vec![0, 1]).unwrap().to_entry())
+                .unwrap();
             writer.flush().unwrap();
         }
 
@@ -750,7 +760,9 @@ mod tests {
             writer.write_version().unwrap();
             writer.write_entry(&Accumulator::new(B256::repeat_byte(0x11)).to_entry()).unwrap();
             writer.write_entry(&Accumulator::new(B256::repeat_byte(0x22)).to_entry()).unwrap();
-            writer.write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).to_entry()).unwrap();
+            writer
+                .write_entry(&DynamicBlockIndex::new(0, 2, Vec::new()).unwrap().to_entry())
+                .unwrap();
             writer.flush().unwrap();
         }
 
