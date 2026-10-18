@@ -17,6 +17,7 @@ use reth_node_core::{
     args::{DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
+use reth_primitives_traits::BlockBody;
 use reth_tasks::Runtime;
 
 pub mod bootnode;
@@ -80,7 +81,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     );
                 }
                 let body = result.into_iter().next().unwrap();
-                tracing::info!(target: "reth::cli", ?body, "Successfully downloaded body")
+                tracing::info!(target: "reth::cli", %hash, txs = body.transaction_count(), "Successfully downloaded body")
             }
             Subcommands::Rlpx(command) => {
                 command.execute().await?;
