@@ -260,7 +260,6 @@ impl<R: Read + Seek> Era1Reader<R> {
 pub struct Era1Writer<W: Write> {
     writer: E2StoreWriter<W>,
     has_written_version: bool,
-    has_written_blocks: bool,
     has_written_accumulator: bool,
     has_written_block_index: bool,
 }
@@ -273,7 +272,6 @@ impl<W: Write> StreamWriter<W> for Era1Writer<W> {
         Self {
             writer: E2StoreWriter::new(writer),
             has_written_version: false,
-            has_written_blocks: false,
             has_written_accumulator: false,
             has_written_block_index: false,
         }
@@ -356,8 +354,6 @@ impl<W: Write> Era1Writer<W> {
         // Write difficulty
         let difficulty_entry = block_tuple.total_difficulty.to_entry();
         self.writer.write_entry(&difficulty_entry)?;
-
-        self.has_written_blocks = true;
 
         Ok(())
     }
