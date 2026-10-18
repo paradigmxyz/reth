@@ -148,8 +148,8 @@ pub trait FileWriter {
 
     /// Writes a file in `directory` using its standardized era name.
     ///
-    /// Uses [`Self::create`] and has the same overwrite and failure semantics: an existing file
-    /// with that name is truncated, and errors can leave an empty or partial replacement.
+    /// Uses [`FileWriter::create`] and has the same overwrite and failure semantics: an existing
+    /// file with that name is truncated, and errors can leave an empty or partial replacement.
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>;
 }
 
@@ -170,8 +170,8 @@ impl<T: StreamWriter<File>> FileWriter for T {
 
     /// Writes a file in `directory` using its standardized era name.
     ///
-    /// Uses [`Self::create`] and has the same overwrite and failure semantics: an existing file
-    /// with that name is truncated, and errors can leave an empty or partial replacement.
+    /// Uses [`FileWriter::create`] and has the same overwrite and failure semantics: an existing
+    /// file with that name is truncated, and errors can leave an empty or partial replacement.
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError> {
         let filename = file.id().to_file_name();
         let path = directory.as_ref().join(filename);
