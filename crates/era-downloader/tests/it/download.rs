@@ -39,13 +39,13 @@ async fn test_getting_file_after_fetching_file_list(url: &str) {
     let url = client.url(0).await.unwrap().unwrap();
 
     let expected_count = 0;
-    let actual_count = client.files_count().await;
+    let actual_count = client.files_count().await.unwrap();
     assert_eq!(actual_count, expected_count);
 
     client.download_to_file(url).await.unwrap();
 
     let expected_count = 1;
-    let actual_count = client.files_count().await;
+    let actual_count = client.files_count().await.unwrap();
     assert_eq!(actual_count, expected_count);
 }
 
@@ -78,13 +78,13 @@ async fn test_getting_ere_file_after_fetching_file_list(url: &str) {
     let url = client.url(0).await.unwrap().unwrap();
 
     let expected_count = 0;
-    let actual_count = client.files_count().await;
+    let actual_count = client.files_count().await.unwrap();
     assert_eq!(actual_count, expected_count);
 
     client.download_to_file(url).await.unwrap();
 
     let expected_count = 1;
-    let actual_count = client.files_count().await;
+    let actual_count = client.files_count().await.unwrap();
     assert_eq!(actual_count, expected_count);
 }
 

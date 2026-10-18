@@ -4,6 +4,7 @@ use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
 use reth_era::common::file_ops::EraFileType;
+use reth_fs_util::FsPathError;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
@@ -128,37 +129,57 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         Ok(path.into_boxed_path())
     }
 
-    /// Recovers index of file following the latest downloaded file from a different run.
-    pub async fn recover_index(&self) -> Option<usize> {
+    /// Recovers the index following the latest downloaded file from a different run.
+    ///
+    /// Returns `Ok(None)` for a missing or empty cache. Directory access and enumeration failures,
+    /// and a latest index that cannot be incremented, are returned as errors.
+    pub async fn recover_index(&self) -> eyre::Result<Option<usize>> {
         let mut max = None;
-
-        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
-            while let Ok(Some(entry)) = dir.next_entry().await {
+        if let Some(mut dir) = self.read_download_dir().await? {
+            while let Some(entry) = dir
+                .next_entry()
+                .await
+                .map_err(|error| FsPathError::read_dir(error, self.folder.as_ref()))?
+            {
                 if let Some(name) = entry.file_name().to_str() &&
                     self.is_matching_era_file(name) &&
-                    let Some(number) = self.file_name_to_number(name) &&
-                    (max.is_none() || matches!(max, Some(max) if number > max))
+                    let Some(number) = self.file_name_to_number(name)
                 {
-                    max.replace(number + 1);
+                    let next = number.checked_add(1).ok_or_eyre("ERA file index overflow")?;
+                    max = max.max(Some(next));
                 }
             }
         }
 
-        max
+        Ok(max)
     }
 
-    /// Deletes files that are outside-of the working range.
+    /// Deletes downloaded files outside the half-open range `[index, index + max_files)`.
+    ///
+    /// This is destructive: matching archives outside the range are removed even if they have not
+    /// been processed. Unrelated files are retained. A missing directory is treated as empty;
+    /// other directory and deletion errors are returned to the caller.
     pub async fn delete_outside_range(&self, index: usize, max_files: usize) -> eyre::Result<()> {
-        let last = index + max_files;
+        let last = index.checked_add(max_files).ok_or_eyre("ERA cache range overflow")?;
 
-        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
-            while let Ok(Some(entry)) = dir.next_entry().await {
+        if let Some(mut dir) = self.read_download_dir().await? {
+            while let Some(entry) = dir
+                .next_entry()
+                .await
+                .map_err(|error| FsPathError::read_dir(error, self.folder.as_ref()))?
+            {
                 if let Some(name) = entry.file_name().to_str() &&
                     self.is_matching_era_file(name) &&
                     let Some(number) = self.file_name_to_number(name) &&
                     (number < index || number >= last)
                 {
-                    reth_fs_util::remove_file_if_exists(entry.path())?;
+                    match fs::remove_file(entry.path()).await {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => {
+                            return Err(FsPathError::remove_file(error, entry.path()).into())
+                        }
+                    }
                 }
             }
         }
@@ -171,12 +192,19 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         Ok(self.number_to_file_name(number).await?.map(|name| self.url.join(&name)).transpose()?)
     }
 
-    /// Returns the number of files in the `folder`.
-    pub async fn files_count(&self) -> usize {
+    /// Returns the number of downloaded archives matching this client's type.
+    ///
+    /// A missing directory counts as empty. Other directory access and enumeration failures are
+    /// returned as errors rather than a partial count.
+    pub async fn files_count(&self) -> eyre::Result<usize> {
         let mut count = 0usize;
 
-        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
-            while let Ok(Some(entry)) = dir.next_entry().await {
+        if let Some(mut dir) = self.read_download_dir().await? {
+            while let Some(entry) = dir
+                .next_entry()
+                .await
+                .map_err(|error| FsPathError::read_dir(error, self.folder.as_ref()))?
+            {
                 if let Some(ext) = entry.path().extension().and_then(|ext| ext.to_str()) &&
                     self.era_type
                         .extensions()
@@ -188,7 +216,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
             }
         }
 
-        count
+        Ok(count)
     }
 
     /// Fetches the list of ERA1/ERA files from `url` and stores it in a file located within
@@ -346,6 +374,14 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     fn is_matching_era_file(&self, file_name: &str) -> bool {
         EraFileType::from_filename(file_name) == Some(self.era_type)
     }
+
+    async fn read_download_dir(&self) -> eyre::Result<Option<fs::ReadDir>> {
+        match fs::read_dir(&self.folder).await {
+            Ok(dir) => Ok(Some(dir)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(FsPathError::read_dir(error, self.folder.as_ref()).into()),
+        }
+    }
 }
 
 /// Extracts an era filename ending in one of `extensions` from a single index line.
@@ -480,5 +516,86 @@ mod tests {
         assert_eq!(error.downcast_ref::<reqwest::Error>().unwrap().status(), Some(status));
         assert!(!folder.path().join(INDEX_HTML_FILE).exists());
         server.join().unwrap();
+    }
+
+    #[test_case(&[0, 1]; "ascending")]
+    #[test_case(&[1, 0]; "descending")]
+    #[test_case(&[5, 0, 1]; "sparse")]
+    #[tokio::test]
+    async fn recovery_returns_index_after_latest_file(numbers: &[usize]) {
+        let folder = tempfile::tempdir().unwrap();
+        for number in numbers {
+            reth_fs_util::write(
+                folder.path().join(format!("mainnet-{number:05}-deadbeef.era")),
+                b"",
+            )
+            .unwrap();
+        }
+        reth_fs_util::write(folder.path().join("mainnet-99999-deadbeef.era1"), b"").unwrap();
+        reth_fs_util::write(folder.path().join("mainnet-99999-deadbeef.tmp"), b"").unwrap();
+        let client = EraClient::new(
+            Client::new(),
+            Url::parse("https://example.com/").unwrap(),
+            folder.path(),
+        );
+        assert_eq!(client.recover_index().await.unwrap(), numbers.iter().max().map(|n| n + 1));
+    }
+
+    #[tokio::test]
+    async fn directory_errors_are_not_empty_cache_results() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("not-a-directory");
+        reth_fs_util::write(&path, b"").unwrap();
+        let client =
+            EraClient::new(Client::new(), Url::parse("https://example.com/").unwrap(), path);
+        for error in [
+            client.recover_index().await.unwrap_err(),
+            client.files_count().await.unwrap_err(),
+            client.delete_outside_range(0, 1).await.unwrap_err(),
+        ] {
+            let FsPathError::ReadDir { source, path } =
+                error.downcast_ref::<FsPathError>().unwrap()
+            else {
+                panic!("expected directory error: {error:?}");
+            };
+            assert_eq!(source.kind(), io::ErrorKind::NotADirectory);
+            assert_eq!(path, client.folder.as_ref());
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_directory_is_an_empty_cache() {
+        let folder = tempfile::tempdir().unwrap();
+        let client = EraClient::new(
+            Client::new(),
+            Url::parse("https://example.com/").unwrap(),
+            folder.path().join("missing"),
+        );
+        assert_eq!(client.recover_index().await.unwrap(), None);
+        assert_eq!(client.files_count().await.unwrap(), 0);
+        client.delete_outside_range(0, 1).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recovery_and_cache_range_reject_index_overflow() {
+        let folder = tempfile::tempdir().unwrap();
+        reth_fs_util::write(
+            folder.path().join(format!("mainnet-{}-deadbeef.era", usize::MAX)),
+            b"",
+        )
+        .unwrap();
+        let client = EraClient::new(
+            Client::new(),
+            Url::parse("https://example.com/").unwrap(),
+            folder.path(),
+        );
+        assert_eq!(
+            client.recover_index().await.unwrap_err().to_string(),
+            "ERA file index overflow"
+        );
+        assert_eq!(
+            client.delete_outside_range(usize::MAX, 1).await.unwrap_err().to_string(),
+            "ERA cache range overflow"
+        );
     }
 }

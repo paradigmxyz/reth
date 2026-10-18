@@ -88,10 +88,10 @@ impl<Http> EraStream<Http> {
             },
             starting_stream: StartingStream {
                 client,
-                files_count: Box::pin(async move { usize::MAX }),
+                files_count: Box::pin(async move { Ok(usize::MAX) }),
                 next_url: Box::pin(async move { Ok(None) }),
                 delete_outside_range: Box::pin(async move { Ok(()) }),
-                recover_index: Box::pin(async move { None }),
+                recover_index: Box::pin(async move { Ok(None) }),
                 fetch_file_list: Box::pin(async move { Ok(()) }),
                 state: Default::default(),
                 max_files: config.max_files,
@@ -220,10 +220,11 @@ impl Stream for DownloadStream {
 
 struct StartingStream<Http> {
     client: EraClient<Http>,
-    files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
+    files_count: Pin<Box<dyn Future<Output = eyre::Result<usize>> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
     delete_outside_range: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
-    recover_index: Pin<Box<dyn Future<Output = Option<usize>> + Send + Sync + 'static>>,
+    recover_index:
+        Pin<Box<dyn Future<Output = eyre::Result<Option<usize>>> + Send + Sync + 'static>>,
     fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
@@ -289,15 +290,30 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
         }
 
         if self.state == State::RecoverIndex &&
-            let Poll::Ready(last) = self.recover_index.poll_unpin(cx)
+            let Poll::Ready(result) = self.recover_index.poll_unpin(cx)
         {
-            self.last = last;
-            self.count_files();
+            match result {
+                Ok(last) => {
+                    self.last = last;
+                    self.count_files();
+                }
+                Err(error) => {
+                    self.recover_index();
+                    return Poll::Ready(Some(Box::pin(async move { Err(error) })));
+                }
+            }
         }
 
         if self.state == State::CountFiles &&
-            let Poll::Ready(downloaded) = self.files_count.poll_unpin(cx)
+            let Poll::Ready(result) = self.files_count.poll_unpin(cx)
         {
+            let downloaded = match result {
+                Ok(downloaded) => downloaded,
+                Err(error) => {
+                    self.count_files();
+                    return Poll::Ready(Some(Box::pin(async move { Err(error) })));
+                }
+            };
             let max_missing = self
                 .max_files
                 .saturating_sub(downloaded + self.downloading)
