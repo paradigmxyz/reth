@@ -39,7 +39,7 @@ pub use catch_up::{
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::SnapGeneration;
-pub use pivot::SnapPivotPolicy;
+pub use pivot::{SnapPivotPolicy, DEFAULT_HEAD_DISTANCE};
 pub use reorg::{BlockWithAccessListHash, SnapReorg};
 pub use repair::StateRepairs;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
