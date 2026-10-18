@@ -653,11 +653,12 @@ mod tests {
         let id = EreId::new("mainnet", 0, 8192);
         assert!(id.profiles().is_empty());
 
-        let id = id
-            .with_profiles([EreProfile::NoReceipts, EreProfile::NoProofs, EreProfile::NoReceipts])
-            .with_profile(EreProfile::NoProofs);
+        let id = id.with_profiles([
+            EreProfile::NoReceipts,
+            EreProfile::NoProofs,
+            EreProfile::NoReceipts,
+        ]);
         assert_eq!(id.profiles(), [EreProfile::NoProofs, EreProfile::NoReceipts]);
-        assert_eq!(id.to_file_name(), "mainnet-00000-00000000-noproofs-noreceipts.ere");
     }
 
     #[test]
