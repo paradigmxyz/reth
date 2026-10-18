@@ -1,0 +1,25 @@
+[package]
+name = "reth-pureth-transaction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+ethereum_ssz.workspace = true
+reth-pureth-ssz.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+alloy-consensus = { workspace = true, features = ["secp256k1"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+alloy-consensus = { workspace = true, features = ["k256"] }

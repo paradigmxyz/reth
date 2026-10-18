@@ -13,6 +13,7 @@ workspace = true
 
 [features]
 test-utils = [
+    "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
@@ -31,5 +32,6 @@ reth-pureth-ssz.workspace = true
 tree_hash.workspace = true
 
 [dev-dependencies]
+reth-chain-state.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 serde_json.workspace = true

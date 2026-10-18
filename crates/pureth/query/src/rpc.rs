@@ -227,9 +227,7 @@ mod tests {
             HistoricalAcquisitionError::ReceiptsUnavailable,
             HistoricalAcquisitionError::Snapshot(
                 reth_pureth_receipt::Eip6466SnapshotError::MissingData(
-                    reth_pureth_receipt::ReceiptConstructionError::MissingAuthorizationOutcomes {
-                        transaction_hash: B256::ZERO,
-                    },
+                    reth_pureth_receipt::ReceiptConstructionError::MissingAuthorizationList,
                 ),
             ),
             HistoricalAcquisitionError::BlockRead(ProviderError::BlockExpired {

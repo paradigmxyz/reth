@@ -156,6 +156,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn incomplete_or_gapped_receipts_do_not_return_a_root() {
+        for (indices, expected) in [(vec![0usize], Some(2)), (vec![1], None)] {
+            let (tx, rx) = bounded::<IndexedReceipt<Receipt>>(2);
+            let (result_tx, result_rx) = oneshot::channel();
+            for index in indices {
+                tx.send(IndexedReceipt::new(index, Receipt::default())).unwrap();
+            }
+            drop(tx);
+            let handle = ReceiptRootTaskHandle::new(rx, result_tx);
+            tokio::task::spawn_blocking(move || handle.run(expected)).await.unwrap();
+            assert!(result_rx.await.is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn test_receipt_root_task_single_receipt() {
         let receipts: Vec<Receipt> = vec![Receipt::default()];
 

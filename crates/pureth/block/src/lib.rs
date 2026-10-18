@@ -4,7 +4,35 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_pureth_ssz::{merkleize_progressive, mix_in_length, RetainedNode, TreeConstructionError};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+mod payload;
+mod requests;
+mod summary_codec;
+pub use payload::{
+    BlockAccessListSnapshot, ExecutionPayloadFields, ExecutionPayloadSnapshot, PayloadComponents,
+    PayloadError, PayloadLimits,
+};
+pub use requests::{
+    ConsolidationRequest, DepositRequest, ExecutionRequests, ExecutionRequestsSnapshot,
+    RequestsError, WithdrawalRequest,
+};
+pub use summary_codec::{ExecutionSummarySnapshot, SummaryCodecError};
+
+#[cfg(feature = "native-primitives")]
+mod primitives;
+#[cfg(feature = "native-primitives")]
+pub use primitives::{
+    ExecutionBlock, ExecutionBody, ExecutionHeader, ExecutionPrimitives, PrimitiveError,
+};
+
+#[cfg(feature = "native-source")]
+mod source;
+#[cfg(feature = "native-source")]
+pub use source::{
+    PayloadSourceError, PayloadSourceInput, PayloadSourceKind, PayloadSourceMetadata,
+    SourcePayloadSnapshot, StateRootStatus,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct GasAmounts {
     pub regular: u64,
     pub blob: u64,
@@ -24,7 +52,7 @@ impl GasAmounts {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct BlobFeesPerGas {
     pub regular: U256,
     pub blob: U256,
@@ -50,7 +78,7 @@ impl BlobFeesPerGas {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
 pub struct ExecutionSummary {
     pub parent_hash: B256,
     pub miner: Address,
@@ -88,6 +116,7 @@ impl From<TreeConstructionError> for BlockCommitmentError {
 
 impl ExecutionSummary {
     pub fn tree(&self) -> Result<RetainedNode, BlockCommitmentError> {
+        self.validate()?;
         let Self {
             parent_hash,
             miner,
@@ -108,15 +137,6 @@ impl ExecutionSummary {
             block_access_list_root,
             slot_number,
         } = self;
-        if extra_data.len() > 32 {
-            return Err(BlockCommitmentError::ExtraDataTooLong);
-        }
-        if gas_used.regular > gas_limits.regular || gas_used.blob > gas_limits.blob {
-            return Err(BlockCommitmentError::GasUsedExceedsLimit);
-        }
-        if excess_gas.regular != 0 {
-            return Err(BlockCommitmentError::UnsupportedRegularExcess);
-        }
         let extra = mix_in_length(
             RetainedNode::leaf(B256::right_padding_from(extra_data)),
             extra_data.len(),
@@ -144,6 +164,21 @@ impl ExecutionSummary {
             ],
             0x03ffff,
         )?)
+    }
+
+    fn validate(&self) -> Result<(), BlockCommitmentError> {
+        if self.extra_data.len() > 32 {
+            return Err(BlockCommitmentError::ExtraDataTooLong);
+        }
+        if self.gas_used.regular > self.gas_limits.regular ||
+            self.gas_used.blob > self.gas_limits.blob
+        {
+            return Err(BlockCommitmentError::GasUsedExceedsLimit);
+        }
+        if self.excess_gas.regular != 0 {
+            return Err(BlockCommitmentError::UnsupportedRegularExcess);
+        }
+        Ok(())
     }
 }
 

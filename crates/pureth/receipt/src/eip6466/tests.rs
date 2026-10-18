@@ -1,7 +1,62 @@
 use super::*;
 use alloy_consensus::{Header, TxEip7702, TxLegacy};
 use alloy_primitives::{b256, hex, Log as ExecutionLog, Signature, TxKind};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_ethereum_primitives::{BlockBody, Transaction as EthereumTransaction};
+
+fn chain_spec() -> ChainSpec {
+    ChainSpecBuilder::mainnet().byzantium_activated().build()
+}
+
+#[test]
+fn amsterdam_receipt_charges_are_not_block_resource_gas() {
+    let block = recovered_block(
+        vec![
+            legacy_transaction(0, TxKind::Call(Address::ZERO)),
+            legacy_transaction(1, TxKind::Call(Address::ZERO)),
+        ],
+        vec![address(1), address(2)],
+        90_000,
+        100_000,
+    );
+    let stored = [
+        stored_receipt(TxType::Legacy, true, 70_000, Vec::new()),
+        stored_receipt(TxType::Legacy, true, 140_000, Vec::new()),
+    ];
+    assert!(matches!(
+        receipts_from_block(&block, &stored, &chain_spec()),
+        Err(ReceiptConstructionError::CumulativeGasExceedsBlockLimit { index: 1, .. })
+    ));
+    let spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
+    let receipts = receipts_from_block(&block, &stored, &spec).unwrap();
+    assert_eq!(receipts.get(0).unwrap().gas_used(), 70_000);
+    assert_eq!(receipts.get(1).unwrap().gas_used(), 70_000);
+}
+
+#[test]
+fn signed_gas_limits_and_empty_block_gas_still_apply_in_both_forks() {
+    for spec in [chain_spec(), ChainSpecBuilder::mainnet().amsterdam_activated().build()] {
+        let block = recovered_block(
+            vec![legacy_transaction(0, TxKind::Call(Address::ZERO))],
+            vec![address(1)],
+            21_000,
+            2_000_000,
+        );
+        let stored = [stored_receipt(TxType::Legacy, true, 1_000_001, Vec::new())];
+        assert_eq!(
+            receipts_from_block(&block, &stored, &spec),
+            Err(ReceiptConstructionError::TransactionGasUsedExceedsLimit {
+                index: 0,
+                gas_used: 1_000_001,
+                gas_limit: 1_000_000
+            })
+        );
+        assert_eq!(
+            receipts_from_block(&recovered_block(Vec::new(), Vec::new(), 1, 1), &[], &spec),
+            Err(ReceiptConstructionError::BlockGasUsedMismatch { header: 1, receipts: 0 })
+        );
+    }
+}
 
 #[test]
 fn codec_roundtrips_receipt_variants_and_lists() {
@@ -37,11 +92,17 @@ fn codec_roundtrips_receipt_variants_and_lists() {
 #[test]
 fn codec_rejects_noncanonical_receipt_encodings() {
     assert!(Receipt::from_ssz_bytes(&[]).is_err());
+    let basic = receipt_variants()[0].to_ssz_bytes().unwrap();
+    assert_eq!(Receipt::from_ssz_bytes(&basic).unwrap(), receipt_variants()[0]);
     for selector in [0, 4, 127, 255] {
-        assert!(Receipt::from_ssz_bytes(&[selector]).is_err());
+        let mut bytes = basic.clone();
+        bytes[0] = selector;
+        assert_eq!(
+            Receipt::from_ssz_bytes(&bytes),
+            Err(ssz::DecodeError::UnionSelectorInvalid(selector))
+        );
     }
 
-    let basic = receipt_variants()[0].to_ssz_bytes().unwrap();
     let mut invalid_bool = basic.clone();
     invalid_bool[33] = 2;
     assert!(Receipt::from_ssz_bytes(&invalid_bool).is_err());
@@ -100,11 +161,13 @@ fn receipt_accessors_preserve_variant_presence() {
 }
 
 #[test]
-fn historical_acquisition_rejects_set_code_and_mixed_blocks_without_outcomes() {
+fn historical_acquisition_recovers_set_code_and_mixed_block_authorities() {
     let (set_code, stored) = set_code_block_fixture(false);
-    let transaction = set_code.body().transactions[0].clone();
     let mixed = recovered_block(
-        vec![legacy_transaction(0, TxKind::Call(address(2))), transaction],
+        vec![
+            legacy_transaction(0, TxKind::Call(address(2))),
+            set_code.body().transactions[0].clone(),
+        ],
         vec![address(1), address(0x61)],
         51_000,
         100_000,
@@ -114,6 +177,8 @@ fn historical_acquisition_rejects_set_code_and_mixed_blocks_without_outcomes() {
         stored_receipt(TxType::Eip7702, false, 51_000, Vec::new()),
     ];
     for (block, receipts) in [(set_code, stored.to_vec()), (mixed, mixed_stored)] {
+        let expected =
+            Eip6466ReceiptSnapshot::from_block(&block, &receipts, &chain_spec()).unwrap();
         let (provider, hash) = crate::test_utils::historical_provider_for_block(
             block,
             Some(receipts),
@@ -121,14 +186,18 @@ fn historical_acquisition_rejects_set_code_and_mixed_blocks_without_outcomes() {
                 reth_chainspec::ChainSpecBuilder::mainnet().byzantium_activated().build(),
             ),
         );
-        let error = crate::ProviderSnapshot::from_reth_historical(&provider, hash).unwrap_err();
-        assert!(error.is_unavailable());
-        assert!(matches!(
-            error,
-            crate::HistoricalAcquisitionError::Snapshot(Eip6466SnapshotError::MissingData(
-                ReceiptConstructionError::MissingAuthorizationOutcomes { .. }
-            ))
-        ));
+        let snapshot = crate::ProviderSnapshot::from_reth_historical(&provider, hash).unwrap();
+        assert_eq!(snapshot.receipt_snapshot().serialized(), expected.serialized());
+        let children = snapshot.receipt_snapshot().tree().children().unwrap().as_ptr();
+        let receipts = snapshot.into_receipt_snapshot();
+        assert_eq!(receipts.tree().children().unwrap().as_ptr(), children);
+        assert_eq!(
+            receipts.receipts().as_slice().last().unwrap().authorities().unwrap(),
+            &[
+                Address::from(hex!("4fd357b597c2d9c930a24645958f8cbc43a11d2e")),
+                Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820")),
+            ]
+        );
     }
 }
 
@@ -206,7 +275,12 @@ fn recovered_block(
 
 fn legacy_transaction(nonce: u64, to: TxKind) -> TransactionSigned {
     TransactionSigned::new_unhashed(
-        EthereumTransaction::Legacy(TxLegacy { nonce, to, ..Default::default() }),
+        EthereumTransaction::Legacy(TxLegacy {
+            nonce,
+            to,
+            gas_limit: 1_000_000,
+            ..Default::default()
+        }),
         Signature::test_signature(),
     )
 }
@@ -214,6 +288,7 @@ fn legacy_transaction(nonce: u64, to: TxKind) -> TransactionSigned {
 fn set_code_transaction() -> TxEip7702 {
     TxEip7702 {
         chain_id: 1,
+        gas_limit: 1_000_000,
         authorization_list: serde_json::from_value(serde_json::json!([
             {
                 "chainId": "0x0",
@@ -286,21 +361,6 @@ fn set_code_block_fixture(success: bool) -> (RecoveredBlock<Block>, [StoredRecei
     let stored = [stored_receipt(TxType::Eip7702, success, 30_000, Vec::new())];
 
     (block, stored)
-}
-
-fn singleton_authorization_outcomes(
-    block: &RecoveredBlock<Block>,
-    outcomes: Vec<AuthorizationOutcome>,
-) -> BlockAuthorizationOutcomes {
-    assert_eq!(block.body().transactions.len(), 1);
-
-    BlockAuthorizationOutcomes::new(
-        block.hash(),
-        vec![Some(TransactionAuthorizationOutcomes::new(
-            *block.body().transactions[0].hash(),
-            outcomes,
-        ))],
-    )
 }
 
 #[test]
@@ -424,7 +484,7 @@ fn block_conversion_preserves_senders_gas_status_and_logs() {
         ),
     ];
 
-    let converted = receipts_from_block(&block, &stored_receipts, true, None).unwrap();
+    let converted = receipts_from_block(&block, &stored_receipts, &chain_spec()).unwrap();
 
     assert_eq!(converted.len(), 2);
 
@@ -468,7 +528,7 @@ fn failed_create_has_zero_contract_address() {
     let stored_receipts = [stored_receipt(TxType::Legacy, false, 53_000, Vec::new())];
 
     let snapshot =
-        Eip6466ReceiptSnapshot::from_block(&block, &stored_receipts, true, None).unwrap();
+        Eip6466ReceiptSnapshot::from_block(&block, &stored_receipts, &chain_spec()).unwrap();
     let converted = snapshot.receipts();
 
     match converted.get(0).unwrap() {
@@ -503,7 +563,7 @@ fn successful_create_keeps_derived_contract_address() {
     let block =
         recovered_block(vec![legacy_transaction(7, TxKind::Create)], vec![sender], 53_000, 60_000);
     let stored = [stored_receipt(TxType::Legacy, true, 53_000, Vec::new())];
-    let converted = receipts_from_block(&block, &stored, true, None).unwrap();
+    let converted = receipts_from_block(&block, &stored, &chain_spec()).unwrap();
     let Receipt::Create(receipt) = converted.get(0).unwrap() else {
         panic!("expected Create receipt");
     };
@@ -512,43 +572,60 @@ fn successful_create_keeps_derived_contract_address() {
 }
 
 #[test]
-fn recoverable_skipped_authorization_commits_zero() {
-    let mut payload = set_code_transaction();
+fn recovered_authorities_do_not_depend_on_chain_or_nonce_acceptance() {
+    for (field, value) in [("chainId", "0x2"), ("nonce", "0xffffffffffffffff")] {
+        let mut payload = set_code_transaction();
+        let mut authorization = serde_json::to_value(&payload.authorization_list[0]).unwrap();
+        authorization[field] = serde_json::json!(value);
+        payload.authorization_list[0] = serde_json::from_value(authorization).unwrap();
+        let expected = payload.authorization_list[0].recover_authority().unwrap();
+        let transaction = TransactionSigned::new_unhashed(
+            EthereumTransaction::Eip7702(payload),
+            Signature::test_signature(),
+        );
+        let receipt =
+            receipt_from_transaction(&transaction, address(1), 30_000, Vec::new(), true).unwrap();
+        assert_eq!(receipt.authorities().unwrap()[0], expected);
+        assert_ne!(expected, Address::ZERO);
+    }
+}
 
-    let mut authorization = serde_json::to_value(&payload.authorization_list[0]).unwrap();
+#[test]
+fn invalid_inner_signatures_commit_zero_without_losing_other_positions() {
+    for (field, value) in [
+        ("r", "0x0"),
+        ("s", "0x0"),
+        ("yParity", "0x2"),
+        ("s", "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+    ] {
+        let mut payload = set_code_transaction();
+        let mut authorization = serde_json::to_value(&payload.authorization_list[0]).unwrap();
+        authorization[field] = serde_json::json!(value);
+        payload.authorization_list[0] = serde_json::from_value(authorization).unwrap();
+        assert!(payload.authorization_list[0].recover_authority().is_err());
+        let transaction = TransactionSigned::new_unhashed(
+            EthereumTransaction::Eip7702(payload),
+            Signature::test_signature(),
+        );
+        let receipt =
+            receipt_from_transaction(&transaction, address(1), 30_000, Vec::new(), false).unwrap();
+        assert_eq!(
+            receipt.authorities().unwrap(),
+            &[Address::ZERO, Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820"))]
+        );
+    }
+}
 
-    authorization["chainId"] = serde_json::json!("0x2");
-    payload.authorization_list[0] = serde_json::from_value(authorization).unwrap();
-
-    assert_ne!(payload.authorization_list[0].recover_authority().unwrap(), Address::ZERO,);
-
+#[test]
+fn empty_authorization_list_is_a_conversion_failure() {
     let transaction = TransactionSigned::new_unhashed(
-        EthereumTransaction::Eip7702(payload),
+        EthereumTransaction::Eip7702(TxEip7702::default()),
         Signature::test_signature(),
     );
-
-    let second = Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820"));
-
-    let outcomes = TransactionAuthorizationOutcomes::new(
-        *transaction.hash(),
-        vec![AuthorizationOutcome::Skipped, AuthorizationOutcome::Accepted(second)],
+    assert_eq!(
+        receipt_from_transaction(&transaction, address(1), 30_000, Vec::new(), true),
+        Err(ReceiptConstructionError::EmptyAuthorizationList)
     );
-
-    let converted = receipt_from_transaction(
-        &transaction,
-        address(1),
-        30_000,
-        Vec::new(),
-        true,
-        Some(&outcomes),
-    )
-    .unwrap();
-
-    let Receipt::SetCode(receipt) = converted else {
-        panic!("expected SetCode receipt");
-    };
-
-    assert_eq!(receipt.authorities, vec![Address::ZERO, second]);
 }
 
 #[test]
@@ -568,7 +645,7 @@ fn equal_cumulative_gas_produces_zero_individual_gas() {
         stored_receipt(TxType::Legacy, true, 21_000, Vec::new()),
     ];
 
-    let converted = receipts_from_block(&block, &stored_receipts, true, None).unwrap();
+    let converted = receipts_from_block(&block, &stored_receipts, &chain_spec()).unwrap();
 
     match converted.get(1).unwrap() {
         Receipt::Basic(receipt) => assert_eq!(receipt.gas_used, 0),
@@ -593,7 +670,7 @@ fn block_conversion_rejects_decreasing_cumulative_gas() {
         stored_receipt(TxType::Legacy, true, 40_000, Vec::new()),
     ];
 
-    let error = receipts_from_block(&block, &stored_receipts, true, None).unwrap_err();
+    let error = receipts_from_block(&block, &stored_receipts, &chain_spec()).unwrap_err();
 
     assert_eq!(
         error,
@@ -614,12 +691,32 @@ fn block_conversion_rejects_input_count_mismatch() {
         30_000,
     );
 
-    let error = receipts_from_block(&block, &[], true, None).unwrap_err();
+    let error = receipts_from_block(&block, &[], &chain_spec()).unwrap_err();
 
     assert_eq!(
         error,
         ReceiptConstructionError::InputCountMismatch { transactions: 1, receipts: 0 }
     );
+
+    let stored = [stored_receipt(TxType::Legacy, true, 21_000, Vec::new())];
+    for spec in [chain_spec(), ChainSpecBuilder::mainnet().amsterdam_activated().build()] {
+        for senders in [Vec::new(), vec![address(1), address(2)]] {
+            let count = senders.len();
+            let malformed = RecoveredBlock::new_unhashed(block.clone_block(), senders);
+            let error = receipts_from_block(&malformed, &stored, &spec).unwrap_err();
+            assert_eq!(
+                error,
+                ReceiptConstructionError::SenderCountMismatch { transactions: 1, senders: count }
+            );
+            assert_eq!(
+                matches!(
+                    Eip6466SnapshotError::from_construction(error),
+                    Eip6466SnapshotError::MissingData(_)
+                ),
+                count < 1
+            );
+        }
+    }
 }
 
 #[test]
@@ -633,7 +730,7 @@ fn block_conversion_rejects_transaction_type_mismatch() {
 
     let stored_receipts = [stored_receipt(TxType::Eip1559, true, 21_000, Vec::new())];
 
-    let error = receipts_from_block(&block, &stored_receipts, true, None).unwrap_err();
+    let error = receipts_from_block(&block, &stored_receipts, &chain_spec()).unwrap_err();
 
     assert_eq!(
         error,
@@ -656,7 +753,7 @@ fn block_conversion_rejects_pre_eip658_receipts() {
 
     let stored_receipts = [stored_receipt(TxType::Legacy, true, 21_000, Vec::new())];
 
-    let error = receipts_from_block(&block, &stored_receipts, false, None).unwrap_err();
+    let error = receipts_from_block(&block, &stored_receipts, MAINNET.as_ref()).unwrap_err();
 
     assert_eq!(error, ReceiptConstructionError::PreEip658Block);
 }
@@ -672,7 +769,7 @@ fn block_conversion_rejects_final_gas_mismatch() {
 
     let stored_receipts = [stored_receipt(TxType::Legacy, true, 21_000, Vec::new())];
 
-    let error = receipts_from_block(&block, &stored_receipts, true, None).unwrap_err();
+    let error = receipts_from_block(&block, &stored_receipts, &chain_spec()).unwrap_err();
 
     assert_eq!(
         error,
@@ -681,19 +778,13 @@ fn block_conversion_rejects_final_gas_mismatch() {
 }
 
 #[test]
-fn failed_set_code_status_keeps_supplied_accepted_authorities() {
+fn failed_set_code_status_keeps_recovered_authorities() {
     let (block, stored) = set_code_block_fixture(false);
 
     let first = Address::from(hex!("4fd357b597c2d9c930a24645958f8cbc43a11d2e"));
     let second = Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820"));
 
-    let outcomes = singleton_authorization_outcomes(
-        &block,
-        vec![AuthorizationOutcome::Accepted(first), AuthorizationOutcome::Accepted(second)],
-    );
-
-    let snapshot =
-        Eip6466ReceiptSnapshot::from_block(&block, &stored, true, Some(&outcomes)).unwrap();
+    let snapshot = Eip6466ReceiptSnapshot::from_block(&block, &stored, &chain_spec()).unwrap();
 
     let Receipt::SetCode(receipt) = snapshot.receipts().get(0).unwrap() else {
         panic!("expected SetCode receipt");
@@ -924,7 +1015,7 @@ fn snapshot_distinguishes_missing_data_from_conversion_failure() {
     let empty = recovered_block(Vec::new(), Vec::new(), 0, 0);
 
     assert!(matches!(
-        Eip6466ReceiptSnapshot::from_block(&empty, &[], false, None),
+        Eip6466ReceiptSnapshot::from_block(&empty, &[], MAINNET.as_ref()),
         Err(Eip6466SnapshotError::MissingData(ReceiptConstructionError::PreEip658Block))
     ));
 
@@ -936,14 +1027,14 @@ fn snapshot_distinguishes_missing_data_from_conversion_failure() {
     );
 
     assert!(matches!(
-        Eip6466ReceiptSnapshot::from_block(&missing_receipt, &[], true, None),
+        Eip6466ReceiptSnapshot::from_block(&missing_receipt, &[], &chain_spec()),
         Err(Eip6466SnapshotError::MissingData(ReceiptConstructionError::InputCountMismatch { .. }))
     ));
 
     let invalid_header = recovered_block(Vec::new(), Vec::new(), 1, 0);
 
     assert!(matches!(
-        Eip6466ReceiptSnapshot::from_block(&invalid_header, &[], true, None),
+        Eip6466ReceiptSnapshot::from_block(&invalid_header, &[], &chain_spec()),
         Err(Eip6466SnapshotError::Conversion(
             ReceiptConstructionError::HeaderGasUsedExceedsLimit { .. }
         ))
@@ -951,243 +1042,76 @@ fn snapshot_distinguishes_missing_data_from_conversion_failure() {
 }
 
 #[test]
-fn duplicate_authorization_tuples_keep_separate_outcome_positions() {
+fn duplicate_authorization_tuples_keep_separate_recovered_positions() {
     let mut payload = set_code_transaction();
-
     payload.authorization_list.insert(1, payload.authorization_list[0].clone());
-
     let transaction = TransactionSigned::new_unhashed(
         EthereumTransaction::Eip7702(payload),
         Signature::test_signature(),
     );
-
+    let receipt =
+        receipt_from_transaction(&transaction, address(1), 30_000, Vec::new(), true).unwrap();
     let first = Address::from(hex!("4fd357b597c2d9c930a24645958f8cbc43a11d2e"));
     let second = Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820"));
-
-    let outcomes = TransactionAuthorizationOutcomes::new(
-        *transaction.hash(),
-        vec![
-            AuthorizationOutcome::Accepted(first),
-            AuthorizationOutcome::Skipped,
-            AuthorizationOutcome::Accepted(second),
-        ],
-    );
-
-    let converted = receipt_from_transaction(
-        &transaction,
-        address(1),
-        30_000,
-        Vec::new(),
-        true,
-        Some(&outcomes),
-    )
-    .unwrap();
-
-    let Receipt::SetCode(receipt) = converted else {
-        panic!("expected SetCode receipt");
-    };
-
-    assert_eq!(receipt.authorities.len(), 3);
-    assert_eq!(receipt.authorities, vec![first, Address::ZERO, second]);
+    assert_eq!(receipt.authorities().unwrap(), &[first, first, second]);
 }
 
 #[test]
-fn set_code_without_outcomes_is_missing_data() {
-    let (block, stored) = set_code_block_fixture(true);
-    let transaction_hash = *block.body().transactions[0].hash();
-
-    assert_eq!(
-        receipts_from_block(&block, &stored, true, None).unwrap_err(),
-        ReceiptConstructionError::MissingAuthorizationOutcomes { transaction_hash },
-    );
-
-    assert!(matches!(
-        Eip6466ReceiptSnapshot::from_block(&block, &stored, true, None),
-        Err(Eip6466SnapshotError::MissingData(
-            ReceiptConstructionError::MissingAuthorizationOutcomes { .. }
-        )),
-    ));
-}
-
-#[test]
-fn missing_set_code_record_is_not_an_all_skipped_record() {
-    let (block, stored) = set_code_block_fixture(true);
-
-    let outcomes = BlockAuthorizationOutcomes::new(block.hash(), vec![None]);
-
-    assert!(matches!(
-        receipts_from_block(&block, &stored, true, Some(&outcomes)),
-        Err(ReceiptConstructionError::MissingAuthorizationOutcomes { .. }),
-    ));
-}
-
-#[test]
-fn mismatched_authorization_block_is_rejected() {
-    let (block, stored) = set_code_block_fixture(true);
-
-    let mut outcomes =
-        singleton_authorization_outcomes(&block, vec![AuthorizationOutcome::Skipped; 2]);
-
-    let wrong_hash = block.hash() ^ B256::repeat_byte(0xff);
-    outcomes.block_hash = wrong_hash;
-
-    assert_eq!(
-        receipts_from_block(&block, &stored, true, Some(&outcomes)).unwrap_err(),
-        ReceiptConstructionError::AuthorizationBlockMismatch {
-            expected: block.hash(),
-            actual: wrong_hash,
-        },
-    );
-}
-
-#[test]
-fn mismatched_authorization_record_counts_are_rejected() {
-    let (block, stored) = set_code_block_fixture(true);
-
-    for records in [Vec::new(), vec![None, None]] {
-        let record_count = records.len();
-
-        let outcomes = BlockAuthorizationOutcomes::new(block.hash(), records);
-
-        assert_eq!(
-            receipts_from_block(&block, &stored, true, Some(&outcomes)).unwrap_err(),
-            ReceiptConstructionError::AuthorizationRecordCountMismatch {
-                transactions: 1,
-                records: record_count,
-            },
-        );
-    }
-}
-
-#[test]
-fn mismatched_authorization_transaction_is_rejected() {
-    let (block, stored) = set_code_block_fixture(true);
-
-    let transaction_hash = *block.body().transactions[0].hash();
-    let wrong_hash = transaction_hash ^ B256::repeat_byte(0xff);
-
-    let outcomes = BlockAuthorizationOutcomes::new(
-        block.hash(),
-        vec![Some(TransactionAuthorizationOutcomes::new(
-            wrong_hash,
-            vec![AuthorizationOutcome::Skipped; 2],
-        ))],
-    );
-
-    assert_eq!(
-        receipts_from_block(&block, &stored, true, Some(&outcomes)).unwrap_err(),
-        ReceiptConstructionError::AuthorizationTransactionMismatch {
-            expected: transaction_hash,
-            actual: wrong_hash,
-        },
-    );
-}
-
-#[test]
-fn mismatched_authorization_outcome_counts_are_conversion_errors() {
-    let (block, stored) = set_code_block_fixture(true);
-
-    for count in [0, 1, 3] {
-        let outcomes =
-            singleton_authorization_outcomes(&block, vec![AuthorizationOutcome::Skipped; count]);
-
-        assert_eq!(
-            receipts_from_block(&block, &stored, true, Some(&outcomes)).unwrap_err(),
-            ReceiptConstructionError::AuthorizationOutcomeCountMismatch {
-                authorizations: 2,
-                outcomes: count,
-            },
-        );
-
-        assert!(matches!(
-            Eip6466ReceiptSnapshot::from_block(&block, &stored, true, Some(&outcomes),),
-            Err(Eip6466SnapshotError::Conversion(
-                ReceiptConstructionError::AuthorizationOutcomeCountMismatch { .. }
-            )),
-        ));
-    }
-}
-
-#[test]
-fn basic_and_create_transactions_reject_authorization_records() {
-    for kind in [TxKind::Call(Address::ZERO), TxKind::Create] {
-        let transaction = legacy_transaction(0, kind);
-
-        let outcomes = TransactionAuthorizationOutcomes::new(*transaction.hash(), Vec::new());
-
-        assert_eq!(
-            receipt_from_transaction(
-                &transaction,
-                address(1),
-                53_000,
-                Vec::new(),
-                true,
-                Some(&outcomes),
-            )
-            .unwrap_err(),
-            ReceiptConstructionError::UnexpectedAuthorizationOutcomes {
-                transaction_hash: *transaction.hash(),
-            },
-        );
-    }
-}
-
-#[test]
-fn mixed_block_uses_transaction_aligned_authorization_records() {
+fn mixed_block_recovers_authorities_from_its_own_ordered_transactions() {
     let set_code = TransactionSigned::new_unhashed(
         EthereumTransaction::Eip7702(set_code_transaction()),
         Signature::test_signature(),
     );
-
-    let set_code_hash = *set_code.hash();
-
     let block = recovered_block(
         vec![legacy_transaction(0, TxKind::Call(Address::ZERO)), set_code],
         vec![address(1), address(2)],
         51_000,
         100_000,
     );
-
     let stored = [
         stored_receipt(TxType::Legacy, true, 21_000, Vec::new()),
         stored_receipt(TxType::Eip7702, true, 51_000, Vec::new()),
     ];
-
-    let outcomes = BlockAuthorizationOutcomes::new(
-        block.hash(),
-        vec![
-            None,
-            Some(TransactionAuthorizationOutcomes::new(
-                set_code_hash,
-                vec![AuthorizationOutcome::Skipped; 2],
-            )),
-        ],
-    );
-
-    let converted = receipts_from_block(&block, &stored, true, Some(&outcomes)).unwrap();
-
+    let converted = receipts_from_block(&block, &stored, &chain_spec()).unwrap();
     assert_eq!(converted.len(), 2);
+    assert_eq!(converted.get(0).unwrap().from_(), address(1));
+    assert_eq!(converted.get(0).unwrap().gas_used(), 21_000);
+    assert_eq!(converted.get(1).unwrap().from_(), address(2));
+    assert_eq!(converted.get(1).unwrap().gas_used(), 30_000);
+    assert_eq!(
+        converted.get(1).unwrap().authorities().unwrap(),
+        &[
+            Address::from(hex!("4fd357b597c2d9c930a24645958f8cbc43a11d2e")),
+            Address::from(hex!("fc8ceb2413f8f3808eab57499da4a8b5179f6820")),
+        ]
+    );
+}
 
-    let Receipt::Basic(first) = converted.get(0).unwrap() else {
-        panic!("expected Basic receipt");
-    };
-
-    let Receipt::SetCode(second) = converted.get(1).unwrap() else {
-        panic!("expected SetCode receipt");
-    };
-
-    assert_eq!(first.from_, address(1));
-    assert_eq!(first.gas_used, 21_000);
-    assert_eq!(second.from_, address(2));
-    assert_eq!(second.gas_used, 30_000);
-    assert_eq!(second.authorities, vec![Address::ZERO, Address::ZERO],);
-
-    let missing = BlockAuthorizationOutcomes::new(block.hash(), vec![None, None]);
-
-    assert!(matches!(
-        Eip6466ReceiptSnapshot::from_block(&block, &stored, true, Some(&missing),),
-        Err(Eip6466SnapshotError::MissingData(
-            ReceiptConstructionError::MissingAuthorizationOutcomes { .. }
-        )),
-    ));
+#[test]
+fn log_data_and_topic_boundaries_match_independent_receipt_roots() {
+    for (length, topic_count, expected) in [
+        (0, 2, b256!("c799d094f7dacafac5165d4dcdf7f4b2d578ceb654f593e18e3e8ec8a5d1420d")),
+        (1, 2, b256!("0ac618a508f445c0ef258f5c6988254b0b4e4428253365425c805567abae7eb9")),
+        (31, 2, b256!("81b207589c5402fb300a47e8f27b9e561e36ae93e6b3c701957912255e610aac")),
+        (32, 2, b256!("c45ddf0c1d844655a01316aa88287600fda1e2aae79c4c8d35b816273004d91c")),
+        (33, 2, b256!("3f8fe05d8f7d17aa4044bc1394dc6085e4672c8ad784b8cebc8c18f52c15ece2")),
+        (160, 2, b256!("4cd08a680012f384afb634e61e674fca24ba58499b27d49b51c51705ad07be91")),
+        (161, 2, b256!("99a7b2250be5c97b722fdc76399613fd0c2f69f260650d7265d49ab144425ce0")),
+        (3, 0, b256!("47e01cb1306c628bd4553c0beaab7d13efc32b9ef0c706849a31674dc701dbdb")),
+        (3, 4, b256!("d611ecece864519dbd21df88ce2c743508f09f43eb8795832ce04bcce76f220b")),
+    ] {
+        let receipt = Receipt::Basic(BasicReceipt {
+            from_: address(0x11),
+            gas_used: 21_000,
+            logs: vec![Log::new(
+                address(0x44),
+                (0..topic_count).map(|index| B256::repeat_byte(0x55 + index)).collect(),
+                Bytes::from(vec![0xab; length]),
+            )
+            .unwrap()],
+            status: true,
+        });
+        let snapshot = Eip6466ReceiptSnapshot::build(Receipts::new(vec![receipt])).unwrap();
+        assert_eq!(snapshot.root(), expected, "data length {length}, topic count {topic_count}");
+    }
 }
