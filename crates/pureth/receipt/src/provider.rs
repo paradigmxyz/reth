@@ -1,55 +1,14 @@
 use crate::eip6466::{Eip6466ReceiptSnapshot, Eip6466SnapshotError};
-use alloy_consensus::{BlockHeader as _, Header, TxLegacy, TxType};
-use alloy_primitives::{Address, Bytes, Log as ExecutionLog, Signature, TxKind, B256};
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks, MAINNET};
-use reth_ethereum_primitives::{
-    Block, BlockBody, EthPrimitives, Receipt as StoredReceipt, Transaction as EthereumTransaction,
-    TransactionSigned,
-};
-use reth_primitives_traits::RecoveredBlock;
+use alloy_consensus::BlockHeader as _;
+use alloy_primitives::B256;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockNumReader, BlockReader, ProviderError, ReceiptProvider,
     TransactionVariant,
 };
 use std::fmt;
-
-pub const SINGLETON_BLOCK_HASH: B256 =
-    alloy_primitives::b256!("0101010101010101010101010101010101010101010101010101010101010101");
-pub const MULTIPLE_LOGS_BLOCK_HASH: B256 =
-    alloy_primitives::b256!("0202020202020202020202020202020202020202020202020202020202020202");
-pub const PROGRESSIVE_RECEIPTS_BLOCK_HASH: B256 =
-    alloy_primitives::b256!("0303030303030303030303030303030303030303030303030303030303030303");
-
-#[derive(Debug)]
-pub struct DeterministicProvider {
-    snapshots: [ProviderSnapshot; 3],
-}
-
-impl DeterministicProvider {
-    pub fn new() -> Result<Self, ProviderBuildError> {
-        Ok(Self {
-            snapshots: [
-                singleton_snapshot()?,
-                multiple_logs_snapshot()?,
-                progressive_receipts_snapshot()?,
-            ],
-        })
-    }
-
-    pub fn lookup(
-        &self,
-        block_hash: B256,
-        object: ObjectKind,
-    ) -> Result<&ProviderSnapshot, LookupError> {
-        validate_lookup(object)?;
-
-        self.snapshots
-            .iter()
-            .find(|snapshot| snapshot.block_hash == block_hash)
-            .ok_or(LookupError::UnknownBlock)
-    }
-}
 
 #[derive(Debug)]
 pub struct RethRootProvider<N: ProviderNodeTypes<Primitives = EthPrimitives>> {
@@ -203,34 +162,7 @@ pub enum CanonicalityStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RootContext {
-    DeterministicTestData,
     RethExperimentalUnanchored,
-}
-
-#[derive(Debug)]
-pub enum ProviderBuildError {
-    RecoveredBlock,
-    Snapshot(Eip6466SnapshotError),
-}
-
-impl fmt::Display for ProviderBuildError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::RecoveredBlock => formatter.write_str("deterministic block recovery failed"),
-            Self::Snapshot(error) => {
-                write!(formatter, "receipt snapshot construction failed: {error}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ProviderBuildError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::RecoveredBlock => None,
-            Self::Snapshot(error) => Some(error),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -348,109 +280,17 @@ impl std::error::Error for RethRootProviderError {
     }
 }
 
-fn singleton_snapshot() -> Result<ProviderSnapshot, ProviderBuildError> {
-    build_snapshot(
-        SINGLETON_BLOCK_HASH,
-        vec![transaction(0)],
-        vec![receipt(
-            21_000,
-            vec![log(
-                Address::repeat_byte(0x11),
-                vec![B256::repeat_byte(0x22)],
-                &[0x01, 0x02, 0x03],
-            )],
-        )],
-    )
-}
-
-fn multiple_logs_snapshot() -> Result<ProviderSnapshot, ProviderBuildError> {
-    build_snapshot(
-        MULTIPLE_LOGS_BLOCK_HASH,
-        vec![transaction(0)],
-        vec![receipt(
-            21_000,
-            vec![
-                log(Address::repeat_byte(0x11), vec![B256::repeat_byte(0x22)], &[0x01, 0x02, 0x03]),
-                log(Address::repeat_byte(0x33), vec![B256::repeat_byte(0x44)], &[0x04, 0x05]),
-            ],
-        )],
-    )
-}
-
-fn progressive_receipts_snapshot() -> Result<ProviderSnapshot, ProviderBuildError> {
-    let transactions = (0_u8..6).map(|index| transaction(u64::from(index))).collect();
-    let receipts = (0_u8..6)
-        .map(|index| {
-            receipt(
-                21_000 * (u64::from(index) + 1),
-                vec![log(
-                    Address::repeat_byte(0x11 + index),
-                    vec![B256::repeat_byte(0x22)],
-                    &[0x01, 0x02, 0x03],
-                )],
-            )
-        })
-        .collect();
-
-    build_snapshot(PROGRESSIVE_RECEIPTS_BLOCK_HASH, transactions, receipts)
-}
-
-fn build_snapshot(
-    block_hash: B256,
-    transactions: Vec<TransactionSigned>,
-    receipts: Vec<StoredReceipt>,
-) -> Result<ProviderSnapshot, ProviderBuildError> {
-    let gas_used = receipts.last().map_or(0, |receipt| receipt.cumulative_gas_used);
-    let senders = vec![Address::repeat_byte(0x66); transactions.len()];
-    let block = RecoveredBlock::try_new_unhashed(
-        Block {
-            header: Header {
-                number: 4_370_000,
-                gas_used,
-                gas_limit: gas_used,
-                ..Default::default()
-            },
-            body: BlockBody { transactions, ..Default::default() },
-        },
-        senders,
-    )
-    .map_err(|_| ProviderBuildError::RecoveredBlock)?;
-    let receipt_snapshot = Eip6466ReceiptSnapshot::from_block(&block, &receipts, MAINNET.as_ref())
-        .map_err(ProviderBuildError::Snapshot)?;
-
-    Ok(ProviderSnapshot {
-        block_hash,
-        block_status: CanonicalityStatus::Unknown,
-        object: ObjectKind::Receipts,
-        root_context: RootContext::DeterministicTestData,
-        receipt_snapshot,
-    })
-}
-
-fn transaction(nonce: u64) -> TransactionSigned {
-    TransactionSigned::new_unhashed(
-        EthereumTransaction::Legacy(TxLegacy {
-            nonce,
-            gas_limit: 21_000,
-            to: TxKind::Call(Address::ZERO),
-            ..Default::default()
-        }),
-        Signature::test_signature(),
-    )
-}
-
-const fn receipt(cumulative_gas_used: u64, logs: Vec<ExecutionLog>) -> StoredReceipt {
-    StoredReceipt { tx_type: TxType::Legacy, success: true, cumulative_gas_used, logs }
-}
-
-fn log(address: Address, topics: Vec<B256>, data: &[u8]) -> ExecutionLog {
-    ExecutionLog::new_unchecked(address, topics, Bytes::copy_from_slice(data))
-}
-
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
+    use alloy_consensus::{Header, TxLegacy, TxType};
+    use alloy_primitives::{Address, Bytes, Log as ExecutionLog, Signature, TxKind};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_ethereum_primitives::{
+        Block, BlockBody, Receipt as StoredReceipt, Transaction as EthereumTransaction,
+        TransactionSigned,
+    };
+    use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         BlockWriter, DBProvider, DatabaseProviderFactory, ExecutionOutcome, OriginalValuesKnown,
@@ -508,13 +348,38 @@ pub mod test_utils {
             vec![log(Address::repeat_byte(0x11), vec![B256::repeat_byte(0x22)], &[1, 2, 3])],
         )]
     }
+
+    pub(super) fn transaction(nonce: u64) -> TransactionSigned {
+        TransactionSigned::new_unhashed(
+            EthereumTransaction::Legacy(TxLegacy {
+                nonce,
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::ZERO),
+                ..Default::default()
+            }),
+            Signature::test_signature(),
+        )
+    }
+
+    const fn receipt(cumulative_gas_used: u64, logs: Vec<ExecutionLog>) -> StoredReceipt {
+        StoredReceipt { tx_type: TxType::Legacy, success: true, cumulative_gas_used, logs }
+    }
+
+    fn log(address: Address, topics: Vec<B256>, data: &[u8]) -> ExecutionLog {
+        ExecutionLog::new_unchecked(address, topics, Bytes::copy_from_slice(data))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ReceiptConstructionError, Receipts, TreeConstructionError};
+    use alloy_consensus::{Header, TxType};
+    use alloy_primitives::Address;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_ethereum_primitives::{Block, BlockBody, Receipt as StoredReceipt};
+    use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         BlockExecutionOutput, BlockWriter, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
         OriginalValuesKnown, StateWriteConfig, StateWriter,
@@ -590,24 +455,58 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_cases_use_coherent_distinct_stored_snapshots() {
-        let provider = DeterministicProvider::new().unwrap();
-        let cases = [
-            (SINGLETON_BLOCK_HASH, 0, 0, 1, Address::repeat_byte(0x11)),
-            (MULTIPLE_LOGS_BLOCK_HASH, 0, 1, 1, Address::repeat_byte(0x33)),
-            (PROGRESSIVE_RECEIPTS_BLOCK_HASH, 5, 0, 6, Address::repeat_byte(0x16)),
-        ];
+    fn historical_cases_preserve_distinct_receipts_and_coherent_snapshots() {
         let mut roots = Vec::new();
-        for (block_hash, receipt_index, log_index, count, address) in cases {
+        for (count, receipt_index, log_index, address) in [
+            (1usize, 0, 0, Address::repeat_byte(0x11)),
+            (1, 0, 1, Address::repeat_byte(0x33)),
+            (6, 5, 0, Address::repeat_byte(0x16)),
+        ] {
+            let receipts = (0..count)
+                .map(|index| {
+                    let mut receipt = test_utils::singleton_receipts().remove(0);
+                    receipt.cumulative_gas_used = 21_000 * (index as u64 + 1);
+                    receipt.logs[0].address = Address::repeat_byte(0x11 + index as u8);
+                    if log_index == 1 {
+                        let mut log = receipt.logs[0].clone();
+                        log.address = address;
+                        receipt.logs.push(log);
+                    }
+                    receipt
+                })
+                .collect::<Vec<_>>();
+            let block = RecoveredBlock::try_new_unhashed(
+                Block {
+                    header: Header {
+                        gas_used: 21_000 * count as u64,
+                        gas_limit: 30_000_000,
+                        ..Default::default()
+                    },
+                    body: BlockBody {
+                        transactions: (0..count)
+                            .map(|index| test_utils::transaction(index as u64))
+                            .collect(),
+                        ..Default::default()
+                    },
+                },
+                vec![Address::repeat_byte(0x66); count],
+            )
+            .unwrap();
+            let (provider, block_hash) = test_utils::historical_provider_for_block(
+                block,
+                Some(receipts),
+                Arc::new(ChainSpecBuilder::mainnet().byzantium_activated().build()),
+            );
+            let provider = RethRootProvider::new(provider);
             let first = provider.lookup(block_hash, ObjectKind::Receipts).unwrap();
             let second = provider.lookup(block_hash, ObjectKind::Receipts).unwrap();
             let snapshot = first.receipt_snapshot();
-            assert!(std::ptr::eq(first, second));
-            assert!(std::ptr::eq(snapshot, second.receipt_snapshot()));
+            assert_eq!(first.root(), second.root());
+            assert_eq!(snapshot.serialized(), second.receipt_snapshot().serialized());
             assert_eq!(first.block_hash(), block_hash);
-            assert_eq!(first.block_status(), CanonicalityStatus::Unknown);
+            assert_eq!(first.block_status(), CanonicalityStatus::Canonical);
             assert_eq!(first.object(), ObjectKind::Receipts);
-            assert_eq!(first.root_context(), RootContext::DeterministicTestData);
+            assert_eq!(first.root_context(), RootContext::RethExperimentalUnanchored);
             assert_eq!(snapshot.receipts().len(), count);
             assert_eq!(
                 snapshot.receipts().get(receipt_index).unwrap().logs()[log_index].address(),
@@ -626,21 +525,8 @@ mod tests {
 
     #[test]
     fn lookup_validates_object_before_block() {
-        let provider = DeterministicProvider::new().unwrap();
-        assert!(matches!(
-            provider.lookup(B256::ZERO, ObjectKind::Withdrawals),
-            Err(LookupError::UnsupportedObject)
-        ));
-        assert!(matches!(
-            provider.lookup(B256::ZERO, ObjectKind::Receipts),
-            Err(LookupError::UnknownBlock)
-        ));
-        assert!(matches!(
-            provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Withdrawals),
-            Err(LookupError::UnsupportedObject)
-        ));
-
-        let (provider, _) = test_utils::historical_provider(Some(test_utils::singleton_receipts()));
+        let (provider, block_hash) =
+            test_utils::historical_provider(Some(test_utils::singleton_receipts()));
         let provider = RethRootProvider::new(provider);
         assert!(matches!(
             provider.lookup(B256::ZERO, ObjectKind::Withdrawals),
@@ -649,6 +535,10 @@ mod tests {
         assert!(matches!(
             provider.lookup(B256::ZERO, ObjectKind::Receipts),
             Err(RethRootProviderError::Lookup(LookupError::UnknownBlock))
+        ));
+        assert!(matches!(
+            provider.lookup(block_hash, ObjectKind::Withdrawals),
+            Err(RethRootProviderError::Lookup(LookupError::UnsupportedObject))
         ));
     }
 
@@ -688,7 +578,7 @@ mod tests {
             .downcast_ref::<ReceiptConstructionError>()
             .is_some());
 
-        let error = ProviderBuildError::Snapshot(Eip6466SnapshotError::Tree(
+        let error = HistoricalAcquisitionError::Snapshot(Eip6466SnapshotError::Tree(
             TreeConstructionError::InvalidWidth { width: 0 },
         ));
         assert!(error
@@ -698,7 +588,7 @@ mod tests {
             .unwrap()
             .downcast_ref::<TreeConstructionError>()
             .is_some());
-        assert!(ProviderBuildError::RecoveredBlock.source().is_none());
+        assert!(HistoricalAcquisitionError::BlockUnavailable.source().is_none());
     }
 
     #[test]

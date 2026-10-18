@@ -1,5 +1,5 @@
 use super::*;
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{Signed, TxEip1559};
 use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization};
 use alloy_primitives::{b256, uint, Address};
 
@@ -95,11 +95,11 @@ fn four_variants_preserve_canonical_bytes_rlp_and_hashes() {
         assert_eq!(decoded, transaction);
         assert_eq!(encode_transaction(&decoded).unwrap(), bytes);
 
-        let original = transaction.to_alloy().unwrap();
+        let original = transaction.to_envelope().unwrap();
         let rlp = transaction.original_rlp().unwrap();
-        assert_eq!(TransactionSsz::from_alloy(&original).unwrap(), transaction);
+        assert_eq!(TransactionSsz::from_envelope(&original).unwrap(), transaction);
         assert_eq!(TransactionSsz::from_rlp(&rlp).unwrap(), transaction);
-        assert_eq!(transaction.original_transaction_hash().unwrap(), *original.hash());
+        assert_eq!(transaction.original_transaction_hash().unwrap(), *original.tx_hash());
         assert_eq!(transaction.original_signing_hash().unwrap(), original.signature_hash());
         let snapshot = TransactionSnapshot::build(vec![transaction]).unwrap();
         assert_eq!(snapshot.transaction_tree(0).unwrap().root(), expected_root);
@@ -138,7 +138,11 @@ fn list_snapshot_preserves_order_and_retained_transaction_access() {
     ] {
         let transactions = (0..count)
             .map(|nonce| {
-                let mut payload = four_variants()[nonce % 4].payload().as_legacy().unwrap().clone();
+                let TransactionPayload::Legacy(mut payload) =
+                    four_variants()[nonce % 4].payload().clone()
+                else {
+                    panic!("expected legacy payload");
+                };
                 payload.nonce = u64::try_from(nonce).unwrap();
                 TransactionSsz::new(payload, signature()).unwrap()
             })
@@ -175,7 +179,9 @@ fn list_snapshot_preserves_order_and_retained_transaction_access() {
 fn mutations_change_the_retained_commitment() {
     let original = four_variants().remove(0);
     let root = TransactionSnapshot::build(vec![original.clone()]).unwrap().root();
-    let mut payload = original.payload().as_legacy().unwrap().clone();
+    let TransactionPayload::Legacy(mut payload) = original.payload().clone() else {
+        panic!("expected legacy payload");
+    };
     payload.input = Bytes::from(vec![0x01, 0x02, 0x04]);
     assert_ne!(
         TransactionSnapshot::build(vec![TransactionSsz::new(payload, signature()).unwrap()])
@@ -258,7 +264,9 @@ fn invalid_signature_scalars_are_rejected() {
 #[test]
 fn full_width_values_survive_ssz_without_truncating_into_alloy() {
     for field in ["chain_id", "gas_price"] {
-        let mut payload = four_variants()[2].payload().as_legacy().unwrap().clone();
+        let TransactionPayload::Legacy(mut payload) = four_variants()[2].payload().clone() else {
+            panic!("expected legacy payload");
+        };
         if field == "chain_id" {
             payload.chain_id = Some(U256::MAX);
         } else {
@@ -268,7 +276,7 @@ fn full_width_values_survive_ssz_without_truncating_into_alloy() {
         let decoded = decode_transaction(&encode_transaction(&transaction).unwrap()).unwrap();
         assert_eq!(decoded, transaction);
         assert!(matches!(
-            decoded.to_alloy(),
+            decoded.to_envelope(),
             Err(TransactionError::UnsupportedWidth(actual)) if actual == field,
         ));
     }
@@ -276,10 +284,12 @@ fn full_width_values_survive_ssz_without_truncating_into_alloy() {
 
 #[test]
 fn source_conversion_supports_typed_and_rejects_incorrect_cached_hashes() {
-    let legacy = four_variants()[0].to_alloy().unwrap();
+    let EthereumTxEnvelope::Legacy(legacy) = four_variants()[0].to_envelope().unwrap() else {
+        panic!("expected legacy envelope");
+    };
     let invalid_hash = Signed::new_unchecked(legacy.tx().clone(), *legacy.signature(), B256::ZERO);
     assert!(matches!(
-        TransactionSsz::from_alloy(&invalid_hash),
+        TransactionSsz::from_envelope(&EthereumTxEnvelope::Legacy(invalid_hash)),
         Err(TransactionError::SourceHashMismatch),
     ));
 
@@ -452,8 +462,11 @@ fn empty_fields_and_duplicate_access_entries_remain_canonical() {
 fn source_errors_retain_index_and_typed_cause_without_partial_conversion() {
     let source = reference_transactions();
     let good = source[0].to_envelope().unwrap();
+    let EthereumTxEnvelope::Legacy(legacy) = four_variants()[0].to_envelope().unwrap() else {
+        panic!("expected legacy envelope");
+    };
     let bad = EthereumTxEnvelope::Legacy(Signed::new_unchecked(
-        four_variants()[0].to_alloy().unwrap().tx().clone(),
+        legacy.tx().clone(),
         signature(),
         B256::ZERO,
     ));

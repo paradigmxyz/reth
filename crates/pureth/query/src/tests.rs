@@ -1,5 +1,6 @@
 use super::*;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use ssz::Decode;
 
 #[test]
 fn parser_accepts_valid_syntax() {
@@ -124,15 +125,14 @@ fn progressive_positions_keep_large_logical_indices_separate() {
 
 #[test]
 fn address_target_is_right_padded_to_one_chunk() {
-    let address = [0x11_u8; 20];
-    let node = address_target_node(&address).unwrap();
+    let address = Address::repeat_byte(0x11);
+    let node = B256::right_padding_from(address.as_slice());
 
-    assert_eq!(&node[..20], &address);
+    assert_eq!(&node[..20], address.as_slice());
     assert_eq!(&node[20..], &[0_u8; 12]);
-    assert_eq!(address_target_node(&address[..19]), Err(InvalidAddressLength { actual: 19 }));
-
-    let too_long = [0x11_u8; 21];
-    assert_eq!(address_target_node(&too_long), Err(InvalidAddressLength { actual: 21 }));
+    for length in [19, 21] {
+        assert!(Address::from_ssz_bytes(&vec![0x11; length]).is_err());
+    }
 }
 
 fn synthetic_branch() -> Vec<B256> {
@@ -146,14 +146,14 @@ const SYNTHETIC_ROOT: [u8; 32] = [
 
 #[test]
 fn verifier_accepts_the_independently_computed_synthetic_branch() {
-    let target = address_target_node(&[0x11; 20]).unwrap();
+    let target = B256::right_padding_from(Address::repeat_byte(0x11).as_slice());
 
     assert_eq!(verify_branch(target, 576, &synthetic_branch(), B256::from(SYNTHETIC_ROOT)), Ok(()));
 }
 
 #[test]
 fn verifier_rejects_single_input_mutations() {
-    let target = address_target_node(&[0x11; 20]).unwrap();
+    let target = B256::right_padding_from(Address::repeat_byte(0x11).as_slice());
     let branch = synthetic_branch();
 
     let mut wrong_target = target;

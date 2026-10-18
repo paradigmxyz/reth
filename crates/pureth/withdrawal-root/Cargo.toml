@@ -16,5 +16,7 @@ alloy-eips = { workspace = true, features = ["ssz"] }
 alloy-primitives.workspace = true
 ethereum_ssz.workspace = true
 reth-pureth-ssz.workspace = true
-sha2.workspace = true
 tree_hash.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true

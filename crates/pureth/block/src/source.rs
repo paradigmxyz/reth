@@ -1267,8 +1267,9 @@ mod tests {
         ] {
             let (_, outcome, _, _, _, _, snapshot) = build(case);
             let header = ExecutionHeader::from_payload(snapshot.payload()).unwrap();
-            let body = ExecutionBody::from_header(
-                &header,
+            assert_eq!(header.summary_ssz().unwrap(), snapshot.payload().summary().serialized());
+            let body = ExecutionBody::from_payload(
+                snapshot.payload(),
                 alloy_consensus::BlockBody {
                     transactions: outcome.block.body().transactions.clone(),
                     ommers: Vec::new(),

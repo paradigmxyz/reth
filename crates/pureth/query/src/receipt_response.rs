@@ -59,17 +59,16 @@ fn proof(
     snapshot: &ProviderSnapshot,
     index: u64,
     selection: SelectionResponse,
-) -> WholeReceiptProof {
-    WholeReceiptProof {
+) -> Result<WholeReceiptProof, SelectionError> {
+    if snapshot.root_context() != RootContext::RethExperimentalUnanchored {
+        return Err(SelectionError::InvalidContext);
+    }
+    Ok(WholeReceiptProof {
         block_hash: snapshot.block_hash(),
         receipt_index: index,
-        root_context: match snapshot.root_context() {
-            RootContext::DeterministicTestData => "deterministic_test_data",
-            RootContext::RethExperimentalUnanchored => "reth_experimental_unanchored",
-        }
-        .into(),
+        root_context: "reth_experimental_unanchored".into(),
         selection,
-    }
+    })
 }
 
 fn check_receipt(receipt: &impl Serialize) -> Result<(), SelectionError> {
@@ -100,7 +99,7 @@ pub fn extend_receipt_response<T: Serialize>(
                 &request([index]),
                 limits,
             )?;
-            Some(proof(snapshot, index, selection))
+            Some(proof(snapshot, index, selection)?)
         }
     };
     let response = ReceiptResponse::WithProof { receipt, ssz_proof };
@@ -180,7 +179,7 @@ pub fn extend_block_receipt_responses<T: Serialize>(
                         results: vec![result],
                         multiproof: None,
                     },
-                )));
+                )?));
             }
         }
     } else {
@@ -208,10 +207,7 @@ pub fn verify_whole_receipt_proof(
     encoded_size(proof, limits.response_bytes, "response bytes")?;
     if proof.block_hash != block_hash ||
         proof.receipt_index != index ||
-        !matches!(
-            proof.root_context.as_str(),
-            "deterministic_test_data" | "reth_experimental_unanchored"
-        )
+        proof.root_context != "reth_experimental_unanchored"
     {
         return Err(SelectionError::InvalidContext);
     }
@@ -221,9 +217,7 @@ pub fn verify_whole_receipt_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_pureth_receipt::{
-        DeterministicProvider, ObjectKind, PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
-    };
+    use crate::test_utils;
     #[test]
     fn receipt_response_preserves_legacy_and_distinguishes_null_from_errors() {
         let receipt = serde_json::json!({"status": "0x1", "transactionHash": B256::ZERO});
@@ -245,12 +239,11 @@ mod tests {
         )
         .unwrap();
         assert!(serde_json::to_value(unsupported).unwrap()["sszProof"].is_null());
-        let provider = DeterministicProvider::new().unwrap();
-        let snapshot = provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+        let snapshot = test_utils::snapshot(1);
         let supported = extend_receipt_response(
             receipt.clone(),
             0,
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits::default(),
         )
@@ -274,10 +267,22 @@ mod tests {
             SelectionLimits::default()
         )
         .is_err());
+        let mut obsolete = proof;
+        obsolete.root_context = "deterministic_test_data".into();
+        assert_eq!(
+            verify_whole_receipt_proof(
+                snapshot.block_hash(),
+                0,
+                &obsolete,
+                snapshot.root(),
+                SelectionLimits::default()
+            ),
+            Err(SelectionError::InvalidContext)
+        );
         assert!(extend_receipt_response(
             receipt,
             1,
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits::default()
         )
@@ -285,15 +290,13 @@ mod tests {
     }
     #[test]
     fn block_receipt_proofs_share_the_snapshot_but_verify_each_complete_element() {
-        let provider = DeterministicProvider::new().unwrap();
-        let snapshot =
-            provider.lookup(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+        let snapshot = test_utils::snapshot(6);
         let receipts = (0..snapshot.receipt_snapshot().receipts().len())
             .map(|index| serde_json::json!({"transactionIndex": index}))
             .collect();
         let responses = extend_block_receipt_responses(
             receipts,
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits { selections: 2, ..Default::default() },
             &AtomicBool::new(false),
@@ -314,7 +317,7 @@ mod tests {
         }
         assert!(extend_block_receipt_responses(
             vec![serde_json::json!({})],
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits::default(),
             &AtomicBool::new(false)
@@ -325,7 +328,7 @@ mod tests {
             .collect();
         assert!(extend_block_receipt_responses(
             receipts,
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits::default(),
             &AtomicBool::new(true)
@@ -335,12 +338,11 @@ mod tests {
 
     #[test]
     fn whole_receipt_verification_caps_the_complete_proof_envelope() {
-        let provider = DeterministicProvider::new().unwrap();
-        let snapshot = provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+        let snapshot = test_utils::snapshot(1);
         let response = extend_receipt_response(
             serde_json::json!({}),
             0,
-            ReceiptProofSupport::Supported(snapshot),
+            ReceiptProofSupport::Supported(&snapshot),
             true,
             SelectionLimits::default(),
         )
@@ -381,9 +383,7 @@ mod tests {
                 SelectionError::InvalidContext
             );
         }
-        let provider = DeterministicProvider::new().unwrap();
-        let snapshot =
-            provider.lookup(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ObjectKind::Receipts).unwrap();
+        let snapshot = test_utils::snapshot(6);
         for limits in [
             SelectionLimits { selections: 1, targets: 1, ..Default::default() },
             SelectionLimits { witness_hashes: 1, ..Default::default() },
@@ -395,7 +395,7 @@ mod tests {
                 .collect();
             assert!(extend_block_receipt_responses(
                 receipts,
-                ReceiptProofSupport::Supported(snapshot),
+                ReceiptProofSupport::Supported(&snapshot),
                 true,
                 limits,
                 &AtomicBool::new(false)

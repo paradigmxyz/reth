@@ -1059,8 +1059,6 @@ fn every_independent_budget_rejects_the_first_excess() {
         (SelectionLimits { witness_hashes: hashes - 1, ..Default::default() }, "witness hashes"),
         (SelectionLimits { response_bytes: bytes - 1, ..Default::default() }, "response bytes"),
         (SelectionLimits { source_bytes: 0, ..Default::default() }, "source bytes"),
-        (SelectionLimits { receipts: 2, ..Default::default() }, "receipts"),
-        (SelectionLimits { logs: 2, ..Default::default() }, "logs"),
     ] {
         assert_eq!(
             select_receipt_snapshot(&snapshot, &request, limits),
@@ -1126,8 +1124,8 @@ fn selection_wire_has_no_receipt_schema_or_revision_dispatch() {
 }
 
 #[test]
-fn typed_layout_rejects_invalid_selectors_masks_and_lengths() {
-    for (selector, mask) in [(0, 0x1b), (4, 0x1b), (1, 0x1f), (2, 0x1b), (3, 0x1b)] {
+fn typed_layout_rejects_reserved_selectors_empty_masks_and_padded_context() {
+    for (selector, mask) in [(0, 0x1b), (128, 0x1b), (255, 0x1b), (1, 0), (2, 0), (3, 0), (7, 0)] {
         let mut read = |index| {
             Ok(match index {
                 3 => B256::right_padding_from(&1_u64.to_le_bytes()),
@@ -1141,7 +1139,7 @@ fn typed_layout_rejects_invalid_selectors_masks_and_lengths() {
             Some(SelectionError::InvalidContext)
         );
     }
-    for index in [3, 9, 17] {
+    for index in [3, 9] {
         let mut read = |position| {
             let mut node = match position {
                 3 => B256::right_padding_from(&1_u64.to_le_bytes()),
@@ -1408,6 +1406,120 @@ fn structural_budget_covers_retained_trees_at_progressive_boundaries() {
 }
 
 #[test]
+fn sparse_queries_do_not_apply_filter_scan_caps_to_the_entire_block() {
+    let defaults = SelectionLimits::default();
+    for (receipts, logs, reason) in
+        [(defaults.receipts + 1, 0, "receipts"), (1, defaults.logs + 1, "logs")]
+    {
+        let log = Log::new(Address::ZERO, Vec::new(), Bytes::new()).unwrap();
+        let snapshot =
+            Eip6466ReceiptSnapshot::build(Receipts::new(vec![
+                Receipt::Basic(BasicReceipt {
+                    from_: Address::repeat_byte(0x44),
+                    gas_used: 21_000,
+                    logs: vec![log; logs],
+                    status: true,
+                });
+                receipts
+            ]))
+            .unwrap();
+        for format in [SelectionProofFormat::SingleBranch, SelectionProofFormat::Multiproof] {
+            let request = single_request("[0].from", SelectionOperation::Value {});
+            let response =
+                select_with_format(&snapshot, &request, defaults, &AtomicBool::new(false), format)
+                    .unwrap();
+            verify_receipt_selection(&request, &response, snapshot.root(), defaults).unwrap();
+            assert_eq!(response.results[0].values_ssz[0].as_ref(), &[0x44; 20]);
+        }
+        assert_eq!(
+            select_receipt_multiproof(
+                &snapshot,
+                &filter_request(FilterOutput::Receipts, Vec::new()),
+                defaults,
+            ),
+            Err(SelectionError::LimitExceeded(reason))
+        );
+        assert_eq!(
+            select_receipt_multiproof(
+                &snapshot,
+                &single_request("[0].from", SelectionOperation::Value {}),
+                SelectionLimits { source_bytes: 1, ..defaults },
+            ),
+            Err(SelectionError::LimitExceeded("source bytes"))
+        );
+    }
+}
+
+#[test]
+fn root_only_receipt_verification_matches_retained_nodes_at_progressive_boundaries() {
+    for count in [0, 1, 4, 5, 6, 20, 21, 22] {
+        for length in [0, 1, 31, 32, 33, 160, 161, 672, 673] {
+            let log = Log::new(
+                Address::repeat_byte(0x33),
+                vec![B256::repeat_byte(0x44); count.min(4)],
+                Bytes::from(vec![0x55; length]),
+            )
+            .unwrap();
+            let snapshot = Eip6466ReceiptSnapshot::build(Receipts::new(
+                (0..count)
+                    .map(|index| match index % 3 {
+                        0 => Receipt::Basic(BasicReceipt {
+                            from_: Address::repeat_byte(1),
+                            gas_used: 21_000,
+                            logs: vec![log.clone()],
+                            status: index % 2 == 0,
+                        }),
+                        1 => Receipt::Create(CreateReceipt {
+                            from_: Address::repeat_byte(2),
+                            gas_used: 42_000,
+                            contract_address: Address::repeat_byte(3),
+                            logs: Vec::new(),
+                            status: index % 2 == 0,
+                        }),
+                        _ => Receipt::SetCode(SetCodeReceipt {
+                            from_: Address::repeat_byte(4),
+                            gas_used: 63_000,
+                            logs: vec![log.clone(); count],
+                            status: index % 2 == 0,
+                            authorities: vec![Address::repeat_byte(5); count],
+                        }),
+                    })
+                    .collect(),
+            ))
+            .unwrap();
+            assert_eq!(
+                whole_root(Kind::Receipts, snapshot.serialized(), usize::MAX),
+                Ok(snapshot.root()),
+                "count={count}, length={length}",
+            );
+            if count > 0 {
+                for path in
+                    ["[0]", "[0].logs", "[0].logs[0]", "[0].logs[0].topics", "[0].logs[0].data"]
+                {
+                    let path = tokens(path).unwrap();
+                    let target = resolve_eip(&path, &mut |index| {
+                        Ok(node_at(snapshot.tree(), index).unwrap())
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        whole_root(
+                            target.kind,
+                            supplied_whole(&snapshot, &path).unwrap(),
+                            usize::MAX,
+                        ),
+                        node_at(snapshot.tree(), target.index)
+                            .map_err(|_| SelectionError::InvalidProof),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(whole::root(Kind::Receipt(2), &[1]), Err(SelectionError::InvalidValue));
+    assert_eq!(whole::root(Kind::Topics, &[0; 160]), Err(SelectionError::InvalidValue));
+    assert_eq!(whole::root(Kind::Authorities, &[0; 21]), Err(SelectionError::InvalidValue));
+}
+
+#[test]
 fn filter_and_selection_proofs_verify_at_the_first_accepted_source_budget() {
     let receipt = Receipt::Basic(BasicReceipt {
         from_: Address::ZERO,
@@ -1488,4 +1600,158 @@ fn scalar_single_branch_verification_accounts_for_values_witnesses_and_cache() {
         SelectionLimits { source_bytes: required, ..Default::default() },
     )
     .unwrap();
+}
+
+fn compatible_receipt_response(
+    tree: &RetainedNode,
+    indices: &[u128],
+    value: Bytes,
+    format: SelectionProofFormat,
+) -> SelectionResponse {
+    let witnesses = indices
+        .iter()
+        .map(|index| {
+            let (node, branch) = node_and_branch(tree, *index).unwrap();
+            SelectionWitness { node, branch }
+        })
+        .collect::<Vec<_>>();
+    let multiproof = (format == SelectionProofFormat::Multiproof).then(|| {
+        let reads = indices.iter().copied().zip(witnesses.iter().map(|w| w.node)).collect();
+        multiproof::build(
+            tree,
+            &reads,
+            indices,
+            SelectionLimits::default(),
+            usize::MAX,
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+    });
+    SelectionResponse {
+        root: tree.root(),
+        proof_format: Some(format),
+        results: vec![SelectionResult {
+            values_ssz: vec![value],
+            witnesses: (format == SelectionProofFormat::SingleBranch).then_some(witnesses),
+            matches: None,
+        }],
+        multiproof,
+    }
+}
+
+#[test]
+fn compatible_receipt_fields_verify_without_accepting_unknown_whole_receipts() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/receipt_compatible_fields.json"))
+            .unwrap();
+    let receipt = Receipt::Basic(BasicReceipt {
+        from_: Address::repeat_byte(0x11),
+        gas_used: 21_000,
+        logs: vec![Log::new(
+            Address::repeat_byte(0x22),
+            vec![B256::repeat_byte(0x33)],
+            Bytes::from(vec![0x44; 33]),
+        )
+        .unwrap()],
+        status: true,
+    });
+    let whole_bytes = Bytes::from(receipt.to_ssz_bytes().unwrap());
+    run(
+        &Eip6466ReceiptSnapshot::build(Receipts::new(vec![receipt])).unwrap(),
+        &single_request("[0]", SelectionOperation::Whole {}),
+    );
+    for case in reference["cases"].as_array().unwrap() {
+        let root: B256 = case["root"].as_str().unwrap().parse().unwrap();
+        let selector = case["selector"].as_u64().unwrap();
+        assert_eq!(case["sender_gindex"], 32);
+        let mask: B256 = case["active_fields"].as_str().unwrap().parse().unwrap();
+        let mut tree = RetainedNode::leaf(B256::right_padding_from(&[0x11; 20]));
+        for sibling in case["sender_branch"].as_array().unwrap() {
+            tree = RetainedNode::pair(
+                tree,
+                RetainedNode::leaf(sibling.as_str().unwrap().parse().unwrap()),
+            );
+        }
+        assert_eq!(tree.root(), root);
+        assert_eq!(node_and_branch(&tree, 17).unwrap().0, mask);
+        assert_eq!(node_and_branch(&tree, 9).unwrap().0[0], selector as u8);
+        for format in [SelectionProofFormat::SingleBranch, SelectionProofFormat::Multiproof] {
+            let verify = |request: &SelectionRequest, response: &SelectionResponse| {
+                verify_receipt_selection(request, response, root, SelectionLimits::default())
+            };
+            let field = single_request("[0].from", SelectionOperation::Value {});
+            let response = compatible_receipt_response(
+                &tree,
+                &[3, 9, 17, 32],
+                Bytes::from(vec![0x11; 20]),
+                format,
+            );
+            verify(&field, &response).unwrap();
+            for context in [1, 2] {
+                let mut changed = response.clone();
+                let byte = usize::from(context == 2);
+                match format {
+                    SelectionProofFormat::SingleBranch => {
+                        changed.results[0].witnesses.as_mut().unwrap()[context].node[byte] ^= 1
+                    }
+                    SelectionProofFormat::Multiproof => {
+                        changed.multiproof.as_mut().unwrap().targets[context][byte] ^= 1
+                    }
+                }
+                assert!(verify(&field, &changed).is_err());
+            }
+            let present = mask[0] & 4 != 0;
+            let response = compatible_receipt_response(
+                &tree,
+                &[3, 9, 17],
+                Bytes::from(vec![u8::from(present)]),
+                format,
+            );
+            verify(
+                &single_request("[0].contract_address", SelectionOperation::Presence {}),
+                &response,
+            )
+            .unwrap();
+            if !present {
+                assert_eq!(
+                    verify(
+                        &single_request("[0].contract_address", SelectionOperation::Value {}),
+                        &response
+                    ),
+                    Err(SelectionError::AbsentField)
+                );
+            }
+            let response =
+                compatible_receipt_response(&tree, &[3, 9, 17, 4], whole_bytes.clone(), format);
+            assert_eq!(
+                verify(&single_request("[0]", SelectionOperation::Whole {}), &response),
+                Err(if selector > 3 {
+                    SelectionError::UnsupportedOperation
+                } else {
+                    SelectionError::InvalidValue
+                })
+            );
+        }
+    }
+}
+
+#[test]
+fn compatible_receipt_presence_follows_each_known_field_bit() {
+    for (position, field) in
+        ["from", "gas_used", "contract_address", "logs", "status", "authorities"]
+            .into_iter()
+            .enumerate()
+    {
+        let mut read = |index| {
+            Ok(match index {
+                3 => B256::right_padding_from(&1_u64.to_le_bytes()),
+                9 => B256::right_padding_from(&[7]),
+                17 => B256::right_padding_from(&[0x3f & !(1 << position)]),
+                _ => B256::ZERO,
+            })
+        };
+        let target = resolve_eip(&tokens(&format!("[0].{field}")).unwrap(), &mut read).unwrap();
+        assert_eq!(target.kind, Kind::Absent);
+        assert_eq!(claim_value(target, &mut read), Err(SelectionError::AbsentField));
+    }
 }

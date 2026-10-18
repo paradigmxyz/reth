@@ -1,6 +1,6 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
-use alloy_consensus::{crypto::SECP256K1N_HALF, EthereumTxEnvelope, Signed, TxEip4844, TxLegacy};
+use alloy_consensus::{crypto::SECP256K1N_HALF, EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip2930::AccessList,
@@ -100,14 +100,6 @@ impl From<LegacyPayload> for TransactionPayload {
 }
 
 impl TransactionPayload {
-    pub const fn as_legacy(&self) -> Option<&LegacyPayload> {
-        if let Self::Legacy(value) = self {
-            Some(value)
-        } else {
-            None
-        }
-    }
-
     pub const fn selector(&self) -> u8 {
         match self {
             Self::Legacy(p) => match (p.chain_id.is_some(), p.to) {
@@ -264,10 +256,6 @@ impl TransactionSsz {
         Ok(transaction)
     }
 
-    pub fn from_alloy(signed: &Signed<TxLegacy>) -> Result<Self, TransactionError> {
-        Self::from_envelope(&EthereumTxEnvelope::Legacy(signed.clone()))
-    }
-
     pub fn from_rlp(bytes: &[u8]) -> Result<Self, TransactionError> {
         let mut remaining = bytes;
         let transaction = match EthereumTxEnvelope::<TxEip4844>::decode_2718(&mut remaining) {
@@ -290,13 +278,6 @@ impl TransactionSsz {
         }
 
         Ok(transaction)
-    }
-
-    pub fn to_alloy(&self) -> Result<Signed<TxLegacy>, TransactionError> {
-        match self.to_envelope()? {
-            EthereumTxEnvelope::Legacy(signed) => Ok(signed),
-            _ => Err(TransactionError::InvalidEncoding("expected legacy payload")),
-        }
     }
 
     pub const fn payload(&self) -> &TransactionPayload {

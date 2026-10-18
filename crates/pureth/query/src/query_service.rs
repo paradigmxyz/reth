@@ -7,8 +7,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_pureth_receipt::{
-    CanonicalityStatus, DeterministicProvider, HistoricalAcquisitionError, LookupError, ObjectKind,
-    ProviderBuildError, ProviderSnapshot, RethRootProvider, RethRootProviderError, RootContext,
+    CanonicalityStatus, HistoricalAcquisitionError, LookupError, ObjectKind, ProviderSnapshot,
+    RethRootProvider, RethRootProviderError, RootContext,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,7 +53,7 @@ pub enum ResponseVerificationError {
 }
 
 #[derive(Debug)]
-pub struct QueryService<P = DeterministicProvider> {
+pub struct QueryService<P> {
     provider: P,
     limits: SelectionLimits,
 }
@@ -70,35 +70,10 @@ pub trait QueryHandler {
     }
 }
 
-impl QueryService<DeterministicProvider> {
-    pub fn new() -> Result<Self, ProviderBuildError> {
-        Ok(Self::from_provider(DeterministicProvider::new()?))
-    }
-
-    pub fn from_provider(provider: DeterministicProvider) -> Self {
-        Self { provider, limits: SelectionLimits::default() }
-    }
-}
-
 impl<P> QueryService<P> {
     pub const fn with_limits(mut self, limits: SelectionLimits) -> Self {
         self.limits = limits;
         self
-    }
-}
-
-impl QueryHandler for QueryService<DeterministicProvider> {
-    fn query_with_cancel(
-        &self,
-        request: QueryRequest,
-        cancelled: &AtomicBool,
-    ) -> Result<QueryResponse, QueryError> {
-        validate_request(&request, self.limits, cancelled)?;
-        let snapshot = self
-            .provider
-            .lookup(request.block_hash, ObjectKind::Receipts)
-            .map_err(QueryError::Provider)?;
-        query_snapshot_with_cancel(&request, snapshot, self.limits, cancelled)
     }
 }
 
@@ -169,7 +144,10 @@ fn query_snapshot_with_cancel(
     cancelled: &AtomicBool,
 ) -> Result<QueryResponse, QueryError> {
     validate_request(request, limits, cancelled)?;
-    if snapshot.block_hash() != request.block_hash || snapshot.object() != ObjectKind::Receipts {
+    if snapshot.block_hash() != request.block_hash ||
+        snapshot.object() != ObjectKind::Receipts ||
+        snapshot.root_context() != RootContext::RethExperimentalUnanchored
+    {
         return Err(QueryError::InvalidSnapshot);
     }
     let selection =
@@ -180,11 +158,7 @@ fn query_snapshot_with_cancel(
     let response = QueryResponse {
         block_hash: snapshot.block_hash(),
         object: request.object.clone(),
-        root_context: match snapshot.root_context() {
-            RootContext::DeterministicTestData => "deterministic_test_data",
-            RootContext::RethExperimentalUnanchored => "reth_experimental_unanchored",
-        }
-        .to_owned(),
+        root_context: "reth_experimental_unanchored".to_owned(),
         block_status: match snapshot.block_status() {
             CanonicalityStatus::Canonical => "canonical",
             CanonicalityStatus::NonCanonical => "non_canonical",
@@ -206,10 +180,7 @@ pub fn verify_query_response(
     if request.object != "receipts" ||
         response.object != request.object ||
         response.block_hash != request.block_hash ||
-        !matches!(
-            response.root_context.as_str(),
-            "deterministic_test_data" | "reth_experimental_unanchored"
-        ) ||
+        response.root_context != "reth_experimental_unanchored" ||
         !matches!(response.block_status.as_str(), "canonical" | "non_canonical" | "unknown")
     {
         return Err(ResponseVerificationError::InvalidContext);

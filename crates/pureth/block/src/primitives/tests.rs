@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ExecutionRequestsSnapshot, PayloadLimits};
 use alloy_consensus::{SignableTransaction, TxLegacy};
 use reth_db_api::{
     models::StoredBlockOmmers,
@@ -9,6 +10,7 @@ use reth_primitives_traits::{FullBlock, FullBlockBody, FullBlockHeader};
 use reth_provider::{
     test_utils::create_test_provider_factory, DBProvider, DatabaseProviderFactory,
 };
+use reth_pureth_receipt::eip6466::{Eip6466ReceiptSnapshot, Receipts};
 use ssz::Encode;
 
 fn fixture_summary() -> ExecutionSummary {
@@ -350,4 +352,97 @@ fn stored_headers_and_indices_round_trip_through_native_tables() {
         reader.tx_ref().get::<tables::BlockOmmers<ExecutionHeader>>(1).unwrap(),
         Some(wrapped),
     );
+}
+
+#[test]
+fn producer_primitives_reuse_retained_commitments_and_reject_different_bodies() {
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/payload.json")).unwrap();
+    for case in reference["cases"].as_array().unwrap().iter().take(3) {
+        let bytes = |name: &str| {
+            alloy_primitives::hex::decode(case[name].as_str().unwrap().strip_prefix("0x").unwrap())
+                .unwrap()
+        };
+        let mut payload_bytes = bytes("payload");
+        payload_bytes[204..236].fill(0);
+        payload_bytes[204] = 7;
+        let payload = ExecutionPayloadSnapshot::from_ssz(
+            &payload_bytes,
+            Eip6466ReceiptSnapshot::build(Receipts::from_ssz_bytes(&bytes("receipts")).unwrap())
+                .unwrap(),
+            ExecutionRequestsSnapshot::from_ssz(&bytes("requests")).unwrap(),
+            PayloadLimits::default(),
+        )
+        .unwrap();
+        let components = payload.components();
+        let native = EthereumBody {
+            transactions: components
+                .transactions
+                .transactions()
+                .iter()
+                .map(|transaction| transaction.to_envelope().unwrap())
+                .collect(),
+            withdrawals: Some(components.withdrawals.withdrawals().to_vec().into()),
+            ommers: Vec::new(),
+        };
+        let header = ExecutionHeader::from_payload(&payload).unwrap();
+        assert_eq!(header.summary_ssz().unwrap(), payload.summary().serialized());
+        assert_eq!(header.hash_slow(), payload.root());
+        let body = ExecutionBody::from_payload(&payload, native.clone()).unwrap();
+        assert_eq!(
+            body.roots,
+            Some((components.transactions.root(), components.withdrawals.root()))
+        );
+        let block = ExecutionBlock::try_new(header, body).unwrap();
+        let encoded = alloy_rlp::encode(&block);
+        assert_eq!(ExecutionBlock::decode(&mut encoded.as_slice()).unwrap(), block);
+        let encoded = serde_json::to_value(&block).unwrap();
+        assert_eq!(serde_json::from_value::<ExecutionBlock>(encoded).unwrap(), block);
+        for mutation in 0..7 {
+            let mut wrong = native.clone();
+            match mutation {
+                0 => wrong.withdrawals = None,
+                1 => wrong.withdrawals.as_mut().unwrap()[0].amount += 1,
+                2 => wrong.ommers.push(ExecutionHeader::default()),
+                3 => {
+                    if wrong.transactions.is_empty() {
+                        wrong.transactions.push(
+                            TxLegacy::default()
+                                .into_signed(alloy_primitives::Signature::new(
+                                    U256::from(1),
+                                    U256::from(2),
+                                    false,
+                                ))
+                                .into(),
+                        );
+                    } else {
+                        wrong.transactions.clear();
+                    }
+                }
+                4 => {
+                    if wrong.transactions.is_empty() {
+                        continue;
+                    }
+                    wrong.transactions[0] = TxLegacy { nonce: 9, ..Default::default() }
+                        .into_signed(alloy_primitives::Signature::new(
+                            U256::from(1),
+                            U256::from(2),
+                            false,
+                        ))
+                        .into();
+                }
+                5 => wrong.withdrawals.as_mut().unwrap().swap(0, 1),
+                _ => {
+                    if wrong.transactions.len() < 2 {
+                        continue;
+                    }
+                    wrong.transactions.swap(0, 1);
+                }
+            }
+            assert!(matches!(
+                ExecutionBody::from_payload(&payload, wrong),
+                Err(PrimitiveError::InvalidBody)
+            ));
+        }
+    }
 }

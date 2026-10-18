@@ -2,9 +2,9 @@
 
 use alloy_primitives::{Address, Bytes, B256};
 use reth_pureth_query::{
-    address_target_node, branch_positions, compose_gindices, container_field_gindex,
-    progressive_chunk_gindex, select_receipt_snapshot, verify_branch, ReceiptSelection,
-    SelectionError, SelectionLimits, SelectionOperation, SelectionRequest,
+    branch_positions, compose_gindices, container_field_gindex, progressive_chunk_gindex,
+    select_receipt_snapshot, verify_branch, ReceiptSelection, SelectionError, SelectionLimits,
+    SelectionOperation, SelectionRequest,
 };
 use reth_pureth_receipt::{
     eip6466::{
@@ -95,7 +95,7 @@ fn selected_address(snapshot: &Eip6466ReceiptSnapshot, path: ResolvedPath) -> Op
 
 fn proof(snapshot: &Eip6466ReceiptSnapshot, path: ResolvedPath) -> (B256, u128, Vec<B256>) {
     let address = selected_address(snapshot, path).unwrap();
-    let target = address_target_node(address.as_slice()).unwrap();
+    let target = B256::right_padding_from(address.as_slice());
     let gindex = address_gindex(path);
     let (node, branch) = branch(snapshot.tree(), gindex);
     assert_eq!(node, target);
