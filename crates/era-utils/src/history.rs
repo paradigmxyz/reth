@@ -4,6 +4,7 @@ use alloy_consensus::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
 use alloy_rlp::Decodable;
+use eyre::WrapErr;
 use futures_util::{Stream, StreamExt};
 use reth_codecs::Compact;
 use reth_db_api::{
@@ -39,7 +40,8 @@ use reth_storage_api::{
     NodePrimitivesProvider, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
 };
 use std::{collections::Bound, error::Error, ops::RangeBounds, sync::mpsc};
-use tracing::info;
+use tokio::runtime::{Handle, RuntimeFlavor};
+use tracing::{info, Instrument};
 
 /// A decoded ERA block: header, body, and optionally its receipts.
 type EraBlock<BH, BB, R> = (BH, BB, Option<Vec<R>>);
@@ -235,6 +237,20 @@ where
 /// as pre-Byzantium receipts can't be recomputed here.
 ///
 /// Returns current block height.
+///
+/// # Runtime requirements
+///
+/// Requires an entered multi-thread Tokio runtime. Returns an error when there is no runtime or
+/// the runtime uses the current-thread scheduler, including calls from its blocking pool.
+/// The import performs blocking file/database work and waits for async downloads. It uses
+/// [`tokio::task::block_in_place`] so the runtime can keep polling downloads and other tasks while
+/// the calling thread imports blocks. The caller remains blocked until the import finishes.
+/// Callers using a [`tokio::task::LocalSet`] must move the import onto a blocking worker.
+///
+/// # Panics
+///
+/// Panics in execution contexts that disallow blocking in place, such as a task running in a
+/// [`tokio::task::LocalSet`], even when its runtime uses the multi-thread scheduler.
 pub fn import<S, Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
     provider_factory: &PF,
@@ -265,170 +281,184 @@ where
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
     ReceiptOf<<PF as DatabaseProviderFactory>::ProviderRW>: Compact + Receipt,
 {
-    let (tx, rx) = mpsc::channel();
-
-    // Handle IO-bound async download in a background tokio task
-    tokio::spawn(async move {
-        while let Some(file) = downloader.next().await {
-            tx.send(Some(file))?;
-        }
-        tx.send(None)
-    });
-
-    let static_file_provider = provider_factory.static_file_provider();
-
-    // The chain's first block, which is not necessarily 0: reth supports a non-zero genesis.
-    let genesis_block_number = static_file_provider.genesis_block_number();
-
-    // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
-    // when poll_execute_ready is polled.
-    let headers_tip = static_file_provider
-        .get_highest_static_file_block(StaticFileSegment::Headers)
-        .unwrap_or(genesis_block_number);
-
-    // When backfilling receipts, resume from the receipts tip so blocks whose headers were already
-    // imported still get their receipts; only blocks above `headers_tip` are written in full.
-    let receipts_tip = store_receipts
-        .then(|| static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts));
-    let mut height = match receipts_tip {
-        Some(tip) => headers_tip.min(tip.unwrap_or(genesis_block_number)),
-        None => headers_tip,
-    };
-
-    // Only the executed range can hold receipts durably, so the repair has to land exactly on the
-    // Execution checkpoint.
-    let receipts_target = store_receipts
-        .then(|| -> eyre::Result<_> {
-            let provider = provider_factory.database_provider_rw()?;
-
-            // Writing the segment under a config that routes receipts to the database would leave
-            // two sources and keep data the prune config wants dropped.
-            if !matches!(
-                EitherWriter::receipts_destination(&provider),
-                EitherWriterDestination::StaticFile
-            ) {
-                eyre::bail!(
-                    "receipt import writes the Receipts static file segment, but this node's \
-                     prune configuration keeps receipts elsewhere. Remove the receipt pruning \
-                     configuration, or import without receipts"
-                );
-            }
-
-            let target = provider
-                .get_stage_checkpoint(StageId::Execution)?
-                .map(|checkpoint| checkpoint.block_number)
-                .unwrap_or(genesis_block_number);
-
-            if target <= genesis_block_number {
-                eyre::bail!(
-                    "receipt import repairs the receipt static files of an already-executed \
-                     range, but this database has executed no blocks. Sync the node first, or \
-                     import without receipts"
-                );
-            }
-            if height >= target {
-                eyre::bail!(
-                    "receipts already cover the executed range up to block {target}, nothing to \
-                     repair"
-                );
-            }
-            if let Some(to_block) = to_block &&
-                to_block != target
-            {
-                eyre::bail!(
-                    "--to-block {to_block} does not match the Execution checkpoint {target}. A \
-                     receipt repair must cover the executed range exactly, so either drop \
-                     --to-block or set it to {target}"
-                );
-            }
-            // Such a repair can never complete, so fail before committing the empty blocks that
-            // precede the first pre-Byzantium receipt.
-            if !is_receipt_verifiable(height + 1) {
-                eyre::bail!(
-                    "receipt repair would start at block {}, which predates Byzantium. Those \
-                     receipts commit to a post-state root this node's receipt type cannot \
-                     represent, so the Receipts segment has to already cover the pre-Byzantium \
-                     range",
-                    height + 1,
-                );
-            }
-
-            Ok(target)
-        })
-        .transpose()?;
-
-    // A segment that doesn't exist yet holds no receipts for genesis, which has none of its own.
-    // The backfill resumes at the block after it, so seed that entry the way `init_genesis` does,
-    // or the writer rejects the first append. Setting the range directly rather than incrementing
-    // also covers a genesis that doesn't sit on a static file boundary.
-    if matches!(receipts_tip, Some(None)) {
-        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-        writer.user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
-        writer.commit()?;
+    let runtime = Handle::try_current()
+        .wrap_err("ERA import requires an entered multi-thread Tokio runtime")?;
+    if runtime.runtime_flavor() != RuntimeFlavor::MultiThread {
+        eyre::bail!("ERA import requires a multi-thread Tokio runtime");
     }
 
-    let to_block = receipts_target.or(to_block);
-    let end = to_block.map_or(Bound::Unbounded, Bound::Included);
-    let policy = ImportPolicy { headers_tip, is_receipt_verifiable };
+    tokio::task::block_in_place(|| {
+        let (tx, rx) = mpsc::channel();
 
-    while let Some(meta) = rx.recv()? {
-        let meta = meta?;
-        let from = height;
-        let provider = provider_factory.database_provider_rw()?;
+        // Async downloads continue while this thread imports files and waits for the next one.
+        runtime.spawn(
+            async move {
+                while let Some(file) = downloader.next().await {
+                    tx.send(Some(file))?;
+                }
+                tx.send(None)
+            }
+            .in_current_span(),
+        );
 
-        // Headers and receipts are separate static file segments, each with its own writer, only
-        // open the receipts one when `--with-receipts` was requested.
-        let mut receipts_writer = store_receipts
-            .then(|| static_file_provider.latest_writer(StaticFileSegment::Receipts))
+        let static_file_provider = provider_factory.static_file_provider();
+
+        // The chain's first block, which is not necessarily 0: reth supports a non-zero genesis.
+        let genesis_block_number = static_file_provider.genesis_block_number();
+
+        // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+        // when poll_execute_ready is polled.
+        let headers_tip = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or(genesis_block_number);
+
+        // When backfilling receipts, resume from the receipts tip so blocks whose headers were
+        // already imported still get their receipts; only blocks above `headers_tip` are
+        // written in full.
+        let receipts_tip = store_receipts.then(|| {
+            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
+        });
+        let mut height = match receipts_tip {
+            Some(tip) => headers_tip.min(tip.unwrap_or(genesis_block_number)),
+            None => headers_tip,
+        };
+
+        // Only the executed range can hold receipts durably, so the repair has to land exactly on
+        // the Execution checkpoint.
+        let receipts_target = store_receipts
+            .then(|| -> eyre::Result<_> {
+                let provider = provider_factory.database_provider_rw()?;
+
+                // Writing the segment under a config that routes receipts to the database would leave
+                // two sources and keep data the prune config wants dropped.
+                if !matches!(
+                    EitherWriter::receipts_destination(&provider),
+                    EitherWriterDestination::StaticFile
+                ) {
+                    eyre::bail!(
+                        "receipt import writes the Receipts static file segment, but this node's \
+                         prune configuration keeps receipts elsewhere. Remove the receipt pruning \
+                         configuration, or import without receipts"
+                    );
+                }
+
+                let target = provider
+                    .get_stage_checkpoint(StageId::Execution)?
+                    .map(|checkpoint| checkpoint.block_number)
+                    .unwrap_or(genesis_block_number);
+
+                if target <= genesis_block_number {
+                    eyre::bail!(
+                        "receipt import repairs the receipt static files of an already-executed \
+                         range, but this database has executed no blocks. Sync the node first, or \
+                         import without receipts"
+                    );
+                }
+                if height >= target {
+                    eyre::bail!(
+                        "receipts already cover the executed range up to block {target}, nothing to \
+                         repair"
+                    );
+                }
+                if let Some(to_block) = to_block &&
+                    to_block != target
+                {
+                    eyre::bail!(
+                        "--to-block {to_block} does not match the Execution checkpoint {target}. A \
+                         receipt repair must cover the executed range exactly, so either drop \
+                         --to-block or set it to {target}"
+                    );
+                }
+                // Such a repair can never complete, so fail before committing the empty blocks that
+                // precede the first pre-Byzantium receipt.
+                if !is_receipt_verifiable(height + 1) {
+                    eyre::bail!(
+                        "receipt repair would start at block {}, which predates Byzantium. Those \
+                         receipts commit to a post-state root this node's receipt type cannot \
+                         represent, so the Receipts segment has to already cover the pre-Byzantium \
+                         range",
+                        height + 1,
+                    );
+                }
+
+                Ok(target)
+            })
             .transpose()?;
 
-        height = process::<S, _, _, _, _>(
-            &meta,
-            &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
-            receipts_writer.as_mut(),
-            &provider,
-            hash_collector,
-            (Bound::Included(height), end),
-            policy,
-        )?;
+        // A segment that doesn't exist yet holds no receipts for genesis, which has none of its
+        // own. The backfill resumes at the block after it, so seed that entry the way
+        // `init_genesis` does, or the writer rejects the first append. Setting the range
+        // directly rather than incrementing also covers a genesis that doesn't sit on a
+        // static file boundary.
+        if matches!(receipts_tip, Some(None)) {
+            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
+            writer.user_header_mut().set_block_range(genesis_block_number, genesis_block_number);
+            writer.commit()?;
+        }
 
-        // Drop the receipts writer's lock before `provider.commit()`, which locks every static
-        // file segment (including receipts) via `has_unwind_queued`.
-        drop(receipts_writer);
+        let to_block = receipts_target.or(to_block);
+        let end = to_block.map_or(Bound::Unbounded, Bound::Included);
+        let policy = ImportPolicy { headers_tip, is_receipt_verifiable };
 
-        // A receipts-only backfill trails `headers_tip`; the checkpoints must not regress below
-        // the headers already in static files.
-        let checkpoint = height.max(headers_tip);
-        save_stage_checkpoints(&provider, from, checkpoint, checkpoint, checkpoint)?;
+        while let Some(meta) = rx.recv()? {
+            let meta = meta?;
+            let from = height;
+            let provider = provider_factory.database_provider_rw()?;
+
+            // Headers and receipts are separate static file segments, each with its own writer,
+            // only open the receipts one when `--with-receipts` was requested.
+            let mut receipts_writer = store_receipts
+                .then(|| static_file_provider.latest_writer(StaticFileSegment::Receipts))
+                .transpose()?;
+
+            height = process::<S, _, _, _, _>(
+                &meta,
+                &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
+                receipts_writer.as_mut(),
+                &provider,
+                hash_collector,
+                (Bound::Included(height), end),
+                policy,
+            )?;
+
+            // Drop the receipts writer's lock before `provider.commit()`, which locks every static
+            // file segment (including receipts) via `has_unwind_queued`.
+            drop(receipts_writer);
+
+            // A receipts-only backfill trails `headers_tip`; the checkpoints must not regress below
+            // the headers already in static files.
+            let checkpoint = height.max(headers_tip);
+            save_stage_checkpoints(&provider, from, checkpoint, checkpoint, checkpoint)?;
+
+            provider.commit()?;
+
+            info!(target: "era::history::import", first = from, last = height, file = %meta.path().display(), "Imported ERA file");
+
+            if to_block.is_some_and(|to| height >= to) {
+                break;
+            }
+        }
+
+        let provider = provider_factory.database_provider_rw()?;
+
+        build_index(&provider, hash_collector)?;
 
         provider.commit()?;
 
-        info!(target: "era::history::import", first = from, last = height, file = %meta.path().display(), "Imported ERA file");
-
-        if to_block.is_some_and(|to| height >= to) {
-            break;
+        // A repair that stops short leaves the receipts behind the executed range, which the
+        // Execution stage reports as missing static file data on the next node start.
+        if let Some(target) = receipts_target &&
+            height < target
+        {
+            eyre::bail!(
+                "receipt repair reached block {height} but the executed range ends at {target}. The \
+                 source ran out of files, re-run with the files covering blocks {}..={target}",
+                height + 1,
+            );
         }
-    }
 
-    let provider = provider_factory.database_provider_rw()?;
-
-    build_index(&provider, hash_collector)?;
-
-    provider.commit()?;
-
-    // A repair that stops short leaves the receipts behind the executed range, which the Execution
-    // stage reports as missing static file data on the next node start.
-    if let Some(target) = receipts_target &&
-        height < target
-    {
-        eyre::bail!(
-            "receipt repair reached block {height} but the executed range ends at {target}. The \
-             source ran out of files, re-run with the files covering blocks {}..={target}",
-            height + 1,
-        );
-    }
-
-    Ok(height)
+        Ok(height)
+    })
 }
 
 /// Saves progress of ERA import into stages sync.
@@ -893,8 +923,9 @@ mod tests {
         StaticFileSegment, StaticFileWriter,
     };
     use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig};
-    use std::{cell::Cell, path::Path};
+    use std::{cell::Cell, path::Path, time::Duration};
     use tempfile::tempdir;
+    use tokio::task::LocalSet;
 
     /// Builds an `.era1` block tuple for a transaction-less block carrying `receipts`.
     fn era1_block_tuple(number: u64, receipts: Vec<ReceiptEnvelope>) -> BlockTuple {
@@ -1035,6 +1066,105 @@ mod tests {
         fn path(&self) -> &Path {
             Path::new("test.era1")
         }
+    }
+
+    #[test]
+    fn import_without_runtime_returns_error() {
+        let pf = create_test_provider_factory();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let stream = futures_util::stream::empty::<eyre::Result<TestMeta>>();
+
+        let error = import::<TestEra, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            false,
+            &|_| false,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "ERA import requires an entered multi-thread Tokio runtime");
+    }
+
+    #[tokio::test]
+    async fn import_on_current_thread_runtime_returns_error() {
+        let pf = create_test_provider_factory();
+        let folder = tempdir().unwrap();
+        let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+        let stream = futures_util::stream::empty::<eyre::Result<TestMeta>>();
+
+        let error = import::<TestEra, _, _, _, Block, _, _>(
+            stream,
+            &pf,
+            &mut hash_collector,
+            None,
+            false,
+            &|_| false,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "ERA import requires a multi-thread Tokio runtime");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[should_panic(expected = "can call blocking only when running on the multi-threaded runtime")]
+    async fn import_in_local_set_panics() {
+        LocalSet::new()
+            .run_until(async {
+                let pf = create_test_provider_factory();
+                let folder = tempdir().unwrap();
+                let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+                let stream = futures_util::stream::empty::<eyre::Result<TestMeta>>();
+
+                import::<TestEra, _, _, _, Block, _, _>(
+                    stream,
+                    &pf,
+                    &mut hash_collector,
+                    None,
+                    false,
+                    &|_| false,
+                )
+                .unwrap();
+            })
+            .await;
+    }
+
+    #[test]
+    fn import_releases_single_runtime_worker_for_downloads() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        runtime.spawn(async move {
+            let pf = create_test_provider_factory();
+            init_genesis(&pf).unwrap();
+            let folder = tempdir().unwrap();
+            let mut hash_collector = Collector::new(4096, Some(folder.path().to_owned()));
+            let stream = futures_util::stream::once(async {
+                tokio::task::yield_now().await;
+                Ok(TestMeta { marked: Cell::new(false) })
+            })
+            .boxed();
+
+            let result = import::<TestEra, _, _, _, Block, _, _>(
+                stream,
+                &pf,
+                &mut hash_collector,
+                None,
+                false,
+                &|_| false,
+            );
+            tx.send(result).unwrap();
+        });
+
+        // An OS-thread timeout also bounds this test if the only runtime worker gets blocked.
+        let result = rx.recv_timeout(Duration::from_secs(10));
+        runtime.shutdown_background();
+        assert_eq!(result.unwrap().unwrap(), 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
