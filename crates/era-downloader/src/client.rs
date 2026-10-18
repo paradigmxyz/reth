@@ -524,7 +524,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let http = ListingClient::default();
         *http.index.lock().await = "<a href=\"mainnet-00000-original.era1\">\n".to_owned();
-        *http.checksums.lock().await = b"00\ninvalid\n".to_vec();
+        *http.checksums.lock().await = b"00\r\n\xff\n".to_vec();
         let client = EraClient::new(
             http.clone(),
             Url::parse("https://example.com/era1/").unwrap(),
@@ -654,21 +654,5 @@ mod tests {
         second.unwrap();
         assert_eq!(http.calls.load(Ordering::Relaxed), 4);
         assert_eq!(clone.expected_checksum(0).await.unwrap(), vec![0]);
-    }
-
-    #[tokio::test]
-    async fn malformed_later_checksum_does_not_reject_earlier_entries() {
-        let folder = tempfile::tempdir().unwrap();
-        let http = ListingClient::default();
-        *http.index.lock().await = "<a href=\"mainnet-00000-original.era1\">\n".to_owned();
-        *http.checksums.lock().await = b"00\r\n\xff\n".to_vec();
-        let client =
-            EraClient::new(http, Url::parse("https://example.com/era1/").unwrap(), folder.path());
-        client.fetch_file_list().await.unwrap();
-        assert_eq!(client.expected_checksum(0).await.unwrap(), vec![0]);
-        assert_eq!(
-            client.expected_checksum(1).await.unwrap_err().downcast_ref::<hex::FromHexError>(),
-            Some(&hex::FromHexError::OddLength)
-        );
     }
 }
