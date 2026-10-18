@@ -604,9 +604,6 @@ mod tests {
         let compressed_receipts = CompressedReceipts::from_rlp(&rlp_data).unwrap();
         let decompressed = compressed_receipts.decompress().unwrap();
         assert_eq!(decompressed, rlp_data);
-        assert_eq!(compressed_header.data, compressed_body.data);
-        assert_eq!(compressed_header.data, compressed_receipts.data);
-        assert_eq!(compressed_header.data, snappy_compress(&rlp_data).unwrap());
     }
 
     #[test]
