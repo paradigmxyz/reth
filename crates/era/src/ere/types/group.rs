@@ -247,7 +247,7 @@ pub struct EreId {
     ///
     /// Kept sorted and deduplicated by the builders so the filename postfix renders in the
     /// spec-mandated alphabetical order. Empty means the default, fully verifiable profile.
-    pub profiles: Vec<EreProfile>,
+    profiles: Vec<EreProfile>,
 }
 
 impl EreId {
@@ -291,6 +291,14 @@ impl EreId {
         self.profiles.extend(profiles);
         self.normalize_profiles();
         self
+    }
+
+    /// Returns the subset profiles in alphabetical order, without duplicates.
+    ///
+    /// An empty slice denotes the default, fully verifiable profile. Use [`Self::with_profile`]
+    /// or [`Self::with_profiles`] to add profiles while preserving their canonical order.
+    pub fn profiles(&self) -> &[EreProfile] {
+        &self.profiles
     }
 
     /// Sort and deduplicate profiles so the filename postfix is deterministic and alphabetical.
@@ -622,4 +630,17 @@ mod tests {
     fn test_ere_id_file_naming_with_profiles(id: EreId, expected_file_name: &str) {
         assert_eq!(id.to_file_name(), expected_file_name);
     }
+
+    #[test]
+    fn ere_id_profiles_remain_canonical() {
+        let id = EreId::new("mainnet", 0, 8192);
+        assert!(id.profiles().is_empty());
+
+        let id = id
+            .with_profiles([EreProfile::NoReceipts, EreProfile::NoProofs, EreProfile::NoReceipts])
+            .with_profile(EreProfile::NoProofs);
+        assert_eq!(id.profiles(), [EreProfile::NoProofs, EreProfile::NoReceipts]);
+        assert_eq!(id.to_file_name(), "mainnet-00000-00000000-noproofs-noreceipts.ere");
+    }
+
 }
