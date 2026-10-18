@@ -425,7 +425,7 @@ async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
 mod tests {
     use super::*;
     use std::{
-        io::{Read, Write},
+        io::{BufRead, BufReader, Write},
         net::TcpListener,
         path::PathBuf,
         thread,
@@ -493,8 +493,15 @@ mod tests {
             // Three archive attempts followed by one index request.
             for _ in 0..4 {
                 let (mut socket, _) = listener.accept().unwrap();
-                let mut request = [0; 4096];
-                socket.read(&mut request).unwrap();
+                let mut reader = BufReader::new(&mut socket);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
                 write!(
                     socket,
                     "HTTP/1.1 {} {}\r\nContent-Length: 5\r\nConnection: close\r\n\r\nerror",

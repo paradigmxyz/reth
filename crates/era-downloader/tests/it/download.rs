@@ -1,5 +1,5 @@
 //! Tests fetching a file
-use crate::{StubClient, ERE_ETHPANDAOPS_URL};
+use super::*;
 use reqwest::Url;
 use reth_era_downloader::EraClient;
 use std::str::FromStr;
