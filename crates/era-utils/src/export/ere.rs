@@ -8,7 +8,7 @@ use alloy_rlp::Encodable;
 use eyre::{eyre, Result};
 use reth_era::{
     common::file_ops::{EraFileFormat, EraFileId, StreamWriter},
-    e2s::types::Header,
+    e2s::{error::E2sError, types::Header},
     ere::{
         file::{EreFile, EreWriter},
         types::{
@@ -52,7 +52,7 @@ impl EraBlockWriter for Ere {
             .then(|| super::accumulator::<Accumulator, _, _, _>(&blocks[..pre_merge_count]))
             .transpose()?;
         let id = file_id(network, max_blocks_per_file, blocks)?;
-        let index = block_index(blocks[0].header.number(), &tuples, accumulator.as_ref());
+        let index = block_index(blocks[0].header.number(), &tuples, accumulator.as_ref())?;
 
         let file_path = dir.join(id.to_file_name());
         let group = EreGroup::new(tuples, accumulator, index);
@@ -144,7 +144,7 @@ fn block_index(
     start_block: u64,
     tuples: &[BlockTuple],
     accumulator: Option<&Accumulator>,
-) -> DynamicBlockIndex {
+) -> Result<DynamicBlockIndex, E2sError> {
     // Every block carries header + body + receipts, plus total-difficulty for pre-merge files
     // (proofs are always omitted), so the index stores three or four offsets per block.
     let has_total_difficulty = tuples.first().is_some_and(|t| t.total_difficulty.is_some());
