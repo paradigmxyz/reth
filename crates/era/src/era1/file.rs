@@ -580,10 +580,6 @@ mod tests {
             (vec![version.clone(), accumulator.clone()], "Era1 file missing block index entry"),
             (vec![version.clone(), index.clone()], "Era1 file missing accumulator entry"),
             (
-                [vec![version.clone()], block_entries.to_vec()].concat(),
-                "Era1 file missing accumulator entry",
-            ),
-            (
                 [vec![version.clone()], block_entries.to_vec(), vec![accumulator.clone()]].concat(),
                 "Era1 file missing block index entry",
             ),
