@@ -139,17 +139,28 @@ pub trait FileWriter {
     /// Era file type the writer handles
     type File: EraFileFormat<Id: EraFileId>;
 
-    /// Creates a new file at the specified path and writes the era file to it
+    /// Creates or truncates the file at `path`, then writes the era file to it.
+    ///
+    /// Existing contents are removed before writing begins. This operation is not atomic: an
+    /// error can leave an empty or partially written file, and the previous contents are not
+    /// restored.
     fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError>;
 
-    /// Creates a file in the directory using standardized era naming
+    /// Writes a file in `directory` using its standardized era name.
+    ///
+    /// Uses [`Self::create`] and has the same overwrite and failure semantics: an existing file
+    /// with that name is truncated, and errors can leave an empty or partial replacement.
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>;
 }
 
 impl<T: StreamWriter<File>> FileWriter for T {
     type File = T::File;
 
-    /// Creates a new file at the specified path and writes the era file to it
+    /// Creates or truncates the file at `path`, then writes the era file to it.
+    ///
+    /// Existing contents are removed before writing begins. This operation is not atomic: an
+    /// error can leave an empty or partially written file, and the previous contents are not
+    /// restored.
     fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError> {
         let file_handle = File::create(path).map_err(E2sError::Io)?;
         let mut writer = Self::new(file_handle);
@@ -157,7 +168,10 @@ impl<T: StreamWriter<File>> FileWriter for T {
         Ok(())
     }
 
-    /// Creates a file in the directory using standardized era naming
+    /// Writes a file in `directory` using its standardized era name.
+    ///
+    /// Uses [`Self::create`] and has the same overwrite and failure semantics: an existing file
+    /// with that name is truncated, and errors can leave an empty or partial replacement.
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError> {
         let filename = file.id().to_file_name();
         let path = directory.as_ref().join(filename);
