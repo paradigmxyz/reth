@@ -1,15 +1,13 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
 //! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
+use crate::{ExExContext, ExExEventSender, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use std::fmt::Debug;
-use tokio::sync::mpsc;
-
-use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 
 // TODO(0xurb) - add `node` after abstractions
 /// Captures the context that an `ExEx` has access to.
@@ -20,14 +18,14 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     pub config: NodeConfig<Box<dyn EthChainSpec<Header = N::BlockHeader> + 'static>>,
     /// The loaded node config
     pub reth_config: reth_config::Config,
-    /// Channel used to send [`ExExEvent`]s to the rest of the node.
+    /// Submits [`ExExEvent`](crate::ExExEvent)s to the execution extension manager.
     ///
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
     /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
-    pub events: mpsc::UnboundedSender<ExExEvent>,
+    pub events: ExExEventSender,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
     ///
     /// # Important

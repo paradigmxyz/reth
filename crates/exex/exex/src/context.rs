@@ -1,4 +1,6 @@
-use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
+use crate::{
+    ExExContextDyn, ExExEventSendError, ExExEventSender, ExExNotifications, ExExNotificationsStream,
+};
 use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExHead;
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
@@ -6,7 +8,6 @@ use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
-use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 /// Captures the context that an `ExEx` has access to.
 ///
@@ -18,14 +19,14 @@ pub struct ExExContext<Node: FullNodeComponents> {
     pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     /// The loaded node config
     pub reth_config: reth_config::Config,
-    /// Channel used to send [`ExExEvent`]s to the rest of the node.
+    /// Submits [`ExExEvent`](crate::ExExEvent)s to the execution extension manager.
     ///
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
     /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
-    pub events: UnboundedSender<ExExEvent>,
+    pub events: ExExEventSender,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
     ///
     /// # Important
@@ -120,15 +121,13 @@ where
         self.notifications.catch_up_with_head(head)
     }
 
-    /// Sends an [`ExExEvent::FinishedHeight`] to the ExEx task manager letting it know that this
-    /// ExEx has processed the corresponding block.
+    /// Sends an [`ExExEvent::FinishedHeight`](crate::ExExEvent::FinishedHeight) to the ExEx task
+    /// manager letting it know that this ExEx has processed the corresponding block.
     ///
-    /// Returns an error if the channel was closed (ExEx task manager panicked).
-    pub fn send_finished_height(
-        &self,
-        height: BlockNumHash,
-    ) -> Result<(), SendError<BlockNumHash>> {
-        self.events.send(ExExEvent::FinishedHeight(height)).map_err(|_| SendError(height))
+    /// Success means the report was queued, not that the manager processed it. Returns the unsent
+    /// event if the manager is no longer accepting events.
+    pub fn send_finished_height(&self, height: BlockNumHash) -> Result<(), ExExEventSendError> {
+        self.events.send_finished_height(height)
     }
 }
 

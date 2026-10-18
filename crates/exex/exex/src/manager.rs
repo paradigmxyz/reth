@@ -1,5 +1,6 @@
 use crate::{
-    wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
+    wal::Wal, ExExEvent, ExExEventSender, ExExNotification, ExExNotifications, FinishedExExHeight,
+    WalHandle,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -95,15 +96,16 @@ pub struct ExExHandle<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> ExExHandle<N> {
     /// Create a new handle for the given `ExEx`.
     ///
-    /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
+    /// Returns the handle, an [`ExExEventSender`] for reporting the extension's progress, and
+    /// [`ExExNotifications`] for receiving chain changes. Give the sender and notifications to
+    /// the `ExEx`.
     pub fn new<P, E: ConfigureEvm<Primitives = N>>(
         id: String,
         node_head: BlockNumHash,
         provider: P,
         evm_config: E,
         wal_handle: WalHandle<N>,
-    ) -> (Self, UnboundedSender<ExExEvent>, ExExNotifications<P, E>) {
+    ) -> (Self, ExExEventSender, ExExNotifications<P, E>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let notifications =
@@ -118,7 +120,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
                 next_notification_id: 0,
                 finished_height: None,
             },
-            event_tx,
+            event_tx.into(),
             notifications,
         )
     }
@@ -894,7 +896,7 @@ mod tests {
 
         // Update the block height via an event
         let block = BlockNumHash::new(42, B256::random());
-        event_tx.send(ExExEvent::FinishedHeight(block)).unwrap();
+        event_tx.send_finished_height(block).unwrap();
 
         // Create a mock ExExManager and add the exex_handle to it
         let exex_manager = ExExManager::new(

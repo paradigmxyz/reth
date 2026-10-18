@@ -309,7 +309,7 @@ pub async fn test_exex_context_with_chain_spec(
         head,
         config: NodeConfig::test(),
         reth_config: reth_config::Config::default(),
-        events: events_tx,
+        events: events_tx.into(),
         notifications,
         components,
     };
