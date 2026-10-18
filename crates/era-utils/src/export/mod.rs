@@ -18,7 +18,7 @@ use eyre::{eyre, Result};
 use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, Receipt};
-use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider, ReceiptProvider};
+use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -39,7 +39,9 @@ pub struct ExportConfig {
     pub dir: PathBuf,
     /// First block to export
     pub first_block_number: BlockNumber,
-    /// Last block to export
+    /// Requested last block to export, inclusive.
+    ///
+    /// Export stops at the highest available header if storage does not reach this block.
     pub last_block_number: BlockNumber,
     /// Number of blocks per ERA file.
     /// It can never be larger than `MAX_BLOCKS_PER_ERA1 = 8192`
@@ -158,7 +160,11 @@ type BodyOf<P> = <<P as BlockReader>::Block as Block>::Body;
 /// Fetches block history from `provider` and writes it to ERA files in the `W` format, chunked by
 /// [`ExportConfig::max_blocks_per_file`].
 ///
-/// Returns the paths of the files that were created.
+/// Returns the paths of the files that were created. The requested end is capped at the highest
+/// available header, which may extend beyond the provider's best-block checkpoint into static
+/// files. A successful export can therefore end before [`ExportConfig::last_block_number`].
+/// Storage lookup failures are returned as errors, rather than interpreted as missing headers.
+/// Returns an error if the resolved end is before [`ExportConfig::first_block_number`].
 pub fn export<W, P>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
     W: EraBlockWriter,
@@ -171,7 +177,7 @@ where
 
     // `best_block_number()` can be stale behind static files, so reconcile against what is actually
     // available.
-    let last_block = determine_export_range(provider, config)?;
+    let last_block = determine_export_range(provider, config, provider.best_block_number()?)?;
 
     info!(
         target: "era::history::export",
@@ -290,39 +296,40 @@ where
 /// Determines the actual last block number that can be exported.
 ///
 /// Uses a `headers_range` fallback when `best_block_number` is stale due to static file storage.
-fn determine_export_range<P>(provider: &P, config: &ExportConfig) -> Result<BlockNumber>
+fn determine_export_range<P>(
+    provider: &P,
+    config: &ExportConfig,
+    best_block_number: BlockNumber,
+) -> Result<BlockNumber>
 where
-    P: HeaderProvider + BlockNumReader,
+    P: HeaderProvider,
 {
-    let best_block_number = provider.best_block_number()?;
-
-    if best_block_number >= config.last_block_number {
-        return Ok(config.last_block_number);
-    }
-
-    warn!(
-        "Last block {} is beyond current head {}, setting last = head",
-        config.last_block_number, best_block_number
-    );
-
-    // Check if more blocks are actually available beyond what `best_block_number()` reports.
-    match provider.headers_range(best_block_number..=config.last_block_number) {
-        Ok(headers) => match headers.last() {
-            Some(last_header) => {
-                let highest_block = last_header.number();
-                info!("Found highest available block {} via headers_range", highest_block);
-                Ok(highest_block)
-            }
-            None => {
-                warn!("No headers found in range, using best_block_number {}", best_block_number);
-                Ok(best_block_number)
-            }
-        },
-        Err(_) => {
-            warn!("headers_range failed, using best_block_number {}", best_block_number);
-            Ok(best_block_number)
+    let last_block = if best_block_number >= config.last_block_number {
+        config.last_block_number
+    } else {
+        // Check whether static files extend beyond the best-block checkpoint.
+        let headers = provider.headers_range(best_block_number..=config.last_block_number)?;
+        if let Some(last_header) = headers.last() {
+            let highest_block = last_header.number();
+            info!("Found highest available block {} via headers_range", highest_block);
+            highest_block
+        } else {
+            warn!(
+                "No headers found beyond current head, using best_block_number {}",
+                best_block_number
+            );
+            best_block_number
         }
+    };
+
+    if last_block < config.first_block_number {
+        return Err(eyre!(
+            "Export range ends at block {last_block}, before first block {}",
+            config.first_block_number,
+        ));
     }
+
+    Ok(last_block)
 }
 
 /// Throttled progress reporter for a running export.
@@ -367,8 +374,14 @@ impl ExportProgress {
 
 #[cfg(test)]
 mod tests {
-    use super::ExportConfig;
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::BlockHash;
     use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
+    use reth_primitives_traits::SealedHeader;
+    use reth_static_file_types::StaticFileSegment;
+    use reth_storage_api::errors::{ProviderError, ProviderResult};
+    use std::ops::RangeBounds;
     use tempfile::tempdir;
 
     #[test]
@@ -409,5 +422,95 @@ mod tests {
         let result = oversized_config.validate();
         assert!(result.is_err(), "Oversized blocks per file should fail validation");
         assert!(result.unwrap_err().to_string().contains("exceeds ERA1 limit"));
+    }
+
+    #[derive(Debug)]
+    struct RangeProvider {
+        headers: ProviderResult<Vec<Header>>,
+    }
+
+    impl HeaderProvider for RangeProvider {
+        type Header = Header;
+
+        fn header(&self, _block_hash: BlockHash) -> ProviderResult<Option<Header>> {
+            unreachable!("range discovery only reads headers_range");
+        }
+
+        fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Header>> {
+            unreachable!("range discovery only reads headers_range");
+        }
+
+        fn headers_range(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<Header>> {
+            self.headers.clone()
+        }
+
+        fn sealed_header(
+            &self,
+            _number: BlockNumber,
+        ) -> ProviderResult<Option<SealedHeader<Header>>> {
+            unreachable!("range discovery only reads headers_range");
+        }
+
+        fn sealed_headers_while(
+            &self,
+            _range: impl RangeBounds<BlockNumber>,
+            _predicate: impl FnMut(&SealedHeader<Header>) -> bool,
+        ) -> ProviderResult<Vec<SealedHeader<Header>>> {
+            unreachable!("range discovery only reads headers_range");
+        }
+    }
+
+    #[test]
+    fn export_range_within_head_does_not_probe_storage() {
+        let provider = RangeProvider { headers: Err(ProviderError::UnsupportedProvider) };
+        let config = ExportConfig { last_block_number: 5, ..Default::default() };
+
+        assert_eq!(determine_export_range(&provider, &config, 10).unwrap(), 5);
+    }
+
+    #[test]
+    fn export_range_uses_headers_beyond_checkpoint() {
+        let provider =
+            RangeProvider { headers: Ok(vec![Header { number: 7, ..Default::default() }]) };
+        let config = ExportConfig { last_block_number: 10, ..Default::default() };
+
+        assert_eq!(determine_export_range(&provider, &config, 5).unwrap(), 7);
+    }
+
+    #[test]
+    fn export_range_without_later_headers_uses_checkpoint() {
+        let provider = RangeProvider { headers: Ok(Vec::new()) };
+        let config = ExportConfig { last_block_number: 10, ..Default::default() };
+
+        assert_eq!(determine_export_range(&provider, &config, 5).unwrap(), 5);
+    }
+
+    #[test]
+    fn export_range_preserves_storage_error() {
+        let provider = RangeProvider {
+            headers: Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 8)),
+        };
+        let config = ExportConfig { last_block_number: 10, ..Default::default() };
+
+        let error = determine_export_range(&provider, &config, 5).unwrap_err();
+        assert!(matches!(
+            error.downcast_ref::<ProviderError>(),
+            Some(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 8))
+        ));
+    }
+
+    #[test]
+    fn export_range_rejects_end_before_start() {
+        let provider = RangeProvider { headers: Ok(Vec::new()) };
+        for last_block_number in [5, 10] {
+            let config =
+                ExportConfig { first_block_number: 8, last_block_number, ..Default::default() };
+
+            let error = determine_export_range(&provider, &config, 5).unwrap_err();
+            assert_eq!(error.to_string(), "Export range ends at block 5, before first block 8",);
+        }
     }
 }
