@@ -70,18 +70,18 @@
 //! ``````
 
 use crate::{
-    common::decode::DecodeCompressedRlp,
+    common::{
+        compression::{snappy_compress, snappy_decompress},
+        decode::DecodeCompressedRlp,
+    },
     e2s::{error::E2sError, types::Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use sha2::{Digest, Sha256};
-use snap::{read::FrameDecoder, write::FrameEncoder};
-use std::{
-    io::{Read, Write},
-    marker::PhantomData,
-};
+
+pub use crate::common::compression::SnappyRlpCodec;
 
 // Era1-specific constants
 /// `CompressedHeader` record type
@@ -102,56 +102,6 @@ pub const ACCUMULATOR: [u8; 2] = [0x07, 0x00];
 /// Maximum number of blocks in an Era1 file, limited by accumulator size
 pub const MAX_BLOCKS_PER_ERA1: usize = 8192;
 
-/// Generic codec for Snappy-compressed RLP data
-#[derive(Debug, Clone, Default)]
-pub struct SnappyRlpCodec<T> {
-    _phantom: PhantomData<T>,
-}
-
-impl<T> SnappyRlpCodec<T> {
-    /// Create a new codec for the given type
-    pub const fn new() -> Self {
-        Self { _phantom: PhantomData }
-    }
-}
-
-impl<T: Decodable> SnappyRlpCodec<T> {
-    /// Decode compressed data into the target type
-    pub fn decode(&self, compressed_data: &[u8]) -> Result<T, E2sError> {
-        let mut decoder = FrameDecoder::new(compressed_data);
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress data: {e}"))
-        })?;
-
-        let mut slice = decompressed.as_slice();
-        T::decode(&mut slice).map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
-    }
-}
-
-impl<T: Encodable> SnappyRlpCodec<T> {
-    /// Encode data into compressed format
-    pub fn encode(&self, data: &T) -> Result<Vec<u8>, E2sError> {
-        let mut rlp_data = Vec::new();
-        data.encode(&mut rlp_data);
-
-        let mut compressed = Vec::new();
-        {
-            let mut encoder = FrameEncoder::new(&mut compressed);
-
-            Write::write_all(&mut encoder, &rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress data: {e}"))
-            })?;
-
-            encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
-            })?;
-        }
-
-        Ok(compressed)
-    }
-}
-
 /// Compressed block header using `snappyFramed(rlp(header))`
 #[derive(Debug, Clone)]
 pub struct CompressedHeader {
@@ -167,30 +117,12 @@ impl CompressedHeader {
 
     /// Create from RLP-encoded header by compressing it with Snappy
     pub fn from_rlp(rlp_data: &[u8]) -> Result<Self, E2sError> {
-        let mut compressed = Vec::new();
-        {
-            let mut encoder = FrameEncoder::new(&mut compressed);
-
-            Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
-            })?;
-
-            encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
-            })?;
-        }
-        Ok(Self { data: compressed })
+        Ok(Self { data: snappy_compress(rlp_data)? })
     }
 
     /// Decompress to get the original RLP-encoded header
     pub fn decompress(&self) -> Result<Vec<u8>, E2sError> {
-        let mut decoder = FrameDecoder::new(self.data.as_slice());
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress header: {e}"))
-        })?;
-
-        Ok(decompressed)
+        snappy_decompress(&self.data)
     }
 
     /// Convert to an [`Entry`]
@@ -248,30 +180,12 @@ impl CompressedBody {
 
     /// Create from RLP-encoded body by compressing it with Snappy
     pub fn from_rlp(rlp_data: &[u8]) -> Result<Self, E2sError> {
-        let mut compressed = Vec::new();
-        {
-            let mut encoder = FrameEncoder::new(&mut compressed);
-
-            Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress body: {e}"))
-            })?;
-
-            encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
-            })?;
-        }
-        Ok(Self { data: compressed })
+        Ok(Self { data: snappy_compress(rlp_data)? })
     }
 
     /// Decompress to get the original RLP-encoded body
     pub fn decompress(&self) -> Result<Vec<u8>, E2sError> {
-        let mut decoder = FrameDecoder::new(self.data.as_slice());
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress body: {e}"))
-        })?;
-
-        Ok(decompressed)
+        snappy_decompress(&self.data)
     }
 
     /// Convert to an [`Entry`]
@@ -335,29 +249,12 @@ impl CompressedReceipts {
 
     /// Create from RLP-encoded receipts by compressing it with Snappy
     pub fn from_rlp(rlp_data: &[u8]) -> Result<Self, E2sError> {
-        let mut compressed = Vec::new();
-        {
-            let mut encoder = FrameEncoder::new(&mut compressed);
-
-            Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress receipts: {e}"))
-            })?;
-
-            encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
-            })?;
-        }
-        Ok(Self { data: compressed })
+        Ok(Self { data: snappy_compress(rlp_data)? })
     }
+
     /// Decompress to get the original RLP-encoded receipts
     pub fn decompress(&self) -> Result<Vec<u8>, E2sError> {
-        let mut decoder = FrameDecoder::new(self.data.as_slice());
-        let mut decompressed = Vec::new();
-        Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress receipts: {e}"))
-        })?;
-
-        Ok(decompressed)
+        snappy_decompress(&self.data)
     }
 
     /// Convert to an [`Entry`]
@@ -707,6 +604,9 @@ mod tests {
         let compressed_receipts = CompressedReceipts::from_rlp(&rlp_data).unwrap();
         let decompressed = compressed_receipts.decompress().unwrap();
         assert_eq!(decompressed, rlp_data);
+        assert_eq!(compressed_header.data, compressed_body.data);
+        assert_eq!(compressed_header.data, compressed_receipts.data);
+        assert_eq!(compressed_header.data, snappy_compress(&rlp_data).unwrap());
     }
 
     #[test]
@@ -832,6 +732,23 @@ mod tests {
                 assert_eq!(decoded_log.address, original_log.address);
                 assert_eq!(decoded_log.data.topics(), original_log.data.topics());
             }
+        }
+    }
+
+    #[test]
+    fn era1_decoders_reject_trailing_rlp() {
+        let compressed = snappy_compress(&[1, 2]).unwrap();
+        let codec = SnappyRlpCodec::<u64>::new();
+        for result in [
+            codec.decode(&compressed),
+            CompressedHeader::new(compressed.clone()).decode::<u64>(),
+            CompressedBody::new(compressed.clone()).decode::<u64>(),
+            CompressedReceipts::new(compressed).decode::<u64>(),
+        ] {
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "RLP error: Trailing bytes after RLP value: 1 byte(s) remain"
+            );
         }
     }
 }
