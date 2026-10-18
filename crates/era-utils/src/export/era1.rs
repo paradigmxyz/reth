@@ -82,11 +82,10 @@ where
 }
 
 impl ChunkAccumulator for Accumulator {
-    fn from_pairs(records: &[(B256, U256)]) -> Result<Self> {
-        let records: Vec<HeaderRecord> = records
-            .iter()
-            .map(|&(block_hash, total_difficulty)| HeaderRecord { block_hash, total_difficulty })
-            .collect();
+    fn from_pairs(records: impl Iterator<Item = (B256, U256)>) -> Result<Self> {
+        let records = records
+            .map(|(block_hash, total_difficulty)| HeaderRecord { block_hash, total_difficulty })
+            .collect::<Vec<_>>();
         Self::from_header_records(&records).map_err(|e| eyre!("Failed to compute accumulator: {e}"))
     }
 }

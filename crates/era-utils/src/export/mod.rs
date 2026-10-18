@@ -135,7 +135,7 @@ pub trait EraBlockWriter {
 /// seam that keeps [`accumulator`] format-agnostic.
 pub(crate) trait ChunkAccumulator: Sized {
     /// Builds the accumulator from the chunk's `(block_hash, total_difficulty)` header records.
-    fn from_pairs(records: &[(B256, U256)]) -> Result<Self>;
+    fn from_pairs(records: impl Iterator<Item = (B256, U256)>) -> Result<Self>;
 }
 
 /// Computes the chunk's accumulator from each block's `(block_hash, total_difficulty)` header
@@ -144,8 +144,7 @@ fn accumulator<A, H, B, R>(blocks: &[ExportBlock<H, B, R>]) -> Result<A>
 where
     A: ChunkAccumulator,
 {
-    let records: Vec<(B256, U256)> = blocks.iter().map(ExportBlock::header_record).collect();
-    A::from_pairs(&records)
+    A::from_pairs(blocks.iter().map(ExportBlock::header_record))
 }
 
 /// A chunk of [`ExportBlock`]s sourced from provider `P`.
@@ -362,6 +361,37 @@ impl ExportProgress {
 
     fn elapsed(&self) -> Duration {
         self.start.elapsed()
+    }
+}
+
+#[cfg(test)]
+mod accumulator_tests {
+    use super::*;
+    use alloy_primitives::b256;
+
+    #[test]
+    fn chunk_accumulators_match_known_header_record_root() {
+        let blocks = [ExportBlock {
+            header: (),
+            block_hash: B256::repeat_byte(1),
+            body: (),
+            receipts: Vec::<()>::new(),
+            total_difficulty: U256::from(100),
+        }];
+        let expected = b256!("ada35c48d81117f4fd588554cd4c4752356336e84cb41106dea1ceb4cfac8799");
+
+        assert_eq!(
+            accumulator::<reth_era::era1::types::execution::Accumulator, _, _, _>(&blocks)
+                .unwrap()
+                .root,
+            expected,
+        );
+        assert_eq!(
+            accumulator::<reth_era::ere::types::execution::Accumulator, _, _, _>(&blocks)
+                .unwrap()
+                .root,
+            expected,
+        );
     }
 }
 
