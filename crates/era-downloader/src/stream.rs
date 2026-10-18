@@ -195,10 +195,10 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStr
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Poll::Ready(fut) = self.starting_stream.poll_next_unpin(cx) {
-            if let Some(fut) = fut {
-                self.download_stream.scheduled.push_back(fut);
-            } else {
-                self.download_stream.ended = true;
+            match fut {
+                Some(Ok(fut)) => self.download_stream.scheduled.push_back(fut),
+                Some(Err(error)) => return Poll::Ready(Some(Err(error))),
+                None => self.download_stream.ended = true,
             }
         }
 
@@ -288,7 +288,7 @@ enum State {
 }
 
 impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for StartingStream<Http> {
-    type Item = DownloadFuture;
+    type Item = eyre::Result<DownloadFuture>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.state == State::Initial {
@@ -303,7 +303,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 Err(e) => {
                     self.fetch_file_list();
 
-                    return Poll::Ready(Some(Box::pin(async move { Err(e) })));
+                    return Poll::Ready(Some(Err(e)));
                 }
             }
         }
@@ -316,7 +316,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 Err(e) => {
                     self.delete_outside_range();
 
-                    return Poll::Ready(Some(Box::pin(async move { Err(e) })));
+                    return Poll::Ready(Some(Err(e)));
                 }
             }
         }
@@ -331,7 +331,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 }
                 Err(error) => {
                     self.recover_index();
-                    return Poll::Ready(Some(Box::pin(async move { Err(error) })));
+                    return Poll::Ready(Some(Err(error)));
                 }
             }
         }
@@ -343,7 +343,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
                 Ok(downloaded) => downloaded,
                 Err(error) => {
                     self.count_files();
-                    return Poll::Ready(Some(Box::pin(async move { Err(error) })));
+                    return Poll::Ready(Some(Err(error)));
                 }
             };
             let max_missing = self
@@ -357,7 +357,6 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
             if max_missing > 0 {
                 let index = self.index;
                 self.index += 1;
-                self.downloading += 1;
                 self.next_url(index, max_missing);
             } else {
                 self.count_files();
@@ -369,10 +368,14 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
         {
             self.state = State::Missing(max_missing - 1);
 
-            return Poll::Ready(url.transpose().map(|url| -> DownloadFuture {
-                let mut client = self.client.clone();
-
-                Box::pin(async move { client.download_to_file(url?).await.map(EraRemoteMeta::new) })
+            return Poll::Ready(url.transpose().map(|url| {
+                url.map(|url| -> DownloadFuture {
+                    self.downloading += 1;
+                    let mut client = self.client.clone();
+                    Box::pin(
+                        async move { client.download_to_file(url).await.map(EraRemoteMeta::new) },
+                    )
+                })
             }));
         }
 
@@ -436,6 +439,9 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::task::noop_waker;
+    use reqwest::Client;
+    use std::path::PathBuf;
 
     #[test]
     #[should_panic(expected = "maximum cached files must be nonzero")]
@@ -447,5 +453,34 @@ mod tests {
     #[should_panic(expected = "maximum concurrent downloads must be nonzero")]
     fn rejects_zero_download_concurrency() {
         EraStreamConfig::default().with_max_concurrent_downloads(0);
+    }
+
+    #[test]
+    fn cache_scan_errors_do_not_release_pending_download_capacity() {
+        let client = EraClient::new(
+            Client::new(),
+            Url::parse("https://example.com/").unwrap(),
+            PathBuf::new(),
+        );
+        let mut stream = EraStream::new(client, EraStreamConfig::default().with_max_files(2));
+        stream.starting_stream.downloading = 2;
+        stream.download_stream.downloads.push_back(Box::pin(std::future::pending()));
+        stream.download_stream.downloads.push_back(Box::pin(std::future::pending()));
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+
+        for _ in 0..3 {
+            stream.starting_stream.state = State::CountFiles;
+            stream.starting_stream.files_count =
+                Box::pin(async { Err(eyre::eyre!("cache scan failed")) });
+            let Poll::Ready(Some(Err(error))) = Pin::new(&mut stream).poll_next(&mut context)
+            else {
+                panic!("cache failure must be delivered without waiting for earlier downloads");
+            };
+            assert_eq!(error.to_string(), "cache scan failed");
+            assert_eq!(stream.starting_stream.downloading, 2);
+            assert_eq!(stream.download_stream.downloads.len(), 2);
+            assert!(stream.download_stream.scheduled.is_empty());
+        }
     }
 }
