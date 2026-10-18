@@ -34,14 +34,26 @@ impl Default for EraStreamConfig {
 }
 
 impl EraStreamConfig {
-    /// The maximum amount of downloaded ERA1 files kept in the download directory.
+    /// The maximum number of downloaded archives kept in the dedicated cache directory.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_files` is zero: at least one file must fit for the stream to make progress.
+    #[track_caller]
     pub const fn with_max_files(mut self, max_files: usize) -> Self {
+        assert!(max_files > 0, "maximum cached files must be nonzero");
         self.max_files = max_files;
         self
     }
 
-    /// The maximum amount of downloads happening at the same time.
+    /// The maximum number of downloads happening at the same time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_concurrent_downloads` is zero: downloads would never be polled.
+    #[track_caller]
     pub const fn with_max_concurrent_downloads(mut self, max_concurrent_downloads: usize) -> Self {
+        assert!(max_concurrent_downloads > 0, "maximum concurrent downloads must be nonzero");
         self.max_concurrent_downloads = max_concurrent_downloads;
         self
     }
@@ -53,7 +65,17 @@ impl EraStreamConfig {
     }
 }
 
-/// An asynchronous stream of ERA1 files.
+/// An asynchronous stream of downloaded archives backed by a dedicated, disposable cache.
+///
+/// On startup, archives of the client's type outside the initial configured window are deleted,
+/// including preexisting files that have not been processed. Do not point this stream at an archive
+/// directory whose contents must be preserved.
+///
+/// Each yielded [`EraRemoteMeta`] keeps its file in the cache until
+/// [`EraMeta::mark_as_processed`] removes it. Close file handles before acknowledging a file. If
+/// files are retained without acknowledgement, the cache fills and further downloads wait for
+/// space. Dropping metadata or the stream does not acknowledge files; retained files can be reused
+/// on the next run if they fall inside that run's initial window.
 ///
 /// # Examples
 /// ```
@@ -76,8 +98,15 @@ pub struct EraStream<Http> {
 }
 
 impl<Http> EraStream<Http> {
-    /// Constructs a new [`EraStream`] that downloads concurrently up to `max_concurrent_downloads`
-    /// ERA1 files to `client` `folder`, keeping their count up to `max_files`.
+    /// Constructs a stream that downloads into the client's dedicated, disposable cache directory.
+    ///
+    /// Before downloading, the first poll fetches the file list and deletes matching archives
+    /// outside `[start_from, start_from + max_files)`. This includes existing unprocessed archives;
+    /// unrelated files and archives of other types are retained. Keep archival data elsewhere.
+    ///
+    /// Download concurrency and retained file count are bounded by `config`. After processing each
+    /// yielded file, call [`EraMeta::mark_as_processed`] to remove it and free cache capacity. The
+    /// cache directory must already exist; access errors are yielded as stream errors.
     pub fn new(client: EraClient<Http>, config: EraStreamConfig) -> Self {
         Self {
             download_stream: DownloadStream {
@@ -128,8 +157,11 @@ impl<T: EraMeta> EraMeta for Box<T> {
     }
 }
 
-/// Contains information about ERA file that is hosted remotely and represented by a temporary
-/// local file.
+/// A remotely hosted archive represented by a downloaded file in a disposable cache.
+///
+/// Process the file at [`EraMeta::path`], close its handles, and then call
+/// [`EraMeta::mark_as_processed`] to delete it and release cache capacity. Dropping this metadata
+/// does not delete the file.
 #[derive(Debug)]
 pub struct EraRemoteMeta {
     path: Box<Path>,
@@ -398,5 +430,22 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
         Pin::new(&mut self.next_url).set(Box::pin(async move { client.url(index).await }));
 
         self.state = State::NextUrl(max_missing);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "maximum cached files must be nonzero")]
+    fn rejects_zero_cache_capacity() {
+        EraStreamConfig::default().with_max_files(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "maximum concurrent downloads must be nonzero")]
+    fn rejects_zero_download_concurrency() {
+        EraStreamConfig::default().with_max_concurrent_downloads(0);
     }
 }
