@@ -71,7 +71,10 @@
 
 use crate::{
     common::decode::DecodeCompressedRlp,
-    e2s::{error::E2sError, types::Entry},
+    e2s::{
+        error::E2sError,
+        types::{self, Entry},
+    },
 };
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
@@ -591,11 +594,12 @@ impl BlockTuple {
     }
 
     /// Total serialized size of the tuple's four records (each an e2store [`Entry`]) on disk.
-    pub fn size(&self) -> usize {
-        self.header.to_entry().size() +
-            self.body.to_entry().size() +
-            self.receipts.to_entry().size() +
-            self.total_difficulty.to_entry().size()
+    pub const fn size(&self) -> usize {
+        4 * types::Header::SIZE +
+            self.header.data.len() +
+            self.body.data.len() +
+            self.receipts.data.len() +
+            U256::BYTES
     }
 
     /// Convert to an `alloy_consensus::Block`
@@ -832,6 +836,28 @@ mod tests {
                 assert_eq!(decoded_log.address, original_log.address);
                 assert_eq!(decoded_log.data.topics(), original_log.data.topics());
             }
+        }
+    }
+
+    #[test]
+    fn block_tuple_size_matches_serialized_entries() {
+        for payload_size in [0, 1, 1024] {
+            let block = BlockTuple::new(
+                CompressedHeader::new(vec![0; payload_size]),
+                CompressedBody::new(vec![1; payload_size * 2]),
+                CompressedReceipts::new(vec![2; payload_size * 3]),
+                TotalDifficulty::new(U256::MAX),
+            );
+            let mut encoded = Vec::new();
+            for entry in [
+                block.header.to_entry(),
+                block.body.to_entry(),
+                block.receipts.to_entry(),
+                block.total_difficulty.to_entry(),
+            ] {
+                entry.write(&mut encoded).unwrap();
+            }
+            assert_eq!(block.size(), encoded.len());
         }
     }
 }
