@@ -151,51 +151,50 @@ where
             );
 
             if range_output.is_final_range {
-                let total_hashes = hash_collector.len();
-                let interval = (total_hashes / 10).max(1);
-
-                // Use append mode when table is empty (first sync) - significantly faster
-                let append_only =
-                    provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
-
-                // Auto-commits on threshold; consistency check heals any crash.
-                provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
-                    let mut writer =
-                        EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
-
-                    let iter = hash_collector
-                        .iter()
-                        .map_err(|e| ProviderError::other(Box::new(e)))?;
-
-                    for (index, hash_to_number) in iter.enumerate() {
-                        let (hash_bytes, number_bytes) =
-                            hash_to_number.map_err(|e| ProviderError::other(Box::new(e)))?;
-                        if index > 0 && index.is_multiple_of(interval) {
-                            info!(
-                                target: "sync::stages::transaction_lookup",
-                                ?append_only,
-                                progress = %format_args!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
-                                "Inserting hashes"
-                            );
-                        }
-
-                        // Decode from raw ETL bytes
-                        let hash = TxHash::decode(&hash_bytes)?;
-                        let tx_num = TxNumber::decompress(&number_bytes)?;
-                        writer.put_transaction_hash_number(hash, tx_num, append_only)?;
-                    }
-
-                    Ok(((), writer.into_raw_rocksdb_batch()))
-                })?;
-
-                trace!(target: "sync::stages::transaction_lookup",
-                    total_hashes,
-                    "Transaction hashes inserted"
-                );
-
                 break;
             }
         }
+
+        let total_hashes = hash_collector.len();
+        let interval = (total_hashes / 10).max(1);
+
+        // Use append mode when table is empty (first sync) - significantly faster
+        let append_only = provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
+
+        // Auto-commits on threshold; consistency check heals any crash.
+        provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+            let mut writer =
+                EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
+
+            let iter = hash_collector
+                .iter()
+                .map_err(|e| ProviderError::other(Box::new(e)))?;
+
+            for (index, hash_to_number) in iter.enumerate() {
+                let (hash_bytes, number_bytes) =
+                    hash_to_number.map_err(|e| ProviderError::other(Box::new(e)))?;
+                if index > 0 && index.is_multiple_of(interval) {
+                    info!(
+                        target: "sync::stages::transaction_lookup",
+                        ?append_only,
+                        progress = %format_args!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        "Inserting hashes"
+                    );
+                }
+
+                // Decode from raw ETL bytes
+                let hash = TxHash::decode(&hash_bytes)?;
+                let tx_num = TxNumber::decompress(&number_bytes)?;
+                writer.put_transaction_hash_number(hash, tx_num, append_only)?;
+            }
+
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
+
+        trace!(target: "sync::stages::transaction_lookup",
+            total_hashes,
+            "Transaction hashes inserted"
+        );
 
         if provider.cached_storage_settings().storage_v2 {
             provider.commit_pending_rocksdb_batches()?;
@@ -345,6 +344,37 @@ mod tests {
         );
 
         // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    #[tokio::test]
+    async fn execute_chunk_ending_at_target_writes_hashes() {
+        let mut rng = generators::rng();
+        let runner = TransactionLookupTestRunner { chunk_size: 2, ..Default::default() };
+        let input = ExecInput { target: Some(1), checkpoint: Some(StageCheckpoint::new(0)) };
+
+        // The transaction that crosses the chunk threshold lives in the target block, so the
+        // first chunk already ends at the target without being the final chunk.
+        let blocks = (0..=1)
+            .map(|number| {
+                random_block(
+                    &mut rng,
+                    number,
+                    BlockParams {
+                        tx_count: Some(if number == 1 { 5 } else { 0 }),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        runner.db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+
+        let result = runner.execute(input).await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { checkpoint: StageCheckpoint { block_number: 1, .. }, done: true })
+        );
+        assert_eq!(runner.db.count_entries::<tables::TransactionHashNumbers>().unwrap(), 5);
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
