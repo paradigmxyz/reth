@@ -1,0 +1,21 @@
+[package]
+name = "example-pureth-query"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alloy-genesis.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-signer-local.workspace = true
+eyre.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+reth-chainspec.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
+reth-pureth-query = { path = "../../crates/pureth/query" }
+reth-pureth-receipt.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
