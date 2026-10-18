@@ -65,6 +65,10 @@ where
     }
 
     /// Converts the backfill job into a stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `max_blocks` threshold is `Some(0)`.
     pub fn into_stream(self) -> StreamBackfillJob<E, P, Chain<E::Primitives>> {
         self.into()
     }
@@ -243,11 +247,9 @@ impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
-        backfill::{
-            job::ExecutionStageThresholds,
-            test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
-        },
+        backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         BackfillJobFactory,
     };
     use alloy_consensus::BlockHeader;
@@ -477,27 +479,30 @@ mod tests {
         let (block1, output1) = blocks_and_execution_outputs[0].clone();
         let (block2, output2) = blocks_and_execution_outputs[1].clone();
 
-        // Backfill with max_blocks=1, expect two separate chains
-        let factory = BackfillJobFactory::new(executor, blockchain_db).with_thresholds(
-            ExecutionStageThresholds { max_blocks: Some(1), ..Default::default() },
-        );
-        let job = factory.backfill(1..=2);
-        let chains = job.collect::<Result<Vec<_>, _>>()?;
+        // A zero threshold still commits after executing the first block in a direct job.
+        for max_blocks in [0, 1] {
+            let factory =
+                BackfillJobFactory::new(executor.clone(), blockchain_db.clone()).with_thresholds(
+                    ExecutionStageThresholds { max_blocks: Some(max_blocks), ..Default::default() },
+                );
+            let job = factory.backfill(1..=2);
+            let chains = job.collect::<Result<Vec<_>, _>>()?;
 
-        // Assert two chains, each with one block
-        assert_eq!(chains.len(), 2);
+            // Assert two chains, each with one block
+            assert_eq!(chains.len(), 2);
 
-        let mut chain1 = chains[0].clone();
-        chain1.execution_outcome_mut().bundle.reverts.sort();
-        assert_eq!(chain1.blocks().len(), 1);
-        assert_eq!(chain1.blocks().get(&1).map(|block| block.as_ref()), Some(&block1));
-        assert_eq!(chain1.execution_outcome(), &to_execution_outcome(1, &output1));
+            let mut chain1 = chains[0].clone();
+            chain1.execution_outcome_mut().bundle.reverts.sort();
+            assert_eq!(chain1.blocks().len(), 1);
+            assert_eq!(chain1.blocks().get(&1).map(|block| block.as_ref()), Some(&block1));
+            assert_eq!(chain1.execution_outcome(), &to_execution_outcome(1, &output1));
 
-        let mut chain2 = chains[1].clone();
-        chain2.execution_outcome_mut().bundle.reverts.sort();
-        assert_eq!(chain2.blocks().len(), 1);
-        assert_eq!(chain2.blocks().get(&2).map(|block| block.as_ref()), Some(&block2));
-        assert_eq!(chain2.execution_outcome(), &to_execution_outcome(2, &output2));
+            let mut chain2 = chains[1].clone();
+            chain2.execution_outcome_mut().bundle.reverts.sort();
+            assert_eq!(chain2.blocks().len(), 1);
+            assert_eq!(chain2.blocks().get(&2).map(|block| block.as_ref()), Some(&block2));
+            assert_eq!(chain2.execution_outcome(), &to_execution_outcome(2, &output2));
+        }
 
         Ok(())
     }

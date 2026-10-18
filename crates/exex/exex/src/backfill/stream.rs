@@ -68,13 +68,23 @@ where
     T: Send + Sync + 'static,
 {
     /// Configures the parallelism of the [`StreamBackfillJob`] to handle active tasks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `parallelism` is zero.
     pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
+        assert!(parallelism > 0, "backfill stream parallelism must be greater than zero");
         self.parallelism = parallelism;
         self
     }
 
     /// Configures the batch size for the [`StreamBackfillJob`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `batch_size` is zero.
     pub const fn with_batch_size(mut self, batch_size: usize) -> Self {
+        assert!(batch_size > 0, "backfill batch size must be greater than zero");
         self.batch_size = batch_size;
         self
     }
@@ -219,8 +229,15 @@ impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamI
 where
     E: ConfigureEvm,
 {
+    /// # Panics
+    ///
+    /// Panics if the job's `max_blocks` threshold is `Some(0)`.
     fn from(job: BackfillJob<E, P>) -> Self {
-        let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
+        // Clamp on narrower targets so a positive threshold cannot become a zero batch size.
+        let batch_size = job
+            .thresholds
+            .max_blocks
+            .map_or(DEFAULT_BATCH_SIZE, |max| usize::try_from(max).unwrap_or(usize::MAX));
         Self {
             evm_config: job.evm_config,
             provider: job.provider,
@@ -228,12 +245,13 @@ where
             range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
-            batch_size,
+            batch_size: DEFAULT_BATCH_SIZE,
             thresholds: ExecutionStageThresholds {
                 max_blocks: Some(batch_size as u64),
                 ..job.thresholds
             },
         }
+        .with_batch_size(batch_size)
     }
 }
 
@@ -337,6 +355,14 @@ mod tests {
 
         // expect no more blocks
         assert!(backfill_stream.next().await.is_none());
+
+        let mut one_block_stream =
+            factory.backfill(1..=2).into_stream().with_parallelism(1).with_batch_size(1);
+        for block in &blocks {
+            let chain = one_block_stream.next().await.unwrap().unwrap();
+            assert!(chain.blocks_iter().map(|block| block.as_ref()).eq([block]));
+        }
+        assert!(one_block_stream.next().await.is_none());
 
         Ok(())
     }
@@ -466,5 +492,28 @@ mod tests {
         assert_eq!(chain2.execution_outcome(), expected_chain2.execution_outcome());
 
         Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "backfill stream parallelism must be greater than zero")]
+    fn zero_parallelism_panics() {
+        let job = SingleBlockBackfillJob::from(BackfillJobFactory::new((), ()).backfill(1..=1));
+        StreamBackfillJob::from(job).with_parallelism(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "backfill batch size must be greater than zero")]
+    fn zero_batch_size_panics() {
+        let job = SingleBlockBackfillJob::from(BackfillJobFactory::new((), ()).backfill(1..=1));
+        StreamBackfillJob::from(job).with_batch_size(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "backfill batch size must be greater than zero")]
+    fn zero_threshold_panics_when_converting_to_stream() {
+        let job = BackfillJobFactory::new(EthEvmConfig::mainnet(), ())
+            .with_thresholds(ExecutionStageThresholds { max_blocks: Some(0), ..Default::default() })
+            .backfill(1..=1);
+        let _stream = StreamBackfillJob::from(job);
     }
 }

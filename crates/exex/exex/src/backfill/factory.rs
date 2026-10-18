@@ -54,7 +54,12 @@ impl<E, P> BackfillJobFactory<E, P> {
     ///
     /// Configures the [`StreamBackfillJob`](super::stream::StreamBackfillJob) created via
     /// [`BackfillJob::into_stream`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `stream_parallelism` is zero.
     pub const fn with_stream_parallelism(mut self, stream_parallelism: usize) -> Self {
+        assert!(stream_parallelism > 0, "backfill stream parallelism must be greater than zero");
         self.stream_parallelism = stream_parallelism;
         self
     }
@@ -83,5 +88,16 @@ impl BackfillJobFactory<(), ()> {
             components.evm_config().clone(),
             components.provider().clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "backfill stream parallelism must be greater than zero")]
+    fn zero_stream_parallelism_panics() {
+        BackfillJobFactory::new((), ()).with_stream_parallelism(0);
     }
 }
