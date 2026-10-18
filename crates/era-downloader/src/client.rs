@@ -1,7 +1,7 @@
 use alloy_primitives::{hex, hex::ToHexExt};
 use bytes::Bytes;
 use eyre::{eyre, OptionExt};
-use futures_util::{lock::Mutex, stream::StreamExt, Stream, TryStreamExt};
+use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
 use reth_era::common::file_ops::EraFileType;
 use reth_fs_util::FsPathError;
@@ -10,6 +10,7 @@ use std::{collections::HashMap, future::Future, path::Path, str::FromStr, sync::
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
+    sync::Mutex,
     try_join,
 };
 
