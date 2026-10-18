@@ -184,7 +184,7 @@ impl<R: Read + Seek> EraReader<R> {
             group.add_entry(entry);
         }
 
-        let (start_slot, slot_count) = group.slot_range();
+        let (start_slot, slot_count) = group.slot_start_and_count();
 
         let id = EraId::new(network_name, start_slot, slot_count);
 

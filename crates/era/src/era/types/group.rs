@@ -71,9 +71,11 @@ impl EraGroup {
         self.other_entries.push(entry);
     }
 
-    /// Get the starting slot and slot count.
-    pub const fn slot_range(&self) -> (u64, u32) {
-        if let Some(ref block_index) = self.slot_index {
+    /// Returns the starting slot and the number of indexed slots, including empty slots.
+    ///
+    /// Without a block index, returns the state index's starting slot and a count of zero.
+    pub const fn slot_start_and_count(&self) -> (u64, u32) {
+        if let Some(block_index) = &self.slot_index {
             // Non-genesis era: use block slot index
             (block_index.starting_slot, block_index.slot_count() as u32)
         } else {
@@ -85,12 +87,18 @@ impl EraGroup {
 
     /// Get the starting slot number
     pub const fn starting_slot(&self) -> u64 {
-        self.slot_range().0
+        self.slot_start_and_count().0
     }
 
     /// Get the number of slots
     pub const fn slot_count(&self) -> u32 {
-        self.slot_range().1
+        self.slot_start_and_count().1
+    }
+
+    /// Returns the starting slot and slot count, rather than range endpoints.
+    #[deprecated(note = "Use `slot_start_and_count` instead")]
+    pub const fn slot_range(&self) -> (u64, u32) {
+        self.slot_start_and_count()
     }
 }
 
@@ -421,5 +429,16 @@ mod tests {
     fn test_era_id_file_naming_with_era_count(id: EraId, expected_file_name: &str) {
         let actual_file_name = id.to_file_name();
         assert_eq!(actual_file_name, expected_file_name);
+    }
+
+    #[test]
+    fn era_group_reports_slot_start_and_count() {
+        let mut group =
+            EraGroup::new(Vec::new(), create_beacon_state(50), SlotIndex::new(1000, vec![-100]));
+        assert_eq!(group.slot_start_and_count(), (1000, 0));
+        group.slot_index = Some(SlotIndex::new(500, vec![0, -200, 0]));
+        assert_eq!(group.slot_start_and_count(), (500, 3));
+        assert_eq!(group.starting_slot(), 500);
+        assert_eq!(group.slot_count(), 3);
     }
 }

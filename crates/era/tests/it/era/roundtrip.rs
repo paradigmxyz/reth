@@ -175,7 +175,7 @@ async fn test_era_file_roundtrip(
         )
     };
 
-    let (start_slot, slot_count) = new_group.slot_range();
+    let (start_slot, slot_count) = new_group.slot_start_and_count();
     let new_file = EraFile::new(new_group, EraId::new(network, start_slot, slot_count));
 
     let mut reconstructed_buffer = Vec::new();
