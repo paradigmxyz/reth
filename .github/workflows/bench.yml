@@ -2158,7 +2158,7 @@ jobs:
           CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
-          uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+          uv run --with matplotlib --with pillow==12.3.0 python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
       - name: Upload chart attachments
         id: upload-charts
