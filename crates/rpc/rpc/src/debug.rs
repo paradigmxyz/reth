@@ -2,7 +2,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, Log, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -14,6 +14,7 @@ use alloy_rpc_types_trace::geth::{
     TraceResult,
 };
 use async_trait::async_trait;
+use derive_more::{Deref, DerefMut};
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
@@ -38,27 +39,48 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
     StorageRootProvider, TransactionVariant,
 };
-use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard, Runtime};
+use reth_tasks::{
+    cancel::{is_cancelled, ManualCancel},
+    pool::BlockingTaskGuard,
+    Runtime,
+};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
     HashedStorage,
 };
-use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
+use revm::{
+    context_interface::{ContextError, ContextTr},
+    database::states::bundle_state::BundleRetention,
+    handler::FrameResult,
+    inspector::JournalExt,
+    interpreter::{
+        interpreter_types::LoopControl, CallInputs, CallOutcome, CreateInputs, CreateOutcome,
+        FrameInput, Gas, InstructionResult, Interpreter, InterpreterResult,
+    },
+    Database, DatabaseCommit, Inspector,
+};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
+
 #[cfg(feature = "js-tracer")]
-use {
-    alloy_rpc_types_trace::geth::GethDebugTracerType,
-    revm_inspectors::tracing::js::JsInspectorInterrupt, std::time::Duration,
-};
+use alloy_rpc_types_trace::geth::GethDebugTracerType;
+#[cfg(feature = "js-tracer")]
+use revm_inspectors::tracing::js::JsInspectorInterrupt;
 
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
+///
+/// EVM traces honor the requested timeout (five seconds by default) and cooperate with request
+/// cancellation. Block and bundle traces apply the timeout separately to each transaction.
 pub struct DebugApi<Eth: RpcNodeCore> {
     inner: Arc<DebugApiInner<Eth>>,
 }
@@ -118,15 +140,18 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Trace the entire block asynchronously
+    /// Trace the entire block asynchronously, with a separate timeout for each transaction.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+        let interrupt = TraceInterrupt::new(&opts)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(
+            block.parent_hash(),
+            move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -134,7 +159,8 @@ where
                 let block_env = evm_env.block_env.clone();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let inspector = tracer_interrupt
+                    .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
                 let mut evm =
                     eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
                 while let Some((index, tx)) = transactions.next() {
@@ -143,23 +169,25 @@ where
                     }
                     let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
+                    evm.components_mut().1.interrupt.restart();
+                    let res = evm.transact(tx_env.clone());
+                    evm.components_mut().1.interrupt.check()?;
+                    let res = res.map_err(Eth::Error::from_evm_err)?;
 
                     let (db, inspector, _) = evm.components_mut();
-                    let result = inspector
-                        .get_result(
-                            Some(TransactionContext {
-                                block_hash: Some(block.hash()),
-                                tx_hash: Some(*tx.tx_hash()),
-                                tx_index: Some(index),
-                            }),
-                            &tx_env,
-                            &block_env,
-                            &res,
-                            db,
-                        )
-                        .map_err(Eth::Error::from_eth_err)?;
-
+                    let result = inspector.get_result(
+                        Some(TransactionContext {
+                            block_hash: Some(block.hash()),
+                            tx_hash: Some(*tx.tx_hash()),
+                            tx_index: Some(index),
+                        }),
+                        &tx_env,
+                        &block_env,
+                        &res,
+                        db,
+                    );
+                    inspector.interrupt.check()?;
+                    let result = result.map_err(Eth::Error::from_eth_err)?;
                     results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
@@ -170,8 +198,9 @@ where
                 }
 
                 Ok(results)
-            })
-            .await
+            },
+        );
+        interrupt.run_block(trace).await
     }
 
     /// Traces a block for `traceChain`, preserving transaction-level tracing failures in the
@@ -183,8 +212,11 @@ where
     ) -> Result<Vec<Option<TraceResult>>, Eth::Error> {
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+        let interrupt = TraceInterrupt::new(&opts)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(
+            block.parent_hash(),
+            move |eth_api, mut db| {
                 let tx_count = block.body().transactions().len();
                 let mut results = Vec::with_capacity(tx_count);
 
@@ -205,13 +237,25 @@ where
                         return Ok(results)
                     }
                 };
-                let mut evm =
-                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
+                    &mut db,
+                    evm_env,
+                    tracer_interrupt.attach(inspector),
+                );
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = match evm.transact(tx_env.clone()) {
+                    evm.components_mut().1.interrupt.restart();
+                    let result = evm.transact(tx_env.clone());
+                    let result = evm
+                        .components_mut()
+                        .1
+                        .interrupt
+                        .check()
+                        .map_err(Eth::Error::from_eth_err)
+                        .and_then(|()| result.map_err(Eth::Error::from_evm_err));
+                    let res = match result {
                         Ok(res) => res,
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
@@ -223,7 +267,7 @@ where
                     };
 
                     let (db, inspector, _) = evm.components_mut();
-                    let result = match inspector.get_result(
+                    let result = inspector.get_result(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
                             tx_hash: Some(tx_hash),
@@ -233,7 +277,13 @@ where
                         &block_env,
                         &res,
                         db,
-                    ) {
+                    );
+                    let result = match inspector
+                        .interrupt
+                        .check()
+                        .map_err(Eth::Error::from_eth_err)
+                        .and_then(|()| result.map_err(Eth::Error::from_eth_err))
+                    {
                         Ok(result) => result,
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
@@ -259,8 +309,9 @@ where
 
                 results.resize(tx_count, None);
                 Ok(results)
-            })
-            .await
+            },
+        );
+        interrupt.run_block(trace).await
     }
 
     /// Replays the given block and returns the trace of each transaction.
@@ -330,7 +381,7 @@ where
                 Some(res) => res,
             };
 
-        let interrupt = JsTraceInterrupt::new(&opts)?;
+        let interrupt = TraceInterrupt::new(&opts)?;
         let tracer_interrupt = interrupt.clone();
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
@@ -356,6 +407,7 @@ where
                     bal.as_deref(),
                 )?;
 
+                inspector.interrupt.check()?;
                 let trace = inspector
                     .get_result(
                         Some(TransactionContext {
@@ -407,7 +459,7 @@ where
                 .await;
         }
 
-        let interrupt = JsTraceInterrupt::new(&tracing_options)?;
+        let interrupt = TraceInterrupt::new(&tracing_options)?;
         let tracer_interrupt = interrupt.clone();
         let this = self.clone();
         let trace =
@@ -421,6 +473,7 @@ where
                     tx_env.clone(),
                     &mut inspector,
                 )?;
+                inspector.interrupt.check()?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -469,7 +522,7 @@ where
 
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        let interrupt = JsTraceInterrupt::new(&tracing_options)?;
+        let interrupt = TraceInterrupt::new(&tracing_options)?;
         let tracer_interrupt = interrupt.clone();
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
@@ -486,6 +539,7 @@ where
                 );
                 let res =
                     eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                inspector.interrupt.check()?;
                 let trace = inspector
                     .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -498,7 +552,9 @@ where
 
     /// The `debug_traceCallMany` method lets you run an `eth_callMany` within the context of the
     /// given block execution using the first n transactions in the given block as base.
-    /// Each following bundle increments block number by 1 and block timestamp by 12 seconds
+    /// Each following bundle increments block number by 1 and block timestamp by 12 seconds.
+    /// The tracer timeout applies to each transaction, defaults to five seconds, and interrupts
+    /// built-in and JS tracers cooperatively. Dropping the request cancels the remaining work.
     pub async fn debug_trace_call_many(
         &self,
         bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
@@ -540,69 +596,70 @@ where
             replay_block_txs = false;
         }
 
-        self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, mut db| {
-                // the outer vec for the bundles
-                let mut all_bundles = Vec::with_capacity(bundles.len());
+        let interrupt = TraceInterrupt::new(&tracing_options)?;
+        let tracer_interrupt = interrupt.clone();
+        let trace = self.eth_api().spawn_with_state_at_block(at, move |eth_api, mut db| {
+            // the outer vec for the bundles
+            let mut all_bundles = Vec::with_capacity(bundles.len());
 
-                if replay_block_txs {
-                    // only need to replay the transactions in the block if not all transactions are
-                    // to be replayed
-                    // Execute all transactions until index. No BAL positioning here: bundle
-                    // transactions commit state on top, and an attached BAL would take read
-                    // precedence over the committed changes
-                    eth_api.replay_block_until(&mut db, &block, num_txs, None)?;
-                }
+            if replay_block_txs {
+                // only need to replay the transactions in the block if not all transactions are
+                // to be replayed
+                // Execute all transactions until index. No BAL positioning here: bundle
+                // transactions commit state on top, and an attached BAL would take read
+                // precedence over the committed changes
+                eth_api.replay_block_until(&mut db, &block, num_txs, None)?;
+            }
 
-                // Trace all bundles
-                let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
-                    .map_err(Eth::Error::from_eth_err)?;
-                while let Some(bundle) = bundles.next() {
-                    let mut results = Vec::with_capacity(bundle.transactions.len());
-                    let Bundle { transactions, block_override } = bundle;
+            // Trace all bundles
+            let mut bundles = bundles.into_iter().peekable();
+            let mut inspector = tracer_interrupt
+                .attach(DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?);
+            while let Some(bundle) = bundles.next() {
+                let mut results = Vec::with_capacity(bundle.transactions.len());
+                let Bundle { transactions, block_override } = bundle;
 
-                    let block_overrides = block_override.map(Box::new);
+                let block_overrides = block_override.map(Box::new);
 
-                    let mut transactions = transactions.into_iter().peekable();
-                    while let Some(tx) = transactions.next() {
-                        if is_cancelled() {
-                            return Err(EthApiError::InternalEthError.into())
-                        }
-                        // apply state overrides only once, before the first transaction
-                        let state_overrides = state_overrides.take();
-                        let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
-
-                        let (evm_env, tx_env) =
-                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-
-                        let res = eth_api.inspect(
-                            &mut db,
-                            evm_env.clone(),
-                            tx_env.clone(),
-                            &mut inspector,
-                        )?;
-                        let trace = inspector
-                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        // If there is more transactions, commit the database
-                        // If there is no transactions, but more bundles, commit to the database too
-                        if transactions.peek().is_some() || bundles.peek().is_some() {
-                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
-                            db.commit(res.state);
-                        }
-                        results.push(trace);
+                let mut transactions = transactions.into_iter().peekable();
+                while let Some(tx) = transactions.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
                     }
-                    // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.inner_mut().number += uint!(1_U256);
-                    evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
+                    // apply state overrides only once, before the first transaction
+                    let state_overrides = state_overrides.take();
+                    let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    all_bundles.push(results);
+                    let (evm_env, tx_env) =
+                        eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+
+                    inspector.interrupt.restart();
+                    let res =
+                        eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector);
+                    inspector.interrupt.check()?;
+                    let res = res?;
+                    let trace =
+                        inspector.get_result(None, &tx_env, &evm_env.block_env, &res, &mut db);
+                    inspector.interrupt.check()?;
+                    let trace = trace.map_err(Eth::Error::from_eth_err)?;
+
+                    // If there is more transactions, commit the database
+                    // If there is no transactions, but more bundles, commit to the database too
+                    if transactions.peek().is_some() || bundles.peek().is_some() {
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        db.commit(res.state);
+                    }
+                    results.push(trace);
                 }
-                Ok(all_bundles)
-            })
-            .await
+                // Increment block_env number and timestamp for the next bundle
+                evm_env.block_env.inner_mut().number += uint!(1_U256);
+                evm_env.block_env.inner_mut().timestamp += uint!(12_U256);
+
+                all_bundles.push(results);
+            }
+            Ok(all_bundles)
+        });
+        interrupt.run_block(trace).await
     }
 
     /// Generates an execution witness for the given block hash. see
@@ -1099,7 +1156,11 @@ where
                 if sink.is_closed() {
                     break
                 }
-                let traces = match this.trace_chain_block(block.clone(), opts.clone()).await {
+                let traces = tokio::select! {
+                    _ = sink.closed() => break,
+                    traces = this.trace_chain_block(block.clone(), opts.clone()) => traces,
+                };
+                let traces = match traces {
                     Ok(traces) => traces,
                     Err(err) => {
                         tracing::warn!(target: "rpc::debug", %number, %err, "Failed to trace chain block");
@@ -1539,85 +1600,269 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
-/// Default timeout of a JS tracer, matching geth.
-#[cfg(feature = "js-tracer")]
-const DEFAULT_JS_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Interrupts a JS tracer once its request is dropped or its timeout expires.
-///
-/// Built-in tracers can't be interrupted, so for them this does nothing.
-#[derive(Clone, Debug, Default)]
-struct JsTraceInterrupt {
-    #[cfg(feature = "js-tracer")]
-    js: Option<(JsInspectorInterrupt, Duration)>,
+/// Adds cancellation without the log cloning performed by a tuple of inspectors.
+#[derive(Debug, Deref, DerefMut)]
+struct InterruptibleDebugInspector {
+    #[deref]
+    #[deref_mut]
+    inspector: DebugInspector,
+    interrupt: TraceInterrupt,
 }
 
-impl JsTraceInterrupt {
-    /// Creates an interrupt if `opts` selects a JS tracer, using its `timeout` or geth's default.
-    #[cfg_attr(
-        not(feature = "js-tracer"),
-        expect(unused_variables, reason = "only JS tracers can be interrupted")
-    )]
+impl<CTX: ContextTr<Journal: JournalExt>> Inspector<CTX> for InterruptibleDebugInspector {
+    fn initialize_interp(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+        self.inspector.initialize_interp(interp, context);
+    }
+
+    fn step(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+        self.inspector.step(interp, context);
+        self.interrupt.step(interp, context);
+    }
+
+    fn step_end(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+        self.inspector.step_end(interp, context);
+        self.interrupt.step_end(interp, context);
+    }
+
+    fn log(&mut self, context: &mut CTX, log: Log) {
+        self.inspector.log(context, log);
+    }
+
+    fn log_full(&mut self, interp: &mut Interpreter, context: &mut CTX, log: Log) {
+        self.inspector.log_full(interp, context, log);
+    }
+
+    fn frame_start(&mut self, context: &mut CTX, input: &mut FrameInput) -> Option<FrameResult> {
+        self.inspector.frame_start(context, input)
+    }
+
+    fn frame_end(&mut self, context: &mut CTX, input: &FrameInput, result: &mut FrameResult) {
+        self.inspector.frame_end(context, input, result);
+    }
+
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        let result = self.inspector.call(context, inputs);
+        self.interrupt.call(context, inputs).or(result)
+    }
+
+    fn call_end(&mut self, context: &mut CTX, inputs: &CallInputs, outcome: &mut CallOutcome) {
+        self.inspector.call_end(context, inputs, outcome);
+    }
+
+    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        let result = self.inspector.create(context, inputs);
+        self.interrupt.create(context, inputs).or(result)
+    }
+
+    fn create_end(
+        &mut self,
+        context: &mut CTX,
+        inputs: &CreateInputs,
+        outcome: &mut CreateOutcome,
+    ) {
+        self.inspector.create_end(context, inputs, outcome);
+    }
+
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
+        <DebugInspector as Inspector<CTX>>::selfdestruct(
+            &mut self.inspector,
+            contract,
+            target,
+            value,
+        );
+    }
+}
+
+/// Default timeout for each traced transaction, matching geth.
+const DEFAULT_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Amortizes clock reads for built-in tracers while checking cancellation on every opcode.
+const TRACE_TIMEOUT_CHECK_INTERVAL: usize = 1024;
+
+/// Cooperatively stops EVM execution on a deadline or when the request is dropped.
+///
+/// Pair this with the debug inspector so all built-in tracers, including the default struct
+/// logger, observe cancellation at EVM hooks. JS tracers also retain their upstream interrupt
+/// checks around callbacks and result generation. Neither mechanism preempts a running callback,
+/// precompile, database operation, or JS constructor.
+#[derive(Clone, Debug)]
+struct TraceInterrupt {
+    cancellation: TraceCancellation,
+    timeout: Duration,
+    started: Instant,
+    steps_until_deadline_check: usize,
+}
+
+impl TraceInterrupt {
     fn new(opts: &GethDebugTracingOptions) -> Result<Self, EthApiError> {
+        let timeout = match &opts.timeout {
+            Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
+                EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
+            })?,
+            None => DEFAULT_TRACER_TIMEOUT,
+        };
         #[cfg(feature = "js-tracer")]
         if let Some(GethDebugTracerType::JsTracer(_)) = &opts.tracer {
-            let timeout = match &opts.timeout {
-                Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
-                    EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
-                })?,
-                None => DEFAULT_JS_TRACER_TIMEOUT,
-            };
-            return Ok(Self { js: Some((JsInspectorInterrupt::new(), timeout)) })
+            return Ok(Self {
+                cancellation: TraceCancellation::Js(JsInspectorInterrupt::new()),
+                timeout,
+                started: Instant::now(),
+                steps_until_deadline_check: 0,
+            })
         }
-        Ok(Self::default())
+        Ok(Self {
+            cancellation: TraceCancellation::BuiltIn(Default::default()),
+            timeout,
+            started: Instant::now(),
+            steps_until_deadline_check: 0,
+        })
     }
 
-    /// Lets this interrupt stop `inspector` if it's a JS tracer.
-    #[cfg_attr(
-        not(feature = "js-tracer"),
-        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
-    )]
-    fn attach(&self, inspector: DebugInspector) -> DebugInspector {
+    fn attach(&self, inspector: DebugInspector) -> InterruptibleDebugInspector {
         #[cfg(feature = "js-tracer")]
-        if let Some((interrupt, _)) = &self.js {
-            return match inspector {
-                DebugInspector::Js(js) => {
-                    DebugInspector::Js(Box::new(js.with_interrupt(interrupt.clone())))
-                }
-                inspector => inspector,
+        let inspector = match (inspector, &self.cancellation) {
+            (DebugInspector::Js(js), TraceCancellation::Js(interrupt)) => {
+                DebugInspector::Js(Box::new(js.with_interrupt(interrupt.clone())))
             }
-        }
-        inspector
+            (inspector, _) => inspector,
+        };
+        InterruptibleDebugInspector { inspector, interrupt: self.clone() }
     }
 
-    /// Awaits `trace`, interrupting the tracer if the returned future is dropped or the timeout
-    /// expires.
-    ///
-    /// The interrupt is armed before the future is first polled, so dropping it unpolled still
-    /// stops a trace that is already running on a blocking task.
-    #[cfg_attr(
-        not(feature = "js-tracer"),
-        expect(
-            clippy::manual_async_fn,
-            clippy::redundant_async_block,
-            reason = "only JS tracers can be interrupted"
-        )
-    )]
+    /// Starts a fresh timeout for the next transaction without clearing request cancellation.
+    fn restart(&mut self) {
+        self.started = Instant::now();
+        self.steps_until_deadline_check = 0;
+    }
+
+    fn check(&self) -> Result<(), EthApiError> {
+        if self.started.elapsed() >= self.timeout {
+            self.cancellation.interrupt();
+            return Err(EthApiError::ExecutionTimedOut(self.timeout))
+        }
+        if self.cancellation.is_interrupted() {
+            return Err(EthApiError::InternalEthError)
+        }
+        Ok(())
+    }
+
+    /// Arms cancellation before polling, including when the returned future is dropped unpolled.
+    fn run_block<T>(&self, trace: impl Future<Output = T>) -> impl Future<Output = T> {
+        let guard = TraceInterruptGuard(self.cancellation.clone());
+        async move {
+            let _guard = guard;
+            trace.await
+        }
+    }
+
     fn run<T, E: FromEthApiError>(
         &self,
         trace: impl Future<Output = Result<T, E>>,
     ) -> impl Future<Output = Result<T, E>> {
-        #[cfg(feature = "js-tracer")]
-        let js = self.js.as_ref().map(|(interrupt, timeout)| (interrupt.drop_guard(), *timeout));
-        async move {
-            #[cfg(feature = "js-tracer")]
-            if let Some((_interrupt_on_drop, timeout)) = js {
-                return tokio::time::timeout(timeout, trace)
-                    .await
-                    .map_err(|_| E::from_eth_err(EthApiError::ExecutionTimedOut(timeout)))?
-            }
-            trace.await
+        self.run_block(async move {
+            let result = tokio::time::timeout(self.timeout, trace)
+                .await
+                .map_err(|_| E::from_eth_err(EthApiError::ExecutionTimedOut(self.timeout)))?;
+            // A worker can observe the deadline before Tokio's timer is polled.
+            self.check().map_err(E::from_eth_err)?;
+            result
+        })
+    }
+
+    fn check_context(&self, context: &mut impl ContextTr, check_deadline: bool) -> bool {
+        if !(self.cancellation.is_interrupted() || (check_deadline && self.check().is_err())) {
+            return false
         }
+        if context.error().is_ok() {
+            *context.error() = Err(ContextError::Custom("Tracing interrupted".into()));
+        }
+        true
+    }
+
+    fn interrupt_result(
+        &self,
+        context: &mut impl ContextTr,
+        gas_limit: u64,
+    ) -> Option<InterpreterResult> {
+        self.check_context(context, true).then(|| InterpreterResult {
+            result: InstructionResult::FatalExternalError,
+            output: Bytes::new(),
+            gas: Gas::new(gas_limit),
+        })
+    }
+}
+
+impl<CTX: ContextTr> Inspector<CTX> for TraceInterrupt {
+    fn step(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+        let check_deadline = self.steps_until_deadline_check == 0;
+        if check_deadline {
+            self.steps_until_deadline_check = TRACE_TIMEOUT_CHECK_INTERVAL;
+            // JS callbacks can take arbitrarily long; check their deadline on every step.
+            #[cfg(feature = "js-tracer")]
+            if matches!(self.cancellation, TraceCancellation::Js(_)) {
+                self.steps_until_deadline_check = 1;
+            }
+        }
+        self.steps_until_deadline_check -= 1;
+        if self.check_context(context, check_deadline) {
+            // The JS inspector may already have set a halt action.
+            interp.bytecode.action().take();
+            interp.bytecode.reset_action();
+            interp.halt_fatal();
+        }
+    }
+
+    fn step_end(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+        if self.check_context(context, false) {
+            // Replace pending actions too: cancellation must not be catchable by a parent call.
+            interp.bytecode.action().take();
+            interp.bytecode.reset_action();
+            interp.halt_fatal();
+        }
+    }
+
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        self.interrupt_result(context, inputs.gas_limit)
+            .map(|result| CallOutcome::new(result, inputs.return_memory_offset.clone()))
+    }
+
+    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        self.interrupt_result(context, inputs.gas_limit())
+            .map(|result| CreateOutcome::new(result, None))
+    }
+}
+
+/// Uses the upstream JS flag where available so there is one cancellation signal per request.
+#[derive(Clone, Debug)]
+enum TraceCancellation {
+    BuiltIn(ManualCancel),
+    #[cfg(feature = "js-tracer")]
+    Js(JsInspectorInterrupt),
+}
+
+impl TraceCancellation {
+    fn is_interrupted(&self) -> bool {
+        match self {
+            Self::BuiltIn(cancel) => cancel.is_cancelled(),
+            #[cfg(feature = "js-tracer")]
+            Self::Js(interrupt) => interrupt.is_interrupted(),
+        }
+    }
+
+    fn interrupt(&self) {
+        match self {
+            Self::BuiltIn(cancel) => cancel.clone().cancel(),
+            #[cfg(feature = "js-tracer")]
+            Self::Js(interrupt) => interrupt.interrupt(),
+        }
+    }
+}
+
+struct TraceInterruptGuard(TraceCancellation);
+
+impl Drop for TraceInterruptGuard {
+    fn drop(&mut self) {
+        self.0.interrupt();
     }
 }
 
@@ -1635,8 +1880,15 @@ mod tests {
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
-        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
-        state::AccountInfo as RevmAccountInfo,
+        bytecode::opcode,
+        context::TxEnv,
+        context_interface::result::EVMError,
+        database::{
+            states::StorageSlot, AccountStatus, BundleAccount, BundleState, CacheDB, EmptyDB,
+        },
+        primitives::TxKind,
+        state::{AccountInfo as RevmAccountInfo, Bytecode},
+        InspectEvm, MainBuilder, MainContext,
     };
 
     #[tokio::test]
@@ -1691,18 +1943,10 @@ mod tests {
     #[cfg(feature = "js-tracer")]
     #[test]
     fn js_trace_interrupt_stops_attached_js_tracer() {
-        use revm::{
-            context::TxEnv,
-            context_interface::result::EVMError,
-            database::{CacheDB, EmptyDB},
-            primitives::TxKind,
-            InspectEvm, MainBuilder, MainContext,
-        };
-
         let opts = js_tracer_opts(None);
-        let interrupt = JsTraceInterrupt::new(&opts).unwrap();
+        let interrupt = TraceInterrupt::new(&opts).unwrap();
         let inspector = interrupt.attach(DebugInspector::new(opts).unwrap());
-        interrupt.js.as_ref().unwrap().0.interrupt();
+        interrupt.cancellation.interrupt();
 
         let mut evm = revm::Context::mainnet()
             .with_db(CacheDB::<EmptyDB>::default())
@@ -1721,20 +1965,20 @@ mod tests {
     #[cfg(feature = "js-tracer")]
     #[tokio::test]
     async fn js_trace_interrupt_times_out_and_interrupts_tracer() {
-        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
+        let interrupt = TraceInterrupt::new(&js_tracer_opts(Some("10ms"))).unwrap();
         let err =
             interrupt.run(std::future::pending::<Result<(), EthApiError>>()).await.unwrap_err();
         assert!(
             matches!(err, EthApiError::ExecutionTimedOut(timeout) if timeout == Duration::from_millis(10))
         );
-        assert!(interrupt.js.unwrap().0.is_interrupted());
+        assert!(interrupt.cancellation.is_interrupted());
     }
 
     #[cfg(feature = "js-tracer")]
     #[test]
     fn js_trace_interrupt_interrupts_tracer_when_dropped_unpolled() {
-        let interrupt = JsTraceInterrupt::new(&js_tracer_opts(None)).unwrap();
-        let (tracer_interrupt, _) = interrupt.js.clone().unwrap();
+        let interrupt = TraceInterrupt::new(&js_tracer_opts(None)).unwrap();
+        let tracer_interrupt = interrupt.cancellation.clone();
         let trace = interrupt.run(std::future::pending::<Result<(), EthApiError>>());
         assert!(!tracer_interrupt.is_interrupted());
         drop(trace);
@@ -1781,5 +2025,133 @@ mod tests {
 
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+
+    #[test]
+    fn trace_interrupt_builtin_timeout_and_cancellation() {
+        for tracer in [None, Some("callTracer"), Some("prestateTracer"), Some("noopTracer")] {
+            for create in [false, true] {
+                for timeout in [false, true] {
+                    let opts = serde_json::from_value(serde_json::json!({
+                        "tracer": tracer,
+                        "timeout": if timeout { "0s" } else { "5s" },
+                    }))
+                    .unwrap();
+                    let interrupt = TraceInterrupt::new(&opts).unwrap();
+                    if !timeout {
+                        interrupt.cancellation.interrupt();
+                    }
+                    let inspector = interrupt.attach(DebugInspector::new(opts).unwrap());
+                    let mut evm = revm::Context::mainnet()
+                        .with_db(CacheDB::<EmptyDB>::default())
+                        .build_mainnet_with_inspector(inspector);
+                    let result = evm.inspect_tx(TxEnv {
+                        gas_limit: 1_000_000,
+                        kind: if create {
+                            TxKind::Create
+                        } else {
+                            TxKind::Call(Address::with_last_byte(1))
+                        },
+                        ..Default::default()
+                    });
+                    assert!(
+                        matches!(&result, Err(EVMError::Custom(msg)) if msg == "Tracing interrupted"),
+                        "{result:?}"
+                    );
+                    if timeout {
+                        assert!(
+                            matches!(interrupt.check(), Err(EthApiError::ExecutionTimedOut(duration)) if duration == Duration::ZERO)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trace_interrupt_stops_running_evm_after_request_drop() {
+        let options = vec![
+            GethDebugTracingOptions::default(),
+            GethDebugTracingOptions::call_tracer(Default::default()),
+        ];
+        #[cfg(feature = "js-tracer")]
+        let options = options.into_iter().chain([js_tracer_opts(None)]);
+        for opts in options {
+            let interrupt = TraceInterrupt::new(&opts).unwrap();
+            let expected = "Tracing interrupted";
+            #[cfg(feature = "js-tracer")]
+            let expected = if matches!(interrupt.cancellation, TraceCancellation::Js(_)) {
+                "JavaScript tracing interrupted"
+            } else {
+                expected
+            };
+            let request = interrupt.run_block(std::future::pending::<()>());
+            let target = Address::with_last_byte(0xff);
+            let mut db = CacheDB::<EmptyDB>::default();
+            db.insert_account_info(
+                target,
+                RevmAccountInfo {
+                    code: Some(Bytecode::new_raw(Bytes::from_static(&[
+                        opcode::JUMPDEST,
+                        opcode::PUSH0,
+                        opcode::JUMP,
+                    ]))),
+                    ..Default::default()
+                },
+            );
+            // Signal cancellation from an opcode hook, after execution has already entered the
+            // loop.
+            let mut evm = revm::Context::mainnet().with_db(db).build_mainnet_with_inspector((
+                interrupt.attach(DebugInspector::new(opts).unwrap()),
+                DropTraceRequest(Some(request)),
+            ));
+            let result = evm.inspect_tx(TxEnv {
+                gas_limit: 1_000_000,
+                kind: TxKind::Call(target),
+                ..Default::default()
+            });
+            assert!(matches!(&result, Err(EVMError::Custom(msg)) if msg == expected), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn trace_interrupt_restarts_deadline_without_resetting_cancellation() {
+        let mut interrupt = TraceInterrupt::new(&GethDebugTracingOptions::default()).unwrap();
+        assert_eq!(interrupt.timeout, DEFAULT_TRACER_TIMEOUT);
+        interrupt.started -= DEFAULT_TRACER_TIMEOUT;
+        interrupt.restart();
+        interrupt.check().unwrap();
+        interrupt.cancellation.interrupt();
+        interrupt.restart();
+        assert!(matches!(interrupt.check(), Err(EthApiError::InternalEthError)));
+    }
+
+    #[tokio::test]
+    async fn trace_interrupt_builtin_request_timeout() {
+        let opts = GethDebugTracingOptions { timeout: Some("0s".into()), ..Default::default() };
+        let interrupt = TraceInterrupt::new(&opts).unwrap();
+        let result = interrupt.run(std::future::pending::<Result<(), EthApiError>>()).await;
+        assert!(
+            matches!(result, Err(EthApiError::ExecutionTimedOut(duration)) if duration == Duration::ZERO)
+        );
+        assert!(interrupt.cancellation.is_interrupted());
+    }
+
+    #[test]
+    fn trace_interrupt_rejects_invalid_timeout() {
+        let opts =
+            GethDebugTracingOptions { timeout: Some("invalid".into()), ..Default::default() };
+        assert_eq!(
+            TraceInterrupt::new(&opts).unwrap_err().to_string(),
+            "invalid tracer timeout \"invalid\": expected number at 0"
+        );
+    }
+
+    struct DropTraceRequest<T>(Option<T>);
+
+    impl<CTX, T> Inspector<CTX> for DropTraceRequest<T> {
+        fn step(&mut self, _interp: &mut Interpreter, _context: &mut CTX) {
+            self.0.take();
+        }
     }
 }

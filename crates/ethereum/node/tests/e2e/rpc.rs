@@ -20,15 +20,24 @@ use alloy_rpc_types_eth::{
     AccessListResult, TransactionRequest,
 };
 use alloy_rpc_types_trace::geth::{
-    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace,
+    CallConfig, ChainBlockTraceResult, GethDebugTracingOptions, GethTrace, TraceResult,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::{
+        client::{ClientT, Subscription, SubscriptionClientT},
+        params::ArrayParams,
+    },
+    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObjectOwned},
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
-    receipt::PendingTransactionExt, test_chain_spec, test_chain_spec_builder,
-    transaction::TransactionTestContext, wait::poll_until, wallet::Wallet, E2ETestSetupExt,
-    NodeHelperType,
+    receipt::PendingTransactionExt,
+    test_chain_spec, test_chain_spec_builder,
+    transaction::TransactionTestContext,
+    wait::{poll_until, WAIT_TIMEOUT},
+    wallet::Wallet,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -1288,5 +1297,103 @@ async fn test_mine_signed() -> eyre::Result<()> {
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_debug_trace_timeouts() -> eyre::Result<()> {
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
+        .build_single()
+        .await?;
+    let mut account = wallet.account(0);
+    let recipient = Address::with_last_byte(0xff);
+    let mined = node
+        .mine([
+            account.transfer(recipient, U256::ONE).await,
+            account.transfer(recipient, U256::ONE).await,
+        ])
+        .await?;
+    let hash = mined.receipts[0].transaction_hash;
+    let block_hash = mined.block().hash();
+    let client = node.rpc_client().unwrap();
+    let raw: Bytes = client.request("debug_getRawBlock", (block_hash,)).await?;
+    let call = serde_json::json!({"from": mined.receipts[0].from, "to": recipient});
+    let bundles =
+        serde_json::json!([{"transactions": [call.clone()]}, {"transactions": [call.clone()]}]);
+    let mut tracers = vec![serde_json::Value::Null, serde_json::json!("callTracer")];
+    if cfg!(feature = "js-tracer") {
+        tracers
+            .push(serde_json::json!("{ fault: function() {}, result: function() { return {}; } }"));
+    }
+    for tracer in tracers {
+        // Reusing the inspector across transactions and bundles must not cancel successful work.
+        let success_opts = serde_json::json!({"tracer": tracer, "timeout": "5s"});
+        let block_traces: Vec<TraceResult> =
+            client.request("debug_traceBlockByHash", (block_hash, &success_opts)).await?;
+        assert_eq!(block_traces.len(), 2);
+        assert!(block_traces.iter().all(|trace| matches!(trace, TraceResult::Success { .. })));
+        let bundle_traces: Vec<Vec<GethTrace>> = client
+            .request(
+                "debug_traceCallMany",
+                (&bundles, serde_json::json!({"blockNumber": "latest"}), &success_opts),
+            )
+            .await?;
+        assert_eq!(bundle_traces.iter().map(Vec::len).collect::<Vec<_>>(), [1, 1]);
+
+        let opts = serde_json::json!({"tracer": tracer, "timeout": "0s"});
+        let mut indexed_opts = opts.clone();
+        indexed_opts["txIndex"] = serde_json::json!(0);
+        let requests = [
+            ("debug_traceTransaction", serde_json::json!([hash, opts])),
+            ("debug_traceCall", serde_json::json!([call, "latest", opts])),
+            ("debug_traceCall", serde_json::json!([call, "latest", indexed_opts])),
+            ("debug_traceBlock", serde_json::json!([raw, opts])),
+            ("debug_traceBlockByHash", serde_json::json!([block_hash, opts])),
+            ("debug_traceBlockByNumber", serde_json::json!(["latest", opts])),
+            ("debug_traceCallMany", serde_json::json!([bundles, {"blockNumber": "latest"}, opts])),
+        ];
+        for (method, params) in requests {
+            let mut rpc_params = ArrayParams::new();
+            for param in params.as_array().unwrap() {
+                rpc_params.insert(param)?;
+            }
+            let err = client.request::<serde_json::Value, _>(method, rpc_params).await.unwrap_err();
+            let jsonrpsee::core::ClientError::Call(err) = err else {
+                panic!("unexpected {method} error: {err}")
+            };
+            assert_eq!(
+                err,
+                ErrorObjectOwned::owned(
+                    CALL_EXECUTION_FAILED_CODE,
+                    "execution aborted (timeout = 0ns)",
+                    None::<()>,
+                ),
+                "{method}, tracer: {tracer}"
+            );
+        }
+
+        // Subscriptions keep the failure on the timed-out transaction and leave later entries null.
+        let ws = node.inner.rpc_server_handle().ws_client().await.unwrap();
+        let mut subscription: Subscription<ChainBlockTraceResult> = ws
+            .subscribe(
+                "debug_subscribe",
+                jsonrpsee::rpc_params!["traceChain", "0x0", "0x1", opts],
+                "debug_unsubscribe",
+            )
+            .await?;
+        let traced = tokio::time::timeout(WAIT_TIMEOUT, subscription.next()).await?.unwrap()?;
+        assert_eq!(
+            traced.traces,
+            vec![
+                Some(TraceResult::Error {
+                    error: "execution aborted (timeout = 0ns)".into(),
+                    tx_hash: Some(hash),
+                }),
+                None
+            ]
+        );
+        subscription.unsubscribe().await?;
+    }
     Ok(())
 }
