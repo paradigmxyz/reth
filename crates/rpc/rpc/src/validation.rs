@@ -121,6 +121,28 @@ where
             *cache = (head, cached_state)
         }
     }
+
+    /// Runs the validation on a blocking task.
+    ///
+    /// The validation is skipped if the request is dropped before it starts and stopped if the
+    /// request is dropped while the validation waits for the cached reads.
+    async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
+    where
+        F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
+    {
+        let (mut tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking_task(async move {
+            let result = tokio::select! {
+                biased;
+                _ = tx.closed() => return,
+                result = validation => result.map_err(ErrorObject::from),
+            };
+            let _ = tx.send(result);
+        });
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
 }
 
 impl<Provider, E, T> ValidationApi<Provider, E, T>
@@ -308,7 +330,7 @@ where
         }
 
         let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
+            output.state.account(&message.proposer_fee_recipient)
         {
             let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
             let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
@@ -593,16 +615,8 @@ where
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v3(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -611,16 +625,8 @@ where
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v4(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -629,16 +635,8 @@ where
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v5(&this, request).await };
+        self.spawn_validation(validation).await
     }
 
     /// Validates a block submitted to the relay
@@ -647,16 +645,8 @@ where
         request: BuilderBlockValidationRequestV6,
     ) -> RpcResult<()> {
         let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = Self::validate_builder_submission_v6(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        });
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        let validation = async move { Self::validate_builder_submission_v6(&this, request).await };
+        self.spawn_validation(validation).await
     }
 }
 
@@ -958,8 +948,8 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_deterministic() {
         let mut addresses = AddressSet::default();
-        addresses.insert(Address::from([1u8; 20]));
-        addresses.insert(Address::from([2u8; 20]));
+        addresses.insert(Address::repeat_byte(1u8));
+        addresses.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses);
         let hash2 = hash_disallow_list(&addresses);
@@ -970,10 +960,10 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_different_content() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);
@@ -984,12 +974,12 @@ mod tests {
     #[test]
     fn test_hash_disallow_list_order_independent() {
         let mut addresses1 = AddressSet::default();
-        addresses1.insert(Address::from([1u8; 20]));
-        addresses1.insert(Address::from([2u8; 20]));
+        addresses1.insert(Address::repeat_byte(1u8));
+        addresses1.insert(Address::repeat_byte(2u8));
 
         let mut addresses2 = AddressSet::default();
-        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
-        addresses2.insert(Address::from([1u8; 20]));
+        addresses2.insert(Address::repeat_byte(2u8)); // Different insertion order
+        addresses2.insert(Address::repeat_byte(1u8));
 
         let hash1 = hash_disallow_list(&addresses1);
         let hash2 = hash_disallow_list(&addresses2);

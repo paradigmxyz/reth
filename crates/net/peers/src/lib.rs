@@ -222,9 +222,7 @@ impl core::fmt::Display for AnyNode {
             Self::NodeRecord(record) => write!(f, "{record}"),
             #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => write!(f, "{enr}"),
-            Self::PeerId(peer_id) => {
-                write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
-            }
+            Self::PeerId(peer_id) => write!(f, "enode://{peer_id:x}"),
             Self::TrustedPeer(peer) => write!(f, "{peer}"),
         }
     }
@@ -307,6 +305,7 @@ impl<T> WithPeerId<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b512;
 
     #[cfg(feature = "secp256k1")]
     #[test]
@@ -317,7 +316,7 @@ mod tests {
             address: std::net::IpAddr::V4([10,3,58,6].into()),
             tcp_port: 30303,
             udp_port: 30301,
-            id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
+            id: b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0"),
         }));
         assert_eq!(node.to_string(), url)
     }
@@ -326,7 +325,7 @@ mod tests {
     fn test_peer_id_parse() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0";
         let node: AnyNode = url.parse().unwrap();
-        assert_eq!(node, AnyNode::PeerId("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap()));
+        assert_eq!(node, AnyNode::PeerId(b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0")));
         assert_eq!(node.to_string(), url);
 
         let url = "enode://";
@@ -342,9 +341,9 @@ mod tests {
         let node: AnyNode = url.parse().unwrap();
         assert_eq!(
             node.peer_id(),
-            "0xca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
-                .parse::<PeerId>()
-                .unwrap()
+            b512!(
+                "0xca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+            )
         );
         // The spec vector is discovery-only (no tcp key), so it has no RLPx endpoint.
         assert!(node.node_record().is_none());
@@ -358,7 +357,7 @@ mod tests {
         assert!(matches!(node, AnyNode::TrustedPeer(_)));
         assert_eq!(
             node.peer_id(),
-            "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse::<PeerId>().unwrap()
+            b512!("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0")
         );
         assert!(node.node_record().is_none());
         assert!(node.trusted_peer().is_some());

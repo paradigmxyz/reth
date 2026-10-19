@@ -16,7 +16,6 @@ workspace = true
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
-reth-storage-errors.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
@@ -45,6 +44,7 @@ rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
+reth-db-common.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true

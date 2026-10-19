@@ -11,9 +11,9 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
-    BlockReader, DBProvider, EitherWriter, PruneCheckpointReader, PruneCheckpointWriter,
-    RocksDBProviderFactory, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
-    TransactionsProvider, TransactionsProviderExt,
+    DBProvider, EitherWriter, PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionsProvider,
+    TransactionsProviderExt,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -61,7 +61,6 @@ impl<Provider> Stage<Provider> for TransactionLookupStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
-        + BlockReader
         + PruneCheckpointReader
         + StatsReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
@@ -203,11 +202,10 @@ where
             provider.rocksdb_provider().flush(&[Tables::TransactionHashNumbers.name()])?;
         }
 
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(input.target())
+        Ok(ExecOutput::done(
+            StageCheckpoint::new(input.target())
                 .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
-            done: true,
-        })
+        ))
     }
 
     /// Unwind the stage.

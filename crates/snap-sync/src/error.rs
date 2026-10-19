@@ -1,7 +1,9 @@
 //! Failures raised while assembling a snap state generation.
 
 use alloy_primitives::B256;
-use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
+use reth_downloaders::snap::{
+    InvalidAccountRange, InvalidBlockAccessListRequest, InvalidStorageRangeRequest,
+};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -15,6 +17,9 @@ pub enum SnapSyncError {
     /// A request for state failed.
     #[error(transparent)]
     Request(#[from] RequestError),
+    /// An account range was requested with its origin past its limit.
+    #[error(transparent)]
+    AccountRangeRequest(#[from] InvalidAccountRange),
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
@@ -41,6 +46,16 @@ pub enum SnapSyncError {
         /// Root the attempt currently downloads.
         expected: B256,
         /// Root the range was proved against.
+        got: B256,
+    },
+    /// A generation carries a state root other than the one its target header commits to.
+    #[error("block {block} commits to state root {expected}, not {got}")]
+    HeaderRootMismatch {
+        /// Target block of the generation.
+        block: u64,
+        /// State root of the canonical header.
+        expected: B256,
+        /// State root the generation carries.
         got: B256,
     },
     /// No catch-up progress is recorded for the attempt.
@@ -112,6 +127,17 @@ pub enum SnapSyncError {
         /// Version found on disk, absent when the record carries no numeric version.
         version: Option<u64>,
     },
+    /// A persisted progress record that cannot be decoded.
+    #[error("{key} record is unreadable: {source}")]
+    UnreadableRecord {
+        /// Metadata key the record is stored under.
+        key: &'static str,
+        /// Why the record could not be decoded.
+        source: serde_json::Error,
+    },
+    /// A blocking task panicked or the runtime shut down before it finished.
+    #[error("blocking task failed: {0}")]
+    BlockingTask(#[source] Box<dyn core::error::Error + Send + Sync>),
     /// A range was downloaded from somewhere other than the next key to cover.
     #[error("account range starts at {got}, coverage continues at {expected:?}")]
     OutOfOrderRange {
@@ -170,6 +196,12 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Scheduled accounts remain to be fetched again at the pivot.
+    #[error("{accounts} accounts remain to be fetched again at the pivot")]
+    PendingRepairs {
+        /// Number of accounts still scheduled.
+        accounts: usize,
+    },
     /// Account ranges remain to be downloaded.
     #[error("accounts from {next} are not downloaded yet")]
     IncompleteAccounts {
@@ -182,9 +214,22 @@ pub enum SnapSyncError {
     /// Work stopped because its session was cancelled.
     #[error("snap synchronization was cancelled")]
     Cancelled,
+    /// A reorg was recovered to a pivot below the last block both branches share.
+    #[error("pivot {target} is below reorg ancestor {ancestor}")]
+    PivotBelowAncestor {
+        /// Last block both branches share.
+        ancestor: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
 }
 
 impl SnapSyncError {
+    /// Wraps the failure of a blocking task, which is a panic or a shutting-down runtime.
+    pub(crate) fn blocking_task(error: impl core::error::Error + Send + Sync + 'static) -> Self {
+        Self::BlockingTask(Box::new(error))
+    }
+
     /// Whether the node's progress resolves this error, as new peers serve the state or missing
     /// headers are downloaded.
     ///
@@ -194,6 +239,50 @@ impl SnapSyncError {
             Self::Request(error) => !error.is_channel_closed(),
             Self::MissingHeader { .. } => true,
             _ => false,
+        }
+    }
+
+    /// Whether retrying can't help: storage failed, the node's storage layout or on-disk records
+    /// don't support snap, a blocking task failed, or the network is gone.
+    ///
+    /// Exhaustive so that every new variant is classified on purpose.
+    pub const fn is_fatal(&self) -> bool {
+        match self {
+            Self::Provider(_) |
+            Self::UnsupportedStorage |
+            Self::UnsupportedRecord { .. } |
+            Self::UnreadableRecord { .. } |
+            Self::BlockingTask(_) => true,
+            Self::Request(error) => error.is_channel_closed(),
+            Self::AccountRangeRequest(_) |
+            Self::StorageRequest(_) |
+            Self::BlockAccessListRequest(_) |
+            Self::NoAttempt |
+            Self::StaleWrite { .. } |
+            Self::RootMismatch { .. } |
+            Self::HeaderRootMismatch { .. } |
+            Self::NoCatchUpProgress |
+            Self::MissingHeader { .. } |
+            Self::OutOfOrderBlock { .. } |
+            Self::BlockPastPivot { .. } |
+            Self::PivotNotAdvanced { .. } |
+            Self::CatchUpBehindPivot { .. } |
+            Self::NonCanonicalBlock { .. } |
+            Self::ForkedBlock { .. } |
+            Self::NoCoverage |
+            Self::OutOfOrderRange { .. } |
+            Self::NoProgress { .. } |
+            Self::OutOfOrderStorage { .. } |
+            Self::MissingStorage { .. } |
+            Self::StorageRootMismatch { .. } |
+            Self::UnexpectedStorage { .. } |
+            Self::MissingCode { .. } |
+            Self::CodeMismatch { .. } |
+            Self::PendingRepairs { .. } |
+            Self::IncompleteAccounts { .. } |
+            Self::GenesisPivot |
+            Self::Cancelled |
+            Self::PivotBelowAncestor { .. } => false,
         }
     }
 

@@ -140,8 +140,10 @@ impl Command {
             }
             Subcommand::StaticFile { segment, key, subkey, raw } => {
                 if let StaticFileSegment::StorageChangeSets = segment {
-                    let storage_key =
-                        table_subkey::<tables::StorageChangeSets>(subkey.as_deref()).ok();
+                    let storage_key = subkey
+                        .as_deref()
+                        .map(table_subkey::<tables::StorageChangeSets>)
+                        .transpose()?;
                     let key = table_key::<tables::StorageChangeSets>(&key)?;
 
                     let provider = tool.provider_factory.static_file_provider();
@@ -196,8 +198,10 @@ impl Command {
                         TransactionSenderMask::MASK,
                     ),
                     StaticFileSegment::AccountChangeSets => {
-                        let subkey =
-                            table_subkey::<tables::AccountChangeSets>(subkey.as_deref()).ok();
+                        let subkey = subkey
+                            .as_deref()
+                            .map(table_subkey::<tables::AccountChangeSets>)
+                            .transpose()?;
                         (
                             table_key::<tables::AccountChangeSets>(&key)?,
                             subkey,
@@ -339,6 +343,12 @@ fn parse_address(key: &str) -> eyre::Result<Address> {
     stripped.parse::<Address>().map_err(|e| eyre::eyre!("failed to parse address: {e}"))
 }
 
+/// Returns true if the key is shaped like a hex address, so a parse failure is a typo rather than
+/// a JSON key.
+fn looks_like_address(key: &str) -> bool {
+    key.trim_matches('"').starts_with("0x")
+}
+
 /// Gets account history from RocksDB with ergonomic key parsing.
 ///
 /// Accepts a plain address and uses seek to find the relevant shard.
@@ -386,6 +396,7 @@ fn get_rocksdb_account_history(
                             println!("{}", serde_json::to_string_pretty(&v)?);
                         }
                     }
+                    Some(Err(e)) => return Err(e.into()),
                     _ => {
                         error!(target: "reth::cli", "No content for the given table key.");
                     }
@@ -393,6 +404,7 @@ fn get_rocksdb_account_history(
             }
             Ok(())
         }
+        Err(e) if looks_like_address(key) => Err(e),
         Err(_) => {
             // Fall back to full JSON key parsing (e.g.
             // `{"key":"0x...","highest_block_number":...}`)
@@ -458,6 +470,7 @@ fn get_rocksdb_storage_history(
                             println!("{}", serde_json::to_string_pretty(&v)?);
                         }
                     }
+                    Some(Err(e)) => return Err(e.into()),
                     _ => {
                         error!(target: "reth::cli", "No content for the given table key.");
                     }
@@ -465,6 +478,7 @@ fn get_rocksdb_storage_history(
             }
             Ok(())
         }
+        Err(e) if looks_like_address(key) => Err(e),
         Err(_) => {
             if all_shards || block.is_some() || storage_key.is_some() {
                 return Err(eyre::eyre!(
@@ -507,8 +521,8 @@ pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
 }
 
 /// Get an instance of subkey for given dupsort table
-fn table_subkey<T: DupSort>(subkey: Option<&str>) -> Result<T::SubKey, eyre::Error> {
-    serde_json::from_str(subkey.unwrap_or_default()).map_err(|e| eyre::eyre!(e))
+fn table_subkey<T: DupSort>(subkey: &str) -> Result<T::SubKey, eyre::Error> {
+    serde_json::from_str(subkey).map_err(|e| eyre::eyre!(e))
 }
 
 struct GetValueViewer<'a, N: NodeTypesWithDB> {
@@ -597,14 +611,12 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
         // Check if we're doing a range query
         if let Some(ref end_key_str) = self.end_key {
             let end_key = table_key::<T>(end_key_str)?;
-            let start_subkey = table_subkey::<T>(Some(
-                self.subkey.as_ref().expect("must have been given if end_key is given").as_str(),
-            ))?;
-            let end_subkey_parsed = self
-                .end_subkey
-                .as_ref()
-                .map(|s| table_subkey::<T>(Some(s.as_str())))
-                .transpose()?;
+            let Some(start_subkey) = self.subkey.as_deref() else {
+                eyre::bail!("a subkey is required when end_key is given");
+            };
+            let start_subkey = table_subkey::<T>(start_subkey)?;
+            let end_subkey_parsed =
+                self.end_subkey.as_deref().map(table_subkey::<T>).transpose()?;
 
             self.tool.provider_factory.db_ref().view(|tx| {
                 let mut cursor = tx.cursor_dup_read::<T>()?;
@@ -655,7 +667,10 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             })??;
         } else {
             // Single key/subkey lookup
-            let subkey = table_subkey::<T>(self.subkey.as_deref())?;
+            let Some(subkey) = self.subkey.as_deref() else {
+                eyre::bail!("a subkey is required for dupsort tables");
+            };
+            let subkey = table_subkey::<T>(subkey)?;
 
             let content = if self.raw {
                 self.tool
@@ -693,14 +708,14 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
-    use alloy_primitives::{address, B256};
+    use alloy_primitives::{address, b256, B256};
     use clap::{Args, Parser};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
     };
-    use std::str::FromStr;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -717,8 +732,7 @@ mod tests {
                 "\"0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac\""
             )
             .unwrap(),
-            B256::from_str("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
-                .unwrap()
+            b256!("0x0ac361fe774b78f8fc4e86c1916930d150865c3fc2e21dca2e58833557608bac")
         );
     }
 
@@ -736,10 +750,7 @@ mod tests {
             table_key::<StoragesHistory>(r#"{ "address": "0x01957911244e546ce519fbac6f798958fafadb41", "sharded_key": { "key": "0x0000000000000000000000000000000000000000000000000000000000000003", "highest_block_number": 18446744073709551615 } }"#).unwrap(),
             StorageShardedKey::new(
                 address!("0x01957911244e546ce519fbac6f798958fafadb41"),
-                B256::from_str(
-                    "0x0000000000000000000000000000000000000000000000000000000000000003"
-                )
-                .unwrap(),
+                B256::with_last_byte(3),
                 18446744073709551615
             )
         );

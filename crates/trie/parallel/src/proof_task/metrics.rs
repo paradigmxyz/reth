@@ -1,34 +1,27 @@
-use crate::value_encoder::ValueEncoderStats;
+//! Proof worker metrics.
+
 use reth_metrics::{metrics::Histogram, Metrics};
 use reth_trie::{
     hashed_cursor::{HashedCursorMetrics, HashedCursorMetricsCache},
     trie_cursor::{TrieCursorMetrics, TrieCursorMetricsCache},
     TrieType,
 };
-use std::time::Duration;
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
-/// Metrics for the proof task.
+/// Idle time metrics of the proof workers.
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.proof_task")]
-pub struct ProofTaskTrieMetrics {
+pub struct ProofWorkerIdleMetrics {
     /// Histogram for storage worker idle time in seconds (waiting for proof jobs).
     storage_worker_idle_time_seconds: Histogram,
-    /// Histogram for account worker idle time in seconds (waiting for proof jobs + storage
-    /// results).
+    /// Histogram for account worker idle time in seconds (waiting for proof jobs).
     account_worker_idle_time_seconds: Histogram,
-    /// Histogram for `Dispatched` deferred encoder variant count.
-    deferred_encoder_dispatched: Histogram,
-    /// Histogram for `Sync` deferred encoder variant count.
-    deferred_encoder_sync: Histogram,
-    /// Histogram for dispatched storage proofs that fell back to sync due to missing root.
-    deferred_encoder_dispatched_missing_root: Histogram,
-    /// Histogram for time account workers spent blocked waiting for storage proof results
-    /// (seconds). This is the portion of account worker idle time attributable to storage
-    /// worker latency rather than queue wait.
-    account_worker_storage_wait_seconds: Histogram,
 }
 
-impl ProofTaskTrieMetrics {
+impl ProofWorkerIdleMetrics {
     /// Record storage worker idle time.
     pub fn record_storage_worker_idle_time(&self, duration: Duration) {
         self.storage_worker_idle_time_seconds.record(duration.as_secs_f64());
@@ -37,15 +30,6 @@ impl ProofTaskTrieMetrics {
     /// Record account worker idle time.
     pub fn record_account_worker_idle_time(&self, duration: Duration) {
         self.account_worker_idle_time_seconds.record(duration.as_secs_f64());
-    }
-
-    /// Record value encoder stats (deferred encoder variant counts and storage wait time).
-    pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
-        self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
-        self.deferred_encoder_sync.record(stats.sync_count as f64);
-        self.deferred_encoder_dispatched_missing_root
-            .record(stats.dispatched_missing_root_count as f64);
-        self.account_worker_storage_wait_seconds.record(stats.storage_wait_time.as_secs_f64());
     }
 }
 
@@ -77,7 +61,7 @@ impl ProofTaskCursorMetrics {
     ///
     /// This method adds the current counter values from the cache to the Prometheus metrics
     /// and then resets all cache counters to zero.
-    pub fn record(&mut self, cache: &mut ProofTaskCursorMetricsCache) {
+    pub fn record(&self, cache: &mut ProofTaskCursorMetricsCache) {
         self.account_trie_cursor.record(&mut cache.account_trie_cursor);
         self.account_hashed_cursor.record(&mut cache.account_hashed_cursor);
         self.storage_trie_cursor.record(&mut cache.storage_trie_cursor);
@@ -130,5 +114,27 @@ impl ProofTaskCursorMetricsCache {
         self.account_hashed_cursor.record_span("account_hashed_cursor");
         self.storage_trie_cursor.record_span("storage_trie_cursor");
         self.storage_hashed_cursor.record_span("storage_hashed_cursor");
+    }
+}
+
+/// Metrics shared by all proof workers.
+///
+/// Every worker records into the same metric series, so the handles are registered once and
+/// shared instead of being registered again by each worker.
+#[derive(Clone, Debug, Default)]
+pub struct ProofWorkerMetrics {
+    /// Worker idle time metrics.
+    pub idle: ProofWorkerIdleMetrics,
+    /// Trie and hashed cursor operation metrics.
+    pub cursor: ProofTaskCursorMetrics,
+}
+
+impl ProofWorkerMetrics {
+    /// Returns the process-wide instance, registering the metrics on first use.
+    ///
+    /// The handles stay bound to the recorder that was installed when this is first called.
+    pub fn shared() -> Arc<Self> {
+        static METRICS: OnceLock<Arc<ProofWorkerMetrics>> = OnceLock::new();
+        METRICS.get_or_init(Default::default).clone()
     }
 }

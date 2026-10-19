@@ -144,7 +144,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
+                    Some(BeaconEngineMessage::NewPayload { cause, payload, tx }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -172,6 +172,7 @@ where
                             // Forward the payload and attempt to create reorg on top of
                             // the next one
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
+                                cause,
                                 payload,
                                 tx,
                             }))
@@ -192,14 +193,16 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, tx },
+                        BeaconEngineMessage::NewPayload { cause: cause.clone(), payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
+                            cause: cause.clone(),
                             payload: T::block_to_payload(reorg_block, encoded_bal),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
                         BeaconEngineMessage::ForkchoiceUpdated {
+                            cause,
                             state: reorg_forkchoice_state,
                             payload_attrs: None,
                             tx: reorg_fcu_tx,
@@ -208,13 +211,21 @@ where
                     *this.state = EngineReorgState::Reorg { queue };
                     continue
                 }
-                (Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }), _) => {
+                (
+                    Some(BeaconEngineMessage::ForkchoiceUpdated {
+                        cause,
+                        state,
+                        payload_attrs,
+                        tx,
+                    }),
+                    _,
+                ) => {
                     // Record last forkchoice state forwarded to the engine.
                     // We do not care if it's valid since engine should be able to handle
                     // reorgs that rely on invalid forkchoice state.
                     *this.last_forkchoice_state = Some(state);
                     *this.forkchoice_states_forwarded += 1;
-                    Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    Some(BeaconEngineMessage::ForkchoiceUpdated { cause, state, payload_attrs, tx })
                 }
                 (item, _) => item,
             };

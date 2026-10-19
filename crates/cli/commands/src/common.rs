@@ -4,6 +4,7 @@ pub use reth_primitives_traits::header::HeaderMut;
 
 use alloy_primitives::B256;
 use clap::Parser;
+use eyre::WrapErr;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
@@ -27,8 +28,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
-    StorageSettings,
+    BalStoreHandle, ProviderFactory, RocksDBBalStore, StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -112,11 +112,8 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
-        let mut config = Config::from_path(config_path)
-            .inspect_err(
-                |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
-            )
-            .unwrap_or_default();
+        let mut config = Config::from_path(&config_path)
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
@@ -196,11 +193,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     where
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
-        let balstore_cache_size =
-            self.db.balstore_cache_size.unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-        ));
+        let bal_store = self
+            .db
+            .balstore_cache_size
+            .map(|distance| {
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, DatabaseEnv>>::new(
             db,
             self.chain.clone(),
@@ -369,7 +369,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::AccessRights;
+    use super::*;
 
     #[test]
     fn inconsistent_access_rights_skip_consistency_checks() {

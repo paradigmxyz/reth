@@ -316,7 +316,7 @@ mod tests {
 
     fn eip4844_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256) {
         let blob = Blob::default();
-        let commitment = Bytes48::from([1u8; 48]);
+        let commitment = Bytes48::repeat_byte(1u8);
         let proof = Bytes48::default();
         let versioned_hash = kzg_to_versioned_hash(commitment.as_slice());
         let sidecar = BlobTransactionSidecar {

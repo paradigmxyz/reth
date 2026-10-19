@@ -590,6 +590,7 @@ pub fn generate_manifest(
     chain_id: u64,
     blocks_per_file: u64,
 ) -> Result<SnapshotManifest> {
+    eyre::ensure!(blocks_per_file > 0, "blocks_per_file must be greater than zero");
     std::fs::create_dir_all(output_dir)?;
 
     let mut components = BTreeMap::new();

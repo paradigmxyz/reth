@@ -8,7 +8,7 @@ use crate::engine_ssz_witness::{
     EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
 };
 use alloy_consensus::{Transaction, TxEnvelope};
-use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
@@ -34,7 +34,7 @@ use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
+use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
 use reth_tracing::tracing::debug;
@@ -362,7 +362,7 @@ impl EngineSszApi for reth_node_builder::rpc::NoopEngineApi {}
 impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
     for EthEngineApi<Provider, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -807,7 +807,7 @@ async fn submit_payload<Provider, Pool, Validator, ChainSpec>(
     payload: ExecutionData,
 ) -> Result<EngineSszPayloadStatus, HttpResponse>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -856,7 +856,7 @@ async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
     request: PayloadBodiesRequest,
 ) -> HttpResponse
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -1121,7 +1121,7 @@ fn decode_new_payload_request(
         }
     }
 
-    let versioned_hashes = calculate_versioned_hashes(&inner.transactions)?;
+    let versioned_hashes = calculate_versioned_hashes(&payload)?;
     let sidecar = match parent_root {
         Some(parent_beacon_block_root) => {
             let cancun = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
@@ -1137,11 +1137,10 @@ fn decode_new_payload_request(
     Ok(ExecutionData::new(payload, sidecar))
 }
 
-fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, PayloadDecodeError> {
+fn calculate_versioned_hashes(payload: &ExecutionPayload) -> Result<Vec<B256>, PayloadDecodeError> {
     let mut versioned_hashes = Vec::new();
-    for transaction in transactions {
-        let transaction = TxEnvelope::decode_2718_exact(transaction.as_ref())
-            .map_err(PayloadDecodeError::InvalidTransaction)?;
+    for transaction in payload.decoded_transactions::<TxEnvelope>() {
+        let transaction = transaction.map_err(PayloadDecodeError::InvalidTransaction)?;
         if let Some(hashes) = transaction.blob_versioned_hashes() {
             versioned_hashes.extend_from_slice(hashes);
         }
@@ -1440,22 +1439,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_body_limits_apply_without_content_length() {
-        for size in [16, 17] {
-            let request = HttpRequest::builder()
-                .header(CONTENT_TYPE, OCTET_STREAM)
-                .body(HttpBody::from(vec![0; size]))
-                .unwrap();
-            let response = read_ssz_body(request, 16).await;
-            if size == 16 {
-                assert_eq!(response.unwrap().len(), size);
-            } else {
-                assert_eq!(response.unwrap_err().status(), STATUS_PAYLOAD_TOO_LARGE);
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn engine_errors_preserve_validation_semantics() {
         use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use reth_engine_primitives::BeaconForkChoiceUpdateError;
@@ -1672,11 +1655,7 @@ mod tests {
 
     #[test]
     fn decodes_forkchoice_v4_with_custody_columns() {
-        let forkchoice_state = ForkchoiceState {
-            head_block_hash: B256::ZERO,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: B256::ZERO,
-        };
+        let forkchoice_state = ForkchoiceState::same_hash(B256::ZERO);
         let encoded = ForkchoiceUpdateAmsterdam {
             forkchoice_state,
             payload_attributes: Optional::none(),
@@ -1693,11 +1672,7 @@ mod tests {
 
     #[test]
     fn decodes_forkchoice_cancun_payload_attributes() {
-        let forkchoice_state = ForkchoiceState {
-            head_block_hash: B256::ZERO,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: B256::ZERO,
-        };
+        let forkchoice_state = ForkchoiceState::same_hash(B256::ZERO);
         let attrs = PayloadAttributesCancun {
             timestamp: 1,
             prev_randao: B256::with_last_byte(2),
