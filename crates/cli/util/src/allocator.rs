@@ -1,0 +1,54 @@
+//! Custom allocator implementation.
+//!
+//! We provide support for jemalloc and snmalloc on unix systems, and prefer jemalloc if both are
+//! enabled.
+
+// We provide jemalloc allocator support, alongside snmalloc. If both features are enabled, jemalloc
+// is prioritized.
+std::cfg_select! {
+    all(feature = "jemalloc", unix) => {
+        type AllocatorInner = tikv_jemallocator::Jemalloc;
+    }
+    all(feature = "snmalloc", unix) => {
+        type AllocatorInner = snmalloc_rs::SnMalloc;
+    }
+    _ => {
+        type AllocatorInner = std::alloc::System;
+    }
+}
+
+// Re-export jemalloc-sys so that binaries can `use` it in main.rs to make it
+// visible to the linker, which is required for `override_allocator_on_supported_platforms`.
+#[cfg(all(feature = "jemalloc", unix))]
+pub use tikv_jemalloc_sys;
+
+// This is to prevent clippy unused warnings when we do `--all-features`
+std::cfg_select! {
+    all(feature = "snmalloc", feature = "jemalloc", unix) => {
+        use snmalloc_rs as _;
+    }
+    _ => {}
+}
+
+std::cfg_select! {
+    feature = "tracy-allocator" => {
+        type AllocatorWrapper = tracy_client::ProfiledAllocator<AllocatorInner>;
+        const fn new_allocator_wrapper() -> AllocatorWrapper {
+            AllocatorWrapper::new(AllocatorInner {}, 100)
+        }
+    }
+    _ => {
+        type AllocatorWrapper = AllocatorInner;
+        const fn new_allocator_wrapper() -> AllocatorWrapper {
+            AllocatorInner {}
+        }
+    }
+}
+
+/// Custom allocator.
+pub type Allocator = AllocatorWrapper;
+
+/// Creates a new [custom allocator][Allocator].
+pub const fn new_allocator() -> Allocator {
+    new_allocator_wrapper()
+}

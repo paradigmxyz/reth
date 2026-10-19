@@ -1,0 +1,36 @@
+[package]
+name = "reth-consensus-debug-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-node-api.workspace = true
+reth-tracing.workspace = true
+
+# ethereum
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-provider = { workspace = true, features = ["ws"] }
+alloy-transport.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-json-rpc.workspace = true
+alloy-primitives.workspace = true
+
+auto_impl.workspace = true
+derive_more.workspace = true
+futures.workspace = true
+eyre.workspace = true
+reqwest = { workspace = true, features = ["query"] }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["time"] }
+serde_json.workspace = true
+
+ringbuffer.workspace = true

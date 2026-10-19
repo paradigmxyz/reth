@@ -1,0 +1,71 @@
+# Runs e2e tests using the testsuite framework
+
+name: e2e
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
+  RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. Test binaries report a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test:
+    name: e2e-testsuite
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 90
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - name: Install nextest
+        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          tool: nextest@0.9.140
+          checksum: true
+          fallback: none
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-rust-e2e-targets
+          cache-bin: false
+          cache-on-failure: true
+      - name: Run e2e tests
+        run: |
+          cargo nextest run \
+            --no-fail-fast \
+            --locked --features "asm-keccak" \
+            --workspace --test e2e_testsuite \
+            --exclude 'example-*' \
+            --exclude 'exex-subscription' \
+            --exclude 'ef-tests' \
+            --exclude 'reth' \
+            -E 'binary(e2e_testsuite)'

@@ -1,0 +1,44 @@
+[package]
+name = "reth-ethereum-engine-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-engine-primitives.workspace = true
+reth-payload-primitives.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+# misc
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-ethereum-primitives/std",
+    "alloy-primitives/std",
+    "alloy-eips/std",
+    "alloy-rpc-types-engine/std",
+    "serde/std",
+    "serde_json/std",
+    "thiserror/std",
+    "reth-engine-primitives/std",
+    "reth-primitives-traits/std",
+]

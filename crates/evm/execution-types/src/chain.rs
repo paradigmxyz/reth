@@ -1,0 +1,919 @@
+//! Contains [Chain], a chain of blocks and their final state.
+
+use crate::{DecodedRevmBal, ExecutionOutcome};
+use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloy_consensus::{
+    transaction::{Recovered, TxHashRef},
+    BlockHeader, TxReceipt,
+};
+use alloy_eips::{eip1898::ForkBlock, BlockNumHash};
+use alloy_primitives::{map::HashSet, Address, BlockHash, BlockNumber, Log, TxHash};
+use core::{fmt, ops::RangeInclusive};
+use reth_primitives_traits::{
+    transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
+    RecoveredBlock, SealedHeader,
+};
+use reth_trie_common::LazyTrieData;
+
+/// A chain of blocks and their final state.
+///
+/// The chain contains the state of accounts after execution of its blocks,
+/// changesets for those blocks (and their transactions), as well as the blocks themselves.
+///
+/// Used inside the `BlockchainTree`.
+///
+/// # Warning
+///
+/// A chain of blocks should not be empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
+    /// All blocks in this chain.
+    blocks: BTreeMap<BlockNumber, Arc<RecoveredBlock<N::Block>>>,
+    /// The outcome of block execution for this chain.
+    ///
+    /// This field contains the state of all accounts after the execution of all blocks in this
+    /// chain, ranging from the [`Chain::first`] block to the [`Chain::tip`] block, inclusive.
+    ///
+    /// Additionally, it includes the individual state changes that led to the current state.
+    execution_outcome: ExecutionOutcome<N::Receipt>,
+    /// Lazy trie data for each block in the chain, keyed by block number.
+    ///
+    /// Contains handles to lazily-initialized sorted trie updates and hashed state.
+    trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+    /// Block access lists prepared during block validation, keyed by block number.
+    ///
+    /// A missing entry means the BAL was not available for that block, not that the block has
+    /// none: only blocks the engine validated from a payload that carried a BAL have one, so
+    /// chains built from storage or received over the wire have no entries at all. Consumers
+    /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
+    /// cache data and not part of the serialized representation.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
+}
+
+type ChainTxReceiptMeta<'a, N> = (
+    &'a Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
+    IndexedTx<'a, <N as NodePrimitives>::Block>,
+    &'a <N as NodePrimitives>::Receipt,
+    &'a [<N as NodePrimitives>::Receipt],
+);
+
+impl<N: NodePrimitives> Default for Chain<N> {
+    fn default() -> Self {
+        Self {
+            blocks: Default::default(),
+            execution_outcome: Default::default(),
+            trie_data: Default::default(),
+            bals: Default::default(),
+        }
+    }
+}
+
+impl<N: NodePrimitives> Chain<N> {
+    /// Create new Chain from blocks and state.
+    ///
+    /// # Warning
+    ///
+    /// A chain of blocks should not be empty.
+    pub fn new(
+        blocks: impl IntoIterator<Item: Into<Arc<RecoveredBlock<N::Block>>>>,
+        execution_outcome: ExecutionOutcome<N::Receipt>,
+        trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+    ) -> Self {
+        let blocks = blocks
+            .into_iter()
+            .map(|b| {
+                let block = b.into();
+                (block.header().number(), block)
+            })
+            .collect::<BTreeMap<_, _>>();
+        debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
+
+        Self { blocks, execution_outcome, trie_data, bals: Default::default() }
+    }
+
+    /// Create new Chain from a single block and its state.
+    pub fn from_block(
+        block: impl Into<Arc<RecoveredBlock<N::Block>>>,
+        execution_outcome: ExecutionOutcome<N::Receipt>,
+        trie_data: LazyTrieData,
+    ) -> Self {
+        let block = block.into();
+        let block_number = block.header().number();
+        Self::new([block], execution_outcome, BTreeMap::from([(block_number, trie_data)]))
+    }
+
+    /// Get the blocks in this chain.
+    pub const fn blocks(&self) -> &BTreeMap<BlockNumber, Arc<RecoveredBlock<N::Block>>> {
+        &self.blocks
+    }
+
+    /// Consumes the type and only returns the blocks in this chain.
+    pub fn into_blocks(self) -> BTreeMap<BlockNumber, Arc<RecoveredBlock<N::Block>>> {
+        self.blocks
+    }
+
+    /// Returns an iterator over all headers in the block with increasing block numbers.
+    pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
+        self.blocks.values().map(|block| block.clone_sealed_header())
+    }
+
+    /// Get all trie data for this chain.
+    pub const fn trie_data(&self) -> &BTreeMap<BlockNumber, LazyTrieData> {
+        &self.trie_data
+    }
+
+    /// Get trie data for a specific block number.
+    pub fn trie_data_at(&self, block_number: BlockNumber) -> Option<&LazyTrieData> {
+        self.trie_data.get(&block_number)
+    }
+
+    /// Remove all trie data for this chain.
+    pub fn clear_trie_data(&mut self) {
+        self.trie_data.clear();
+    }
+
+    /// Get all prepared block access lists for this chain.
+    ///
+    /// Blocks without an available BAL have no entry; see the `bals` field for details.
+    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
+        &self.bals
+    }
+
+    /// Get the prepared block access list for a specific block number, if one is available.
+    ///
+    /// `None` only means no BAL was attached for that block; see the `bals` field for details.
+    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
+        self.bals.get(&block_number)
+    }
+
+    /// Attach a prepared block access list to a block of this chain.
+    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedRevmBal>) {
+        debug_assert!(
+            self.blocks.contains_key(&block_number),
+            "BAL must belong to a block of this chain"
+        );
+        self.bals.insert(block_number, bal);
+    }
+
+    /// Get execution outcome of this chain
+    pub const fn execution_outcome(&self) -> &ExecutionOutcome<N::Receipt> {
+        &self.execution_outcome
+    }
+
+    /// Get mutable execution outcome of this chain
+    pub const fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
+        &mut self.execution_outcome
+    }
+
+    /// Return true if chain is empty and has no blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// Return block number of the block hash.
+    pub fn block_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
+        self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
+    }
+
+    /// Returns the block with matching hash.
+    pub fn recovered_block(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
+        self.blocks
+            .iter()
+            .find_map(|(_num, block)| (block.hash() == block_hash).then_some(block.as_ref()))
+    }
+
+    /// Return execution outcome at the `block_number` or None if block is not known
+    pub fn execution_outcome_at_block(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<ExecutionOutcome<N::Receipt>> {
+        if self.tip().number() == block_number {
+            return Some(self.execution_outcome.clone())
+        }
+
+        if self.blocks.contains_key(&block_number) {
+            let mut execution_outcome = self.execution_outcome.clone();
+            execution_outcome.revert_to(block_number);
+            return Some(execution_outcome)
+        }
+        None
+    }
+
+    /// Destructure the chain into its inner components:
+    /// 1. The blocks contained in the chain.
+    /// 2. The execution outcome representing the final state.
+    /// 3. The trie data map.
+    #[expect(clippy::type_complexity)]
+    pub fn into_inner(
+        self,
+    ) -> (
+        ChainBlocks<'static, N::Block>,
+        ExecutionOutcome<N::Receipt>,
+        BTreeMap<BlockNumber, LazyTrieData>,
+    ) {
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_data)
+    }
+
+    /// Destructure the chain into its inner components:
+    /// 1. A reference to the blocks contained in the chain.
+    /// 2. A reference to the execution outcome representing the final state.
+    pub const fn inner(&self) -> (ChainBlocks<'_, N::Block>, &ExecutionOutcome<N::Receipt>) {
+        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.execution_outcome)
+    }
+
+    /// Returns an iterator over all the receipts of the blocks in the chain.
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<N::Receipt>> + '_ {
+        self.execution_outcome.receipts().iter()
+    }
+
+    /// Returns an iterator over all receipts in the chain.
+    pub fn receipts_iter(&self) -> impl Iterator<Item = &N::Receipt> + '_ {
+        self.block_receipts_iter().flatten()
+    }
+
+    /// Returns an iterator over all logs in the chain.
+    pub fn logs_iter(&self) -> impl Iterator<Item = &Log> + '_
+    where
+        N::Receipt: TxReceipt<Log = Log>,
+    {
+        self.receipts_iter().flat_map(|receipt| receipt.logs())
+    }
+
+    /// Returns an iterator over all blocks in the chain with increasing block number.
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &Arc<RecoveredBlock<N::Block>>> + '_ {
+        self.blocks().values()
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    pub fn transactions_iter(&self) -> impl Iterator<Item = &N::SignedTx> + '_ {
+        self.blocks_iter().flat_map(|block| block.body().transactions())
+    }
+
+    /// Returns an iterator over all transaction hashes in the chain.
+    pub fn transaction_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
+        self.transactions_iter().map(|tx| tx.tx_hash())
+    }
+
+    /// Returns an iterator over all [`Recovered`] transaction references in the chain.
+    pub fn transactions_recovered_iter(
+        &self,
+    ) -> impl Iterator<Item = Recovered<&N::SignedTx>> + '_ {
+        self.blocks_iter().flat_map(|block| block.transactions_recovered())
+    }
+
+    /// Returns an iterator over all blocks and their receipts in the chain.
+    pub fn blocks_and_receipts(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Vec<N::Receipt>)> + '_ {
+        self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
+    /// Returns an iterator over the blocks of this chain that have a prepared block access list,
+    /// paired with that BAL.
+    ///
+    /// Blocks without an available BAL are skipped; see the `bals` field for details.
+    pub fn blocks_and_bals(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+        self.bals
+            .iter()
+            .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))
+    }
+
+    /// Finds a transaction by hash and returns it along with its corresponding receipt data.
+    ///
+    /// Returns `None` if the transaction is not found in this chain.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<ChainTxReceiptMeta<'_, N>> {
+        for (block, receipts) in self.blocks_and_receipts() {
+            let Some(indexed_tx) = block.find_indexed(tx_hash) else {
+                continue;
+            };
+            let receipt = receipts.get(indexed_tx.index())?;
+            return Some((block, indexed_tx, receipt, receipts.as_slice()));
+        }
+
+        None
+    }
+
+    /// Get the block at which this chain forked.
+    pub fn fork_block(&self) -> ForkBlock {
+        let first = self.first();
+        ForkBlock {
+            number: first.header().number().saturating_sub(1),
+            hash: first.header().parent_hash(),
+        }
+    }
+
+    /// Get the first block in this chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
+    #[track_caller]
+    pub fn first(&self) -> &RecoveredBlock<N::Block> {
+        self.blocks.first_key_value().expect("Chain should have at least one block").1
+    }
+
+    /// Get the tip of the chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
+    #[track_caller]
+    pub fn tip(&self) -> &RecoveredBlock<N::Block> {
+        self.blocks.last_key_value().expect("Chain should have at least one block").1
+    }
+
+    /// Returns length of the chain.
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+
+    /// Returns the range of block numbers in the chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
+    pub fn range(&self) -> RangeInclusive<BlockNumber> {
+        self.first().header().number()..=self.tip().header().number()
+    }
+
+    /// Get all receipts for the given block.
+    pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&N::Receipt>> {
+        let num = self.block_number(block_hash)?;
+        Some(self.execution_outcome.receipts_by_block(num).iter().collect())
+    }
+
+    /// Get all receipts with attachment.
+    ///
+    /// Attachment includes block number, block hash, transaction hash and transaction index.
+    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts<N::Receipt>> {
+        let mut receipt_attach = Vec::with_capacity(self.blocks().len());
+
+        self.blocks_and_receipts().for_each(|(block, receipts)| {
+            let block_num_hash = BlockNumHash::new(block.number(), block.hash());
+
+            let tx_receipts = block
+                .body()
+                .transactions()
+                .iter()
+                .zip(receipts)
+                .map(|(tx, receipt)| (*tx.tx_hash(), receipt.clone()))
+                .collect();
+
+            receipt_attach.push(BlockReceipts {
+                block: block_num_hash,
+                tx_receipts,
+                timestamp: block.timestamp(),
+            });
+        });
+
+        receipt_attach
+    }
+
+    /// Append a single block with state to the chain.
+    /// This method assumes that blocks attachment to the chain has already been validated.
+    pub fn append_block(
+        &mut self,
+        block: impl Into<Arc<RecoveredBlock<N::Block>>>,
+        execution_outcome: ExecutionOutcome<N::Receipt>,
+        trie_data: LazyTrieData,
+    ) {
+        let block = block.into();
+        let block_number = block.header().number();
+        self.blocks.insert(block_number, block);
+        self.execution_outcome.extend(execution_outcome);
+        self.trie_data.insert(block_number, trie_data);
+    }
+
+    /// Merge two chains by appending the given chain into the current one.
+    ///
+    /// The state of accounts for this chain is set to the state of the newest chain.
+    ///
+    /// Returns the passed `other` chain in [`Result::Err`] variant if the chains could not be
+    /// connected.
+    pub fn append_chain(&mut self, other: Self) -> Result<(), Self> {
+        let chain_tip = self.tip();
+        let other_fork_block = other.fork_block();
+        if chain_tip.hash() != other_fork_block.hash {
+            return Err(other)
+        }
+
+        // Insert blocks from other chain
+        self.blocks.extend(other.blocks);
+        self.execution_outcome.extend(other.execution_outcome);
+        self.trie_data.extend(other.trie_data);
+        self.bals.extend(other.bals);
+
+        Ok(())
+    }
+}
+
+/// Wrapper type for `blocks` display in `Chain`
+#[derive(Debug)]
+pub struct DisplayBlocksChain<'a, B: reth_primitives_traits::Block>(
+    pub &'a BTreeMap<BlockNumber, Arc<RecoveredBlock<B>>>,
+);
+
+impl<B: reth_primitives_traits::Block> fmt::Display for DisplayBlocksChain<'_, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        let mut values = self.0.values().map(|block| block.num_hash());
+        if values.len() <= 3 {
+            list.entries(values);
+        } else {
+            list.entry(&values.next().unwrap());
+            list.entry(&format_args!("..."));
+            list.entry(&values.next_back().unwrap());
+        }
+        list.finish()
+    }
+}
+
+/// All blocks in the chain
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChainBlocks<'a, B: Block> {
+    blocks: Cow<'a, BTreeMap<BlockNumber, Arc<RecoveredBlock<B>>>>,
+}
+
+impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, B> {
+    /// Creates a consuming iterator over all blocks in the chain with increasing block number.
+    ///
+    /// Note: this always yields at least one block.
+    #[inline]
+    pub fn into_blocks(self) -> impl Iterator<Item = Arc<RecoveredBlock<B>>> {
+        self.blocks.into_owned().into_values()
+    }
+
+    /// Creates an iterator over all blocks in the chain with increasing block number.
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = (&BlockNumber, &RecoveredBlock<B>)> {
+        self.blocks.iter().map(|(number, block)| (number, block.as_ref()))
+    }
+
+    /// Get the tip of the chain.
+    ///
+    /// # Note
+    ///
+    /// Chains always have at least one block.
+    #[inline]
+    pub fn tip(&self) -> &RecoveredBlock<B> {
+        self.blocks.last_key_value().expect("Chain should have at least one block").1.as_ref()
+    }
+
+    /// Get the _first_ block of the chain.
+    ///
+    /// # Note
+    ///
+    /// Chains always have at least one block.
+    #[inline]
+    pub fn first(&self) -> &RecoveredBlock<B> {
+        self.blocks.first_key_value().expect("Chain should have at least one block").1.as_ref()
+    }
+
+    /// Returns an iterator over all transactions in the chain.
+    #[inline]
+    pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
+        self.blocks.values().flat_map(|block| block.body().transactions_iter())
+    }
+
+    /// Returns an iterator over all transactions and their senders.
+    #[inline]
+    pub fn transactions_with_sender(
+        &self,
+    ) -> impl Iterator<Item = (&Address, &<B::Body as BlockBody>::Transaction)> + '_ {
+        self.blocks.values().flat_map(|block| block.transactions_with_sender())
+    }
+
+    /// Returns an iterator over all [`Recovered`] in the blocks
+    ///
+    /// Note: This clones the transactions since it is assumed this is part of a shared [Chain].
+    #[inline]
+    pub fn transactions_ecrecovered(
+        &self,
+    ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> + '_ {
+        self.transactions_with_sender().map(|(signer, tx)| tx.clone().with_signer(*signer))
+    }
+
+    /// Returns an iterator over all transaction hashes in the block
+    #[inline]
+    pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
+        self.blocks
+            .values()
+            .flat_map(|block| block.body().transactions_iter().map(|tx| *tx.tx_hash()))
+    }
+
+    /// Returns all transaction hashes in a pre-allocated vector.
+    #[inline]
+    pub fn transaction_hashes_vec(&self) -> Vec<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = Vec::with_capacity(capacity);
+        hashes.extend(self.transaction_hashes());
+        hashes
+    }
+
+    /// Returns all transaction hashes in a pre-allocated set.
+    #[inline]
+    pub fn transaction_hashes_set(&self) -> HashSet<TxHash> {
+        let capacity = self.blocks.values().map(|block| block.body().transactions().len()).sum();
+
+        let mut hashes = HashSet::with_capacity_and_hasher(capacity, Default::default());
+        hashes.extend(self.transaction_hashes());
+        hashes
+    }
+}
+
+impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
+    type Item = (BlockNumber, Arc<RecoveredBlock<B>>);
+    type IntoIter = alloc::collections::btree_map::IntoIter<BlockNumber, Arc<RecoveredBlock<B>>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.blocks.into_owned().into_iter()
+    }
+}
+
+/// Used to hold receipts and their attachment.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
+    /// Block identifier
+    pub block: BlockNumHash,
+    /// Transaction identifier and receipt.
+    pub tx_receipts: Vec<(TxHash, T)>,
+    /// Block timestamp
+    pub timestamp: u64,
+}
+
+/// Bincode-compatible [`Chain`] serde implementation.
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    use crate::serde_bincode_compat;
+    use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+    use alloy_primitives::{Address, BlockNumber, Bytes};
+    use alloy_rlp::Decodable;
+    use core::marker::PhantomData;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_primitives_traits::{NodePrimitives, SealedBlock};
+    use reth_trie_common::SortedTrieData;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::Chain`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_execution_types::{serde_bincode_compat, Chain};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::Chain")]
+    ///     chain: Chain,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(bound = "")]
+    pub struct Chain<'a, N = EthPrimitives>
+    where
+        N: NodePrimitives,
+    {
+        #[serde(skip)]
+        _phantom: PhantomData<N>,
+        blocks: BTreeMap<BlockNumber, RecoveredBlockRepr>,
+        execution_outcome: serde_bincode_compat::ExecutionOutcome<'a>,
+        #[serde(default)]
+        trie_updates: BTreeMap<
+            BlockNumber,
+            reth_trie_common::serde_bincode_compat::updates::TrieUpdatesSorted<'a>,
+        >,
+        #[serde(default)]
+        hashed_state: BTreeMap<
+            BlockNumber,
+            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostStateSorted<'a>,
+        >,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct RecoveredBlockRepr {
+        rlp: Bytes,
+        senders: Vec<Address>,
+    }
+
+    impl<'a, N> From<&'a super::Chain<N>> for Chain<'a, N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: &'a super::Chain<N>) -> Self {
+            Self {
+                _phantom: PhantomData,
+                blocks: value
+                    .blocks
+                    .iter()
+                    .map(|(num, recovered)| {
+                        let senders = recovered.senders().to_vec();
+                        let rlp = Bytes::from(alloy_rlp::encode(recovered.sealed_block()));
+                        (*num, RecoveredBlockRepr { rlp, senders })
+                    })
+                    .collect(),
+                execution_outcome: (&value.execution_outcome).into(),
+                trie_updates: value
+                    .trie_data
+                    .iter()
+                    .map(|(k, v)| (*k, v.get().trie_updates.as_ref().into()))
+                    .collect(),
+                hashed_state: value
+                    .trie_data
+                    .iter()
+                    .map(|(k, v)| (*k, v.get().hashed_state.as_ref().into()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl<'a, N> From<Chain<'a, N>> for super::Chain<N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: Chain<'a, N>) -> Self {
+            use reth_primitives_traits::RecoveredBlock;
+            use reth_trie_common::LazyTrieData;
+
+            let hashed_state_map: BTreeMap<_, _> =
+                value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
+
+            let trie_data: BTreeMap<BlockNumber, LazyTrieData> = value
+                .trie_updates
+                .into_iter()
+                .map(|(k, v)| {
+                    let hashed_state = hashed_state_map.get(&k).cloned().unwrap_or_default();
+                    (k, LazyTrieData::ready(SortedTrieData::new(hashed_state, Arc::new(v.into()))))
+                })
+                .collect();
+
+            let blocks = value
+                .blocks
+                .into_iter()
+                .map(|(num, repr)| {
+                    let block = N::Block::decode(&mut repr.rlp.as_ref())
+                        .expect("invalid RLP for block in serde_bincode_compat");
+                    let sealed = SealedBlock::new_unhashed(block);
+                    (num, Arc::new(RecoveredBlock::new_sealed(sealed, repr.senders)))
+                })
+                .collect();
+
+            // BALs are transient cache data recovered from the BAL store, not carried over the
+            // wire.
+            Self {
+                blocks,
+                execution_outcome: value.execution_outcome.into(),
+                trie_data,
+                bals: BTreeMap::new(),
+            }
+        }
+    }
+
+    impl<N> SerializeAs<super::Chain<N>> for Chain<'_, N>
+    where
+        N: NodePrimitives,
+    {
+        fn serialize_as<S>(source: &super::Chain<N>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Chain::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de, N> DeserializeAs<'de, super::Chain<N>> for Chain<'de, N>
+    where
+        N: NodePrimitives,
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Chain<N>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Chain::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, Chain};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_primitives_traits::RecoveredBlock;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_chain_bincode_roundtrip() {
+            use alloc::collections::BTreeMap;
+
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Chain")]
+                chain: Chain,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                chain: Chain::new(
+                    vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                        .unwrap()],
+                    Default::default(),
+                    BTreeMap::new(),
+                ),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxType;
+    use alloy_primitives::{map::HashMap, Address, B256};
+    use reth_ethereum_primitives::Receipt;
+    use revm::{database::BundleState, state::AccountInfo};
+
+    #[test]
+    fn chain_append() {
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
+        let block3_hash = B256::repeat_byte(0x03);
+        let block4_hash = B256::repeat_byte(0x04);
+
+        let mut block1 = block.clone();
+        let mut block2 = block.clone();
+        let mut block3 = block.clone();
+        let mut block4 = block;
+
+        block1.set_hash(block1_hash);
+        block2.set_hash(block2_hash);
+        block3.set_hash(block3_hash);
+        block4.set_hash(block4_hash);
+
+        block3.set_parent_hash(block2_hash);
+
+        let mut chain1: Chain = Chain {
+            blocks: BTreeMap::from([(1, Arc::new(block1)), (2, Arc::new(block2))]),
+            ..Default::default()
+        };
+
+        let chain2 = Chain {
+            blocks: BTreeMap::from([(3, Arc::new(block3)), (4, Arc::new(block4))]),
+            ..Default::default()
+        };
+
+        assert!(chain1.append_chain(chain2.clone()).is_ok());
+
+        // chain1 got changed so this will fail
+        assert!(chain1.append_chain(chain2).is_err());
+    }
+
+    #[test]
+    fn test_number_split() {
+        let execution_outcome1: ExecutionOutcome = ExecutionOutcome::new(
+            BundleState::new(
+                vec![(
+                    Address::repeat_byte(2),
+                    None,
+                    Some(AccountInfo::default()),
+                    HashMap::default(),
+                )],
+                vec![vec![(Address::repeat_byte(2), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            1,
+            vec![],
+        );
+
+        let execution_outcome2 = ExecutionOutcome::new(
+            BundleState::new(
+                vec![(
+                    Address::repeat_byte(3),
+                    None,
+                    Some(AccountInfo::default()),
+                    HashMap::default(),
+                )],
+                vec![vec![(Address::repeat_byte(3), None, vec![])]],
+                vec![],
+            ),
+            vec![vec![]],
+            2,
+            vec![],
+        );
+
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let block1_hash = B256::repeat_byte(15);
+        block1.set_block_number(1);
+        block1.set_hash(block1_hash);
+        block1.push_sender(Address::repeat_byte(4));
+
+        let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+        let block2_hash = B256::repeat_byte(16);
+        block2.set_block_number(2);
+        block2.set_hash(block2_hash);
+        block2.push_sender(Address::repeat_byte(4));
+
+        let mut block_state_extended = execution_outcome1;
+        block_state_extended.extend(execution_outcome2);
+
+        let chain: Chain =
+            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, BTreeMap::new());
+
+        // return tip state
+        assert_eq!(
+            chain.execution_outcome_at_block(block2.number),
+            Some(chain.execution_outcome.clone())
+        );
+        // state at unknown block
+        assert_eq!(chain.execution_outcome_at_block(100), None);
+    }
+
+    #[test]
+    fn receipts_by_block_hash() {
+        // Create a default RecoveredBlock object
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
+
+        // Define block hashes for block1 and block2
+        let block1_hash = B256::repeat_byte(0x01);
+        let block2_hash = B256::repeat_byte(0x02);
+
+        // Clone the default block into block1 and block2
+        let mut block1 = block.clone();
+        let mut block2 = block;
+
+        // Set the hashes of block1 and block2
+        block1.set_hash(block1_hash);
+        block2.set_hash(block2_hash);
+
+        // Create a random receipt object, receipt1
+        let receipt1 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+        };
+
+        // Create another random receipt object, receipt2
+        let receipt2 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 1325345,
+            logs: vec![],
+            success: true,
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = vec![vec![receipt1.clone()], vec![receipt2]];
+
+        // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
+        // vector, and first_block set to 10
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
+        // including block1_hash and block2_hash, and the execution_outcome
+        let chain: Chain = Chain {
+            blocks: BTreeMap::from([(10, Arc::new(block1)), (11, Arc::new(block2))]),
+            execution_outcome: execution_outcome.clone(),
+            ..Default::default()
+        };
+
+        // Assert that the proper receipt vector is returned for block1_hash
+        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+
+        // Create an ExecutionOutcome object with a single receipt vector containing receipt1
+        let execution_outcome1 = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![receipt1]],
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Assert that the execution outcome at the first block contains only the first receipt
+        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+
+        // Assert that the execution outcome at the tip block contains the whole execution outcome
+        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
+    }
+}

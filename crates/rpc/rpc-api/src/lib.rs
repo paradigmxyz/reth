@@ -1,0 +1,101 @@
+//! Reth RPC interface definitions
+//!
+//! Provides all RPC interfaces.
+//!
+//! ## Feature Flags
+//!
+//! - `client`: Enables JSON-RPC client support.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+mod admin;
+mod anvil;
+mod debug;
+mod engine;
+mod hardhat;
+mod mev;
+mod miner;
+mod net;
+mod otterscan;
+mod reth;
+mod reth_engine;
+mod rpc;
+mod testing;
+mod trace;
+mod txpool;
+mod validation;
+mod web3;
+
+pub use reth::RethJitAction;
+pub use testing::{
+    TestingBuildBlockRequestV1, TestingBuildBlockResponseV1, TESTING_BUILD_BLOCK_V1,
+    TESTING_COMMIT_BLOCK_V1,
+};
+
+/// re-export of all server traits
+pub use servers::*;
+
+/// Aggregates all server traits.
+pub mod servers {
+    pub use crate::{
+        admin::AdminApiServer,
+        anvil::AnvilApiServer,
+        debug::DebugApiServer,
+        engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
+        hardhat::HardhatApiServer,
+        mev::{MevFullApiServer, MevSimApiServer},
+        miner::MinerApiServer,
+        net::NetApiServer,
+        otterscan::OtterscanServer,
+        reth::RethApiServer,
+        reth_engine::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus},
+        rpc::RpcApiServer,
+        testing::TestingApiServer,
+        trace::TraceApiServer,
+        txpool::TxPoolApiServer,
+        validation::BlockSubmissionValidationApiServer,
+        web3::Web3ApiServer,
+    };
+    pub use reth_rpc_eth_api::{
+        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthConfigApiServer,
+        EthFilterApiServer, EthPubSubApiServer, L2EthApiExtServer,
+    };
+}
+
+/// re-export of all client traits
+#[cfg(feature = "client")]
+pub use clients::*;
+
+/// Aggregates all client traits.
+#[cfg(feature = "client")]
+pub mod clients {
+    pub use crate::{
+        admin::AdminApiClient,
+        anvil::AnvilApiClient,
+        debug::DebugApiClient,
+        engine::{EngineApiClient, EngineEthApiClient},
+        hardhat::HardhatApiClient,
+        mev::{MevFullApiClient, MevSimApiClient},
+        miner::MinerApiClient,
+        net::NetApiClient,
+        otterscan::OtterscanClient,
+        reth::RethApiClient,
+        reth_engine::RethEngineApiClient,
+        rpc::RpcApiClient,
+        testing::TestingApiClient,
+        trace::TraceApiClient,
+        txpool::TxPoolApiClient,
+        validation::BlockSubmissionValidationApiClient,
+        web3::Web3ApiClient,
+    };
+    pub use reth_rpc_eth_api::{
+        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthConfigApiClient,
+        EthFilterApiClient, L2EthApiExtClient,
+    };
+}

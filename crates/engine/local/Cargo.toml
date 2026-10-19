@@ -1,0 +1,37 @@
+[package]
+name = "reth-engine-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-engine-primitives = { workspace = true, features = ["std"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-transaction-pool.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-rpc-types-engine.workspace = true
+
+# async
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+
+# misc
+eyre.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,550 @@
+//! Support for metering senders. Facilitates debugging by exposing metrics for number of messages
+//! sent, number of errors, etc.
+
+use crate::Metrics;
+use futures::Stream;
+use metrics::Counter;
+use reth_primitives_traits::InMemorySize;
+use std::{
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    task::{ready, Context, Poll},
+};
+use tokio::sync::mpsc::{
+    self,
+    error::{SendError, TryRecvError, TrySendError},
+};
+use tokio_util::sync::{PollSendError, PollSender};
+
+/// Wrapper around [`mpsc::unbounded_channel`] that returns a new unbounded metered channel.
+pub fn metered_unbounded_channel<T>(
+    scope: &'static str,
+) -> (UnboundedMeteredSender<T>, UnboundedMeteredReceiver<T>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (UnboundedMeteredSender::new(tx, scope), UnboundedMeteredReceiver::new(rx, scope))
+}
+
+/// Wrapper around [`mpsc::channel`] that returns a new bounded metered channel with the given
+/// buffer size.
+pub fn metered_channel<T>(
+    buffer: usize,
+    scope: &'static str,
+) -> (MeteredSender<T>, MeteredReceiver<T>) {
+    let (tx, rx) = mpsc::channel(buffer);
+    (MeteredSender::new(tx, scope), MeteredReceiver::new(rx, scope))
+}
+
+/// A wrapper type around [`UnboundedSender`](mpsc::UnboundedSender) that updates metrics on send.
+#[derive(Debug)]
+pub struct UnboundedMeteredSender<T> {
+    /// The [`UnboundedSender`](mpsc::UnboundedSender) that this wraps around
+    sender: mpsc::UnboundedSender<T>,
+    /// Holds metrics for this type
+    metrics: MeteredSenderMetrics,
+}
+
+impl<T> UnboundedMeteredSender<T> {
+    /// Creates a new [`UnboundedMeteredSender`] wrapping around the provided
+    /// [`mpsc::UnboundedSender`] that updates metrics on send.
+    pub fn new(sender: mpsc::UnboundedSender<T>, scope: &'static str) -> Self {
+        Self { sender, metrics: MeteredSenderMetrics::new(scope) }
+    }
+
+    /// Calls the underlying [`mpsc::UnboundedSender`]'s `send`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn send(&self, message: T) -> Result<(), SendError<T>> {
+        match self.sender.send(message) {
+            Ok(()) => {
+                self.metrics.messages_sent_total.increment(1);
+                Ok(())
+            }
+            Err(error) => {
+                self.metrics.send_errors_total.increment(1);
+                Err(error)
+            }
+        }
+    }
+}
+
+impl<T> Clone for UnboundedMeteredSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// A wrapper type around [`UnboundedReceiver`](mpsc::UnboundedReceiver) that updates metrics on
+/// receive.
+#[derive(Debug)]
+pub struct UnboundedMeteredReceiver<T> {
+    /// The [`UnboundedReceiver`](mpsc::UnboundedReceiver) that this wraps around
+    receiver: mpsc::UnboundedReceiver<T>,
+    /// Holds metrics for this type
+    metrics: MeteredReceiverMetrics,
+}
+
+// === impl MeteredReceiver ===
+
+impl<T> UnboundedMeteredReceiver<T> {
+    /// Creates a new [`UnboundedMeteredReceiver`] wrapping around the provided
+    /// [Receiver](mpsc::UnboundedReceiver)
+    pub fn new(receiver: mpsc::UnboundedReceiver<T>, scope: &'static str) -> Self {
+        Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
+    }
+
+    /// Receives the next value for this receiver.
+    pub async fn recv(&mut self) -> Option<T> {
+        let msg = self.receiver.recv().await;
+        if msg.is_some() {
+            self.metrics.messages_received_total.increment(1);
+        }
+        msg
+    }
+
+    /// Tries to receive the next value for this receiver.
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        let msg = self.receiver.try_recv()?;
+        self.metrics.messages_received_total.increment(1);
+        Ok(msg)
+    }
+
+    /// Closes the receiving half of a channel without dropping it.
+    pub fn close(&mut self) {
+        self.receiver.close();
+    }
+
+    /// Polls to receive the next message on this channel.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        let msg = ready!(self.receiver.poll_recv(cx));
+        if msg.is_some() {
+            self.metrics.messages_received_total.increment(1);
+        }
+        Poll::Ready(msg)
+    }
+}
+
+impl<T> Stream for UnboundedMeteredReceiver<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_recv(cx)
+    }
+}
+
+/// A wrapper type around [Sender](mpsc::Sender) that updates metrics on send.
+#[derive(Debug)]
+pub struct MeteredSender<T> {
+    /// The [Sender](mpsc::Sender) that this wraps around
+    sender: mpsc::Sender<T>,
+    /// Holds metrics for this type
+    metrics: MeteredSenderMetrics,
+}
+
+impl<T> MeteredSender<T> {
+    /// Creates a new [`MeteredSender`] wrapping around the provided [Sender](mpsc::Sender)
+    pub fn new(sender: mpsc::Sender<T>, scope: &'static str) -> Self {
+        Self { sender, metrics: MeteredSenderMetrics::new(scope) }
+    }
+
+    /// Tries to acquire a permit to send a message without waiting.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `try_reserve_owned`.
+    pub fn try_reserve_owned(self) -> Result<OwnedPermit<T>, TrySendError<Self>> {
+        let Self { sender, metrics } = self;
+        sender.try_reserve_owned().map(|permit| OwnedPermit::new(permit, metrics.clone())).map_err(
+            |err| match err {
+                TrySendError::Full(sender) => TrySendError::Full(Self { sender, metrics }),
+                TrySendError::Closed(sender) => TrySendError::Closed(Self { sender, metrics }),
+            },
+        )
+    }
+
+    /// Waits to acquire a permit to send a message and return owned permit.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `reserve_owned`.
+    pub async fn reserve_owned(self) -> Result<OwnedPermit<T>, SendError<()>> {
+        self.sender.reserve_owned().await.map(|permit| OwnedPermit::new(permit, self.metrics))
+    }
+
+    /// Waits to acquire a permit to send a message.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `reserve`.
+    pub async fn reserve(&self) -> Result<Permit<'_, T>, SendError<()>> {
+        self.sender.reserve().await.map(|permit| Permit::new(permit, &self.metrics))
+    }
+
+    /// Tries to acquire a permit to send a message without waiting.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `try_reserve`.
+    pub fn try_reserve(&self) -> Result<Permit<'_, T>, TrySendError<()>> {
+        self.sender.try_reserve().map(|permit| Permit::new(permit, &self.metrics))
+    }
+
+    /// Returns the underlying [Sender](mpsc::Sender).
+    pub const fn inner(&self) -> &mpsc::Sender<T> {
+        &self.sender
+    }
+
+    /// Calls the underlying [Sender](mpsc::Sender)'s `try_send`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn try_send(&self, message: T) -> Result<(), TrySendError<T>> {
+        match self.sender.try_send(message) {
+            Ok(()) => {
+                self.metrics.messages_sent_total.increment(1);
+                Ok(())
+            }
+            Err(error) => {
+                self.metrics.send_errors_total.increment(1);
+                Err(error)
+            }
+        }
+    }
+
+    /// Calls the underlying [Sender](mpsc::Sender)'s `send`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub async fn send(&self, value: T) -> Result<(), SendError<T>> {
+        match self.sender.send(value).await {
+            Ok(()) => {
+                self.metrics.messages_sent_total.increment(1);
+                Ok(())
+            }
+            Err(error) => {
+                self.metrics.send_errors_total.increment(1);
+                Err(error)
+            }
+        }
+    }
+}
+
+impl<T> Clone for MeteredSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// A wrapper type around [`OwnedPermit`](mpsc::OwnedPermit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct OwnedPermit<T> {
+    permit: mpsc::OwnedPermit<T>,
+    /// Holds metrics for this type
+    metrics: MeteredSenderMetrics,
+}
+
+impl<T> OwnedPermit<T> {
+    /// Creates a new [`OwnedPermit`] wrapping the provided [`mpsc::OwnedPermit`] with given metrics
+    /// handle.
+    pub const fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> Self {
+        Self { permit, metrics }
+    }
+
+    /// Sends a value using the reserved capacity and update metrics accordingly.
+    pub fn send(self, value: T) -> MeteredSender<T> {
+        let Self { permit, metrics } = self;
+        metrics.messages_sent_total.increment(1);
+        MeteredSender { sender: permit.send(value), metrics }
+    }
+}
+
+/// A wrapper type around [Permit](mpsc::Permit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct Permit<'a, T> {
+    permit: mpsc::Permit<'a, T>,
+    metrics_ref: &'a MeteredSenderMetrics,
+}
+
+impl<'a, T> Permit<'a, T> {
+    /// Creates a new [`Permit`] wrapping the provided [`mpsc::Permit`] with given metrics ref.
+    pub const fn new(permit: mpsc::Permit<'a, T>, metrics_ref: &'a MeteredSenderMetrics) -> Self {
+        Self { permit, metrics_ref }
+    }
+
+    /// Sends a value using the reserved capacity and updates metrics accordingly.
+    pub fn send(self, value: T) {
+        self.metrics_ref.messages_sent_total.increment(1);
+        self.permit.send(value);
+    }
+}
+
+/// A wrapper type around [Receiver](mpsc::Receiver) that updates metrics on receive.
+#[derive(Debug)]
+pub struct MeteredReceiver<T> {
+    /// The [Receiver](mpsc::Receiver) that this wraps around
+    receiver: mpsc::Receiver<T>,
+    /// Holds metrics for this type
+    metrics: MeteredReceiverMetrics,
+}
+
+// === impl MeteredReceiver ===
+
+impl<T> MeteredReceiver<T> {
+    /// Creates a new [`MeteredReceiver`] wrapping around the provided [Receiver](mpsc::Receiver)
+    pub fn new(receiver: mpsc::Receiver<T>, scope: &'static str) -> Self {
+        Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
+    }
+
+    /// Receives the next value for this receiver.
+    pub async fn recv(&mut self) -> Option<T> {
+        let msg = self.receiver.recv().await;
+        if msg.is_some() {
+            self.metrics.messages_received_total.increment(1);
+        }
+        msg
+    }
+
+    /// Tries to receive the next value for this receiver.
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+        let msg = self.receiver.try_recv()?;
+        self.metrics.messages_received_total.increment(1);
+        Ok(msg)
+    }
+
+    /// Closes the receiving half of a channel without dropping it.
+    pub fn close(&mut self) {
+        self.receiver.close();
+    }
+
+    /// Polls to receive the next message on this channel.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        let msg = ready!(self.receiver.poll_recv(cx));
+        if msg.is_some() {
+            self.metrics.messages_received_total.increment(1);
+        }
+        Poll::Ready(msg)
+    }
+}
+
+impl<T> Stream for MeteredReceiver<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_recv(cx)
+    }
+}
+
+/// Throughput metrics for [`MeteredSender`]
+#[derive(Clone, Metrics)]
+#[metrics(dynamic = true)]
+pub struct MeteredSenderMetrics {
+    /// Number of messages sent
+    messages_sent_total: Counter,
+    /// Number of failed message deliveries
+    send_errors_total: Counter,
+}
+
+/// Throughput metrics for [`MeteredReceiver`]
+#[derive(Clone, Metrics)]
+#[metrics(dynamic = true)]
+struct MeteredReceiverMetrics {
+    /// Number of messages received
+    messages_received_total: Counter,
+}
+
+/// A wrapper type around [`PollSender`] that updates metrics on send.
+#[derive(Debug)]
+pub struct MeteredPollSender<T> {
+    /// The [`PollSender`] that this wraps around.
+    sender: PollSender<T>,
+    /// Holds metrics for this type.
+    metrics: MeteredPollSenderMetrics,
+}
+
+impl<T: Send + 'static> MeteredPollSender<T> {
+    /// Creates a new [`MeteredPollSender`] wrapping around the provided [`PollSender`].
+    pub fn new(sender: PollSender<T>, scope: &'static str) -> Self {
+        Self { sender, metrics: MeteredPollSenderMetrics::new(scope) }
+    }
+
+    /// Returns the underlying [`PollSender`].
+    pub const fn inner(&self) -> &PollSender<T> {
+        &self.sender
+    }
+
+    /// Calls the underlying [`PollSender`]'s `poll_reserve`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn poll_reserve(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollSendError<T>>> {
+        match self.sender.poll_reserve(cx) {
+            Poll::Ready(Ok(permit)) => Poll::Ready(Ok(permit)),
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => {
+                self.metrics.back_pressure_total.increment(1);
+                Poll::Pending
+            }
+        }
+    }
+
+    /// Calls the underlying [`PollSender`]'s `send_item`, incrementing the appropriate
+    /// metrics depending on the result.
+    pub fn send_item(&mut self, item: T) -> Result<(), PollSendError<T>> {
+        match self.sender.send_item(item) {
+            Ok(()) => {
+                self.metrics.messages_sent_total.increment(1);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl<T> Clone for MeteredPollSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// Throughput metrics for [`MeteredPollSender`]
+#[derive(Clone, Metrics)]
+#[metrics(dynamic = true)]
+struct MeteredPollSenderMetrics {
+    /// Number of messages sent
+    messages_sent_total: Counter,
+    /// Number of delayed message deliveries caused by a full channel
+    back_pressure_total: Counter,
+}
+
+/// Shared state for tracking memory budget across sender and receiver.
+///
+/// `used` is a pure accounting counter — it does not gate access to any other
+/// shared memory, so all operations on it use [`Ordering::Relaxed`]. Cross-thread
+/// publication of message contents is handled by the underlying mpsc channel.
+#[derive(Debug)]
+struct MemoryBudget {
+    /// Current number of bytes used by buffered messages.
+    used: AtomicUsize,
+    /// Maximum allowed bytes.
+    max_bytes: usize,
+}
+
+/// Guard that releases memory budget when dropped.
+///
+/// Holds the size of the message and a reference to the shared budget counter.
+/// When dropped, it atomically decreases the used counter.
+#[derive(Debug)]
+struct BudgetGuard {
+    size: usize,
+    budget: Arc<MemoryBudget>,
+}
+
+impl Drop for BudgetGuard {
+    fn drop(&mut self) {
+        self.budget.used.fetch_sub(self.size, Ordering::Relaxed);
+    }
+}
+
+/// Message envelope that holds the memory budget while the message sits in the channel.
+///
+/// The guard is dropped (releasing the budget) as soon as the receiver dequeues
+/// the message via [`MemoryBoundedReceiver::recv`] / [`MemoryBoundedReceiver::poll_recv`],
+/// so the budget tracks bytes *currently in the channel queue*, not bytes in flight
+/// downstream of the receiver.
+#[derive(Debug)]
+struct Budgeted<T> {
+    msg: T,
+    _guard: BudgetGuard,
+}
+
+/// A sender that enforces a byte budget before enqueueing messages.
+///
+/// Uses a shared atomic counter to track memory usage. Each message's size is added
+/// to the counter on send and subtracted when the message is dequeued by the receiver.
+///
+/// The current call sites (specifically [`crate::common::mpsc::MemoryBoundedSender`] used
+/// for the `NetworkManager → TransactionsManager` channel) have a single producer driven
+/// from a single `poll`, so the `fetch_add → check → fetch_sub-on-overflow` reservation
+/// pattern can never race with itself. The atomic is still used so the receiver can
+/// release budget from a different task.
+#[derive(Debug, Clone)]
+pub struct MemoryBoundedSender<T: InMemorySize> {
+    /// The underlying unbounded metered sender
+    inner: UnboundedMeteredSender<Budgeted<T>>,
+    /// Shared memory budget tracker
+    budget: Arc<MemoryBudget>,
+}
+
+impl<T: InMemorySize> MemoryBoundedSender<T> {
+    /// Tries to send a message if there is sufficient budget.
+    ///
+    /// Returns `TrySendError::Full` if insufficient budget is available.
+    pub fn try_send(&self, msg: T) -> Result<(), TrySendError<T>> {
+        let size = msg.size();
+
+        // Reserve budget: add first, check after
+        let prev = self.budget.used.fetch_add(size, Ordering::Relaxed);
+        if prev.saturating_add(size) > self.budget.max_bytes {
+            // Over budget, undo
+            self.budget.used.fetch_sub(size, Ordering::Relaxed);
+            return Err(TrySendError::Full(msg));
+        }
+
+        let guard = BudgetGuard { size, budget: Arc::clone(&self.budget) };
+        let budgeted = Budgeted { msg, _guard: guard };
+
+        self.inner.send(budgeted).map_err(|e| {
+            // Guard will be dropped here, releasing the budget
+            TrySendError::Closed(e.0.msg)
+        })
+    }
+}
+
+/// A receiver for memory-bounded messages.
+///
+/// On receive, the budget reserved for the message is released immediately and the
+/// inner `T` is yielded — callers do not need to opt into any wrapper type.
+#[derive(Debug)]
+pub struct MemoryBoundedReceiver<T> {
+    /// The underlying unbounded metered receiver
+    inner: UnboundedMeteredReceiver<Budgeted<T>>,
+}
+
+impl<T> MemoryBoundedReceiver<T> {
+    /// Receives the next message, returning `None` if the channel is closed.
+    ///
+    /// Releases the message's reserved budget before returning.
+    pub async fn recv(&mut self) -> Option<T> {
+        self.inner.recv().await.map(unwrap_budgeted)
+    }
+
+    /// Polls to receive the next message on this channel.
+    ///
+    /// Releases the message's reserved budget before returning.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        self.inner.poll_recv(cx).map(|opt| opt.map(unwrap_budgeted))
+    }
+}
+
+/// Releases the budget guard and returns the inner message.
+fn unwrap_budgeted<T>(b: Budgeted<T>) -> T {
+    // Destructuring binds `_guard` so it is dropped when this function returns,
+    // which runs `BudgetGuard::drop` and releases the reserved bytes.
+    let Budgeted { msg, _guard } = b;
+    msg
+}
+
+impl<T> Stream for MemoryBoundedReceiver<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_recv(cx)
+    }
+}
+
+/// Creates a new memory-bounded channel with the given byte budget.
+///
+/// The budget tracks bytes currently buffered in the channel; it is reserved on
+/// [`MemoryBoundedSender::try_send`] and released as soon as the receiver dequeues
+/// the message.
+pub fn memory_bounded_channel<T: InMemorySize>(
+    max_bytes: usize,
+    scope: &'static str,
+) -> (MemoryBoundedSender<T>, MemoryBoundedReceiver<T>) {
+    let (tx, rx) = metered_unbounded_channel(scope);
+    let budget = Arc::new(MemoryBudget { used: AtomicUsize::new(0), max_bytes });
+
+    let sender = MemoryBoundedSender { inner: tx, budget };
+    let receiver = MemoryBoundedReceiver { inner: rx };
+
+    (sender, receiver)
+}

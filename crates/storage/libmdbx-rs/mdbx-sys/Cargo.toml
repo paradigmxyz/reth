@@ -1,0 +1,15 @@
+[package]
+name = "reth-mdbx-sys"
+description = "Raw bindings for libmdbx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+bindgen = { workspace = true, features = ["runtime"] }
+
+[lints]

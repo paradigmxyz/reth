@@ -1,0 +1,76 @@
+[package]
+name = "reth-rpc-eth-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Types supporting implementation of 'eth' namespace RPC server API"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-chainspec.workspace = true
+reth-chain-state.workspace = true
+reth-errors.workspace = true
+reth-evm.workspace = true
+reth-execution-types.workspace = true
+reth-metrics.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["rpc"] }
+reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
+reth-storage-api.workspace = true
+reth-revm.workspace = true
+reth-rpc-server-types.workspace = true
+reth-rpc-convert.workspace = true
+reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
+
+# ethereum
+alloy-chains.workspace = true
+alloy-eip7928.workspace = true
+alloy-eips.workspace = true
+alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-sol-types.workspace = true
+alloy-transport.workspace = true
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types-eth.workspace = true
+alloy-network.workspace = true
+alloy-serde.workspace = true
+revm.workspace = true
+revm-inspectors.workspace = true
+
+# rpc
+jsonrpsee-core.workspace = true
+jsonrpsee-types.workspace = true
+
+# async
+futures.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+reqwest.workspace = true
+
+# metrics
+metrics.workspace = true
+
+# misc
+serde = { workspace = true, features = ["derive"] }
+url = { workspace = true, features = ["serde"] }
+thiserror.workspace = true
+derive_more.workspace = true
+schnellru.workspace = true
+rand.workspace = true
+tracing.workspace = true
+itertools.workspace = true
+
+[dev-dependencies]
+reth-db-models.workspace = true
+reth-storage-api = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[features]
+js-tracer = ["revm-inspectors/js-tracer"]

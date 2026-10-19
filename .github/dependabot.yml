@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    cooldown:
+      # Buffer the scanner's seven-day minimum: Dependabot reads date-only tag metadata.
+      default-days: 8
+    groups:
+      ci-weekly:
+        patterns:
+          - '*'
+  - package-ecosystem: cargo
+    directory: /
+    allow:
+      - dependency-type: all
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    cooldown:
+      default-days: 7
+    labels:
+      - "A-dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 1
+    groups:
+      cargo-weekly:
+        applies-to: "version-updates"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

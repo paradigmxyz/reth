@@ -1,0 +1,85 @@
+//! Traits used when interacting with the sync status of the network.
+
+use alloy_eips::eip2124::{ForkFilter, Head};
+use reth_eth_wire_types::BlockRangeUpdate;
+
+/// A type that provides information about whether the node is currently syncing and the network is
+/// currently serving syncing related requests.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait SyncStateProvider: Send + Sync {
+    /// Returns `true` if the network is undergoing sync.
+    fn is_syncing(&self) -> bool;
+
+    /// Returns `true` if the network is undergoing an initial (pipeline) sync.
+    fn is_initially_syncing(&self) -> bool;
+}
+
+/// An updater for updating the [SyncState] and status of the network.
+///
+/// The node is either syncing, or it is idle.
+/// While syncing, the node will download data from the network and process it. The processing
+/// consists of several stages, like recovering senders, executing the blocks and indexing.
+/// Eventually the node reaches the `Finish` stage and will transition to [`SyncState::Idle`], it
+/// which point the node is considered fully synced.
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
+    /// Notifies about a [`SyncState`] update.
+    fn update_sync_state(&self, state: SyncState);
+
+    /// Updates the status of the p2p node.
+    fn update_status(&self, head: Head);
+
+    /// Updates the advertised block range.
+    fn update_block_range(&self, update: BlockRangeUpdate);
+
+    /// Replaces the node's active [`ForkFilter`] to adopt a fork schedule that changed at runtime
+    /// (e.g. an L1-signalled upgrade) without a restart.
+    ///
+    /// The caller must build `fork_filter` from the updated chain spec advanced to the node's
+    /// current head, and should do so before the fork's activation timestamp so the node
+    /// announces the upcoming fork ahead of time. Defaults to a no-op for updaters that do not
+    /// track a fork filter.
+    fn set_fork_filter(&self, fork_filter: ForkFilter) {
+        let _ = fork_filter;
+    }
+}
+
+/// The state the network is currently in when it comes to synchronization.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum SyncState {
+    /// Node sync is complete.
+    ///
+    /// The network just serves requests to keep up of the chain.
+    Idle,
+    /// Network is syncing
+    Syncing,
+}
+
+impl SyncState {
+    /// Whether the node is currently syncing.
+    ///
+    /// Note: this does not include keep-up sync when the state is idle.
+    pub const fn is_syncing(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+}
+
+/// A [`NetworkSyncUpdater`] implementation that does nothing.
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub struct NoopSyncStateUpdater;
+
+impl SyncStateProvider for NoopSyncStateUpdater {
+    fn is_syncing(&self) -> bool {
+        false
+    }
+    fn is_initially_syncing(&self) -> bool {
+        false
+    }
+}
+
+impl NetworkSyncUpdater for NoopSyncStateUpdater {
+    fn update_sync_state(&self, _state: SyncState) {}
+    fn update_status(&self, _: Head) {}
+    fn update_block_range(&self, _update: BlockRangeUpdate) {}
+}

@@ -1,0 +1,81 @@
+# Runs `assertoor` tests on a `kurtosis` testnet.
+
+name: kurtosis
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+  push:
+    tags:
+      - "*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build-reth:
+    if: github.repository == 'paradigmxyz/reth'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/docker-test.yml
+    with:
+      hive_target: kurtosis
+    secrets:
+      DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+
+  test:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+    name: run kurtosis
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs:
+      - build-reth
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download reth image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: artifacts
+          path: /tmp
+
+      - name: Load Docker image
+        run: |
+          docker load -i /tmp/reth_image.tar &
+          wait
+          docker image ls -a
+
+      - name: Run kurtosis
+        uses: ethpandaops/kurtosis-assertoor-github-action@f64942cbc780df731a731ea9f45765b161d2c8df # v1.0.1
+        with:
+          ethereum_package_args: ".github/assets/kurtosis_network_params.yaml"
+
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack Webhook Action
+        uses: rtCamp/action-slack-notify@33ca3be66c6f378fe1610fd1d5258632dbed5e58 # v2.4.0
+        env:
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_HIVE_WEBHOOK_URL }}

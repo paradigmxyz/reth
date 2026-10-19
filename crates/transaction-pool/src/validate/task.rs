@@ -1,0 +1,612 @@
+//! A validation service for transactions.
+
+use crate::{
+    blobstore::BlobStore,
+    metrics::TxPoolValidatorMetrics,
+    validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
+    EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
+};
+use futures_util::{lock::Mutex, StreamExt};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
+use reth_primitives_traits::{HeaderTy, SealedBlock};
+use reth_storage_api::BlockReaderIdExt;
+use reth_tasks::Runtime;
+use std::{future::Future, pin::Pin, sync::Arc};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
+
+/// Represents a future outputting unit type and is sendable.
+type ValidationFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Represents a stream of validation futures.
+type ValidationStream = ReceiverStream<ValidationFuture>;
+
+/// A service that performs validation jobs.
+///
+/// This listens for incoming validation jobs and executes them.
+///
+/// This should be spawned as a task: [`ValidationTask::run`]
+#[derive(Clone)]
+pub struct ValidationTask {
+    validation_jobs: Arc<Mutex<ValidationStream>>,
+}
+
+impl ValidationTask {
+    /// Creates a new cloneable task pair.
+    ///
+    /// The sender sends new (transaction) validation tasks to an available validation task.
+    pub fn new() -> (ValidationJobSender, Self) {
+        Self::with_capacity(1)
+    }
+
+    /// Creates a new cloneable task pair with the given channel capacity.
+    pub fn with_capacity(capacity: usize) -> (ValidationJobSender, Self) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let metrics = TxPoolValidatorMetrics::default();
+        (ValidationJobSender { tx, metrics }, Self::with_receiver(rx))
+    }
+
+    /// Creates a new task with the given receiver.
+    pub fn with_receiver(jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>) -> Self {
+        Self { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
+    }
+
+    /// Executes all new validation jobs that come in.
+    ///
+    /// This will run as long as the channel is alive and is expected to be spawned as a task.
+    pub async fn run(self) {
+        loop {
+            // Release the shared receiver before running the job, so other workers
+            // can dequeue validations while this worker is busy.
+            let task = { self.validation_jobs.lock().await.next().await };
+            let Some(task) = task else { break };
+            task.await;
+        }
+    }
+}
+
+impl std::fmt::Debug for ValidationTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidationTask").field("validation_jobs", &"...").finish()
+    }
+}
+
+/// A sender new type for sending validation jobs to [`ValidationTask`].
+#[derive(Debug)]
+pub struct ValidationJobSender {
+    tx: mpsc::Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    metrics: TxPoolValidatorMetrics,
+}
+
+impl ValidationJobSender {
+    /// Sends the given job to the validation task.
+    pub async fn send(
+        &self,
+        job: Pin<Box<dyn Future<Output = ()> + Send>>,
+    ) -> Result<(), TransactionValidatorError> {
+        self.metrics.inflight_validation_jobs.increment(1);
+        let _guard = DecrementPendingOnDrop(&self.metrics.inflight_validation_jobs);
+        self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
+    }
+}
+
+/// A [`TransactionValidator`] implementation that validates ethereum transaction.
+/// This validator is non-blocking, all validation work is done in a separate task.
+#[derive(Debug)]
+pub struct TransactionValidationTaskExecutor<V> {
+    /// The validator that will validate transactions on a separate task.
+    pub validator: Arc<V>,
+    /// The bounded multi-producer queue supplies backpressure without serializing
+    /// producers behind an additional lock.
+    pub to_validation_task: Arc<ValidationJobSender>,
+}
+
+impl<V> Clone for TransactionValidationTaskExecutor<V> {
+    fn clone(&self) -> Self {
+        Self {
+            validator: self.validator.clone(),
+            to_validation_task: self.to_validation_task.clone(),
+        }
+    }
+}
+
+// === impl TransactionValidationTaskExecutor ===
+
+impl TransactionValidationTaskExecutor<()> {
+    /// Convenience method to create a [`EthTransactionValidatorBuilder`]
+    pub fn eth_builder<Client, Evm>(
+        client: Client,
+        evm_config: Evm,
+    ) -> EthTransactionValidatorBuilder<Client, Evm>
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
+    {
+        EthTransactionValidatorBuilder::new(client, evm_config)
+    }
+}
+
+impl<V> TransactionValidationTaskExecutor<V> {
+    /// Maps the given validator to a new type.
+    pub fn map<F, T>(self, mut f: F) -> TransactionValidationTaskExecutor<T>
+    where
+        F: FnMut(V) -> T,
+    {
+        TransactionValidationTaskExecutor {
+            validator: Arc::new(f(Arc::into_inner(self.validator).unwrap())),
+            to_validation_task: self.to_validation_task,
+        }
+    }
+
+    /// Returns the validator.
+    pub fn validator(&self) -> &V {
+        &self.validator
+    }
+}
+
+impl<Client, Tx, Evm> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx, Evm>> {
+    /// Creates a new instance for the given client
+    ///
+    /// This will spawn a single validation tasks that performs the actual validation.
+    /// See [`TransactionValidationTaskExecutor::eth_with_additional_tasks`]
+    pub fn eth<S: BlobStore>(client: Client, evm_config: Evm, blob_store: S, tasks: Runtime) -> Self
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
+    {
+        Self::eth_with_additional_tasks(client, evm_config, blob_store, tasks, 0)
+    }
+
+    /// Creates a new instance for the given client
+    ///
+    /// By default this will enable support for:
+    ///   - shanghai
+    ///   - eip1559
+    ///   - eip2930
+    ///
+    /// This will always spawn a validation task that performs the actual validation. It will spawn
+    /// `num_additional_tasks` additional tasks.
+    pub fn eth_with_additional_tasks<S: BlobStore>(
+        client: Client,
+        evm_config: Evm,
+        blob_store: S,
+        tasks: Runtime,
+        num_additional_tasks: usize,
+    ) -> Self
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>
+            + BlockReaderIdExt<Header = HeaderTy<Evm::Primitives>>,
+        Evm: ConfigureEvm,
+    {
+        EthTransactionValidatorBuilder::new(client, evm_config)
+            .with_additional_tasks(num_additional_tasks)
+            .build_with_tasks(tasks, blob_store)
+    }
+}
+
+impl<V> TransactionValidationTaskExecutor<V> {
+    /// Creates a new executor instance with the given validator for transaction validation.
+    ///
+    /// Initializes the executor with the provided validator and sets up communication for
+    /// validation tasks.
+    pub fn new(validator: V) -> (Self, ValidationTask) {
+        let (tx, task) = ValidationTask::new();
+        (Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }, task)
+    }
+
+    /// Creates a new executor and spawns the validation tasks on the given runtime.
+    ///
+    /// This spawns `additional_tasks` extra blocking tasks plus one critical blocking task
+    /// for the validation service.
+    pub fn spawn(validator: V, tasks: &Runtime, additional_tasks: usize) -> Self {
+        // Buffer two jobs per worker so workers can dequeue without waiting for
+        // a producer to refill the channel after every handoff.
+        let (tx, task) =
+            ValidationTask::with_capacity(additional_tasks.saturating_add(1).saturating_mul(2));
+
+        for _ in 0..additional_tasks {
+            let task = task.clone();
+            tasks.spawn_blocking_task(async move {
+                task.run().await;
+            });
+        }
+
+        tasks.spawn_critical_blocking_task("transaction-validation-service", async move {
+            task.run().await;
+        });
+
+        Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }
+    }
+}
+
+impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
+where
+    V: TransactionValidator + 'static,
+{
+    type Transaction = <V as TransactionValidator>::Transaction;
+    type Block = V::Block;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let hash = *transaction.hash();
+        let (tx, rx) = oneshot::channel();
+        {
+            let res = {
+                let validator = self.validator.clone();
+                let fut = Box::pin(async move {
+                    let res = validator.validate_transaction(origin, transaction).await;
+                    let _ = tx.send(res);
+                });
+                self.to_validation_task.send(fut).await
+            };
+            if res.is_err() {
+                return TransactionValidationOutcome::Error(
+                    hash,
+                    Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+                );
+            }
+        }
+
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => TransactionValidationOutcome::Error(
+                hash,
+                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+            ),
+        }
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: impl IntoIterator<Item = (TransactionOrigin, Self::Transaction), IntoIter: Send>
+            + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
+        let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
+        let (tx, rx) = oneshot::channel();
+        {
+            let res = {
+                let validator = self.validator.clone();
+                let fut = Box::pin(async move {
+                    let res = validator.validate_transactions(transactions).await;
+                    let _ = tx.send(res);
+                });
+                self.to_validation_task.send(fut).await
+            };
+            if res.is_err() {
+                return validation_service_error_outcomes(hashes)
+            }
+        }
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => validation_service_error_outcomes(hashes),
+        }
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
+        let hashes: Vec<_> = transactions.iter().map(|tx| *tx.hash()).collect();
+        let (tx, rx) = oneshot::channel();
+        let validator = self.validator.clone();
+        let fut = Box::pin(async move {
+            let res = validator.validate_transactions_with_origin(origin, transactions).await;
+            let _ = tx.send(res);
+        });
+
+        if self.to_validation_task.send(fut).await.is_err() {
+            return validation_service_error_outcomes(hashes)
+        }
+
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => validation_service_error_outcomes(hashes),
+        }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
+        self.validator.on_new_head_block(new_tip_block)
+    }
+}
+
+/// Decrements the pending-send count even if the send future is cancelled.
+struct DecrementPendingOnDrop<'a>(&'a metrics::Gauge);
+
+impl Drop for DecrementPendingOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.decrement(1);
+    }
+}
+
+#[inline]
+fn validation_service_error_outcomes<T: PoolTransaction>(
+    hashes: Vec<alloy_primitives::TxHash>,
+) -> Vec<TransactionValidationOutcome<T>> {
+    hashes
+        .into_iter()
+        .map(|hash| {
+            TransactionValidationOutcome::Error(
+                hash,
+                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        test_utils::MockTransaction,
+        validate::{TransactionValidationOutcome, ValidTransaction},
+        TransactionOrigin,
+    };
+    use alloy_primitives::{Address, U256};
+    use metrics::atomics::AtomicU64;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn validation_send_metrics_track_cancellation_and_completion() {
+        for close_channel in [false, true] {
+            let (mut sender, task) = ValidationTask::new();
+            let gauge = Arc::new(AtomicU64::new(0));
+            sender.metrics.inflight_validation_jobs = metrics::Gauge::from_arc(gauge.clone());
+            let pending_sends = || f64::from_bits(gauge.load(Ordering::Relaxed));
+
+            sender.send(Box::pin(async {})).await.unwrap();
+            assert_eq!(pending_sends(), 0.0);
+
+            // Keep the channel full so every producer waits for capacity.
+            let mut producers =
+                (0..8).map(|_| Box::pin(sender.send(Box::pin(async {})))).collect::<Vec<_>>();
+            for producer in &mut producers {
+                assert!(futures_util::poll!(producer.as_mut()).is_pending());
+            }
+            assert_eq!(pending_sends(), 8.0);
+
+            let survivor = producers.remove(0);
+            drop(producers);
+            assert_eq!(pending_sends(), 1.0);
+
+            if close_channel {
+                drop(task);
+            } else {
+                // Free a slot for the remaining producer.
+                drop(task.validation_jobs.lock().await.next().await.unwrap());
+            }
+            assert_eq!(survivor.await.is_err(), close_channel);
+            assert_eq!(pending_sends(), 0.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn cloned_workers_validate_while_another_job_is_blocked() {
+        let (sender, task) = ValidationTask::new();
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+            }))
+            .await
+            .unwrap();
+        started_rx.await.unwrap();
+
+        // The first validation remains blocked. A second configured worker must
+        // independently dequeue and finish this job without releasing the first.
+        let (completed_tx, completed_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                completed_tx.send(()).unwrap();
+            }))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), completed_rx)
+            .await
+            .expect("second worker cannot dequeue while first validation holds receiver lock")
+            .unwrap();
+
+        release_tx.send(()).unwrap();
+        drop(sender);
+        // Closing the bounded channel still shuts every worker down cleanly.
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[derive(Debug)]
+    struct NoopValidator;
+
+    impl TransactionValidator for NoopValidator {
+        type Transaction = MockTransaction;
+        type Block = reth_ethereum_primitives::Block;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            TransactionValidationOutcome::Valid {
+                balance: U256::ZERO,
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::Valid(transaction),
+                propagate: false,
+                authorities: Some(Vec::<Address>::new()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_new_spawns_and_validates_single() {
+        let validator = NoopValidator;
+        let (executor, task) = TransactionValidationTaskExecutor::new(validator);
+        tokio::spawn(task.run());
+        let tx = MockTransaction::legacy();
+        let out = executor.validate_transaction(TransactionOrigin::External, tx).await;
+        assert!(out.is_valid());
+    }
+
+    #[tokio::test]
+    async fn executor_new_spawns_and_validates_batch() {
+        let validator = NoopValidator;
+        let (executor, task) = TransactionValidationTaskExecutor::new(validator);
+        tokio::spawn(task.run());
+        let txs = vec![
+            (TransactionOrigin::External, MockTransaction::legacy()),
+            (TransactionOrigin::Local, MockTransaction::legacy()),
+        ];
+        let out = executor.validate_transactions(txs).await;
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|o| o.is_valid()));
+    }
+
+    #[tokio::test]
+    async fn cloned_executors_share_bounded_queue() {
+        let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
+        let mut submissions = tokio::task::JoinSet::new();
+
+        let first_executor = executor.clone();
+        let mut first_submission = Box::pin(async move {
+            first_executor
+                .validate_transaction(TransactionOrigin::Local, MockTransaction::legacy())
+                .await
+        });
+        // Poll once to fill the bounded queue before starting workers.
+        assert!(futures_util::poll!(first_submission.as_mut()).is_pending());
+        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
+
+        submissions.spawn(async move {
+            let outcome = first_submission.await;
+            assert!(outcome.is_valid());
+        });
+
+        for index in 1..64 {
+            let executor = executor.clone();
+            submissions.spawn(async move {
+                let transaction = MockTransaction::legacy();
+                let outcomes = match index % 3 {
+                    0 => vec![
+                        executor.validate_transaction(TransactionOrigin::Local, transaction).await,
+                    ],
+                    1 => {
+                        executor
+                            .validate_transactions(vec![(TransactionOrigin::Local, transaction)])
+                            .await
+                    }
+                    _ => {
+                        executor
+                            .validate_transactions_with_origin(
+                                TransactionOrigin::Local,
+                                vec![transaction],
+                            )
+                            .await
+                    }
+                };
+                assert_eq!(outcomes.len(), 1);
+                assert!(outcomes[0].is_valid());
+            });
+        }
+
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(result) = submissions.join_next().await {
+                result.unwrap();
+            }
+            drop(executor);
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .expect("concurrent producers and workers must drain and shut down");
+    }
+
+    #[tokio::test]
+    async fn configured_workers_have_bounded_handoff_capacity() {
+        let runtime = Runtime::test();
+        for (additional_tasks, expected_capacity) in [(0, 2), (1, 4), (8, 18)] {
+            let executor =
+                TransactionValidationTaskExecutor::spawn(NoopValidator, &runtime, additional_tasks);
+            assert_eq!(executor.to_validation_task.tx.max_capacity(), expected_capacity);
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                executor.validate_transaction(TransactionOrigin::Local, MockTransaction::legacy()),
+            )
+            .await
+            .expect("configured validation workers must process jobs");
+            assert!(outcome.is_valid());
+        }
+    }
+
+    #[derive(Debug)]
+    struct SameOriginBatchValidator;
+
+    impl TransactionValidator for SameOriginBatchValidator {
+        type Transaction = MockTransaction;
+        type Block = reth_ethereum_primitives::Block;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            _transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            panic!("same-origin batches must use the batch validator")
+        }
+
+        async fn validate_transactions_with_origin(
+            &self,
+            origin: TransactionOrigin,
+            transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+            transactions
+                .into_iter()
+                .map(|transaction| TransactionValidationOutcome::Valid {
+                    balance: U256::ZERO,
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::Valid(transaction),
+                    propagate: origin.is_local(),
+                    authorities: None,
+                })
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_forwards_same_origin_batches() {
+        let (executor, task) = TransactionValidationTaskExecutor::new(SameOriginBatchValidator);
+        tokio::spawn(task.run());
+
+        let transactions = vec![MockTransaction::legacy(), MockTransaction::eip1559()];
+        let expected_hashes = transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>();
+        let outcomes = executor
+            .validate_transactions_with_origin(TransactionOrigin::Local, transactions)
+            .await;
+
+        assert_eq!(outcomes.len(), expected_hashes.len());
+        assert!(outcomes.into_iter().zip(expected_hashes).all(|(outcome, expected_hash)| {
+            matches!(
+                outcome,
+                TransactionValidationOutcome::Valid { transaction, propagate: true, .. }
+                    if transaction.hash() == &expected_hash
+            )
+        }));
+    }
+}

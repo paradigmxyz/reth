@@ -1,0 +1,91 @@
+# Runs all `stage run` commands.
+
+name: stage-test
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  FROM_BLOCK: 0
+  TO_BLOCK: 50000
+  RUSTC_WRAPPER: "sccache"
+  # Pin vergen output so reth-node-core compiles identically across commits; otherwise it and
+  # every crate depending on it miss sccache/rust-cache on every run. The installed binary reports a fake SHA.
+  SOURCE_DATE_EPOCH: "1700000000"
+  VERGEN_GIT_SHA: "0000000000000000000000000000000000000000"
+  VERGEN_GIT_DESCRIBE: "v0.0.0-g0000000"
+  VERGEN_GIT_DIRTY: "false"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  stage:
+    name: stage-run-test
+    # Only run stage commands test in merge groups
+    if: github.event_name == 'merge_group'
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RUST_LOG: info,sync=error
+      RUST_BACKTRACE: 1
+      # This is a smoke test of `reth stage run`, so LTO only adds link time.
+      CARGO_PROFILE_RELEASE_LTO: "off"
+    timeout-minutes: 60
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Build reth
+        run: |
+          cargo install --locked --path bin/reth
+      - name: Run headers stage
+        run: |
+          reth stage run headers --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run bodies stage
+        run: |
+          reth stage run bodies --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run senders stage
+        run: |
+          reth stage run senders --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run execution stage
+        run: |
+          reth stage run execution --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      # NOTE: account-hashing, storage-hashing, and hashing stages are omitted.
+      # With storage v2 (now default), these stages are no-ops because the
+      # execution stage writes directly to HashedAccounts/HashedStorages.
+      # Running them here is harmful: `stage run` unwinds before executing,
+      # and the unwind reverts the hashed state that execution wrote, but
+      # the no-op execute never restores it — causing merkle to fail.
+      - name: Run merkle stage
+        run: |
+          reth stage run merkle --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run transaction lookup stage
+        run: |
+          reth stage run tx-lookup --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run account history stage
+        run: |
+          reth stage run account-history --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints
+      - name: Run storage history stage
+        run: |
+          reth stage run storage-history --from ${{ env.FROM_BLOCK }} --to ${{ env.TO_BLOCK }} --commit --checkpoints

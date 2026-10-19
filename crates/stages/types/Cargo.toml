@@ -1,0 +1,76 @@
+[package]
+name = "reth-stages-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for stages usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs = { workspace = true, optional = true }
+reth-trie-common.workspace = true
+reth-primitives-traits.workspace = true
+alloy-primitives.workspace = true
+
+serde = { workspace = true, optional = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+bytes = { workspace = true, optional = true }
+modular-bitfield = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-codecs.workspace = true
+reth-trie-common = { workspace = true, features = ["reth-codec"] }
+alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+rand.workspace = true
+bytes.workspace = true
+modular-bitfield.workspace = true
+
+[features]
+account-ext = ["reth-codecs?/account-ext", "reth-primitives-traits/account-ext"]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "bytes?/std",
+    "reth-trie-common/std",
+    "reth-primitives-traits/std",
+    "serde?/std",
+    "reth-codecs?/std",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:bytes",
+    "dep:modular-bitfield",
+    "reth-trie-common/reth-codec",
+]
+test-utils = [
+    "arbitrary",
+    "reth-codecs?/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-primitives-traits/test-utils",
+]
+arbitrary = [
+    "std",
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+    "reth-trie-common/arbitrary",
+    "reth-primitives-traits/arbitrary",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "bytes?/serde",
+    "rand/serde",
+    "reth-codecs?/serde",
+    "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
+]

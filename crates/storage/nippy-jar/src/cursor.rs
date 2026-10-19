@@ -1,0 +1,215 @@
+use crate::{
+    compression::{Compression, Compressors, Zstd},
+    DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
+};
+use smallvec::SmallVec;
+use std::{ops::Range, sync::Arc};
+use zstd::bulk::Decompressor;
+
+/// The column value ranges of a single row, mirroring the inline capacity of [`RefRow`].
+///
+/// The ranges are collected before they are resolved into slices because [`read_value`] borrows the
+/// internal buffer mutably while filling it.
+///
+/// [`read_value`]: NippyJarCursor::read_value
+type ValueRanges = SmallVec<[ValueRange; 4]>;
+
+/// Simple cursor implementation to retrieve data from [`NippyJar`].
+#[derive(Clone)]
+pub struct NippyJarCursor<'a, H = ()> {
+    /// [`NippyJar`] which holds most of the required configuration to read from the file.
+    jar: &'a NippyJar<H>,
+    /// Data and offset reader.
+    reader: Arc<DataReader>,
+    /// Internal buffer to unload data to without reallocating memory on each retrieval. Only
+    /// compressed jars decompress into it, so it is sized on first use.
+    internal_buffer: Vec<u8>,
+    /// Cursor row position.
+    row: u64,
+}
+
+impl<H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'_, H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
+    }
+}
+
+impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
+    /// Creates a new instance of [`NippyJarCursor`] for the given [`NippyJar`].
+    pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
+        Ok(Self {
+            jar,
+            reader: Arc::new(jar.open_data_reader()?),
+            internal_buffer: Vec::new(),
+            row: 0,
+        })
+    }
+
+    /// Creates a new instance of [`NippyJarCursor`] with the specified [`NippyJar`] and data
+    /// reader.
+    pub const fn with_reader(
+        jar: &'a NippyJar<H>,
+        reader: Arc<DataReader>,
+    ) -> Result<Self, NippyJarError> {
+        Ok(Self { jar, reader, internal_buffer: Vec::new(), row: 0 })
+    }
+
+    /// Returns a reference to the related [`NippyJar`]
+    pub const fn jar(&self) -> &NippyJar<H> {
+        self.jar
+    }
+
+    /// Returns current row index of the cursor
+    pub const fn row_index(&self) -> u64 {
+        self.row
+    }
+
+    /// Resets cursor to the beginning.
+    pub const fn reset(&mut self) {
+        self.row = 0;
+    }
+
+    /// Returns a row by its number.
+    pub fn row_by_number(&mut self, row: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.row = row as u64;
+        self.next_row()
+    }
+
+    /// Returns the current value and advances the row.
+    pub fn next_row(&mut self) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.internal_buffer.clear();
+
+        if self.row as usize >= self.jar.rows {
+            // Has reached the end
+            return Ok(None)
+        }
+
+        let mut row = ValueRanges::with_capacity(self.jar.columns);
+
+        // Retrieve all column values from the row
+        for column in 0..self.jar.columns {
+            self.read_value(column, &mut row)?;
+        }
+
+        self.row += 1;
+
+        Ok(Some(
+            row.into_iter()
+                .map(|v| match v {
+                    ValueRange::Mmap(range) => self.reader.data(range),
+                    ValueRange::Internal(range) => &self.internal_buffer[range],
+                })
+                .collect(),
+        ))
+    }
+
+    /// Returns a row by its number by using a `mask` to only read certain columns from the row.
+    pub fn row_by_number_with_cols(
+        &mut self,
+        row: usize,
+        mask: usize,
+    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.row = row as u64;
+        self.next_row_with_cols(mask)
+    }
+
+    /// Returns the current value and advances the row.
+    ///
+    /// Uses a `mask` to only read certain columns from the row.
+    pub fn next_row_with_cols(&mut self, mask: usize) -> Result<Option<RefRow<'_>>, NippyJarError> {
+        self.internal_buffer.clear();
+
+        if self.row as usize >= self.jar.rows {
+            // Has reached the end
+            return Ok(None)
+        }
+
+        let columns = self.jar.columns;
+        let mut row = ValueRanges::with_capacity(columns);
+
+        for column in 0..columns {
+            if mask & (1 << column) != 0 {
+                self.read_value(column, &mut row)?
+            }
+        }
+        self.row += 1;
+
+        Ok(Some(
+            row.into_iter()
+                .map(|v| match v {
+                    ValueRange::Mmap(range) => self.reader.data(range),
+                    ValueRange::Internal(range) => &self.internal_buffer[range],
+                })
+                .collect(),
+        ))
+    }
+
+    /// Takes the column index and reads the range value for the corresponding column.
+    fn read_value(&mut self, column: usize, row: &mut ValueRanges) -> Result<(), NippyJarError> {
+        // Find out the offset of the column value
+        let offset_pos = self.row as usize * self.jar.columns + column;
+        let value_offset = self.reader.offset(offset_pos)? as usize;
+
+        // A value ends where the next one starts. After the last value, the final offset marks the
+        // end of the committed data, which is not the end of the data file while a writer appends
+        // rows it has not committed yet.
+        let next_value_offset = self.reader.offset(offset_pos + 1)? as usize;
+
+        // Offsets read through a stale mmap while a writer truncates the files, e.g. a concurrent
+        // prune, can be out of order or past the mapped data. Slicing with them would panic.
+        if next_value_offset < value_offset || next_value_offset > self.reader.size() {
+            return Err(NippyJarError::InconsistentState)
+        }
+
+        let column_offset_range = value_offset..next_value_offset;
+
+        if let Some(compression) = self.jar.compressor() {
+            // The decompressors write into the spare capacity of the buffer, so it has to fit any
+            // row of data. The buffer is only cleared between rows, so this reserves once.
+            if self.internal_buffer.capacity() < self.jar.max_row_size {
+                self.internal_buffer.reserve(self.jar.max_row_size - self.internal_buffer.len());
+            }
+
+            let from = self.internal_buffer.len();
+            match compression {
+                Compressors::Zstd(z) if z.use_dict => {
+                    // If we are here, then for sure we have the necessary dictionaries and they're
+                    // loaded (happens during deserialization). Otherwise, there's an issue
+                    // somewhere else and we can't recover here anyway.
+                    let dictionaries = z.dictionaries.as_ref().expect("dictionaries to exist")
+                        [column]
+                        .loaded()
+                        .expect("dictionary to be loaded");
+                    let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
+                    Zstd::decompress_with_dictionary(
+                        self.reader.data(column_offset_range),
+                        &mut self.internal_buffer,
+                        &mut decompressor,
+                    )?;
+                }
+                _ => {
+                    // Uses the chosen default decompressor
+                    compression.decompress_to(
+                        self.reader.data(column_offset_range),
+                        &mut self.internal_buffer,
+                    )?;
+                }
+            }
+            let to = self.internal_buffer.len();
+
+            row.push(ValueRange::Internal(from..to));
+        } else {
+            // Not compressed
+            row.push(ValueRange::Mmap(column_offset_range));
+        }
+
+        Ok(())
+    }
+}
+
+/// Helper type that stores the range of the decompressed column value either on a `mmap` slice or
+/// on the internal buffer.
+enum ValueRange {
+    Mmap(Range<usize>),
+    Internal(Range<usize>),
+}

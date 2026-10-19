@@ -1,0 +1,94 @@
+name: Cyclops audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] Cyclops needs privileged PR-label triggers and does not check out PR code.
+    types: [labeled, opened, synchronize, reopened, ready_for_review]
+  issue_comment: # zizmor: ignore[dangerous-triggers] Cyclops gates comment callers before using secrets.
+    types: [created]
+
+permissions: {}
+
+jobs:
+  publish-label:
+    if: github.event_name == 'pull_request_target' && (github.event.label.name == 'cyclops' || github.event.label.name == 'agentic-audit')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish event
+        env:
+          HAS_EVENTS_ARGS: ${{ secrets.EVENTS_ARGS != '' }}
+          HAS_EVENTS_KEY: ${{ secrets.EVENTS_KEY != '' }}
+          HAS_EVENTS_CERT: ${{ secrets.EVENTS_CERT != '' }}
+        run: |
+          set -euo pipefail
+
+          [[ "$HAS_EVENTS_ARGS" == "true" ]] || { echo "::error::Missing EVENTS_ARGS secret"; exit 1; }
+          [[ "$HAS_EVENTS_KEY" == "true" ]] || { echo "::error::Missing EVENTS_KEY secret"; exit 1; }
+          [[ "$HAS_EVENTS_CERT" == "true" ]] || { echo "::error::Missing EVENTS_CERT secret"; exit 1; }
+
+          printf '%s' '${{ secrets.EVENTS_KEY }}' > "${RUNNER_TEMP}/key"
+          printf '%s' '${{ secrets.EVENTS_CERT }}' > "${RUNNER_TEMP}/cert"
+
+          # EVENTS_ARGS may contain additional curl arguments, not just a URL.
+          curl -sf -o /dev/null -X POST ${{ secrets.EVENTS_ARGS }} \
+            -H "Content-Type: application/json" \
+            --key "${RUNNER_TEMP}/key" \
+            --cert "${RUNNER_TEMP}/cert" \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "event": "pr_audit",
+              "data": {
+                "pr_number": ${{ github.event.pull_request.number }},
+                "sha": "${{ github.event.pull_request.head.sha }}"
+              }
+            }'
+
+  # Push reviews for same-repo PRs. Labels stay on publish-label so fork PRs can still be audited.
+  audit:
+    if: >-
+      contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name) &&
+      github.event.action != 'labeled' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+      statuses: write
+    uses: tempoxyz/gh-actions/.github/workflows/pr-audit.yml@252d87d9636b94551796b4b8a5cb4e27b8916cf6 # 2026-10-12T22-06-06Z-252d87d9
+    with:
+      audit-on-push: true
+      audit-on-command: true
+    secrets:
+      EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+      EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+      EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
+
+  publish-comment:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      (
+        startsWith(github.event.comment.body, 'cyclops audit') ||
+        startsWith(github.event.comment.body, 'cyclops private audit') ||
+        startsWith(github.event.comment.body, '@decofe cyclops audit') ||
+        startsWith(github.event.comment.body, '@decofe cyclops private audit') ||
+        startsWith(github.event.comment.body, 'derek audit')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Handle audit command
+        uses: tempoxyz/gh-actions/actions/pr-audit-comment@252d87d9636b94551796b4b8a5cb4e27b8916cf6 # 2026-10-12T22-06-06Z-252d87d9
+        with:
+          command-regex: '^(?:@decofe\s+)?(?:cyclops\s+(?:private\s+)?audit|derek\s+audit)\b'
+          permission-check-mode: association
+          allowed-associations: OWNER,MEMBER,COLLABORATOR
+          organization: paradigmxyz
+          events-key: ${{ secrets.EVENTS_KEY }}
+          events-cert: ${{ secrets.EVENTS_CERT }}
+          events-args: ${{ secrets.EVENTS_ARGS }}
+          github-token: ${{ github.token }}

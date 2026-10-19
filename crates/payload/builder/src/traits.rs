@@ -1,0 +1,135 @@
+//! Trait abstractions used by the payload crate.
+
+use alloy_rpc_types::engine::PayloadId;
+use reth_chain_state::CanonStateNotification;
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
+use reth_primitives_traits::NodePrimitives;
+use std::future::Future;
+
+use crate::service::BuildNewPayload;
+
+/// A type that can build a payload.
+///
+/// This type is a [`Future`] that resolves when the job is done (e.g. complete, timed out) or it
+/// failed. It's not supposed to return the best payload built when it resolves, instead
+/// [`PayloadJob::best_payload`] should be used for that.
+///
+/// A `PayloadJob` must always be prepared to return the best payload built so far to ensure there
+/// is a valid payload to deliver to the CL, so it does not miss a slot, even if the payload is
+/// empty.
+///
+/// Note: A `PayloadJob` need to be cancel safe because it might be dropped after the CL has requested the payload via `engine_getPayloadV1` (see also [engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1))
+pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> {
+    /// Represents the payload attributes type that is used to spawn this payload job.
+    type PayloadAttributes: PayloadAttributes;
+    /// Represents the future that resolves the block that's returned to the CL.
+    type ResolvePayloadFuture: Future<Output = Result<Self::BuiltPayload, PayloadBuilderError>>
+        + Send
+        + 'static;
+    /// Represents the built payload type that is returned to the CL.
+    type BuiltPayload: BuiltPayload + Clone;
+
+    /// Returns the best payload that has been built so far.
+    ///
+    /// Note: This is never called by the CL.
+    fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError>;
+
+    /// Returns the payload attributes for the payload being built.
+    fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;
+
+    /// Returns the payload timestamp for the payload being built.
+    /// The default implementation allocates full attributes only to
+    /// extract the timestamp. Provide your own implementation if you
+    /// need performance here.
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.payload_attributes()?.timestamp())
+    }
+
+    /// Called when the payload is requested by the CL.
+    ///
+    /// This is invoked on [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2) and [`engine_getPayloadV1`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1).
+    ///
+    /// The timeout for returning the payload to the CL is 1s, thus the future returned should
+    /// resolve in under 1 second.
+    ///
+    /// Ideally this is the best payload built so far, or an empty block without transactions, if
+    /// nothing has been built yet.
+    ///
+    /// According to the spec:
+    /// > Client software MAY stop the corresponding build process after serving this call.
+    ///
+    /// It is at the discretion of the implementer whether the build job should be kept alive or
+    /// terminated.
+    ///
+    /// If this returns [`KeepPayloadJobAlive::Yes`], then the [`PayloadJob`] will be polled
+    /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
+    /// dropped after this call.
+    ///
+    /// # Cancellation safety
+    ///
+    /// The returned [`ResolvePayloadFuture`](Self::ResolvePayloadFuture) is not
+    /// cancellation-safe. Dropping it cancels resolving the payload and, when the corresponding
+    /// handle resolve call has removed the payload job, cancels the job identified by that
+    /// `payload_id`.
+    ///
+    /// The [`PayloadKind`] determines how the payload should be resolved in the
+    /// `ResolvePayloadFuture`. [`PayloadKind::Earliest`] should return the earliest available
+    /// payload (as fast as possible), e.g. racing an empty payload job against a pending job if
+    /// there's no payload available yet. [`PayloadKind::WaitForPending`] is allowed to wait
+    /// until a built payload is available.
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+
+    /// Resolves the payload as fast as possible.
+    ///
+    /// See also [`PayloadJob::resolve_kind`]
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        self.resolve_kind(PayloadKind::Earliest)
+    }
+}
+
+/// Whether the payload job should be kept alive or terminated after the payload was requested by
+/// the CL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepPayloadJobAlive {
+    /// Keep the job alive.
+    Yes,
+    /// Terminate the job.
+    No,
+}
+
+/// A type that knows how to create new jobs for creating payloads.
+pub trait PayloadJobGenerator {
+    /// The type that manages the lifecycle of a payload.
+    ///
+    /// This type is a future that yields better payloads.
+    type Job: PayloadJob;
+
+    /// Creates the initial payload and a new [`PayloadJob`] that yields better payloads over time.
+    ///
+    /// This is called when the CL requests a new payload job via a fork choice update.
+    ///
+    /// Return [`PayloadBuilderError::InvalidAttributes`] to reject the payload attributes; any
+    /// other error is reported to the CL as an internal error.
+    ///
+    /// # Note
+    ///
+    /// This is expected to initially build a new (empty) payload without transactions, so it can be
+    /// returned directly.
+    fn new_payload_job(
+        &self,
+        input: BuildNewPayload<<Self::Job as PayloadJob>::PayloadAttributes>,
+        id: PayloadId,
+    ) -> Result<Self::Job, PayloadBuilderError>;
+
+    /// Handles new chain state events
+    ///
+    /// This is intended for any logic that needs to be run when the chain state changes or used to
+    /// use the in memory state for the head block.
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
+        let _ = new_state;
+    }
+}

@@ -1,0 +1,359 @@
+use crate::{
+    hashed_cursor::HashedCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof_v2::{self, MultiProofCalculator},
+    trie_cursor::TrieCursorFactory,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
+};
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, HashMap},
+    Bytes, B256,
+};
+use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
+use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
+use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
+use reth_trie_common::{
+    DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
+    TrieNodeV2,
+};
+use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
+
+/// State transition witness for the trie.
+#[derive(Debug)]
+pub struct TrieWitness<T, H> {
+    /// The cursor factory for traversing trie nodes.
+    trie_cursor_factory: T,
+    /// The factory for hashed cursors.
+    hashed_cursor_factory: H,
+    /// A set of prefix sets that have changes.
+    prefix_sets: TriePrefixSetsMut,
+    /// Flag indicating whether the root node should always be included (even if the target state
+    /// is empty). This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
+    /// Set to `false` by default.
+    always_include_root_node: bool,
+    /// Controls how the witness is generated.
+    mode: ExecutionWitnessMode,
+    /// Recorded witness.
+    witness: B256Map<Bytes>,
+}
+
+impl<T, H> TrieWitness<T, H> {
+    /// Creates a new witness generator.
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets: TriePrefixSetsMut::default(),
+            always_include_root_node: false,
+            mode: ExecutionWitnessMode::Legacy,
+            witness: HashMap::default(),
+        }
+    }
+
+    /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
+    pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
+        self.prefix_sets = prefix_sets;
+        self
+    }
+
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
+    /// This setting is useful if the caller wants to verify the witness against the
+    /// parent state root.
+    pub const fn always_include_root_node(mut self) -> Self {
+        self.always_include_root_node = true;
+        self
+    }
+
+    /// Set the execution witness generation mode.
+    pub const fn with_execution_witness_mode(mut self, mode: ExecutionWitnessMode) -> Self {
+        self.mode = mode;
+        self
+    }
+}
+
+impl<T, H> TrieWitness<T, H>
+where
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
+{
+    /// Compute the state transition witness for the trie. Gather all required nodes
+    /// to apply `state` on top of the current trie state.
+    ///
+    /// # Arguments
+    ///
+    /// `state` - state transition containing both modified and touched accounts and storage slots.
+    #[allow(clippy::clone_on_copy)]
+    pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
+        let is_state_empty = state.is_empty();
+        if is_state_empty && !self.always_include_root_node {
+            return Ok(Default::default())
+        }
+
+        let proof_targets = if is_state_empty {
+            MultiProofTargetsV2 {
+                account_targets: vec![ProofV2Target::new(B256::ZERO)],
+                ..Default::default()
+            }
+        } else {
+            Self::get_proof_targets(&state)
+        };
+        let mut calculator = MultiProofCalculator::new(
+            self.trie_cursor_factory.clone(),
+            self.hashed_cursor_factory.clone(),
+            self.prefix_sets.clone().freeze(),
+        );
+        let multiproof = calculator.multiproof(proof_targets)?;
+
+        // No need to reconstruct the rest of the trie, we just need to include
+        // the root node and return.
+        if is_state_empty {
+            let (root_hash, root_node) = if let Some(root_node) =
+                multiproof.account_proofs.into_iter().find(|n| n.path.is_empty())
+            {
+                let bytes = Bytes::from(alloy_rlp::encode(&root_node.node));
+                (keccak256(&bytes), bytes)
+            } else {
+                (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
+            };
+            return Ok(B256Map::from_iter([(root_hash, root_node)]))
+        }
+
+        // Record all nodes from multiproof in the witness.
+        self.record_multiproof_nodes(&multiproof);
+
+        let mut sparse_trie = SparseStateTrie::new();
+        sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+
+        // Build storage leaf updates for all accounts with storage changes, split into
+        // removals and upserts. Legacy mode applies removals first to preserve the
+        // historical witness shape expected by existing consumers: a removal can collapse
+        // a branch and force proof fetches that some consumers still rely on. Canonical
+        // mode applies upserts first to avoid those compatibility-only nodes and emit
+        // the minimized draft-spec witness.
+        let mut storage_removals: B256Map<B256Map<LeafUpdate>> = B256Map::default();
+        let mut storage_upserts: B256Map<B256Map<LeafUpdate>> = B256Map::default();
+        for (hashed_address, storage) in &state.storages {
+            for (&hashed_slot, value) in &storage.storage {
+                if value.is_zero() {
+                    storage_removals
+                        .entry(*hashed_address)
+                        .or_default()
+                        .insert(hashed_slot, LeafUpdate::Changed(vec![]));
+                } else {
+                    storage_upserts.entry(*hashed_address).or_default().insert(
+                        hashed_slot,
+                        LeafUpdate::Changed(alloy_rlp::encode_fixed_size(value).to_vec()),
+                    );
+                }
+            }
+        }
+
+        let storage_update_sets = if self.mode.is_canonical() {
+            [&mut storage_upserts, &mut storage_removals]
+        } else {
+            [&mut storage_removals, &mut storage_upserts]
+        };
+
+        // Apply storage updates in mode-specific order, fetching additional proofs as needed.
+        for storage_updates in storage_update_sets {
+            loop {
+                let mut targets = MultiProofTargetsV2::default();
+
+                for (&hashed_address, slot_updates) in storage_updates.iter_mut() {
+                    if slot_updates.is_empty() {
+                        continue;
+                    }
+                    let storage_trie = sparse_trie
+                        .storage_trie_mut(&hashed_address)
+                        .expect("storage trie was revealed from multiproof");
+                    storage_trie
+                        .update_leaves(slot_updates, |key, parent| {
+                            targets
+                                .storage_targets
+                                .entry(hashed_address)
+                                .or_default()
+                                .push(ProofV2Target::new(key).with_parent(parent));
+                        })
+                        .map_err(|err| {
+                            SparseStateTrieErrorKind::SparseStorageTrie(
+                                hashed_address,
+                                err.into_kind(),
+                            )
+                        })?;
+                }
+
+                if targets.is_empty() {
+                    break;
+                }
+
+                let multiproof = calculator.multiproof(targets)?;
+                self.record_multiproof_nodes(&multiproof);
+                sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+            }
+        }
+
+        // Build account leaf updates, split into removals and upserts. Legacy mode keeps
+        // removals-first for the same compatibility reason as storage updates, while
+        // canonical mode uses upserts-first so account updates follow the minimized
+        // draft-spec witness order.
+        let mut account_removals: B256Map<LeafUpdate> = B256Map::default();
+        let mut account_upserts: B256Map<LeafUpdate> = B256Map::default();
+        for &hashed_address in state.accounts.keys().chain(state.storages.keys()) {
+            if account_removals.contains_key(&hashed_address) ||
+                account_upserts.contains_key(&hashed_address)
+            {
+                continue;
+            }
+
+            let account = state
+                .accounts
+                .get(&hashed_address)
+                .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .clone()
+                .unwrap_or_default();
+
+            let storage_root =
+                if let Some(storage_trie) = sparse_trie.storage_trie_mut(&hashed_address) {
+                    storage_trie.root(TrieNodeEpoch::UNMODIFIED)
+                } else {
+                    let record_root_node = !self.mode.is_canonical() ||
+                        state
+                            .storages
+                            .get(&hashed_address)
+                            .is_some_and(|storage| !storage.storage.is_empty());
+                    self.account_storage_root(hashed_address, record_root_node)?
+                };
+
+            if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+                account_removals.insert(hashed_address, LeafUpdate::Changed(vec![]));
+            } else {
+                let mut rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+                account.into_trie_account(storage_root).encode(&mut rlp);
+                account_upserts.insert(hashed_address, LeafUpdate::Changed(rlp));
+            }
+        }
+
+        let account_update_sets = if self.mode.is_canonical() {
+            [&mut account_upserts, &mut account_removals]
+        } else {
+            [&mut account_removals, &mut account_upserts]
+        };
+
+        // Apply account updates in mode-specific order, fetching additional proofs as needed.
+        for account_updates in account_update_sets {
+            loop {
+                let mut targets = MultiProofTargetsV2::default();
+
+                sparse_trie
+                    .trie_mut()
+                    .update_leaves(account_updates, |key, parent| {
+                        targets.account_targets.push(ProofV2Target::new(key).with_parent(parent));
+                    })
+                    .map_err(SparseStateTrieErrorKind::from)?;
+
+                if targets.is_empty() {
+                    break;
+                }
+
+                let multiproof = calculator.multiproof(targets)?;
+                self.record_multiproof_nodes(&multiproof);
+                sparse_trie.reveal_decoded_multiproof_v2(multiproof)?;
+            }
+        }
+
+        if self.mode.is_canonical() {
+            // Empty trie nodes carry no useful witness information and are trivially
+            // reconstructible from the empty root hash.
+            self.witness.retain(|_, value| value.as_ref() != [EMPTY_STRING_CODE]);
+        }
+
+        Ok(self.witness)
+    }
+
+    /// Record all nodes from a V2 decoded multiproof in the witness.
+    fn record_multiproof_nodes(&mut self, multiproof: &DecodedMultiProofV2) {
+        let mut encoded = Vec::new();
+        for proof_node in &multiproof.account_proofs {
+            self.record_witness_node(&proof_node.node, &mut encoded);
+        }
+        for proof_nodes in multiproof.storage_proofs.values() {
+            for proof_node in proof_nodes {
+                self.record_witness_node(&proof_node.node, &mut encoded);
+            }
+        }
+    }
+
+    /// Record a single [`TrieNodeV2`] in the witness.
+    fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
+        encoded.clear();
+        node.encode(encoded);
+        let hash = keccak256(encoded.as_slice());
+        self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
+
+        if let TrieNodeV2::Branch(branch) = node &&
+            !branch.key.is_empty()
+        {
+            encoded.clear();
+            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
+            let hash = keccak256(encoded.as_slice());
+            self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
+        }
+    }
+
+    /// Compute the storage root for an account by walking the storage trie using the cursor
+    /// factories and trie input prefix sets. Records the root node in the witness when requested.
+    fn account_storage_root(
+        &mut self,
+        hashed_address: B256,
+        record_root_node: bool,
+    ) -> Result<B256, TrieWitnessError> {
+        let storage_trie_cursor = self
+            .trie_cursor_factory
+            .storage_trie_cursor(hashed_address)
+            .map_err(StateProofError::from)?;
+        let hashed_storage_cursor = self
+            .hashed_cursor_factory
+            .hashed_storage_cursor(hashed_address)
+            .map_err(StateProofError::from)?;
+        let mut calculator = proof_v2::StorageProofCalculator::new_storage(
+            storage_trie_cursor,
+            hashed_storage_cursor,
+        );
+        if let Some(prefix_set) = self.prefix_sets.storage_prefix_sets.get(&hashed_address) {
+            calculator = calculator.with_prefix_set(prefix_set.clone().freeze());
+        }
+        let root_node = calculator.storage_root_node(hashed_address)?;
+        let root_hash = calculator
+            .compute_root_hash(core::slice::from_ref(&root_node))?
+            .unwrap_or(EMPTY_ROOT_HASH);
+        drop(calculator);
+        if record_root_node {
+            let mut encoded = Vec::new();
+            self.record_witness_node(&root_node.node, &mut encoded);
+        }
+        Ok(root_hash)
+    }
+
+    /// Retrieve proof targets for incoming hashed state.
+    /// Aggregates all accounts and slots present in the state.
+    fn get_proof_targets(state: &HashedPostState) -> MultiProofTargetsV2 {
+        let mut targets = MultiProofTargetsV2::default();
+        for &hashed_address in state.accounts.keys() {
+            targets.account_targets.push(ProofV2Target::new(hashed_address));
+        }
+        for (&hashed_address, storage) in &state.storages {
+            if !state.accounts.contains_key(&hashed_address) {
+                targets.account_targets.push(ProofV2Target::new(hashed_address));
+            }
+            // Accounts without storage slot changes need only an account proof.
+            if storage.storage.is_empty() {
+                continue;
+            }
+            let storage_keys = storage.storage.keys().map(|k| ProofV2Target::new(*k)).collect();
+            targets.storage_targets.insert(hashed_address, storage_keys);
+        }
+        targets
+    }
+}

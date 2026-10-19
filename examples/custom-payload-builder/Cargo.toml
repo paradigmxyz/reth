@@ -1,0 +1,20 @@
+[package]
+name = "example-custom-payload-builder"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-basic-payload-builder.workspace = true
+reth-payload-builder.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
+reth-ethereum-payload-builder.workspace = true
+
+alloy-eips.workspace = true
+
+tracing.workspace = true
+futures-util.workspace = true
+eyre.workspace = true
+
+[lints]

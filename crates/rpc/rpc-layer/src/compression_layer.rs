@@ -1,0 +1,221 @@
+use jsonrpsee_http_client::{HttpBody, HttpRequest, HttpResponse};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+use tower::{Layer, Service};
+use tower_http::compression::{
+    predicate::SizeAbove, Compression, CompressionLayer as TowerCompressionLayer, CompressionLevel,
+};
+
+/// Responses smaller than this many bytes are sent uncompressed.
+///
+/// They fit in a single TCP segment anyway, and setting up a compressor costs far more than
+/// sending them as they are.
+const MIN_COMPRESSION_SIZE: u16 = 1024;
+
+/// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
+/// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
+/// `Accept-Encoding` header.
+#[expect(missing_debug_implementations)]
+#[derive(Clone)]
+pub struct CompressionLayer {
+    inner_layer: TowerCompressionLayer<SizeAbove>,
+}
+
+impl CompressionLayer {
+    /// Creates a new compression layer with zstd, gzip, brotli and deflate enabled.
+    ///
+    /// Responses are compressed at the fastest level, and only if they are at least 1 KiB.
+    pub fn new() -> Self {
+        Self::from_layer(TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true))
+    }
+
+    /// Creates a compression layer allowing only the listed algorithms.
+    ///
+    /// The client's `Accept-Encoding` quality values determine selection among allowed algorithms;
+    /// ties use `tower_http`'s fixed **zstd > br > gzip > deflate** order. The order of `algos` is
+    /// ignored. Omitted quality values default to 1; if no allowed algorithm is acceptable, the
+    /// response is uncompressed.
+    pub fn with_algorithms(algos: &[impl AsRef<str>]) -> Self {
+        // Clear tower_http's enabled-by-default algorithms to make `algos` an allowlist.
+        let mut layer = TowerCompressionLayer::new().no_zstd().no_gzip().no_deflate().no_br();
+
+        for algo in algos {
+            match algo.as_ref() {
+                "zstd" => layer = layer.zstd(true),
+                "deflate" => layer = layer.deflate(true),
+                "gzip" => layer = layer.gzip(true),
+                "br" | "brotli" => layer = layer.br(true),
+                _ => {}
+            }
+        }
+
+        Self::from_layer(layer)
+    }
+
+    /// Applies the compression level and the minimum response size to `layer`.
+    fn from_layer(layer: TowerCompressionLayer) -> Self {
+        let inner_layer = layer
+            .quality(CompressionLevel::Fastest)
+            .compress_when(SizeAbove::new(MIN_COMPRESSION_SIZE));
+        Self { inner_layer }
+    }
+}
+
+impl Default for CompressionLayer {
+    /// Creates a new compression layer with default settings.
+    /// See [`CompressionLayer::new`] for details.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<S> Layer<S> for CompressionLayer {
+    type Service = CompressionService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        CompressionService { compression: self.inner_layer.layer(inner) }
+    }
+}
+
+/// Service that performs response compression.
+///
+/// Created by [`CompressionLayer`].
+#[expect(missing_debug_implementations)]
+#[derive(Clone)]
+pub struct CompressionService<S> {
+    compression: Compression<S, SizeAbove>,
+}
+
+impl<S> Service<HttpRequest> for CompressionService<S>
+where
+    S: Service<HttpRequest, Response = HttpResponse>,
+    S::Future: Send + 'static,
+{
+    type Response = HttpResponse;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.compression.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: HttpRequest) -> Self::Future {
+        let fut = self.compression.call(req);
+
+        Box::pin(async move {
+            let resp = fut.await?;
+            let (parts, compressed_body) = resp.into_parts();
+            let http_body = HttpBody::new(compressed_body);
+
+            Ok(Self::Response::from_parts(parts, http_body))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING};
+    use http_body_util::BodyExt;
+    use jsonrpsee_http_client::{HttpRequest, HttpResponse};
+    use std::{convert::Infallible, future::ready};
+
+    const TEST_DATA: &str = "compress test data ";
+    const REPEAT_COUNT: usize = 1000;
+
+    #[derive(Clone)]
+    struct MockRequestService(String);
+
+    impl Service<HttpRequest> for MockRequestService {
+        type Response = HttpResponse;
+        type Error = Infallible;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(
+            &mut self,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: HttpRequest) -> Self::Future {
+            let body = HttpBody::from(self.0.clone());
+            let response = HttpResponse::builder().body(body).unwrap();
+            ready(Ok(response))
+        }
+    }
+
+    fn setup_compression_service(
+        body: String,
+    ) -> impl Service<HttpRequest, Response = HttpResponse, Error = Infallible> {
+        CompressionLayer::new().layer(MockRequestService(body))
+    }
+
+    async fn get_response_size(response: HttpResponse) -> usize {
+        // Get the total size of the response body
+        response.into_body().collect().await.unwrap().to_bytes().len()
+    }
+
+    #[tokio::test]
+    async fn test_gzip_compression() {
+        let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
+        let request =
+            HttpRequest::builder().header(ACCEPT_ENCODING, "gzip").body(HttpBody::empty()).unwrap();
+
+        let uncompressed_len = TEST_DATA.repeat(REPEAT_COUNT).len();
+
+        // Make the request
+        let response = service.call(request).await.unwrap();
+
+        // Verify the response has gzip content-encoding
+        assert_eq!(
+            response.headers().get(CONTENT_ENCODING).unwrap(),
+            "gzip",
+            "Response should be gzip encoded"
+        );
+
+        // Verify the response body is actually compressed (should be smaller than original)
+        let compressed_size = get_response_size(response).await;
+        assert!(
+            compressed_size < uncompressed_len,
+            "Compressed size ({compressed_size}) should be smaller than original size ({uncompressed_len})"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_compression_when_not_requested() {
+        // Create a service with compression
+        let mut service = setup_compression_service(TEST_DATA.repeat(REPEAT_COUNT));
+        let request = HttpRequest::builder().body(HttpBody::empty()).unwrap();
+
+        let response = service.call(request).await.unwrap();
+        assert!(
+            response.headers().get(CONTENT_ENCODING).is_none(),
+            "Response should not be compressed when not requested"
+        );
+
+        let uncompressed_len = TEST_DATA.repeat(REPEAT_COUNT).len();
+
+        // Verify the response body matches the original size
+        let response_size = get_response_size(response).await;
+        assert!(
+            response_size == uncompressed_len,
+            "Response size ({response_size}) should equal original size ({uncompressed_len})"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_compression_for_small_responses() {
+        let body = "a".repeat(MIN_COMPRESSION_SIZE as usize - 1);
+        let mut service = setup_compression_service(body.clone());
+        let request =
+            HttpRequest::builder().header(ACCEPT_ENCODING, "br").body(HttpBody::empty()).unwrap();
+
+        let response = service.call(request).await.unwrap();
+        assert!(response.headers().get(CONTENT_ENCODING).is_none());
+        assert_eq!(get_response_size(response).await, body.len());
+    }
+}

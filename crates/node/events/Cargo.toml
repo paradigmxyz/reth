@@ -1,0 +1,40 @@
+[package]
+name = "reth-node-events"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-storage-api = { workspace = true, features = ["std"] }
+reth-network-api.workspace = true
+reth-stages.workspace = true
+reth-prune-types.workspace = true
+reth-static-file-types.workspace = true
+reth-primitives-traits.workspace = true
+reth-engine-primitives.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+
+# async
+tokio.workspace = true
+
+# async
+futures.workspace = true
+
+tracing.workspace = true
+
+# misc
+pin-project.workspace = true
+humantime.workspace = true
+derive_more.workspace = true

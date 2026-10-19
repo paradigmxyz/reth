@@ -1,0 +1,27 @@
+# This workflow auto-publishes Reth to external package managers such as
+# Homebrew when a release is published.
+
+name: release externally
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  release-homebrew:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - name: Update Homebrew formula
+        uses: dawidd6/action-homebrew-bump-formula@b12d2bc99c46444125e606142f28200ec71a1214 # v10
+        with:
+          token: ${{ secrets.HOMEBREW }}
+          no_fork: true
+          tap: paradigmxyz/brew
+          formula: reth

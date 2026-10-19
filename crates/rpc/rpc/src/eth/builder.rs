@@ -1,0 +1,647 @@
+//! `EthApiBuilder` implementation
+
+use crate::{eth::core::EthApiInner, EthApi};
+use alloy_network::Ethereum;
+use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::ChainSpecProvider;
+use reth_evm::SenderRecoveryCache;
+use reth_primitives_traits::HeaderTy;
+use reth_rpc_convert::{RpcConvert, RpcConverter};
+use reth_rpc_eth_api::{
+    helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
+};
+use reth_rpc_eth_types::{
+    builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
+    receipt::EthReceiptConverter, EthApiSettings, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle,
+    GasPriceOracleConfig,
+};
+use reth_rpc_server_types::constants::{
+    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
+    DEFAULT_PROOF_PERMITS,
+};
+use reth_tasks::{pool::BlockingTaskPool, Runtime};
+use std::{sync::Arc, time::Duration};
+
+/// A helper to build the `EthApi` handler instance.
+///
+/// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
+/// directly.
+#[derive(Debug)]
+pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
+    components: N,
+    rpc_converter: Rpc,
+    gas_cap: GasCap,
+    max_simulate_blocks: u64,
+    compute_state_root_for_eth_simulate: bool,
+    eth_proof_window: u64,
+    fee_history_cache_config: FeeHistoryCacheConfig,
+    proof_permits: usize,
+    eth_state_cache_config: EthStateCacheConfig,
+    eth_cache: Option<EthStateCache<N::Primitives>>,
+    gas_oracle_config: GasPriceOracleConfig,
+    gas_oracle: Option<GasPriceOracle<N::Provider>>,
+    blocking_task_pool: Option<BlockingTaskPool>,
+    task_spawner: Runtime,
+    next_env: NextEnv,
+    max_batch_size: usize,
+    max_blocking_io_requests: usize,
+    pending_block_kind: PendingBlockKind,
+    raw_tx_forwarder: ForwardConfig,
+    sender_recovery_cache: Option<SenderRecoveryCache>,
+    send_raw_transaction_sync_timeout: Duration,
+    evm_memory_limit: u64,
+    force_blob_sidecar_upcasting: bool,
+}
+
+impl<Provider, Pool, Network, EvmConfig, ChainSpec>
+    EthApiBuilder<
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+    >
+where
+    RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+        RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
+{
+    /// Creates a new `EthApiBuilder` instance.
+    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self {
+        Self::new_with_components(RpcNodeCoreAdapter::new(provider, pool, network, evm_config))
+    }
+}
+
+impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
+    /// Apply a function to the builder
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
+    /// Converts the RPC converter type of this builder
+    pub fn map_converter<F, R>(self, f: F) -> EthApiBuilder<N, R, NextEnv>
+    where
+        F: FnOnce(Rpc) -> R,
+    {
+        let Self {
+            components,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle_config,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        } = self;
+        EthApiBuilder {
+            components,
+            rpc_converter: f(rpc_converter),
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle_config,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        }
+    }
+}
+
+impl<N, ChainSpec> EthApiBuilder<N, RpcConverter<Ethereum, N::Evm, EthReceiptConverter<ChainSpec>>>
+where
+    N: RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
+{
+    /// Creates a new `EthApiBuilder` instance with the provided components.
+    pub fn new_with_components(components: N) -> Self {
+        let rpc_converter =
+            RpcConverter::new(EthReceiptConverter::new(components.provider().chain_spec()));
+        Self {
+            components,
+            rpc_converter,
+            eth_cache: None,
+            gas_oracle: None,
+            gas_cap: GasCap::default(),
+            max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            compute_state_root_for_eth_simulate: false,
+            eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
+            blocking_task_pool: None,
+            fee_history_cache_config: FeeHistoryCacheConfig::default(),
+            proof_permits: DEFAULT_PROOF_PERMITS,
+            task_spawner: Runtime::test(),
+            gas_oracle_config: Default::default(),
+            eth_state_cache_config: Default::default(),
+            next_env: Default::default(),
+            max_batch_size: 1,
+            max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
+            pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: ForwardConfig::default(),
+            sender_recovery_cache: None,
+            send_raw_transaction_sync_timeout: Duration::from_secs(30),
+            evm_memory_limit: (1 << 32) - 1,
+            force_blob_sidecar_upcasting: false,
+        }
+    }
+}
+
+impl<N, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv>
+where
+    N: RpcNodeCore,
+{
+    /// Configures the task spawner used to spawn additional tasks.
+    pub fn task_spawner(mut self, spawner: Runtime) -> Self {
+        self.task_spawner = spawner;
+        self
+    }
+
+    /// Changes the configured converter.
+    pub fn with_rpc_converter<RpcNew>(
+        self,
+        rpc_converter: RpcNew,
+    ) -> EthApiBuilder<N, RpcNew, NextEnv> {
+        let Self {
+            components,
+            rpc_converter: _,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        } = self;
+        EthApiBuilder {
+            components,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        }
+    }
+
+    /// Changes the configured pending environment builder.
+    pub fn with_pending_env_builder<NextEnvNew>(
+        self,
+        next_env: NextEnvNew,
+    ) -> EthApiBuilder<N, Rpc, NextEnvNew> {
+        let Self {
+            components,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env: _,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        } = self;
+        EthApiBuilder {
+            components,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        }
+    }
+
+    /// Sets `eth_cache` config for the cache that will be used if no [`EthStateCache`] is
+    /// configured.
+    pub const fn eth_state_cache_config(
+        mut self,
+        eth_state_cache_config: EthStateCacheConfig,
+    ) -> Self {
+        self.eth_state_cache_config = eth_state_cache_config;
+        self
+    }
+
+    /// Sets `eth_cache` instance
+    pub fn eth_cache(mut self, eth_cache: EthStateCache<N::Primitives>) -> Self {
+        self.eth_cache = Some(eth_cache);
+        self
+    }
+
+    /// Sets `gas_oracle` config for the gas oracle that will be used if no [`GasPriceOracle`] is
+    /// configured.
+    pub const fn gas_oracle_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+        self.gas_oracle_config = gas_oracle_config;
+        self
+    }
+
+    /// Sets `gas_oracle` instance
+    pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<N::Provider>) -> Self {
+        self.gas_oracle = Some(gas_oracle);
+        self
+    }
+
+    /// Sets the gas cap.
+    pub const fn gas_cap(mut self, gas_cap: GasCap) -> Self {
+        self.gas_cap = gas_cap;
+        self
+    }
+
+    /// Sets the maximum number of blocks for `eth_simulateV1`.
+    pub const fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
+        self.max_simulate_blocks = max_simulate_blocks;
+        self
+    }
+
+    /// Sets whether to compute state roots for `eth_simulateV1`.
+    pub const fn compute_state_root_for_eth_simulate(mut self, enabled: bool) -> Self {
+        self.compute_state_root_for_eth_simulate = enabled;
+        self
+    }
+
+    /// Sets the maximum number of blocks into the past for generating state proofs.
+    pub const fn eth_proof_window(mut self, eth_proof_window: u64) -> Self {
+        self.eth_proof_window = eth_proof_window;
+        self
+    }
+
+    /// Sets the blocking task pool.
+    pub fn blocking_task_pool(mut self, blocking_task_pool: BlockingTaskPool) -> Self {
+        self.blocking_task_pool = Some(blocking_task_pool);
+        self
+    }
+
+    /// Sets the fee history cache.
+    pub const fn fee_history_cache_config(
+        mut self,
+        fee_history_cache_config: FeeHistoryCacheConfig,
+    ) -> Self {
+        self.fee_history_cache_config = fee_history_cache_config;
+        self
+    }
+
+    /// Sets the proof permits.
+    pub const fn proof_permits(mut self, proof_permits: usize) -> Self {
+        self.proof_permits = proof_permits;
+        self
+    }
+
+    /// Sets the max batch size for batching transaction insertions.
+    pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Sets the maximum number of concurrent blocking IO requests.
+    pub const fn max_blocking_io_requests(mut self, max_blocking_io_requests: usize) -> Self {
+        self.max_blocking_io_requests = max_blocking_io_requests;
+        self
+    }
+
+    /// Sets the pending block kind
+    pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Sets the sender recovery cache shared with transaction ingress and execution.
+    pub fn sender_recovery_cache(mut self, cache: Option<SenderRecoveryCache>) -> Self {
+        self.sender_recovery_cache = cache;
+        self
+    }
+
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: ForwardConfig) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
+        self
+    }
+
+    /// Returns the gas cap.
+    pub const fn get_gas_cap(&self) -> &GasCap {
+        &self.gas_cap
+    }
+
+    /// Returns the maximum simulate blocks.
+    pub const fn get_max_simulate_blocks(&self) -> u64 {
+        self.max_simulate_blocks
+    }
+
+    /// Returns whether state roots are computed for `eth_simulateV1`.
+    pub const fn get_compute_state_root_for_eth_simulate(&self) -> bool {
+        self.compute_state_root_for_eth_simulate
+    }
+
+    /// Returns the ETH proof window.
+    pub const fn get_eth_proof_window(&self) -> u64 {
+        self.eth_proof_window
+    }
+
+    /// Returns a reference to the fee history cache config.
+    pub const fn get_fee_history_cache_config(&self) -> &FeeHistoryCacheConfig {
+        &self.fee_history_cache_config
+    }
+
+    /// Returns the proof permits.
+    pub const fn get_proof_permits(&self) -> usize {
+        self.proof_permits
+    }
+
+    /// Returns a reference to the ETH state cache config.
+    pub const fn get_eth_state_cache_config(&self) -> &EthStateCacheConfig {
+        &self.eth_state_cache_config
+    }
+
+    /// Returns a reference to the gas oracle config.
+    pub const fn get_gas_oracle_config(&self) -> &GasPriceOracleConfig {
+        &self.gas_oracle_config
+    }
+
+    /// Returns the max batch size.
+    pub const fn get_max_batch_size(&self) -> usize {
+        self.max_batch_size
+    }
+
+    /// Returns the pending block kind.
+    pub const fn get_pending_block_kind(&self) -> PendingBlockKind {
+        self.pending_block_kind
+    }
+
+    /// Returns a reference to the raw tx forwarder config.
+    pub const fn get_raw_tx_forwarder(&self) -> &ForwardConfig {
+        &self.raw_tx_forwarder
+    }
+
+    /// Returns a mutable reference to the fee history cache config.
+    pub const fn fee_history_cache_config_mut(&mut self) -> &mut FeeHistoryCacheConfig {
+        &mut self.fee_history_cache_config
+    }
+
+    /// Returns a mutable reference to the ETH state cache config.
+    pub const fn eth_state_cache_config_mut(&mut self) -> &mut EthStateCacheConfig {
+        &mut self.eth_state_cache_config
+    }
+
+    /// Returns a mutable reference to the gas oracle config.
+    pub const fn gas_oracle_config_mut(&mut self) -> &mut GasPriceOracleConfig {
+        &mut self.gas_oracle_config
+    }
+
+    /// Returns a mutable reference to the raw tx forwarder config.
+    pub const fn raw_tx_forwarder_mut(&mut self) -> &mut ForwardConfig {
+        &mut self.raw_tx_forwarder
+    }
+
+    /// Modifies the fee history cache configuration using a closure.
+    pub fn modify_fee_history_cache_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut FeeHistoryCacheConfig),
+    {
+        f(&mut self.fee_history_cache_config);
+        self
+    }
+
+    /// Modifies the ETH state cache configuration using a closure.
+    pub fn modify_eth_state_cache_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut EthStateCacheConfig),
+    {
+        f(&mut self.eth_state_cache_config);
+        self
+    }
+
+    /// Modifies the gas oracle configuration using a closure.
+    pub fn modify_gas_oracle_config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut GasPriceOracleConfig),
+    {
+        f(&mut self.gas_oracle_config);
+        self
+    }
+
+    /// Modifies the raw tx forwarder configuration using a closure.
+    pub fn modify_raw_tx_forwarder<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut ForwardConfig),
+    {
+        f(&mut self.raw_tx_forwarder);
+        self
+    }
+
+    /// Builds the [`EthApiInner`] instance.
+    ///
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the blocking task pool cannot be built.
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn build_inner(self) -> EthApiInner<N, Rpc>
+    where
+        Rpc: RpcConvert,
+        NextEnv: PendingEnvBuilder<N::Evm>,
+    {
+        let Self {
+            components,
+            rpc_converter,
+            eth_state_cache_config,
+            gas_oracle_config,
+            eth_cache,
+            gas_oracle,
+            gas_cap,
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            blocking_task_pool,
+            fee_history_cache_config,
+            proof_permits,
+            task_spawner,
+            next_env,
+            max_batch_size,
+            max_blocking_io_requests,
+            pending_block_kind,
+            raw_tx_forwarder,
+            sender_recovery_cache,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        } = self;
+
+        let provider = components.provider().clone();
+
+        let eth_cache = eth_cache.unwrap_or_else(|| {
+            EthStateCache::spawn_with(
+                provider.clone(),
+                eth_state_cache_config,
+                task_spawner.clone(),
+            )
+        });
+        let gas_oracle = gas_oracle.unwrap_or_else(|| {
+            GasPriceOracle::new(provider.clone(), gas_oracle_config, eth_cache.clone())
+        });
+        let fee_history_cache =
+            FeeHistoryCache::<HeaderTy<N::Primitives>>::new(fee_history_cache_config);
+        let new_canonical_blocks = provider.canonical_state_stream();
+        let fhc = fee_history_cache.clone();
+        let cache = eth_cache.clone();
+        task_spawner.spawn_critical_task(
+            "cache canonical blocks for fee history task",
+            async move {
+                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
+            },
+        );
+
+        let settings = EthApiSettings {
+            sender_recovery_cache,
+            proof_permits,
+            max_batch_size,
+            max_blocking_io_requests,
+            cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
+                eth_state_cache_config.prewarm_bals.is_some(),
+            gas_cap: gas_cap.into(),
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            pending_block_kind,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        };
+
+        EthApiInner::new(
+            components,
+            eth_cache,
+            gas_oracle,
+            settings,
+            blocking_task_pool.unwrap_or_else(|| {
+                BlockingTaskPool::builder()
+                    .thread_name(|i| format!("blocking-{i:02}"))
+                    .build()
+                    .map(BlockingTaskPool::new)
+                    .expect("failed to build blocking task pool")
+            }),
+            fee_history_cache,
+            task_spawner,
+            rpc_converter,
+            next_env,
+            raw_tx_forwarder.forwarder_client(),
+        )
+    }
+
+    /// Builds the [`EthApi`] instance.
+    ///
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn_with`].
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the blocking task pool cannot be built.
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn build(self) -> EthApi<N, Rpc>
+    where
+        Rpc: RpcConvert,
+        NextEnv: PendingEnvBuilder<N::Evm>,
+    {
+        EthApi { inner: Arc::new(self.build_inner()) }
+    }
+
+    /// Sets the timeout for `send_raw_transaction_sync` RPC method.
+    pub const fn send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
+        self.send_raw_transaction_sync_timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum memory the EVM can allocate per RPC request.
+    pub const fn evm_memory_limit(mut self, memory_limit: u64) -> Self {
+        self.evm_memory_limit = memory_limit;
+        self
+    }
+
+    /// Sets whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
+    pub const fn force_blob_sidecar_upcasting(mut self, force: bool) -> Self {
+        self.force_blob_sidecar_upcasting = force;
+        self
+    }
+}

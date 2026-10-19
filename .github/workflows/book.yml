@@ -1,0 +1,97 @@
+# Documentation jobs.
+
+name: book
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, closed]
+  merge_group:
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    permissions:
+      id-token: write
+      contents: read
+    timeout-minutes: 90
+    env:
+      # Include the system trust store containing Aegis's CA for Bun and Node.
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: .github/scripts/install_llvm.sh ubuntu
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: v1.2.23
+
+      - name: Install Playwright browsers
+        # Required for rehype-mermaid to render Mermaid diagrams during build
+        run: |
+          cd docs/vocs/
+          bun i
+          npx playwright install --with-deps chromium
+
+      - name: Install Rust nightly
+        uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: nightly
+
+      - name: Build docs
+        run: cd docs/vocs && bash scripts/build-cargo-docs.sh
+
+      - name: Build Vocs
+        run: |
+          cd docs/vocs/ && bun run build
+          test -f docs/dist/public/index.html
+          test -f docs/dist/public/overview/index.html
+          test -f docs/dist/public/sdk/index.html
+          test -f docs/dist/public/logo.png
+          test -f docs/dist/public/reth-prod.png
+          test -f docs/dist/public/docs/index.html
+          test -f docs/dist/public/docs/reth/index.html
+          test -d docs/dist/public/docs/static.files
+          grep -q 'content="rustdoc"' docs/dist/public/docs/index.html
+          echo "Vocs Build Complete"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: "./docs/vocs/docs/dist/public"
+
+  deploy:
+    # Only deploy if a push to main
+    if: github.ref_name == 'main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [build]
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    timeout-minutes: 60
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

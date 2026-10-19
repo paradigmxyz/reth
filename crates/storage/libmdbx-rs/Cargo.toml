@@ -1,0 +1,35 @@
+[package]
+name = "reth-libmdbx"
+description = "Idiomatic and safe MDBX wrapper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-mdbx-sys.workspace = true
+
+bitflags.workspace = true
+byteorder.workspace = true
+derive_more.workspace = true
+crossbeam-queue.workspace = true
+parking_lot.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+dashmap = { workspace = true, features = ["inline"], optional = true }
+
+[features]
+dst = []
+default = []
+return-borrowed = []
+read-tx-timeouts = ["dep:dashmap"]
+
+[dev-dependencies]
+tempfile.workspace = true

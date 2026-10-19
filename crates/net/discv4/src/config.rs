@@ -1,0 +1,364 @@
+//! A set of configuration parameters to tune the discovery protocol.
+//!
+//! This basis of this file has been taken from the discv5 codebase:
+//! <https://github.com/sigp/discv5>
+
+use alloy_primitives::bytes::Bytes;
+use alloy_rlp::Encodable;
+use reth_net_banlist::BanList;
+use reth_net_nat::{NatResolver, ResolveNatInterval};
+use reth_network_peers::NodeRecord;
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    time::Duration,
+};
+
+/// Configuration parameters that define the performance of the discovery network.
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Discv4Config {
+    /// Size of the channel buffer for outgoing messages.
+    pub udp_egress_message_buffer: usize,
+    /// Size of the channel buffer for incoming messages.
+    pub udp_ingress_message_buffer: usize,
+    /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
+    pub max_find_node_failures: u8,
+    /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
+    /// 10 seconds.
+    pub ping_interval: Duration,
+    /// The duration of we consider a ping timed out.
+    pub ping_expiration: Duration,
+    /// The rate at which new random lookups should be triggered.
+    pub lookup_interval: Duration,
+    /// The duration of we consider a `FindNode` request timed out.
+    pub request_timeout: Duration,
+    /// The duration after which we consider an enr request timed out.
+    pub enr_expiration: Duration,
+    /// The duration we set for neighbours responses.
+    pub neighbours_expiration: Duration,
+    /// Provides a way to ban peers and ips.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub ban_list: BanList,
+    /// Nodes to boot from.
+    pub bootstrap_nodes: HashSet<NodeRecord>,
+    /// Whether to randomly discover new peers.
+    ///
+    /// If true, the node will automatically randomly walk the DHT in order to find new peers.
+    pub enable_dht_random_walk: bool,
+    /// Whether to automatically lookup peers.
+    pub enable_lookup: bool,
+    /// Whether to enforce EIP-868 extension.
+    pub enable_eip868: bool,
+    /// Whether to only respond with nodes that have a known EIP-868 ENR record (fork ID) in
+    /// `Neighbours` responses.
+    ///
+    /// When enabled, the node will filter out entries that have not yet been confirmed to support
+    /// EIP-868 (i.e., have no `fork_id`) when responding to `FindNode` requests. This helps
+    /// callers discover only peers that advertise their fork ID.
+    pub enforce_eip868_neighbours: bool,
+    /// Whether to respect expiration timestamps in messages.
+    pub enforce_expiration_timestamps: bool,
+    /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
+    pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
+    /// If configured, try to resolve public ip
+    pub external_ip_resolver: Option<NatResolver>,
+    /// External IP of the opposite family to the local [`NodeRecord`] address, advertised in the
+    /// local EIP-868 ENR next to it (`ip` + `ip6`). Serving that family requires a secondary
+    /// socket of that family (shared-port mode).
+    pub secondary_advertised_ip: Option<IpAddr>,
+    /// If configured and a `external_ip_resolver` is configured, try to resolve the external ip
+    /// using this interval.
+    pub resolve_external_ip_interval: Option<Duration>,
+    /// The duration after which we consider a bond expired.
+    pub bond_expiration: Duration,
+}
+
+impl Discv4Config {
+    /// Returns a new default builder instance
+    pub fn builder() -> Discv4ConfigBuilder {
+        Default::default()
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
+        self.add_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_rlp_pair(&mut self, key: impl Into<Vec<u8>>, rlp: Bytes) -> &mut Self {
+        self.additional_eip868_rlp_pairs.insert(key.into(), rlp);
+        self
+    }
+
+    /// Extend additional key value pairs to include in the ENR
+    pub fn extend_eip868_rlp_pairs(
+        &mut self,
+        pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
+    ) -> &mut Self {
+        for (k, v) in pairs {
+            self.add_eip868_rlp_pair(k, v);
+        }
+        self
+    }
+
+    /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
+    /// configured
+    pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
+        let resolver = self.external_ip_resolver.clone()?;
+        let interval = self.resolve_external_ip_interval?;
+        Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
+    }
+}
+
+impl Default for Discv4Config {
+    fn default() -> Self {
+        Self {
+            // This should be high enough to cover an entire recursive FindNode lookup which is
+            // includes sending FindNode to nodes it discovered in the rounds using the concurrency
+            // factor ALPHA
+            udp_egress_message_buffer: 1024,
+            // Every outgoing request will eventually lead to an incoming response
+            udp_ingress_message_buffer: 1024,
+            max_find_node_failures: 5,
+            ping_interval: Duration::from_secs(10),
+            // Unified expiration and timeout durations, mirrors geth's `expiration` duration
+            ping_expiration: Duration::from_secs(20),
+            bond_expiration: Duration::from_secs(60 * 60),
+            enr_expiration: Duration::from_secs(20),
+            neighbours_expiration: Duration::from_secs(20),
+            request_timeout: Duration::from_secs(20),
+
+            lookup_interval: Duration::from_secs(20),
+            ban_list: Default::default(),
+            bootstrap_nodes: Default::default(),
+            enable_dht_random_walk: true,
+            enable_lookup: true,
+            enable_eip868: true,
+            enforce_eip868_neighbours: false,
+            enforce_expiration_timestamps: true,
+            additional_eip868_rlp_pairs: Default::default(),
+            external_ip_resolver: Some(Default::default()),
+            secondary_advertised_ip: None,
+            // By default retry public IP using a 5min interval
+            resolve_external_ip_interval: Some(Duration::from_secs(60 * 5)),
+        }
+    }
+}
+
+/// Builder type for [`Discv4Config`]
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Discv4ConfigBuilder {
+    config: Discv4Config,
+}
+
+impl Discv4ConfigBuilder {
+    /// Sets the channel size for incoming messages
+    pub const fn udp_ingress_message_buffer(
+        &mut self,
+        udp_ingress_message_buffer: usize,
+    ) -> &mut Self {
+        self.config.udp_ingress_message_buffer = udp_ingress_message_buffer;
+        self
+    }
+
+    /// Sets the channel size for outgoing messages
+    pub const fn udp_egress_message_buffer(
+        &mut self,
+        udp_egress_message_buffer: usize,
+    ) -> &mut Self {
+        self.config.udp_egress_message_buffer = udp_egress_message_buffer;
+        self
+    }
+
+    /// The number of allowed request failures for `findNode` requests.
+    pub const fn max_find_node_failures(&mut self, max_find_node_failures: u8) -> &mut Self {
+        self.config.max_find_node_failures = max_find_node_failures;
+        self
+    }
+
+    /// The time between pings to ensure connectivity amongst connected nodes.
+    pub const fn ping_interval(&mut self, interval: Duration) -> &mut Self {
+        self.config.ping_interval = interval;
+        self
+    }
+
+    /// Sets the timeout after which requests are considered timed out
+    pub const fn request_timeout(&mut self, duration: Duration) -> &mut Self {
+        self.config.request_timeout = duration;
+        self
+    }
+
+    /// Sets the expiration duration for pings
+    pub const fn ping_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.ping_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for enr requests
+    pub const fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.enr_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for lookup neighbor requests
+    pub const fn lookup_neighbours_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.neighbours_expiration = duration;
+        self
+    }
+
+    /// Sets the expiration duration for a bond with a peer
+    pub const fn bond_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.bond_expiration = duration;
+        self
+    }
+
+    /// Whether to discover random nodes in the DHT.
+    pub const fn enable_dht_random_walk(&mut self, enable_dht_random_walk: bool) -> &mut Self {
+        self.config.enable_dht_random_walk = enable_dht_random_walk;
+        self
+    }
+
+    /// Whether to automatically lookup
+    pub const fn enable_lookup(&mut self, enable_lookup: bool) -> &mut Self {
+        self.config.enable_lookup = enable_lookup;
+        self
+    }
+
+    /// Whether to enable EIP-868
+    pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
+        self.config.enable_eip868 = enable_eip868;
+        self
+    }
+
+    /// Whether to only include nodes with a known EIP-868 ENR record (fork ID) in `Neighbours`
+    /// responses.
+    pub const fn enforce_eip868_neighbours(
+        &mut self,
+        enforce_eip868_neighbours: bool,
+    ) -> &mut Self {
+        self.config.enforce_eip868_neighbours = enforce_eip868_neighbours;
+        self
+    }
+
+    /// Whether to enforce expiration timestamps in messages.
+    pub const fn enforce_expiration_timestamps(
+        &mut self,
+        enforce_expiration_timestamps: bool,
+    ) -> &mut Self {
+        self.config.enforce_expiration_timestamps = enforce_expiration_timestamps;
+        self
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_pair(&mut self, key: impl Into<Vec<u8>>, value: impl Encodable) -> &mut Self {
+        self.add_eip868_rlp_pair(key, Bytes::from(alloy_rlp::encode(&value)))
+    }
+
+    /// Add another key value pair to include in the ENR
+    pub fn add_eip868_rlp_pair(&mut self, key: impl Into<Vec<u8>>, rlp: Bytes) -> &mut Self {
+        self.config.additional_eip868_rlp_pairs.insert(key.into(), rlp);
+        self
+    }
+
+    /// Extend additional key value pairs to include in the ENR
+    pub fn extend_eip868_rlp_pairs(
+        &mut self,
+        pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
+    ) -> &mut Self {
+        for (k, v) in pairs {
+            self.add_eip868_rlp_pair(k, v);
+        }
+        self
+    }
+
+    /// A set of lists that can ban IP's or `PeerIds` from the server. See
+    /// [`BanList`].
+    pub fn ban_list(&mut self, ban_list: BanList) -> &mut Self {
+        self.config.ban_list = ban_list;
+        self
+    }
+
+    /// Sets the lookup interval duration.
+    pub const fn lookup_interval(&mut self, lookup_interval: Duration) -> &mut Self {
+        self.config.lookup_interval = lookup_interval;
+        self
+    }
+
+    /// Adds a boot node
+    pub fn add_boot_node(&mut self, node: NodeRecord) -> &mut Self {
+        self.config.bootstrap_nodes.insert(node);
+        self
+    }
+
+    /// Adds multiple boot nodes
+    pub fn add_boot_nodes(&mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> &mut Self {
+        self.config.bootstrap_nodes.extend(nodes);
+        self
+    }
+
+    /// Configures if and how the external IP of the node should be resolved.
+    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
+        self.config.external_ip_resolver = external_ip_resolver;
+        self
+    }
+
+    /// Sets the secondary-family external IP advertised in the local EIP-868 ENR.
+    pub const fn secondary_advertised_ip(&mut self, ip: IpAddr) -> &mut Self {
+        self.config.secondary_advertised_ip = Some(ip);
+        self
+    }
+
+    /// Sets the interval at which the external IP is to be resolved.
+    pub const fn resolve_external_ip_interval(
+        &mut self,
+        resolve_external_ip_interval: Option<Duration>,
+    ) -> &mut Self {
+        self.config.resolve_external_ip_interval = resolve_external_ip_interval;
+        self
+    }
+
+    /// Returns the configured [`Discv4Config`]
+    pub fn build(&self) -> Discv4Config {
+        self.config.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_builder() {
+        let mut builder = Discv4Config::builder();
+        let _ = builder
+            .enable_lookup(true)
+            .enable_dht_random_walk(true)
+            .add_boot_nodes(HashSet::new())
+            .lookup_interval(Duration::from_secs(3))
+            .enable_lookup(true)
+            .build();
+    }
+
+    #[tokio::test]
+    async fn test_resolve_external_ip_interval_uses_interval_at() {
+        use reth_net_nat::NatResolver;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Create a config with external IP resolver
+        let mut builder = Discv4Config::builder();
+        builder.external_ip_resolver(Some(NatResolver::ExternalIp(ip_addr)));
+        builder.resolve_external_ip_interval(Some(Duration::from_secs(60 * 5)));
+        let config = builder.build();
+
+        // Get the ResolveNatInterval
+        let mut interval = config.resolve_external_ip_interval().expect("should have interval");
+
+        // Test that first tick returns immediately (interval_at behavior)
+        let ip = interval.tick().await;
+        assert_eq!(ip, Some(ip_addr));
+    }
+}

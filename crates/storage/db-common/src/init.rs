@@ -1,0 +1,1668 @@
+//! Reth genesis initialization utility functions.
+
+use alloy_consensus::BlockHeader;
+use alloy_genesis::GenesisAccount;
+use alloy_primitives::{
+    keccak256,
+    map::{AddressMap, B256Map, B256Set, HashMap},
+    Address, B256, U256,
+};
+use reth_chainspec::EthChainSpec;
+use reth_codecs::Compact;
+use reth_config::config::EtlConfig;
+use reth_db_api::{
+    cursor::{DbCursorRW, DbDupCursorRW},
+    models::{
+        storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, IntegerList,
+        ShardedKey,
+    },
+    tables,
+    transaction::DbTxMut,
+    DatabaseError,
+};
+use reth_etl::Collector;
+use reth_execution_errors::StateRootError;
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, NodePrimitives, SealedHeader, StorageEntry,
+};
+use reth_provider::{
+    errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
+    BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
+    HashingWriter, HeaderProvider, HistoryWriter, MetadataProvider, MetadataWriter,
+    OriginalValuesKnown, ProviderError, RevertsInit, RocksDBProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriteConfig, StateWriter, StaticFileProviderFactory,
+    StorageSettings, StorageSettingsCache, TrieWriter,
+};
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
+use reth_trie::{
+    prefix_set::TriePrefixSets, IntermediateStateRootState, StateRoot as StateRootComputer,
+    StateRootProgress,
+};
+use reth_trie_db::DatabaseStateRoot;
+
+type DbStateRoot<'a, TX, A> = StateRootComputer<
+    reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
+    reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
+>;
+
+use serde::{Deserialize, Serialize};
+use std::io::BufRead;
+use tracing::{debug, error, info, trace, warn};
+
+pub use reth_provider::init::{
+    insert_account_history, insert_genesis_account_history, insert_genesis_history,
+    insert_genesis_storage_history, insert_history, insert_storage_history,
+};
+
+/// Default soft limit for number of bytes to read from state dump file, before inserting into
+/// database.
+///
+/// Default is 1 GB.
+pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
+
+/// Soft limit for the number of flushed updates after which to log progress summary.
+const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
+
+/// Max number of storage "units" (1 per account + 1 per storage slot) before committing
+/// the current MDBX transaction and opening a new one. This bounds dirty page accumulation
+/// and prevents OOM on large state imports.
+const STORAGE_COMMIT_THRESHOLD: usize = 100_000;
+
+/// Max number of trie updates retained before init-state state root computation commits progress.
+const STATE_ROOT_COMMIT_THRESHOLD: u64 = 25_000;
+
+/// Storage initialization error type.
+#[derive(Debug, thiserror::Error, Clone)]
+pub enum InitStorageError {
+    /// Genesis header found on static files but the database is empty.
+    #[error(
+        "static files found, but the database is uninitialized. If attempting to re-syncing, delete both."
+    )]
+    UninitializedDatabase,
+    /// An existing genesis block was found in the database, and its hash did not match the hash of
+    /// the chainspec.
+    #[error(
+        "genesis hash in the storage does not match the specified chainspec: chainspec is {chainspec_hash}, database is {storage_hash}"
+    )]
+    GenesisHashMismatch {
+        /// Expected genesis hash.
+        chainspec_hash: B256,
+        /// Actual genesis hash.
+        storage_hash: B256,
+    },
+    /// Provider error.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+    /// State root error while computing the state root
+    #[error(transparent)]
+    StateRootError(#[from] StateRootError),
+    /// State root doesn't match the expected one.
+    #[error("state root mismatch: {_0}")]
+    StateRootMismatch(GotExpected<B256>),
+}
+
+impl From<DatabaseError> for InitStorageError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Provider(ProviderError::Database(error))
+    }
+}
+
+/// Write the genesis block if it has not already been written
+pub fn init_genesis<PF>(factory: &PF) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockNumReader
+        + MetadataProvider
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    init_genesis_with_settings(factory, StorageSettings::base())
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`].
+pub fn init_genesis_with_settings<PF>(
+    factory: &PF,
+    genesis_storage_settings: StorageSettings,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockNumReader
+        + MetadataProvider
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    init_genesis_with_settings_and_validate(factory, genesis_storage_settings, true)
+}
+
+/// Write the genesis block if it has not already been written with [`StorageSettings`],
+/// optionally validating the DB-resident genesis hash against the chainspec hash.
+pub fn init_genesis_with_settings_and_validate<PF>(
+    factory: &PF,
+    genesis_storage_settings: StorageSettings,
+    validate_genesis_hash: bool,
+) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + ChainSpecProvider
+        + StageCheckpointReader
+        + BlockNumReader
+        + MetadataProvider
+        + StorageSettingsCache,
+    PF::ProviderRW: StaticFileProviderFactory<Primitives = PF::Primitives>
+        + StageCheckpointWriter
+        + HistoryWriter
+        + HeaderProvider
+        + HashingWriter
+        + StateWriter
+        + TrieWriter
+        + MetadataWriter
+        + ChainSpecProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + AsRef<PF::ProviderRW>,
+    PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
+{
+    let chain = factory.chain_spec();
+
+    let genesis = chain.genesis();
+    let hash = chain.genesis_hash();
+
+    // Get the genesis block number from the chain spec
+    let genesis_block_number = chain.genesis_header().number();
+
+    // Check if we already have the genesis header or if we have the wrong one.
+    match factory.block_hash(genesis_block_number) {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
+        Ok(Some(block_hash)) => {
+            if block_hash == hash {
+                // Some users will at times attempt to re-sync from scratch by just deleting the
+                // database. Since `factory.block_hash` will only query the static files, we need to
+                // make sure that our database has been written to, and throw error if it's empty.
+                if factory.get_stage_checkpoint(StageId::Headers)?.is_none() {
+                    error!(target: "reth::storage", "Genesis header found on static files, but database is uninitialized.");
+                    return Err(InitStorageError::UninitializedDatabase)
+                }
+
+                let stored = factory.storage_settings()?.unwrap_or_else(StorageSettings::v1);
+                if stored != genesis_storage_settings {
+                    warn!(
+                        target: "reth::storage",
+                        ?stored,
+                        requested = ?genesis_storage_settings,
+                        "Storage settings mismatch detected. Using the stored settings from the existing database."
+                    );
+                }
+
+                debug!("Genesis already written, skipping.");
+                return Ok(hash)
+            }
+
+            if !validate_genesis_hash {
+                warn!(
+                    target: "reth::storage",
+                    chainspec_hash = %hash,
+                    storage_hash = %block_hash,
+                    "Genesis hash mismatch with chainspec; trusting DB per --debug.skip-genesis-validation"
+                );
+                return Ok(block_hash)
+            }
+            return Err(InitStorageError::GenesisHashMismatch {
+                chainspec_hash: hash,
+                storage_hash: block_hash,
+            })
+        }
+        Err(e) => {
+            debug!(?e);
+            return Err(e.into());
+        }
+    }
+
+    debug!("Writing genesis block.");
+
+    // Make sure to set storage settings before anything writes
+    factory.set_storage_settings_cache(genesis_storage_settings);
+
+    let alloc = &genesis.alloc;
+
+    // use transaction to insert genesis header
+    let provider_rw = factory.database_provider_rw()?;
+
+    // Behaviour reserved only for new nodes should be set in the storage settings.
+    provider_rw.write_storage_settings(genesis_storage_settings)?;
+
+    // For non-zero genesis blocks, set expected_block_start BEFORE insert_genesis_state.
+    // When block_range is None, next_block_number() uses expected_block_start. By default,
+    // expected_block_start comes from find_fixed_range which returns the file range start (0),
+    // not the genesis block number. This would cause increment_block(N) to fail.
+    let static_file_provider = provider_rw.static_file_provider();
+    if genesis_block_number > 0 {
+        if genesis_storage_settings.storage_v2 {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::AccountChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+        if genesis_storage_settings.storage_v2 {
+            static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::StorageChangeSets)?
+                .user_header_mut()
+                .set_expected_block_start(genesis_block_number);
+        }
+    }
+
+    insert_genesis_hashes(&provider_rw, alloc.iter())?;
+    insert_genesis_history(&provider_rw, alloc.iter())?;
+
+    // Insert header
+    insert_genesis_header(&provider_rw, &chain)?;
+
+    insert_genesis_state(&provider_rw, alloc.iter())?;
+
+    // compute state root to populate trie tables
+    compute_state_root(&provider_rw, None)?;
+
+    // set stage checkpoint to genesis block number for all stages
+    let checkpoint = StageCheckpoint::new(genesis_block_number);
+    for stage in StageId::ALL {
+        provider_rw.save_stage_checkpoint(stage, checkpoint)?;
+    }
+
+    // Static file segments start empty, so we need to initialize the block range.
+    // For genesis blocks with non-zero block numbers, we use get_writer() instead of
+    // latest_writer() and set_block_range() to ensure static files start at the correct block.
+    let static_file_provider = provider_rw.static_file_provider();
+
+    static_file_provider
+        .get_writer(genesis_block_number, StaticFileSegment::Receipts)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
+    static_file_provider
+        .get_writer(genesis_block_number, StaticFileSegment::Transactions)?
+        .user_header_mut()
+        .set_block_range(genesis_block_number, genesis_block_number);
+
+    if genesis_storage_settings.storage_v2 {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
+    // `commit_unwind`` will first commit the DB and then the static file provider, which is
+    // necessary on `init_genesis`.
+    provider_rw.commit()?;
+
+    Ok(hash)
+}
+
+/// Inserts the genesis state into the database.
+pub fn insert_genesis_state<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+) -> ProviderResult<()>
+where
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + HeaderProvider
+        + StateWriter
+        + ChainSpecProvider
+        + AsRef<Provider>,
+{
+    let genesis_block_number = provider.chain_spec().genesis_header().number();
+    insert_state(provider, alloc, genesis_block_number)
+}
+
+/// Inserts state at given block into database.
+pub fn insert_state<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()>
+where
+    Provider: StaticFileProviderFactory
+        + DBProvider<Tx: DbTxMut>
+        + HeaderProvider
+        + StateWriter
+        + AsRef<Provider>,
+{
+    let capacity = alloc.size_hint().1.unwrap_or(0);
+    let mut state_init: BundleStateInit =
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut reverts_init: AddressMap<_> =
+        AddressMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut contracts: B256Map<Bytecode> =
+        B256Map::with_capacity_and_hasher(capacity, Default::default());
+
+    for (address, account) in alloc {
+        let bytecode_hash = if let Some(code) = &account.code {
+            match Bytecode::new_raw_checked(code.clone()) {
+                Ok(bytecode) => {
+                    let hash = bytecode.hash_slow();
+                    contracts.insert(hash, bytecode);
+                    Some(hash)
+                }
+                Err(err) => {
+                    error!(%address, %err, "Failed to decode genesis bytecode.");
+                    return Err(DatabaseError::Other(err.to_string()).into());
+                }
+            }
+        } else {
+            None
+        };
+
+        // get state
+        let storage = account
+            .storage
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .map(|(key, value)| {
+                        let value = U256::from_be_bytes(value.0);
+                        (*key, (U256::ZERO, value))
+                    })
+                    .collect::<B256Map<_>>()
+            })
+            .unwrap_or_default();
+
+        reverts_init.insert(
+            *address,
+            (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
+        );
+
+        state_init.insert(
+            *address,
+            (None, Some(Account { bytecode_hash, ..Account::from(account) }), storage),
+        );
+    }
+    let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
+
+    let execution_outcome = ExecutionOutcome::new_init(
+        state_init,
+        all_reverts_init,
+        contracts,
+        Vec::default(),
+        block,
+        Vec::new(),
+    );
+
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
+
+    trace!(target: "reth::cli", "Inserted state");
+
+    Ok(())
+}
+
+/// Inserts hashes for the genesis state.
+pub fn insert_genesis_hashes<'a, 'b, Provider>(
+    provider: &Provider,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
+) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut> + HashingWriter,
+{
+    // insert and hash accounts to hashing table
+    let alloc_accounts = alloc.clone().map(|(addr, account)| (*addr, Some(Account::from(account))));
+    provider.insert_account_for_hashing(alloc_accounts)?;
+
+    trace!(target: "reth::cli", "Inserted account hashes");
+
+    let alloc_storage = alloc.filter_map(|(addr, account)| {
+        // only return Some if there is storage
+        account.storage.as_ref().map(|storage| {
+            (*addr, storage.iter().map(|(&key, &value)| StorageEntry { key, value: value.into() }))
+        })
+    });
+    provider.insert_storage_for_hashing(alloc_storage)?;
+
+    trace!(target: "reth::cli", "Inserted storage hashes");
+
+    Ok(())
+}
+
+/// Inserts header for the genesis state.
+pub fn insert_genesis_header<Provider, Spec>(
+    provider: &Provider,
+    chain: &Spec,
+) -> ProviderResult<()>
+where
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>
+        + DBProvider<Tx: DbTxMut>,
+    Spec: EthChainSpec<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
+{
+    let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
+    let static_file_provider = provider.static_file_provider();
+
+    // Get the actual genesis block number from the header
+    let genesis_block_number = header.number();
+
+    match static_file_provider.block_hash(genesis_block_number) {
+        Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {
+            let difficulty = header.difficulty();
+
+            // For genesis blocks with non-zero block numbers, we need to ensure they are stored
+            // in the correct static file range. We use get_writer() with the genesis block number
+            // to ensure the genesis block is stored in the correct static file range.
+            let mut writer = static_file_provider
+                .get_writer(genesis_block_number, StaticFileSegment::Headers)?;
+
+            // For non-zero genesis blocks, we need to set block range to genesis_block_number and
+            // append header without increment block
+            if genesis_block_number > 0 {
+                writer
+                    .user_header_mut()
+                    .set_block_range(genesis_block_number, genesis_block_number);
+                writer.append_header_direct(header, difficulty, &block_hash)?;
+            } else {
+                // For zero genesis blocks, use normal append_header
+                writer.append_header(header, &block_hash)?;
+            }
+        }
+        Ok(Some(_)) => {}
+        Err(e) => return Err(e),
+    }
+
+    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, genesis_block_number)?;
+    provider.tx_ref().put::<tables::BlockBodyIndices>(genesis_block_number, Default::default())?;
+
+    Ok(())
+}
+
+/// Reads account state from a [`BufRead`] reader and initializes it at the highest block that can
+/// be found on database.
+///
+/// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
+/// be set to the highest block present. One practical usecase is to import OP mainnet state at
+/// bedrock transition block.
+pub fn init_from_state_dump<PF>(
+    mut reader: impl BufRead,
+    provider_factory: &PF,
+    etl_config: EtlConfig,
+) -> eyre::Result<B256>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: StaticFileProviderFactory
+                        + DBProvider<Tx: DbTxMut>
+                        + BlockNumReader
+                        + ChainSpecProvider
+                        + StageCheckpointWriter
+                        + HistoryWriter
+                        + HeaderProvider
+                        + HashingWriter
+                        + TrieWriter
+                        + StateWriter
+                        + StorageSettingsCache
+                        + RocksDBProviderFactory
+                        + AsRef<PF::ProviderRW>,
+    >,
+{
+    if etl_config.file_size == 0 {
+        return Err(eyre::eyre!("ETL file size cannot be zero"))
+    }
+
+    let (block, hash, expected_state_root) = {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        let block = provider_rw.last_block_number()?;
+        let hash = provider_rw
+            .block_hash(block)?
+            .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
+        let header = provider_rw
+            .header_by_number(block)?
+            .map(|h| SealedHeader::new(h, hash))
+            .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?;
+        let state_root = header.state_root();
+
+        debug!(target: "reth::cli",
+            block,
+            chain=%provider_rw.chain_spec().chain(),
+            "Initializing state at block"
+        );
+
+        (block, hash, state_root)
+    };
+
+    // first line can be state root
+    let dump_state_root = parse_state_root(&mut reader)?;
+    if expected_state_root != dump_state_root {
+        error!(target: "reth::cli",
+            ?dump_state_root,
+            ?expected_state_root,
+            "State root from state dump does not match state root in current header."
+        );
+        return Err(InitStorageError::StateRootMismatch(GotExpected {
+            got: dump_state_root,
+            expected: expected_state_root,
+        })
+        .into())
+    }
+
+    // remaining lines are accounts
+    let collector = parse_accounts(&mut reader, etl_config)?;
+
+    // write state to db with chunked commits to avoid OOM
+    dump_state(collector, provider_factory, block)?;
+
+    info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
+
+    // clear trie tables so state root is computed from scratch
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        provider_rw.tx_ref().clear::<tables::AccountsTrie>()?;
+        provider_rw.tx_ref().clear::<tables::StoragesTrie>()?;
+        provider_rw.commit()?;
+    }
+
+    // compute and compare state root
+    let computed_state_root = compute_state_root_chunked(provider_factory)?;
+    if computed_state_root == expected_state_root {
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
+    } else {
+        error!(target: "reth::cli",
+            ?computed_state_root,
+            ?expected_state_root,
+            "Computed state root does not match state root in state dump"
+        );
+
+        return Err(InitStorageError::StateRootMismatch(GotExpected {
+            got: computed_state_root,
+            expected: expected_state_root,
+        })
+        .into())
+    }
+
+    // insert sync stages for stages that require state
+    {
+        let provider_rw = provider_factory.database_provider_rw()?;
+        for stage in StageId::STATE_REQUIRED {
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+        }
+        provider_rw.commit()?;
+    }
+
+    Ok(hash)
+}
+
+/// Parses and returns expected state root.
+fn parse_state_root(reader: &mut impl BufRead) -> eyre::Result<B256> {
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+
+    let expected_state_root = serde_json::from_str::<StateRoot>(&line)?.root;
+    trace!(target: "reth::cli",
+        root=%expected_state_root,
+        "Read state root from file"
+    );
+    Ok(expected_state_root)
+}
+
+/// Parses accounts and pushes them to a [`Collector`].
+fn parse_accounts(
+    reader: impl BufRead,
+    etl_config: EtlConfig,
+) -> Result<Collector<Address, GenesisAccount>, eyre::Error> {
+    let mut collector = Collector::new(etl_config.file_size, etl_config.dir);
+    let mut parsed_accounts = 0usize;
+
+    let stream =
+        serde_json::Deserializer::from_reader(reader).into_iter::<GenesisAccountWithAddress>();
+    for account in stream {
+        let GenesisAccountWithAddress { genesis_account, address } = account?;
+        collector.insert(address, genesis_account)?;
+
+        parsed_accounts += 1;
+        if parsed_accounts.is_multiple_of(100_000) {
+            info!(target: "reth::cli", parsed_accounts, "Parsed accounts");
+        }
+    }
+
+    Ok(collector)
+}
+
+/// Takes a [`Collector`] and writes all accounts directly to database tables.
+///
+/// This bypasses the higher-level `insert_state`/`insert_genesis_hashes`/`insert_history`
+/// functions which build intermediate structures (`BundleStateInit`, `RevertsInit`,
+/// `ExecutionOutcome`) that duplicate all storage data 2-3x in memory. For accounts with
+/// millions of storage entries this causes OOM.
+///
+/// Instead, each account is written directly to all required tables using cursor operations,
+/// using `append`/`append_dup` for sorted tables where possible (MDBX fast path that skips
+/// B-tree traversal). Commits happen every [`STORAGE_COMMIT_THRESHOLD`] storage units to
+/// bound MDBX dirty page accumulation.
+///
+/// NOTE: This function is not idempotent. If the process crashes mid-import, the database
+/// must be wiped before retrying.
+fn dump_state<PF>(
+    mut collector: Collector<Address, GenesisAccount>,
+    provider_factory: &PF,
+    block: u64,
+) -> Result<(), eyre::Error>
+where
+    PF: DatabaseProviderFactory<ProviderRW: DBProvider<Tx: DbTxMut>>,
+    PF::ProviderRW: StaticFileProviderFactory + StorageSettingsCache + RocksDBProviderFactory,
+{
+    let storage_settings = provider_factory.database_provider_rw()?.cached_storage_settings();
+    if storage_settings.storage_v2 {
+        return dump_state_v2(collector, provider_factory, block)
+    }
+
+    let accounts_len = collector.len();
+    let mut total_accounts: usize = 0;
+    let mut storage_units: usize = 0;
+
+    // pre-allocate the history list once — every entry uses the same single-block bitmap
+    let history_list = IntegerList::new([block])?;
+
+    // track seen bytecode hashes to avoid re-hashing and re-writing duplicates
+    let mut seen_bytecodes: B256Set = B256Set::default();
+
+    let mut provider_rw = provider_factory.database_provider_rw()?;
+
+    for entry in collector.iter()? {
+        let (address_raw, account_raw) = entry?;
+        let (address, _) = Address::from_compact(address_raw.as_slice(), address_raw.len());
+        let (account, _) = GenesisAccount::from_compact(account_raw.as_slice(), account_raw.len());
+
+        let account_storage_len = account.storage.as_ref().map_or(0, |s| s.len());
+        let account_units = 1 + account_storage_len;
+
+        // commit before this account would push us over the threshold
+        if storage_units > 0 && storage_units + account_units > STORAGE_COMMIT_THRESHOLD {
+            provider_rw.commit()?;
+            provider_rw = provider_factory.database_provider_rw()?;
+            info!(target: "reth::cli",
+                total_accounts,
+                accounts_len,
+                storage_units,
+                "Committed chunk"
+            );
+            storage_units = 0;
+            seen_bytecodes = B256Set::default();
+        }
+
+        write_account_to_db(
+            provider_rw.tx_ref(),
+            &address,
+            &account,
+            block,
+            &history_list,
+            &mut seen_bytecodes,
+        )?;
+
+        total_accounts += 1;
+        storage_units += account_units;
+
+        if total_accounts.is_multiple_of(100_000) {
+            info!(target: "reth::cli", total_accounts, accounts_len, "Writing accounts...");
+        }
+    }
+
+    // commit final batch
+    provider_rw.commit()?;
+
+    info!(target: "reth::cli", total_accounts, "All accounts written to database");
+
+    Ok(())
+}
+
+fn dump_state_v2<PF>(
+    mut collector: Collector<Address, GenesisAccount>,
+    provider_factory: &PF,
+    block: u64,
+) -> Result<(), eyre::Error>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: StaticFileProviderFactory
+                        + DBProvider<Tx: DbTxMut>
+                        + StorageSettingsCache
+                        + RocksDBProviderFactory,
+    >,
+{
+    let accounts_len = collector.len();
+    let mut total_accounts: usize = 0;
+    let mut storage_units: usize = 0;
+
+    // pre-allocate the history list once — every entry uses the same single-block bitmap
+    let history_list = IntegerList::new([block])?;
+
+    // track seen bytecode hashes to avoid re-hashing and re-writing duplicates
+    let mut seen_bytecodes: B256Set = B256Set::default();
+
+    let mut provider_rw = provider_factory.database_provider_rw()?;
+    let static_file_provider = provider_rw.static_file_provider();
+    let rocksdb_provider = provider_rw.rocksdb_provider();
+    let mut history_batch = rocksdb_provider.batch_with_auto_commit();
+    if snapshot_state_tables_empty(provider_rw.tx_ref())? {
+        reset_pre_snapshot_changeset_segment(
+            &static_file_provider,
+            StaticFileSegment::AccountChangeSets,
+            block,
+        )?;
+        reset_pre_snapshot_changeset_segment(
+            &static_file_provider,
+            StaticFileSegment::StorageChangeSets,
+            block,
+        )?;
+    }
+
+    {
+        let mut account_changeset_writer =
+            static_file_provider.get_writer(block, StaticFileSegment::AccountChangeSets)?;
+        let mut storage_changeset_writer =
+            static_file_provider.get_writer(block, StaticFileSegment::StorageChangeSets)?;
+        prepare_account_changeset_writer(&mut account_changeset_writer, block)?;
+        prepare_storage_changeset_writer(&mut storage_changeset_writer, block)?;
+
+        for entry in collector.iter()? {
+            let (address_raw, account_raw) = entry?;
+            let (address, _) = Address::from_compact(address_raw.as_slice(), address_raw.len());
+            let (account, _) =
+                GenesisAccount::from_compact(account_raw.as_slice(), account_raw.len());
+
+            let account_storage_len = account.storage.as_ref().map_or(0, |s| s.len());
+            let account_units = 1 + account_storage_len;
+
+            // commit before this account would push us over the threshold
+            if storage_units > 0 && storage_units + account_units > STORAGE_COMMIT_THRESHOLD {
+                history_batch.commit()?;
+                commit_mdbx_only(provider_rw)?;
+                provider_rw = provider_factory.database_provider_rw()?;
+                history_batch = rocksdb_provider.batch_with_auto_commit();
+                info!(target: "reth::cli",
+                    total_accounts,
+                    accounts_len,
+                    storage_units,
+                    "Committed chunk"
+                );
+                storage_units = 0;
+                seen_bytecodes = B256Set::default();
+            }
+
+            write_account_to_db_v2(
+                provider_rw.tx_ref(),
+                (&mut account_changeset_writer, &mut storage_changeset_writer),
+                &mut history_batch,
+                &address,
+                &account,
+                &history_list,
+                &mut seen_bytecodes,
+            )?;
+
+            total_accounts += 1;
+            storage_units += account_units;
+
+            if total_accounts.is_multiple_of(100_000) {
+                info!(target: "reth::cli", total_accounts, accounts_len, "Writing accounts...");
+            }
+        }
+    }
+
+    history_batch.commit()?;
+    commit_mdbx_only(provider_rw)?;
+    static_file_provider.finalize()?;
+
+    info!(target: "reth::cli", total_accounts, "All accounts written to database");
+
+    Ok(())
+}
+
+fn prepare_account_changeset_writer<N: NodePrimitives>(
+    writer: &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
+    block: u64,
+) -> ProviderResult<()> {
+    let next_block = writer.next_block_number();
+    if next_block < block {
+        info!(
+            target: "reth::cli",
+            from_block = next_block,
+            to_block = block - 1,
+            "Padding empty account changesets before state import"
+        );
+        for empty_block in next_block..block {
+            writer.append_account_changeset(Vec::new(), empty_block)?;
+            if empty_block > next_block && empty_block.is_multiple_of(1_000_000) {
+                info!(
+                    target: "reth::cli",
+                    padded_to_block = empty_block,
+                    "Padded empty account changesets"
+                );
+            }
+        }
+    }
+
+    writer.begin_account_changeset(block)
+}
+
+fn prepare_storage_changeset_writer<N: NodePrimitives>(
+    writer: &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
+    block: u64,
+) -> ProviderResult<()> {
+    let next_block = writer.next_block_number();
+    if next_block < block {
+        info!(
+            target: "reth::cli",
+            from_block = next_block,
+            to_block = block - 1,
+            "Padding empty storage changesets before state import"
+        );
+        for empty_block in next_block..block {
+            writer.append_storage_changeset(Vec::new(), empty_block)?;
+            if empty_block > next_block && empty_block.is_multiple_of(1_000_000) {
+                info!(
+                    target: "reth::cli",
+                    padded_to_block = empty_block,
+                    "Padded empty storage changesets"
+                );
+            }
+        }
+    }
+
+    writer.begin_storage_changeset(block)
+}
+
+fn snapshot_state_tables_empty<TX: reth_db_api::transaction::DbTx>(
+    tx: &TX,
+) -> ProviderResult<bool> {
+    Ok(tx.entries::<tables::PlainAccountState>()? == 0 &&
+        tx.entries::<tables::PlainStorageState>()? == 0 &&
+        tx.entries::<tables::HashedAccounts>()? == 0 &&
+        tx.entries::<tables::HashedStorages>()? == 0 &&
+        tx.entries::<tables::AccountChangeSets>()? == 0 &&
+        tx.entries::<tables::StorageChangeSets>()? == 0 &&
+        tx.entries::<tables::Bytecodes>()? == 0)
+}
+
+fn reset_pre_snapshot_changeset_segment<N: NodePrimitives>(
+    static_file_provider: &reth_provider::providers::StaticFileProvider<N>,
+    segment: StaticFileSegment,
+    block: u64,
+) -> ProviderResult<()> {
+    if block == 0 {
+        return Ok(())
+    }
+
+    let Some(highest_block) = static_file_provider.get_highest_static_file_block(segment) else {
+        return Ok(())
+    };
+
+    if highest_block >= block {
+        return Ok(())
+    }
+
+    let file_start = static_file_provider.find_fixed_range(segment, block).start();
+    info!(
+        target: "reth::cli",
+        ?segment,
+        highest_block,
+        import_block = block,
+        file_start,
+        "Resetting pre-snapshot changeset static files before state import"
+    );
+    static_file_provider.delete_segment(segment)?;
+
+    Ok(())
+}
+
+fn commit_mdbx_only<Provider>(provider: Provider) -> ProviderResult<()>
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+{
+    reth_db_api::transaction::DbTx::commit(provider.into_tx()).map_err(ProviderError::from)
+}
+
+/// Writes a single account and all its storage to every required DB table directly,
+/// without building intermediary structures.
+///
+/// Uses `append_dup` for `DupSort` tables where insertion order matches key order (the ETL
+/// collector sorts by address, so `AccountChangeSets`, `PlainStorageState`, and
+/// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
+/// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
+/// use `put`/`upsert` which do a full B-tree lookup.
+#[allow(clippy::clone_on_copy)]
+fn write_account_to_db<TX: DbTxMut>(
+    tx: &TX,
+    address: &Address,
+    genesis_account: &GenesisAccount,
+    block: u64,
+    history_list: &IntegerList,
+    seen_bytecodes: &mut B256Set,
+) -> Result<(), eyre::Error> {
+    let bytecode_hash = if let Some(code) = &genesis_account.code {
+        let bytecode = Bytecode::new_raw_checked(code.clone())
+            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let hash = bytecode.hash_slow();
+        if seen_bytecodes.insert(hash) {
+            tx.put::<tables::Bytecodes>(hash, bytecode)?;
+        }
+        Some(hash)
+    } else {
+        None
+    };
+
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
+
+    let hashed_address = keccak256(address);
+
+    // plain state — sorted by address (ETL order), use append
+    tx.put::<tables::PlainAccountState>(*address, account.clone())?;
+
+    // hashed state — unsorted (keccak scrambles order), must use put
+    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+
+    // account changeset — DupSort keyed by block, subkey sorted by address (ETL order)
+    let mut acct_cs_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
+    acct_cs_cursor.append_dup(block, AccountBeforeTx { address: *address, info: None })?;
+
+    // account history
+    tx.put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list.clone())?;
+
+    // storage entries
+    if let Some(storage) = &genesis_account.storage {
+        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storage_cs_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+
+        for (&key, &value) in storage {
+            let value_u256 = U256::from_be_bytes(value.0);
+
+            // plain storage — sorted by (address, key), use append_dup
+            plain_storage_cursor.append_dup(*address, StorageEntry { key, value: value_u256 })?;
+
+            // hashed storage — unsorted keccak order, use upsert
+            let hashed_key = keccak256(key);
+            hashed_storage_cursor
+                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+
+            // storage changeset — sorted by (block, address), then by key via append_dup
+            storage_cs_cursor.append_dup(
+                BlockNumberAddress((block, *address)),
+                StorageEntry { key, value: U256::ZERO },
+            )?;
+
+            // storage history
+            tx.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(*address, key, u64::MAX),
+                history_list.clone(),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Writes a single account to the v2 storage destinations.
+///
+/// Storage v2 uses hashed state as the canonical state, static-file change sets, and `RocksDB`
+/// history indices. The ETL collector yields accounts sorted by address and genesis storage is a
+/// `BTreeMap`, so the streaming static-file writes preserve the required order.
+fn write_account_to_db_v2<TX, N>(
+    tx: &TX,
+    changeset_writers: (
+        &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
+        &mut reth_provider::providers::StaticFileProviderRWRefMut<'_, N>,
+    ),
+    history_batch: &mut reth_provider::providers::RocksDBBatch<'_>,
+    address: &Address,
+    genesis_account: &GenesisAccount,
+    history_list: &IntegerList,
+    seen_bytecodes: &mut B256Set,
+) -> Result<(), eyre::Error>
+where
+    TX: DbTxMut,
+    N: NodePrimitives,
+{
+    let bytecode_hash = if let Some(code) = &genesis_account.code {
+        let bytecode = Bytecode::new_raw_checked(code.clone())
+            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let hash = bytecode.hash_slow();
+        if seen_bytecodes.insert(hash) {
+            tx.put::<tables::Bytecodes>(hash, bytecode)?;
+        }
+        Some(hash)
+    } else {
+        None
+    };
+
+    let account = Account { bytecode_hash, ..Account::from(genesis_account) };
+
+    let hashed_address = keccak256(address);
+    let (account_changeset_writer, storage_changeset_writer) = changeset_writers;
+
+    tx.put::<tables::HashedAccounts>(hashed_address, account)?;
+    account_changeset_writer
+        .append_account_changeset_entry(AccountBeforeTx { address: *address, info: None })?;
+    history_batch
+        .put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list)?;
+
+    if let Some(storage) = &genesis_account.storage {
+        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+
+        for (&key, &value) in storage {
+            let value_u256 = U256::from_be_bytes(value.0);
+
+            let hashed_key = keccak256(key);
+            hashed_storage_cursor
+                .upsert(hashed_address, &StorageEntry { key: hashed_key, value: value_u256 })?;
+
+            storage_changeset_writer.append_storage_changeset_entry(
+                reth_db_api::models::StorageBeforeTx { address: *address, key, value: U256::ZERO },
+            )?;
+
+            history_batch.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(*address, key, u64::MAX),
+                history_list,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Computes the state root (from scratch) based on the accounts and storages present in the
+/// database.
+fn compute_state_root<Provider>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+{
+    reth_trie_db::with_adapter!(provider, |A| {
+        compute_state_root_inner::<_, A>(provider, prefix_sets)
+    })
+}
+
+fn compute_state_root_inner<Provider, A>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
+where
+    Provider: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    A: reth_trie_db::TrieTableAdapter,
+{
+    trace!(target: "reth::cli", "Computing state root");
+
+    let tx = provider.tx_ref();
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let mut total_flushed_updates = 0;
+
+    loop {
+        let mut state_root =
+            DbStateRoot::<_, A>::from_tx(tx).with_intermediate_state(intermediate_state);
+
+        if let Some(sets) = prefix_sets.clone() {
+            state_root = state_root.with_prefix_sets(sets);
+        }
+
+        match state_root.root_with_progress()? {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updated_len = provider.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                trace!(target: "reth::cli",
+                    last_account_key = %state.account_root_state.last_hashed_key,
+                    updated_len,
+                    total_flushed_updates,
+                    "Flushing trie updates"
+                );
+
+                intermediate_state = Some(*state);
+
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
+                    info!(target: "reth::cli",
+                        total_flushed_updates,
+                        "Flushing trie updates"
+                    );
+                }
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updated_len = provider.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                trace!(target: "reth::cli",
+                    %root,
+                    updated_len,
+                    total_flushed_updates,
+                    "State root has been computed"
+                );
+
+                return Ok(root)
+            }
+        }
+    }
+}
+
+/// Computes the state root (from scratch) with periodic commits to free MDBX dirty pages.
+///
+/// Opens a fresh transaction each iteration to release dirty pages, preventing OOM on large
+/// states where trie updates accumulate gigabytes of MDBX dirty pages.
+fn compute_state_root_chunked<PF>(provider_factory: &PF) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    >,
+{
+    let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+
+    reth_trie_db::with_adapter!(&provider_rw, |A| {
+        drop(provider_rw);
+        compute_state_root_chunked_inner::<PF, A>(provider_factory)
+    })
+}
+
+fn compute_state_root_chunked_inner<PF, A>(provider_factory: &PF) -> Result<B256, InitStorageError>
+where
+    PF: DatabaseProviderFactory<
+        ProviderRW: DBProvider<Tx: DbTxMut> + TrieWriter + StorageSettingsCache,
+    >,
+    A: reth_trie_db::TrieTableAdapter,
+{
+    trace!(target: "reth::cli", "Computing state root");
+
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let mut total_flushed_updates = 0;
+
+    loop {
+        let provider_rw = provider_factory.database_provider_rw().map_err(provider_db_err)?;
+        let tx = provider_rw.tx_ref();
+
+        let state_root = DbStateRoot::<_, A>::from_tx(tx)
+            .with_intermediate_state(intermediate_state.take())
+            .with_threshold(STATE_ROOT_COMMIT_THRESHOLD);
+
+        match state_root.root_with_progress()? {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                info!(target: "reth::cli",
+                    last_account_key = %state.account_root_state.last_hashed_key,
+                    updated_len,
+                    total_flushed_updates,
+                    "Flushing trie updates (committing to free memory)"
+                );
+
+                intermediate_state = Some(*state);
+                provider_rw.commit().map_err(provider_db_err)?;
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updated_len = provider_rw.write_trie_updates(updates)?;
+                total_flushed_updates += updated_len;
+
+                info!(target: "reth::cli",
+                    %root,
+                    updated_len,
+                    total_flushed_updates,
+                    "State root computation complete"
+                );
+
+                provider_rw.commit().map_err(provider_db_err)?;
+                return Ok(root)
+            }
+        }
+    }
+}
+
+/// Converts a provider error into an [`InitStorageError`].
+fn provider_db_err(e: impl std::fmt::Display) -> InitStorageError {
+    InitStorageError::from(StateRootError::Database(DatabaseError::Other(e.to_string())))
+}
+
+/// Type to deserialize state root from state dump file.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct StateRoot {
+    root: B256,
+}
+
+/// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
+/// address.
+#[derive(Debug, Serialize, Deserialize)]
+struct GenesisAccountWithAddress {
+    /// The account's balance, nonce, code, and storage.
+    #[serde(flatten)]
+    genesis_account: GenesisAccount,
+    /// The account's address.
+    address: Address,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::constants::{
+        HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    };
+    use alloy_genesis::Genesis;
+    use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
+    use reth_db::DatabaseEnv;
+    use reth_db_api::{
+        cursor::DbCursorRO,
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        table::{Table, TableRow},
+        transaction::DbTx,
+        Database,
+    };
+    use reth_provider::{
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        ProviderFactory, RocksDBProviderFactory,
+    };
+    use std::{collections::BTreeMap, sync::Arc};
+
+    fn collect_table_entries<DB, T>(
+        tx: &<DB as Database>::TX,
+    ) -> Result<Vec<TableRow<T>>, InitStorageError>
+    where
+        DB: Database,
+        T: Table,
+    {
+        Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    #[test]
+    fn parse_accounts_streams_jsonl_accounts() {
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x2"}
+{"address":"0x0000000000000000000000000000000000000001","balance":"0x1"}
+"#;
+
+        let mut collector =
+            parse_accounts(&input[..], EtlConfig::new(None, 128)).expect("parse succeeds");
+
+        let accounts = collector
+            .iter()
+            .unwrap()
+            .map(|entry| {
+                let (address_raw, account_raw) = entry.unwrap();
+                let (address, _) = Address::from_compact(address_raw.as_slice(), address_raw.len());
+                let (account, _) =
+                    GenesisAccount::from_compact(account_raw.as_slice(), account_raw.len());
+                (address, account.balance)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            accounts,
+            vec![
+                (Address::with_last_byte(1), U256::ONE),
+                (Address::with_last_byte(2), U256::from(2))
+            ]
+        );
+    }
+
+    #[test]
+    fn dump_state_uses_storage_v2_destinations() {
+        let storage_key = B256::with_last_byte(3);
+        let input = br#"{"address":"0x0000000000000000000000000000000000000001","balance":"0x1"}
+{"address":"0x0000000000000000000000000000000000000002","balance":"0x0","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
+"#;
+
+        let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let block = 10;
+
+        dump_state(collector, &factory, block).unwrap();
+
+        let provider = factory.provider().unwrap();
+        let tx = provider.tx_ref();
+        assert_eq!(tx.entries::<tables::PlainAccountState>().unwrap(), 0);
+        assert_eq!(tx.entries::<tables::PlainStorageState>().unwrap(), 0);
+        assert_eq!(tx.entries::<tables::AccountChangeSets>().unwrap(), 0);
+        assert_eq!(tx.entries::<tables::StorageChangeSets>().unwrap(), 0);
+        assert_eq!(tx.entries::<tables::HashedAccounts>().unwrap(), 2);
+        assert_eq!(tx.entries::<tables::HashedStorages>().unwrap(), 1);
+
+        let address_with_balance = Address::with_last_byte(1);
+        let address_with_storage = Address::with_last_byte(2);
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, block).unwrap(),
+            vec![
+                AccountBeforeTx { address: address_with_balance, info: None },
+                AccountBeforeTx { address: address_with_storage, info: None }
+            ]
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
+            vec![(
+                BlockNumberAddress((block, address_with_storage)),
+                StorageEntry { key: storage_key, value: U256::ZERO }
+            )]
+        );
+
+        let rocksdb = factory.rocksdb_provider();
+        let accounts = rocksdb
+            .iter::<tables::AccountsHistory>()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let storages = rocksdb
+            .iter::<tables::StoragesHistory>()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(
+            accounts,
+            vec![
+                (
+                    ShardedKey::new(address_with_balance, u64::MAX),
+                    IntegerList::new([block]).unwrap()
+                ),
+                (
+                    ShardedKey::new(address_with_storage, u64::MAX),
+                    IntegerList::new([block]).unwrap()
+                )
+            ]
+        );
+        assert_eq!(
+            storages,
+            vec![(
+                StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+                IntegerList::new([block]).unwrap()
+            )]
+        );
+    }
+
+    #[test]
+    fn dump_state_v2_resets_presnapshot_changeset_static_files() {
+        let storage_key = B256::with_last_byte(3);
+        let input = br#"{"address":"0x0000000000000000000000000000000000000002","balance":"0x0","storage":{"0x0000000000000000000000000000000000000000000000000000000000000003":"0x0000000000000000000000000000000000000000000000000000000000000004"}}
+"#;
+
+        let collector = parse_accounts(&input[..], EtlConfig::new(None, 128)).unwrap();
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let static_files = factory.static_file_provider();
+
+        {
+            let mut writer =
+                static_files.get_writer(0, StaticFileSegment::AccountChangeSets).unwrap();
+            writer.append_account_changeset(Vec::new(), 0).unwrap();
+        }
+        {
+            let mut writer =
+                static_files.get_writer(0, StaticFileSegment::StorageChangeSets).unwrap();
+            writer.append_storage_changeset(Vec::new(), 0).unwrap();
+        }
+        static_files.commit().unwrap();
+
+        let block = 500_010;
+        dump_state(collector, &factory, block).unwrap();
+        static_files.initialize_index().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let address = Address::with_last_byte(2);
+        assert!(reth_provider::ChangeSetReader::account_block_changeset(&provider, 5)
+            .unwrap()
+            .is_empty());
+        assert!(reth_provider::StorageChangeSetReader::storage_changeset(&provider, 5)
+            .unwrap()
+            .is_empty());
+
+        let account_file_start =
+            static_files.find_fixed_range(StaticFileSegment::AccountChangeSets, block).start();
+        let storage_file_start =
+            static_files.find_fixed_range(StaticFileSegment::StorageChangeSets, block).start();
+        assert_eq!(account_file_start, 500_000);
+        assert_eq!(storage_file_start, 500_000);
+        assert!(reth_provider::ChangeSetReader::account_block_changeset(
+            &provider,
+            account_file_start
+        )
+        .unwrap()
+        .is_empty());
+        assert!(reth_provider::StorageChangeSetReader::storage_changeset(
+            &provider,
+            storage_file_start
+        )
+        .unwrap()
+        .is_empty());
+
+        assert_eq!(
+            reth_provider::ChangeSetReader::account_block_changeset(&provider, block).unwrap(),
+            vec![AccountBeforeTx { address, info: None }]
+        );
+        assert_eq!(
+            reth_provider::StorageChangeSetReader::storage_changeset(&provider, block).unwrap(),
+            vec![(
+                BlockNumberAddress((block, address)),
+                StorageEntry { key: storage_key, value: U256::ZERO }
+            )]
+        );
+
+        let account_offsets = static_files
+            .get_segment_provider_for_block(StaticFileSegment::AccountChangeSets, block, None)
+            .unwrap()
+            .read_changeset_offsets()
+            .unwrap()
+            .unwrap();
+        let storage_offsets = static_files
+            .get_segment_provider_for_block(StaticFileSegment::StorageChangeSets, block, None)
+            .unwrap()
+            .read_changeset_offsets()
+            .unwrap()
+            .unwrap();
+        assert_eq!(account_offsets.len() as u64, block - account_file_start + 1);
+        assert_eq!(storage_offsets.len() as u64, block - storage_file_start + 1);
+    }
+
+    #[test]
+    fn success_init_genesis_mainnet() {
+        let genesis_hash =
+            init_genesis(&create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
+    }
+
+    #[test]
+    fn success_init_genesis_sepolia() {
+        let genesis_hash =
+            init_genesis(&create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
+    }
+
+    #[test]
+    fn success_init_genesis_holesky() {
+        let genesis_hash =
+            init_genesis(&create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
+    }
+
+    #[test]
+    fn fail_init_inconsistent_db() {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let static_file_provider = factory.static_file_provider();
+        let rocksdb_provider = factory.rocksdb_provider();
+        init_genesis(&factory).unwrap();
+
+        // Try to init db with a different genesis block
+        let genesis_hash = init_genesis(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+                rocksdb_provider,
+                reth_tasks::Runtime::test(),
+            )
+            .unwrap(),
+        );
+
+        assert!(matches!(
+            genesis_hash.unwrap_err(),
+            InitStorageError::GenesisHashMismatch {
+                chainspec_hash: MAINNET_GENESIS_HASH,
+                storage_hash: SEPOLIA_GENESIS_HASH
+            }
+        ))
+    }
+
+    #[test]
+    fn skip_genesis_hash_validation_accepts_mismatched_db() {
+        let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
+        let static_file_provider = factory.static_file_provider();
+        let rocksdb_provider = factory.rocksdb_provider();
+        init_genesis(&factory).unwrap();
+
+        let result = init_genesis_with_settings_and_validate(
+            &ProviderFactory::<MockNodeTypesWithDB>::new(
+                factory.into_db(),
+                MAINNET.clone(),
+                static_file_provider,
+                rocksdb_provider,
+                reth_tasks::Runtime::test(),
+            )
+            .unwrap(),
+            StorageSettings::base(),
+            false,
+        );
+
+        let returned = result.expect("skip_genesis_validation should suppress mismatch error");
+        assert_eq!(
+            returned, SEPOLIA_GENESIS_HASH,
+            "bypass returns the DB-resident hash, not the chainspec hash",
+        );
+    }
+
+    #[test]
+    fn init_genesis_history() {
+        let address_with_balance = Address::with_last_byte(1);
+        let address_with_storage = Address::with_last_byte(2);
+        let storage_key = B256::with_last_byte(1);
+        let chain_spec = Arc::new(ChainSpec {
+            chain: Chain::from_id(1),
+            genesis: Genesis {
+                alloc: BTreeMap::from([
+                    (
+                        address_with_balance,
+                        GenesisAccount { balance: U256::ONE, ..Default::default() },
+                    ),
+                    (
+                        address_with_storage,
+                        GenesisAccount {
+                            storage: Some(BTreeMap::from([(storage_key, B256::random())])),
+                            ..Default::default()
+                        },
+                    ),
+                ]),
+                ..Default::default()
+            },
+            hardforks: Default::default(),
+            paris_block_and_final_difficulty: None,
+            deposit_contract: None,
+            ..Default::default()
+        });
+
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+
+        let expected_accounts = vec![
+            (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
+            (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap()),
+        ];
+        let expected_storages = vec![(
+            StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+            IntegerList::new([0]).unwrap(),
+        )];
+
+        let collect_from_mdbx = |factory: &ProviderFactory<MockNodeTypesWithDB>| {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+            (
+                collect_table_entries::<DatabaseEnv, tables::AccountsHistory>(tx).unwrap(),
+                collect_table_entries::<DatabaseEnv, tables::StoragesHistory>(tx).unwrap(),
+            )
+        };
+
+        {
+            let settings = factory.cached_storage_settings();
+            let rocksdb = factory.rocksdb_provider();
+
+            let collect_rocksdb = |rocksdb: &reth_provider::providers::RocksDBProvider| {
+                (
+                    rocksdb
+                        .iter::<tables::AccountsHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                    rocksdb
+                        .iter::<tables::StoragesHistory>()
+                        .unwrap()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap(),
+                )
+            };
+
+            let (accounts, storages) = if settings.storage_v2 {
+                collect_rocksdb(&rocksdb)
+            } else {
+                collect_from_mdbx(&factory)
+            };
+            assert_eq!(accounts, expected_accounts);
+            assert_eq!(storages, expected_storages);
+        }
+    }
+
+    #[test]
+    fn warn_storage_settings_mismatch() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        init_genesis_with_settings(&factory, StorageSettings::v1()).unwrap();
+
+        // Request different settings - should warn but succeed
+        let result = init_genesis_with_settings(&factory, StorageSettings::v2());
+
+        // Should succeed (warning is logged, not an error)
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn allow_same_storage_settings() {
+        let factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let settings = StorageSettings::v2();
+        init_genesis_with_settings(&factory, settings).unwrap();
+
+        let result = init_genesis_with_settings(&factory, settings);
+
+        assert!(result.is_ok());
+    }
+}

@@ -1,0 +1,418 @@
+//! Main `stage` command
+//!
+//! Stage debugging tool
+
+use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
+use alloy_eips::BlockHashOrNumber;
+use backon::{ConstantBuilder, Retryable};
+use clap::Parser;
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
+use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
+use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
+use reth_exex::ExExManagerHandle;
+use reth_network::BlockDownloaderProvider;
+use reth_node_builder::common::metrics_hooks;
+use reth_node_core::{
+    args::{NetworkArgs, StageEnum},
+    utils::get_single_header,
+    version::version_metadata,
+};
+use reth_node_metrics::{
+    chain::ChainSpecInfo,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+};
+use reth_primitives_traits::FastInstant as Instant;
+use reth_provider::{
+    providers::BlockchainProvider, ChainSpecProvider, DBProvider, DatabaseProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter,
+};
+use reth_stages::{
+    stages::{
+        AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TransactionLookupStage,
+    },
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
+};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::watch;
+use tracing::*;
+
+/// Number of times fetching the tip header is retried before giving up.
+const HEADER_FETCH_RETRIES: usize = 5;
+
+const HASHING_UNSUPPORTED: &str = "The `hashing` stage cannot be run directly, run `account-hashing` and `storage-hashing` instead.";
+
+/// `reth stage` command
+#[derive(Debug, Parser)]
+pub struct Command<C: ChainSpecParser> {
+    #[command(flatten)]
+    env: EnvironmentArgs<C>,
+
+    /// Enable Prometheus metrics.
+    ///
+    /// The metrics will be served at the given interface and port.
+    #[arg(long, value_name = "SOCKET")]
+    metrics: Option<SocketAddr>,
+
+    /// The name of the stage to run
+    #[arg(value_enum)]
+    stage: StageEnum,
+
+    /// The height to start at
+    #[arg(long)]
+    from: u64,
+
+    /// The end of the stage
+    #[arg(long, short)]
+    to: u64,
+
+    /// Batch size for stage execution and unwind
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    batch_size: Option<u64>,
+
+    /// Normally, running the stage requires unwinding for stages that already
+    /// have been run, in order to not rewrite to the same database slots.
+    ///
+    /// You can optionally skip the unwinding phase if you're syncing a block
+    /// range that has not been synced before.
+    #[arg(long, short)]
+    skip_unwind: bool,
+
+    /// Commits the changes in the database. WARNING: potentially destructive.
+    ///
+    /// Useful when you want to run diagnostics on the database.
+    ///
+    /// NOTE: This flag is currently required for the headers, bodies, and execution stages because
+    /// they use static files and must commit to properly unwind and run.
+    // TODO: We should consider allowing to run hooks at the end of the stage run,
+    // e.g. query the DB size, or any table data.
+    #[arg(long, short)]
+    commit: bool,
+
+    /// Save stage checkpoints
+    #[arg(long)]
+    checkpoints: bool,
+
+    #[command(flatten)]
+    network: NetworkArgs,
+}
+
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
+    /// Execute `stage` command
+    pub async fn execute<N, Comp, F>(self, ctx: CliContext, components: F) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
+        Comp: CliNodeComponents<N>,
+        F: FnOnce(Arc<C::ChainSpec>) -> Comp,
+    {
+        self.validate()?;
+
+        // Quit early if the stage requires a commit and `--commit` is not provided.
+        if self.requires_commit() && !self.commit {
+            return Err(eyre::eyre!(
+                "The stage {} requires overwriting existing static files and must commit, but `--commit` was not provided. Please pass `--commit` and try again.",
+                self.stage.to_string()
+            ));
+        }
+
+        // Raise the fd limit of the process.
+        // Does not do anything on windows.
+        let _ = fdlimit::raise_fd_limit();
+
+        let runtime = ctx.task_executor.clone();
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW, ctx.task_executor.clone())?;
+
+        let mut provider_rw = provider_factory.database_provider_rw()?;
+        let components = components(provider_factory.chain_spec());
+
+        if let Some(listen_addr) = self.metrics {
+            let config = MetricServerConfig::new(
+                listen_addr,
+                VersionInfo {
+                    version: version_metadata().cargo_pkg_version.as_ref(),
+                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                    git_sha: version_metadata().vergen_git_sha.as_ref(),
+                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
+                    build_profile: version_metadata().build_profile_name.as_ref(),
+                },
+                ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
+                ctx.task_executor,
+                metrics_hooks(&provider_factory),
+                data_dir.pprof_dumps(),
+            );
+
+            MetricServer::new(config).serve().await?;
+        }
+
+        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+
+        let etl_config = config.stages.etl.clone();
+        let prune_modes = config.prune.segments.clone();
+
+        let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
+            match self.stage {
+                StageEnum::Headers => {
+                    let consensus = Arc::new(components.consensus().clone());
+
+                    let network_secret_path = self
+                        .network
+                        .p2p_secret_key
+                        .clone()
+                        .unwrap_or_else(|| data_dir.p2p_secret());
+                    let p2p_secret_key = get_secret_key(&network_secret_path)?;
+
+                    let default_peers_path = data_dir.known_peers();
+
+                    let network = self
+                        .network
+                        .network_config::<N::NetworkPrimitives>(
+                            &config,
+                            provider_factory.chain_spec(),
+                            p2p_secret_key,
+                            default_peers_path,
+                            runtime.clone(),
+                        )
+                        .build(BlockchainProvider::new(provider_factory.clone())?)
+                        .start_network()
+                        .await?;
+                    let fetch_client = Arc::new(network.fetch_client().await?);
+
+                    // Use `to` as the tip for the stage
+                    let tip = (|| {
+                        get_single_header(fetch_client.clone(), BlockHashOrNumber::Number(self.to))
+                    })
+                    .retry(ConstantBuilder::default().with_max_times(HEADER_FETCH_RETRIES))
+                    .notify(|err, _| {
+                        warn!(target: "reth::cli", error = %err, "Error requesting header. Retrying...")
+                    })
+                    .await?;
+                    let (_, rx) = watch::channel(tip.hash());
+                    (
+                        Box::new(HeaderStage::new(
+                            provider_factory.clone(),
+                            ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+                                .build(fetch_client, consensus.clone()),
+                            rx,
+                            etl_config,
+                        )),
+                        None,
+                    )
+                }
+                StageEnum::Bodies => {
+                    let consensus = Arc::new(components.consensus().clone());
+
+                    let mut config = config;
+                    config.peers.trusted_nodes_only |= self.network.trusted_only;
+                    config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
+
+                    let network_secret_path = self
+                        .network
+                        .p2p_secret_key
+                        .clone()
+                        .unwrap_or_else(|| data_dir.p2p_secret());
+                    let p2p_secret_key = get_secret_key(&network_secret_path)?;
+
+                    let default_peers_path = data_dir.known_peers();
+
+                    let network = self
+                        .network
+                        .network_config::<N::NetworkPrimitives>(
+                            &config,
+                            provider_factory.chain_spec(),
+                            p2p_secret_key,
+                            default_peers_path,
+                            runtime.clone(),
+                        )
+                        .build(BlockchainProvider::new(provider_factory.clone())?)
+                        .start_network()
+                        .await?;
+                    let fetch_client = Arc::new(network.fetch_client().await?);
+
+                    let stage = BodyStage::new(
+                        BodiesDownloaderBuilder::default()
+                            .with_stream_batch_size(batch_size as usize)
+                            .with_request_limit(config.stages.bodies.downloader_request_limit)
+                            .with_max_buffered_blocks_size_bytes(
+                                config.stages.bodies.downloader_max_buffered_blocks_size_bytes,
+                            )
+                            .with_concurrent_requests_range(
+                                config.stages.bodies.downloader_min_concurrent_requests..=
+                                    config.stages.bodies.downloader_max_concurrent_requests,
+                            )
+                            .build(fetch_client, consensus.clone(), provider_factory.clone()),
+                    );
+                    (Box::new(stage), None)
+                }
+                StageEnum::Senders => (
+                    Box::new(SenderRecoveryStage::new(
+                        SenderRecoveryConfig { commit_threshold: batch_size },
+                        None,
+                    )),
+                    None,
+                ),
+                StageEnum::Execution => (
+                    Box::new(ExecutionStage::new(
+                        components.evm_config().clone(),
+                        Arc::new(components.consensus().clone()),
+                        ExecutionStageThresholds {
+                            max_blocks: Some(batch_size),
+                            max_changes: None,
+                            max_cumulative_gas: None,
+                            max_duration: None,
+                        },
+                        config.stages.merkle.incremental_threshold,
+                        ExExManagerHandle::empty(),
+                    )),
+                    None,
+                ),
+                StageEnum::TxLookup => (
+                    Box::new(TransactionLookupStage::new(
+                        TransactionLookupConfig { chunk_size: batch_size },
+                        etl_config,
+                        prune_modes.transaction_lookup,
+                    )),
+                    None,
+                ),
+                StageEnum::AccountHashing => (
+                    Box::new(AccountHashingStage::new(
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
+                        etl_config,
+                    )),
+                    None,
+                ),
+                StageEnum::StorageHashing => (
+                    Box::new(StorageHashingStage::new(
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: batch_size,
+                            commit_entries: u64::MAX,
+                        },
+                        etl_config,
+                    )),
+                    None,
+                ),
+                StageEnum::Merkle => (
+                    Box::new(MerkleStage::new_execution(
+                        config.stages.merkle.rebuild_threshold,
+                        config.stages.merkle.incremental_threshold,
+                    )),
+                    Some(Box::new(MerkleStage::default_unwind())),
+                ),
+                StageEnum::AccountHistory => (
+                    Box::new(IndexAccountHistoryStage::new(
+                        config.stages.index_account_history,
+                        etl_config,
+                        prune_modes.account_history,
+                    )),
+                    None,
+                ),
+                StageEnum::StorageHistory => (
+                    Box::new(IndexStorageHistoryStage::new(
+                        config.stages.index_storage_history,
+                        etl_config,
+                        prune_modes.storage_history,
+                    )),
+                    None,
+                ),
+                StageEnum::Hashing => eyre::bail!(HASHING_UNSUPPORTED),
+            };
+        let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();
+
+        let unwind_stage = unwind_stage.as_mut().unwrap_or(&mut exec_stage);
+
+        let mut unwind = UnwindInput {
+            checkpoint: checkpoint.with_block_number(self.to),
+            unwind_to: self.from,
+            bad_block: None,
+        };
+
+        if !self.skip_unwind {
+            while unwind.checkpoint.block_number > self.from {
+                let UnwindOutput { checkpoint } = unwind_stage.unwind(&provider_rw, unwind)?;
+                unwind.checkpoint = checkpoint;
+
+                if self.checkpoints {
+                    provider_rw.save_stage_checkpoint(unwind_stage.id(), checkpoint)?;
+                }
+
+                if self.commit {
+                    provider_rw.commit()?;
+                    provider_rw = provider_factory.database_provider_rw()?;
+                }
+            }
+        }
+
+        let mut input = ExecInput {
+            target: Some(self.to),
+            checkpoint: Some(checkpoint.with_block_number(self.from)),
+        };
+
+        let start = Instant::now();
+        info!(target: "reth::cli", stage = %self.stage, "Executing stage");
+        loop {
+            exec_stage.execute_ready(input).await?;
+            let ExecOutput { checkpoint, done } = exec_stage.execute(&provider_rw, input)?;
+
+            input.checkpoint = Some(checkpoint);
+
+            if self.checkpoints {
+                provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
+            }
+            if self.commit {
+                provider_rw.commit()?;
+                provider_rw = provider_factory.database_provider_rw()?;
+            }
+
+            if done {
+                break
+            }
+        }
+        info!(target: "reth::cli", stage = %self.stage, time = ?start.elapsed(), "Finished stage");
+
+        Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
+    }
+
+    /// Validates the arguments that do not require opening the database.
+    fn validate(&self) -> eyre::Result<()> {
+        if self.stage == StageEnum::Hashing {
+            eyre::bail!(HASHING_UNSUPPORTED);
+        }
+        eyre::ensure!(
+            self.from <= self.to,
+            "`--from` ({}) must not be greater than `--to` ({})",
+            self.from,
+            self.to
+        );
+        Ok(())
+    }
+
+    /// Returns whether or not the configured stage requires committing.
+    ///
+    /// This is the case for stages that mainly modify static files, as there is no way to unwind
+    /// these stages without committing anyways. This is because static files do not have
+    /// transactions and we cannot change the view of headers without writing.
+    pub fn requires_commit(&self) -> bool {
+        matches!(self.stage, StageEnum::Headers | StageEnum::Bodies | StageEnum::Execution)
+    }
+}

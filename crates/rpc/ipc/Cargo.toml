@@ -1,0 +1,36 @@
+[package]
+name = "reth-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "IPC support for reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+# async/net
+futures.workspace = true
+tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
+tokio-stream.workspace = true
+pin-project.workspace = true
+tower.workspace = true
+
+# misc
+jsonrpsee = { workspace = true, features = ["server", "client"] }
+serde_json.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+futures-util.workspace = true
+interprocess = { workspace = true, features = ["tokio"] }
+
+[dev-dependencies]
+tokio-stream = { workspace = true, features = ["sync"] }
+serde.workspace = true
+reth-tracing.workspace = true
+rand.workspace = true

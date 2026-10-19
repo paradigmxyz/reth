@@ -1,0 +1,135 @@
+#![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
+
+use crate::{MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE};
+use derive_more::Display;
+use strum::{EnumIter, IntoEnumIterator};
+use thiserror::Error;
+
+/// Segment of the data that can be pruned.
+///
+/// VERY IMPORTANT NOTE: new variants must be added to the end of this enum, and old variants which
+/// are no longer used must not be removed from this enum. The variant index is encoded directly
+/// when writing to the `PruneCheckpoint` table, so changing the order here will corrupt the table.
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, EnumIter)]
+#[cfg_attr(test, derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+pub enum PruneSegment {
+    /// Prune segment responsible for the `TransactionSenders` table.
+    SenderRecovery,
+    /// Prune segment responsible for the `TransactionHashNumbers` table.
+    TransactionLookup,
+    /// Prune segment responsible for all rows in `Receipts` table.
+    Receipts,
+    /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
+    ContractLogs,
+    /// Prunes account changesets (static files/MDBX) and `AccountsHistory`.
+    AccountHistory,
+    /// Prunes storage changesets (static files/MDBX) and `StoragesHistory`.
+    StorageHistory,
+    #[deprecated = "Variant indexes cannot be changed"]
+    #[strum(disabled)]
+    /// Prune segment responsible for the `CanonicalHeaders`, `Headers` tables.
+    Headers,
+    #[deprecated = "Variant indexes cannot be changed"]
+    #[strum(disabled)]
+    /// Prune segment responsible for the `Transactions` table.
+    Transactions,
+    #[deprecated = "Variant indexes cannot be changed"]
+    #[strum(disabled)]
+    /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
+    /// `StoragesTrieChangeSets` table.
+    MerkleChangeSets,
+    /// Prune segment responsible for bodies (transactions in static files).
+    Bodies,
+}
+
+#[cfg(test)]
+#[expect(clippy::derivable_impls)]
+impl Default for PruneSegment {
+    fn default() -> Self {
+        Self::SenderRecovery
+    }
+}
+
+impl PruneSegment {
+    /// Returns an iterator over all variants of [`PruneSegment`].
+    ///
+    /// Excludes deprecated variants that are no longer used, but can still be found in the
+    /// database.
+    pub fn variants() -> impl Iterator<Item = Self> {
+        Self::iter()
+    }
+
+    /// Returns minimum number of blocks to keep in the database for this segment.
+    pub const fn min_blocks(&self) -> u64 {
+        match self {
+            Self::SenderRecovery | Self::TransactionLookup => 0,
+            Self::Receipts | Self::Bodies => MINIMUM_DISTANCE,
+            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+                MINIMUM_UNWIND_SAFE_DISTANCE
+            }
+            #[expect(deprecated)]
+            #[expect(clippy::match_same_arms)]
+            Self::Headers | Self::Transactions | Self::MerkleChangeSets => 0,
+        }
+    }
+
+    /// Returns true if this is [`Self::AccountHistory`].
+    pub const fn is_account_history(&self) -> bool {
+        matches!(self, Self::AccountHistory)
+    }
+
+    /// Returns true if this is [`Self::StorageHistory`].
+    pub const fn is_storage_history(&self) -> bool {
+        matches!(self, Self::StorageHistory)
+    }
+}
+
+/// Prune purpose.
+#[derive(Debug, Clone, Copy)]
+pub enum PrunePurpose {
+    /// Prune data according to user configuration.
+    User,
+    /// Prune data according to highest `static_files` to delete the data from database.
+    StaticFile,
+}
+
+impl PrunePurpose {
+    /// Returns true if the purpose is [`PrunePurpose::User`].
+    pub const fn is_user(self) -> bool {
+        matches!(self, Self::User)
+    }
+
+    /// Returns true if the purpose is [`PrunePurpose::StaticFile`].
+    pub const fn is_static_file(self) -> bool {
+        matches!(self, Self::StaticFile)
+    }
+}
+
+/// `PruneSegment` error type.
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum PruneSegmentError {
+    /// Invalid configuration of a prune segment.
+    #[error("the configuration provided for {0} is invalid")]
+    Configuration(PruneSegment),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prune_segment_iter_excludes_deprecated() {
+        let segments: Vec<PruneSegment> = PruneSegment::variants().collect();
+
+        // Verify deprecated variants are not included derived iter
+        #[expect(deprecated)]
+        {
+            assert!(!segments.contains(&PruneSegment::Headers));
+            assert!(!segments.contains(&PruneSegment::Transactions));
+            assert!(!segments.contains(&PruneSegment::MerkleChangeSets));
+        }
+    }
+}

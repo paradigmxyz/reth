@@ -1,0 +1,44 @@
+[package]
+name = "reth-tasks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Task management"
+
+[lints]
+workspace = true
+
+[dependencies]
+# async
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
+tracing-futures.workspace = true
+futures-util = { workspace = true, features = ["std"] }
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
+# misc
+dashmap.workspace = true
+parking_lot.workspace = true
+thread-priority.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+# feature `rayon`
+rayon = { workspace = true, optional = true }
+crossbeam-utils = { workspace = true, optional = true }
+pin-project = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+
+[features]
+rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
+test-utils = []

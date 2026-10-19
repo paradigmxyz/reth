@@ -1,0 +1,21 @@
+[package]
+name = "example-beacon-api-sse"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "cli"] }
+
+alloy-rpc-types-beacon.workspace = true
+
+bytes.workspace = true
+clap.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+
+[lints]

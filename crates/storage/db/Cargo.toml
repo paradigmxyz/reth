@@ -1,0 +1,100 @@
+[package]
+name = "reth-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Database primitives used in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-api.workspace = true
+reth-fs-util.workspace = true
+reth-storage-errors.workspace = true
+reth-nippy-jar.workspace = true
+reth-tracing.workspace = true
+tracing.workspace = true
+reth-static-file-types.workspace = true
+reth-primitives-traits = { workspace = true, optional = true, features = ["quanta"] }
+
+# ethereum
+alloy-primitives.workspace = true
+
+# mdbx
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
+eyre = { workspace = true, optional = true }
+
+# metrics
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+# misc
+page_size = { workspace = true, optional = true }
+thiserror.workspace = true
+tempfile = { workspace = true, optional = true }
+derive_more.workspace = true
+rustc-hash = { workspace = true, optional = true, features = ["std"] }
+sysinfo = { workspace = true, features = ["system"] }
+parking_lot = { workspace = true, optional = true }
+
+# arbitrary utils
+strum = { workspace = true, features = ["derive"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+# reth libs with arbitrary
+reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+reth-prune-types.workspace = true
+
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-consensus.workspace = true
+
+serde_json.workspace = true
+tempfile.workspace = true
+parking_lot.workspace = true
+
+serde.workspace = true
+
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+
+assert_matches.workspace = true
+
+[features]
+dst = ["reth-libmdbx?/dst"]
+default = ["mdbx"]
+mdbx = [
+    "dep:reth-libmdbx",
+    "dep:eyre",
+    "dep:page_size",
+    "dep:reth-primitives-traits",
+    "reth-metrics",
+    "dep:metrics",
+    "dep:strum",
+    "dep:rustc-hash",
+]
+test-utils = [
+    "dep:tempfile",
+    "mdbx",
+    "arbitrary",
+    "parking_lot",
+    "reth-db-api/test-utils",
+    "reth-nippy-jar/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-prune-types/test-utils",
+]
+arbitrary = [
+    "reth-db-api/arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-consensus/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-prune-types/arbitrary",
+]
+disable-lock = []

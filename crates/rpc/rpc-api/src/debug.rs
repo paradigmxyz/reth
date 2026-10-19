@@ -1,0 +1,383 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
+use alloy_json_rpc::RpcObject;
+use alloy_primitives::{Address, Bytes, B256, U64};
+use alloy_rpc_types_debug::ExecutionWitness;
+use alloy_rpc_types_eth::{Account, AccountInfo, Bundle, Index, StateContext};
+use alloy_rpc_types_trace::geth::{
+    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
+
+/// Debug rpc interface.
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+pub trait DebugApi<TxReq: RpcObject> {
+    /// Returns an RLP-encoded header.
+    #[method(name = "getRawHeader")]
+    async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
+    /// Returns an RLP-encoded block.
+    #[method(name = "getRawBlock")]
+    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
+    /// Returns the RLP-encoded EIP-7928 block access list.
+    #[method(name = "getRawBlockAccessList")]
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
+    /// Returns an EIP-2718 binary-encoded transaction.
+    ///
+    /// If this is a pooled EIP-4844 transaction, the blob sidecar is included.
+    #[method(name = "getRawTransaction")]
+    async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
+    /// Returns an array of EIP-2718 binary-encoded transactions for the given [`BlockId`].
+    #[method(name = "getRawTransactions")]
+    async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
+
+    /// Returns an array of EIP-2718 binary-encoded receipts.
+    #[method(name = "getRawReceipts")]
+    async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
+
+    /// Returns an array of recent bad blocks that the client has seen on the network.
+    #[method(name = "getBadBlocks")]
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
+
+    /// Clears all transactions from the transaction pool.
+    #[method(name = "clearTxpool")]
+    async fn debug_clear_txpool(&self) -> RpcResult<()>;
+
+    /// Subscribes to structured logs created during EVM execution between two blocks, excluding
+    /// the start block and including the end block.
+    #[subscription(
+        name = "subscribe" => "subscription",
+        unsubscribe = "unsubscribe",
+        item = alloy_rpc_types_trace::geth::ChainBlockTraceResult
+    )]
+    async fn debug_subscribe(
+        &self,
+        subscription: String,
+        start_exclusive: BlockNumberOrTag,
+        end_inclusive: BlockNumberOrTag,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> jsonrpsee::core::SubscriptionResult;
+
+    /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
+    /// transaction that were included in this block.
+    ///
+    /// This expects an rlp encoded block
+    ///
+    /// Note, the parent of this block must be present, or it will fail. For the second parameter
+    /// see [`GethDebugTracingOptions`] reference.
+    #[method(name = "traceBlock")]
+    async fn debug_trace_block(
+        &self,
+        rlp_block: Bytes,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+
+    /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
+    /// the block that is already present in the database. For the second parameter see
+    /// [`GethDebugTracingOptions`].
+    #[method(name = "traceBlockByHash")]
+    async fn debug_trace_block_by_hash(
+        &self,
+        block: B256,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+
+    /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
+    /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
+    /// For the second parameter see [`GethDebugTracingOptions`].
+    #[method(name = "traceBlockByNumber")]
+    async fn debug_trace_block_by_number(
+        &self,
+        block: BlockNumberOrTag,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+
+    /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
+    /// exact same manner as it was executed on the network. It will replay any transaction that
+    /// may have been executed prior to this one before it will finally attempt to execute the
+    /// transaction that corresponds to the given hash.
+    #[method(name = "traceTransaction")]
+    async fn debug_trace_transaction(
+        &self,
+        tx_hash: B256,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> RpcResult<GethTrace>;
+
+    /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
+    /// block execution using the final state of parent block as the base.
+    ///
+    /// The first argument (just as in `eth_call`) is a transaction request.
+    /// The block can optionally be specified either by hash or by number as
+    /// the second argument.
+    /// The trace can be configured similar to `debug_traceTransaction`,
+    /// see [`GethDebugTracingOptions`]. The method returns the same output as
+    /// `debug_traceTransaction`.
+    #[method(name = "traceCall")]
+    async fn debug_trace_call(
+        &self,
+        request: TxReq,
+        block_id: Option<BlockId>,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<GethTrace>;
+
+    /// The `debug_traceCallMany` method lets you run an `eth_callMany` within the context of the
+    /// given block execution using the final state of parent block as the base followed by n
+    /// transactions.
+    ///
+    /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
+    /// will affect all transaction in that bundle.
+    /// `BlockNumber` and `transaction_index` are optional. `Transaction_index`
+    /// specifies the number of tx in the block to replay and -1 means all transactions should be
+    /// replayed.
+    /// The trace can be configured similar to `debug_traceTransaction`.
+    /// State override apply to all bundles.
+    ///
+    /// This methods is similar to many `eth_callMany`, hence this returns nested lists of traces.
+    /// Where the length of the outer list is the number of bundles and the length of the inner list
+    /// (`Vec<GethTrace>`) is the number of transactions in the bundle.
+    #[method(name = "traceCallMany")]
+    async fn debug_trace_call_many(
+        &self,
+        bundles: Vec<Bundle<TxReq>>,
+        state_context: Option<StateContext>,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<Vec<GethTrace>>>;
+
+    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    ///
+    /// The first argument is the block identifier. The optional second argument selects the
+    /// witness generation mode and defaults to `legacy`.
+    #[method(name = "executionWitness")]
+    async fn debug_execution_witness(
+        &self,
+        block: BlockId,
+        mode: Option<ExecutionWitnessMode>,
+    ) -> RpcResult<ExecutionWitness>;
+
+    /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
+    /// purpose of generating an execution witness. The witness comprises of a map of all hashed
+    /// trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
+    ///
+    /// The first argument is the block hash. The optional second argument selects the witness
+    /// generation mode and defaults to `legacy`.
+    #[method(name = "executionWitnessByBlockHash")]
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+        mode: Option<ExecutionWitnessMode>,
+    ) -> RpcResult<ExecutionWitness>;
+
+    /// Returns account information, including the storage root, at the state after executing the
+    /// transaction with the given index in the block.
+    #[method(name = "accountAt")]
+    async fn debug_account_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<Account>>;
+
+    /// Returns account information at the state after executing the transaction with the given
+    /// index in the block.
+    #[method(name = "accountInfoAt")]
+    async fn debug_account_info_at(
+        &self,
+        block_id: BlockId,
+        tx_index: Index,
+        address: Address,
+    ) -> RpcResult<Option<AccountInfo>>;
+
+    /// Enumerates all accounts at a given block with paging capability. `maxResults` are returned
+    /// in the page and the items have keys that come after the `start` key (hashed address).
+    ///
+    /// If incompletes is false, then accounts for which the key preimage (i.e: the address) doesn't
+    /// exist in db are skipped. NB: geth by default does not store preimages.
+    #[method(name = "accountRange")]
+    async fn debug_account_range(
+        &self,
+        block_number: BlockNumberOrTag,
+        start: Bytes,
+        max_results: u64,
+        nocode: bool,
+        nostorage: bool,
+        incompletes: bool,
+    ) -> RpcResult<()>;
+
+    /// Flattens the entire key-value database into a single level, removing all unused slots and
+    /// merging all keys.
+    #[method(name = "chaindbCompact")]
+    async fn debug_chaindb_compact(&self) -> RpcResult<()>;
+
+    /// Returns the current chain config.
+    #[method(name = "chainConfig")]
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig>;
+
+    /// Returns leveldb properties of the key-value database.
+    #[method(name = "chaindbProperty")]
+    async fn debug_chaindb_property(&self, property: String) -> RpcResult<()>;
+
+    /// Returns the code associated with a given hash at the specified block ID.
+    /// If no block ID is provided, it defaults to the latest block.
+    #[method(name = "codeByHash")]
+    async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>>;
+
+    /// Retrieves an ancient binary blob from the freezer. The freezer is a collection of
+    /// append-only immutable files. The first argument `kind` specifies which table to look up data
+    /// from. The list of all table kinds are as follows:
+    #[method(name = "dbAncient")]
+    async fn debug_db_ancient(&self, kind: String, number: u64) -> RpcResult<()>;
+
+    /// Returns the number of ancient items in the ancient store.
+    #[method(name = "dbAncients")]
+    async fn debug_db_ancients(&self) -> RpcResult<()>;
+
+    /// Returns the raw value of a key stored in the database.
+    #[method(name = "dbGet")]
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>>;
+
+    /// Retrieves the state that corresponds to the block number and returns a list of accounts
+    /// (including storage and code).
+    #[method(name = "dumpBlock")]
+    async fn debug_dump_block(&self, number: BlockId) -> RpcResult<()>;
+
+    /// Forces garbage collection.
+    #[method(name = "freeOSMemory")]
+    async fn debug_free_os_memory(&self) -> RpcResult<()>;
+
+    /// Returns garbage collection statistics.
+    #[method(name = "gcStats")]
+    async fn debug_gc_stats(&self) -> RpcResult<()>;
+
+    /// Returns the first number where the node has accessible state on disk. This is the
+    /// post-state of that block and the pre-state of the next block. The (from, to) parameters
+    /// are the sequence of blocks to search, which can go either forwards or backwards.
+    ///
+    /// Note: to get the last state pass in the range of blocks in reverse, i.e. (last, first).
+    #[method(name = "getAccessibleState")]
+    async fn debug_get_accessible_state(
+        &self,
+        from: BlockNumberOrTag,
+        to: BlockNumberOrTag,
+    ) -> RpcResult<()>;
+
+    /// Returns all accounts that have changed between the two blocks specified. A change is defined
+    /// as a difference in nonce, balance, code hash, or storage hash. With one parameter, returns
+    /// the list of accounts modified in the specified block.
+    #[method(name = "getModifiedAccountsByHash")]
+    async fn debug_get_modified_accounts_by_hash(
+        &self,
+        start_hash: B256,
+        end_hash: B256,
+    ) -> RpcResult<()>;
+
+    /// Returns all accounts that have changed between the two blocks specified. A change is defined
+    /// as a difference in nonce, balance, code hash or storage hash.
+    #[method(name = "getModifiedAccountsByNumber")]
+    async fn debug_get_modified_accounts_by_number(
+        &self,
+        start_number: u64,
+        end_number: u64,
+    ) -> RpcResult<()>;
+
+    /// Executes a block (bad- or canon- or side-), and returns a list of intermediate roots: the
+    /// stateroot after each transaction.
+    #[method(name = "intermediateRoots")]
+    async fn debug_intermediate_roots(
+        &self,
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<B256>>;
+
+    /// Returns detailed runtime memory statistics.
+    #[method(name = "memStats")]
+    async fn debug_mem_stats(&self) -> RpcResult<()>;
+
+    /// Returns the preimage for a sha3 hash, if known.
+    #[method(name = "preimage")]
+    async fn debug_preimage(&self, hash: B256) -> RpcResult<()>;
+
+    /// Retrieves a block and returns its pretty printed form.
+    #[method(name = "printBlock")]
+    async fn debug_print_block(&self, number: u64) -> RpcResult<()>;
+
+    /// Fetches and retrieves the seed hash of the block by number.
+    #[method(name = "seedHash")]
+    async fn debug_seed_hash(&self, number: u64) -> RpcResult<B256>;
+
+    /// Sets the garbage collection target percentage. A negative value disables garbage collection.
+    #[method(name = "setGCPercent")]
+    async fn debug_set_gc_percent(&self, v: i32) -> RpcResult<()>;
+
+    /// Sets the current head of the local chain by block number. Note, this is a destructive action
+    /// and may severely damage your chain. Use with extreme caution.
+    #[method(name = "setHead")]
+    async fn debug_set_head(&self, number: U64) -> RpcResult<()>;
+
+    /// Configures how often in-memory state tries are persisted to disk. The interval needs to be
+    /// in a format parsable by a time.Duration. Note that the interval is not wall-clock time.
+    /// Rather it is accumulated block processing time after which the state should be flushed.
+    #[method(name = "setTrieFlushInterval")]
+    async fn debug_set_trie_flush_interval(&self, interval: String) -> RpcResult<()>;
+
+    /// Used to obtain info about a block.
+    #[method(name = "standardTraceBadBlockToFile")]
+    async fn debug_standard_trace_bad_block_to_file(
+        &self,
+        block: BlockNumberOrTag,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()>;
+
+    /// This method is similar to `debug_standardTraceBlockToFile`, but can be used to obtain info
+    /// about a block which has been rejected as invalid (for some reason).
+    #[method(name = "standardTraceBlockToFile")]
+    async fn debug_standard_trace_block_to_file(
+        &self,
+        block: BlockNumberOrTag,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<()>;
+
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    #[method(name = "stateRootWithUpdates")]
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<(B256, TrieUpdates)>;
+
+    /// Returns the storage at the given block height and transaction index. The result can be
+    /// paged by providing a `maxResult` to cap the number of storage slots returned as well as
+    /// specifying the offset via `keyStart` (hash of storage key).
+    #[method(name = "storageRangeAt")]
+    async fn debug_storage_range_at(
+        &self,
+        block_hash: B256,
+        tx_idx: usize,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<()>;
+
+    /// Returns the structured logs created during the execution of EVM against a block pulled
+    /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
+    /// `TraceConfig` reference.
+    #[method(name = "traceBadBlock")]
+    async fn debug_trace_bad_block(
+        &self,
+        block_hash: B256,
+        opts: Option<GethDebugTracingCallOptions>,
+    ) -> RpcResult<Vec<TraceResult>>;
+}

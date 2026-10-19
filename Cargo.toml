@@ -1,0 +1,672 @@
+[workspace.package]
+version = "2.7.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
+exclude = [".github/"]
+
+[workspace]
+members = [
+    "bin/reth-bb/",
+    "bin/reth/",
+    "crates/storage/rpc-provider/",
+    "crates/chain-state/",
+    "crates/chainspec/",
+    "crates/cli/cli/",
+    "crates/cli/commands/",
+    "crates/cli/runner/",
+    "crates/cli/util/",
+    "crates/config/",
+    "crates/consensus/common/",
+    "crates/consensus/consensus/",
+    "crates/consensus/debug-client/",
+    "crates/dst/",
+    "crates/e2e-test-utils/",
+    "crates/engine/invalid-block-hooks/",
+    "crates/engine/local",
+    "crates/engine/primitives/",
+    "crates/engine/execution-cache/",
+    "crates/engine/tree/",
+    "crates/engine/util/",
+    "crates/era",
+    "crates/era-downloader",
+    "crates/era-utils",
+    "crates/errors/",
+    "crates/ethereum/hardforks/",
+    "crates/ethereum/cli/",
+    "crates/ethereum/consensus/",
+    "crates/ethereum/engine-primitives/",
+    "crates/ethereum/evm",
+    "crates/ethereum/node",
+    "crates/ethereum/payload/",
+    "crates/ethereum/primitives/",
+    "crates/ethereum/reth/",
+    "crates/etl/",
+    "crates/evm/evm",
+    "crates/evm/execution-errors",
+    "crates/evm/execution-types",
+    "crates/exex/exex/",
+    "crates/exex/test-utils/",
+    "crates/exex/types/",
+    "crates/metrics/",
+    "crates/net/banlist/",
+    "crates/net/discv4/",
+    "crates/net/discv5/",
+    "crates/net/dns/",
+    "crates/net/downloaders/",
+    "crates/net/ecies/",
+    "crates/net/eth-wire-types",
+    "crates/net/eth-wire/",
+    "crates/net/nat/",
+    "crates/net/network-api/",
+    "crates/net/network-types/",
+    "crates/net/network/",
+    "crates/net/p2p/",
+    "crates/net/peers/",
+    "crates/node/api/",
+    "crates/node/builder/",
+    "crates/node/core/",
+    "crates/node/ethstats",
+    "crates/node/events/",
+    "crates/node/metrics",
+    "crates/node/types",
+    "crates/payload/basic/",
+    "crates/payload/builder/",
+    "crates/payload/builder-primitives/",
+    "crates/payload/primitives/",
+    "crates/payload/validator/",
+    "crates/payload/util/",
+    "crates/prune/prune",
+    "crates/prune/types",
+    "crates/revm/",
+    "crates/rpc/ipc/",
+    "crates/rpc/rpc-api/",
+    "crates/rpc/rpc-builder/",
+    "crates/rpc/rpc-engine-api/",
+    "crates/rpc/rpc-eth-api/",
+    "crates/rpc/rpc-eth-types/",
+    "crates/rpc/rpc-layer",
+    "crates/rpc/rpc-server-types/",
+    "crates/rpc/rpc-e2e-tests/",
+    "crates/rpc/rpc-convert/",
+    "crates/rpc/rpc/",
+    "crates/snap-sync/",
+    "crates/stages/api/",
+    "crates/stages/stages/",
+    "crates/stages/types/",
+    "crates/static-file/static-file",
+    "crates/static-file/types/",
+    "crates/storage/db-api/",
+    "crates/storage/db-common",
+    "crates/storage/db-models/",
+    "crates/storage/db/",
+    "crates/storage/errors/",
+    "crates/storage/libmdbx-rs/",
+    "crates/storage/libmdbx-rs/mdbx-sys/",
+    "crates/storage/nippy-jar/",
+    "crates/storage/provider/",
+    "crates/storage/storage-api/",
+    "crates/storage/storage-overlay/",
+    "crates/tasks/",
+    "crates/tokio-util/",
+    "crates/tracing/",
+    "crates/transaction-pool/",
+    "crates/trie/common",
+    "crates/trie/db",
+    "crates/trie/parallel/",
+    "crates/trie/sparse",
+    "crates/trie/trie",
+    "examples/beacon-api-sidecar-fetcher/",
+    "examples/beacon-api-sse/",
+    "examples/bsc-p2p",
+    "examples/custom-dev-node/",
+    "examples/custom-state-root/",
+    "examples/custom-engine-types/",
+    "examples/custom-evm/",
+    "examples/custom-hardforks/",
+    "examples/custom-inspector/",
+    "examples/custom-node-components/",
+    "examples/custom-payload-builder/",
+    "examples/custom-rlpx-subprotocol",
+    "examples/custom-auth-http-middleware",
+    "examples/custom-rpc-middleware",
+    "examples/db-access",
+    "examples/exex-subscription",
+    "examples/exex-test",
+    "examples/full-contract-state",
+    "examples/manual-p2p/",
+    "examples/network-txpool/",
+    "examples/network/",
+    "examples/network-proxy/",
+    "examples/node-builder-api/",
+    "examples/node-custom-rpc/",
+    "examples/node-event-hooks/",
+    "examples/polygon-p2p/",
+    "examples/rpc-db/",
+    "examples/txpool-tracing/",
+    "examples/custom-beacon-withdrawals",
+    "testing/ef-tests/",
+    "testing/testing-utils",
+    "testing/runner",
+    "crates/tracing-otlp",
+]
+default-members = ["bin/reth"]
+exclude = ["docs/cli"]
+
+# Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
+# https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
+resolver = "2"
+
+[workspace.lints]
+rust.missing_debug_implementations = "warn"
+rust.missing_docs = "warn"
+rust.rust_2018_idioms = { level = "deny", priority = -1 }
+rust.unreachable_pub = "warn"
+rust.unused_must_use = "deny"
+rust.rust_2024_incompatible_pat = "warn"
+rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+rustdoc.all = "warn"
+# rust.unnameable-types = "warn"
+
+[workspace.lints.clippy]
+# These are some of clippy's nursery (i.e., experimental) lints that we like.
+# By default, nursery lints are allowed. Some of the lints below have made good
+# suggestions which we fixed. The others didn't have any findings, so we can
+# assume they don't have that many false positives. Let's enable them to
+# prevent future problems.
+borrow_as_ptr = "warn"
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
+dbg_macro = "warn"
+derive_partial_eq_without_eq = "warn"
+doc_markdown = "warn"
+empty_line_after_doc_comments = "warn"
+empty_line_after_outer_attr = "warn"
+enum_glob_use = "warn"
+equatable_if_let = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+flat_map_option = "warn"
+if_not_else = "warn"
+if_then_some_else_none = "warn"
+implicit_clone = "warn"
+imprecise_flops = "warn"
+iter_on_empty_collections = "warn"
+iter_on_single_items = "warn"
+iter_with_drain = "warn"
+iter_without_into_iter = "warn"
+large_stack_frames = "warn"
+manual_assert = "warn"
+manual_clamp = "warn"
+manual_is_variant_and = "warn"
+manual_string_new = "warn"
+match_same_arms = "warn"
+missing_const_for_fn = "warn"
+mutex_integer = "warn"
+naive_bytecount = "warn"
+needless_bitwise_bool = "warn"
+needless_continue = "warn"
+needless_for_each = "warn"
+needless_pass_by_ref_mut = "warn"
+nonstandard_macro_braces = "warn"
+option_as_ref_cloned = "warn"
+or_fun_call = "warn"
+path_buf_push_overwrite = "warn"
+read_zero_byte_vec = "warn"
+result_large_err = "allow"
+redundant_clone = "warn"
+redundant_else = "warn"
+# TODO: Remove once https://github.com/rust-lang/rust-clippy/issues/17525 is resolved.
+redundant_field_names = "allow"
+single_char_pattern = "warn"
+string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
+suboptimal_flops = "warn"
+suspicious_operation_groupings = "warn"
+trailing_empty_array = "warn"
+trait_duplication_in_bounds = "warn"
+transmute_undefined_repr = "warn"
+trivial_regex = "warn"
+tuple_array_conversions = "warn"
+type_repetition_in_bounds = "warn"
+uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
+unnecessary_struct_initialization = "warn"
+unnested_or_patterns = "warn"
+unused_peekable = "warn"
+unused_rounding = "warn"
+use_self = "warn"
+useless_let_if_seq = "warn"
+while_float = "warn"
+zero_sized_map_values = "warn"
+
+# These are nursery lints which have findings. Allow them for now. Some are not
+# quite mature enough for use in our codebase and some we don't really want.
+# Explicitly listing should make it easier to fix in the future.
+as_ptr_cast_mut = "allow"
+cognitive_complexity = "allow"
+debug_assert_with_mut_call = "allow"
+fallible_impl_from = "allow"
+future_not_send = "allow"
+needless_collect = "allow"
+non_send_fields_in_send_ty = "allow"
+redundant_pub_crate = "allow"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
+
+# Speed up compilation time for dev builds by reducing emitted debug info.
+# NOTE: Debuggers may provide less useful information with this setting.
+# Uncomment this section if you're using a debugger.
+[profile.dev]
+# https://davidlattimore.github.io/posts/2024/02/04/speeding-up-the-rust-edit-build-run-cycle.html
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# Speed up tests.
+[profile.dev.package]
+proptest.opt-level = 3
+rand_chacha.opt-level = 3
+rand_xorshift.opt-level = 3
+unarray.opt-level = 3
+blst.opt-level = 3
+c-kzg.opt-level = 3
+secp256k1-sys.opt-level = 3
+
+# Meant for testing - all optimizations, but with debug assertions and overflow checks.
+[profile.hivetests]
+inherits = "test"
+opt-level = 3
+lto = "thin"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+debug = "none"
+strip = "symbols"
+panic = "unwind"
+codegen-units = 16
+
+# Use the `--profile profiling` flag to show symbols in release mode.
+# e.g. `cargo build --profile profiling`
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
+
+[profile.dst]
+inherits = "profiling"
+debug-assertions = true
+overflow-checks = true
+
+# Include debug info in benchmarks too.
+[profile.bench]
+inherits = "profiling"
+
+[profile.maxperf]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+[profile.maxperf-symbols]
+inherits = "maxperf"
+debug = "full"
+strip = "none"
+
+[profile.reproducible]
+inherits = "release"
+panic = "abort"
+codegen-units = 1
+incremental = false
+
+[workspace.dependencies]
+# reth
+reth-basic-payload-builder = { path = "crates/payload/basic" }
+reth-chain-state = { path = "crates/chain-state" }
+reth-chainspec = { path = "crates/chainspec", default-features = false }
+reth-cli = { path = "crates/cli/cli" }
+reth-cli-commands = { path = "crates/cli/commands" }
+reth-cli-runner = { path = "crates/cli/runner" }
+reth-cli-util = { path = "crates/cli/util" }
+reth-codecs = { version = "0.8.2", default-features = false }
+reth-codecs-derive = "0.8.2"
+reth-config = { path = "crates/config", default-features = false }
+reth-consensus = { path = "crates/consensus/consensus", default-features = false }
+reth-consensus-common = { path = "crates/consensus/common", default-features = false }
+reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
+reth-db = { path = "crates/storage/db", default-features = false }
+reth-db-api = { path = "crates/storage/db-api" }
+reth-db-common = { path = "crates/storage/db-common" }
+reth-db-models = { path = "crates/storage/db-models", default-features = false }
+reth-discv4 = { path = "crates/net/discv4" }
+reth-discv5 = { path = "crates/net/discv5" }
+reth-dns-discovery = { path = "crates/net/dns" }
+reth-downloaders = { path = "crates/net/downloaders" }
+reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
+reth-ecies = { path = "crates/net/ecies" }
+reth-engine-local = { path = "crates/engine/local" }
+reth-execution-cache = { path = "crates/engine/execution-cache" }
+reth-engine-primitives = { path = "crates/engine/primitives", default-features = false }
+reth-engine-tree = { path = "crates/engine/tree" }
+reth-engine-util = { path = "crates/engine/util" }
+reth-era = { path = "crates/era" }
+reth-era-downloader = { path = "crates/era-downloader" }
+reth-era-utils = { path = "crates/era-utils" }
+reth-errors = { path = "crates/errors" }
+reth-eth-wire = { path = "crates/net/eth-wire" }
+reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
+reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
+reth-ethereum-cli = { path = "crates/ethereum/cli", default-features = false }
+reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
+reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
+reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
+reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
+reth-ethereum = { path = "crates/ethereum/reth" }
+reth-etl = { path = "crates/etl" }
+reth-evm = { path = "crates/evm/evm", default-features = false }
+reth-evm-ethereum = { path = "crates/ethereum/evm", default-features = false }
+reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
+reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
+reth-exex = { path = "crates/exex/exex" }
+reth-exex-types = { path = "crates/exex/types" }
+reth-fs-util = { path = "crates/fs-util" }
+reth-invalid-block-hooks = { path = "crates/engine/invalid-block-hooks" }
+reth-ipc = { path = "crates/rpc/ipc" }
+reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
+reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
+reth-metrics = { path = "crates/metrics" }
+reth-net-banlist = { path = "crates/net/banlist" }
+reth-net-nat = { path = "crates/net/nat" }
+reth-network = { path = "crates/net/network" }
+reth-network-api = { path = "crates/net/network-api" }
+reth-network-p2p = { path = "crates/net/p2p" }
+reth-network-peers = { path = "crates/net/peers", default-features = false }
+reth-network-types = { path = "crates/net/network-types" }
+reth-nippy-jar = { path = "crates/storage/nippy-jar" }
+reth-node-api = { path = "crates/node/api" }
+reth-node-builder = { path = "crates/node/builder" }
+reth-node-core = { path = "crates/node/core" }
+reth-node-ethereum = { path = "crates/ethereum/node" }
+reth-node-ethstats = { path = "crates/node/ethstats" }
+reth-node-events = { path = "crates/node/events" }
+reth-node-metrics = { path = "crates/node/metrics" }
+reth-node-types = { path = "crates/node/types" }
+reth-payload-builder = { path = "crates/payload/builder" }
+reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
+reth-payload-primitives = { path = "crates/payload/primitives" }
+reth-payload-validator = { path = "crates/payload/validator" }
+reth-primitives-traits = { version = "0.8.2", default-features = false }
+reth-provider = { path = "crates/storage/provider" }
+reth-prune = { path = "crates/prune/prune" }
+reth-prune-types = { path = "crates/prune/types", default-features = false }
+reth-revm = { path = "crates/revm", default-features = false }
+reth-rpc = { path = "crates/rpc/rpc" }
+reth-rpc-api = { path = "crates/rpc/rpc-api" }
+reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
+reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
+reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
+reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = false }
+reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
+reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
+reth-rpc-traits = { version = "0.8.2", default-features = false }
+reth-snap-sync = { path = "crates/snap-sync" }
+reth-stages = { path = "crates/stages/stages" }
+reth-stages-api = { path = "crates/stages/api" }
+reth-stages-types = { path = "crates/stages/types", default-features = false }
+reth-static-file = { path = "crates/static-file/static-file" }
+reth-static-file-types = { path = "crates/static-file/types", default-features = false }
+reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
+reth-storage-errors = { path = "crates/storage/errors", default-features = false }
+reth-storage-overlay = { path = "crates/storage/storage-overlay" }
+reth-tasks = { path = "crates/tasks" }
+reth-testing-utils = { path = "testing/testing-utils" }
+reth-tokio-util = { path = "crates/tokio-util" }
+reth-tracing = { path = "crates/tracing" }
+reth-tracing-otlp = { path = "crates/tracing-otlp" }
+reth-transaction-pool = { path = "crates/transaction-pool" }
+reth-trie = { path = "crates/trie/trie" }
+reth-trie-common = { path = "crates/trie/common", default-features = false }
+reth-trie-db = { path = "crates/trie/db" }
+reth-trie-parallel = { path = "crates/trie/parallel" }
+reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
+reth-zstd-compressors = { version = "0.8.2", default-features = false }
+
+# revm
+revm = { version = "43.0.3", default-features = false }
+revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
+revm-inspectors = "0.44.2"
+
+# eth
+alloy-dyn-abi = "1.6.1"
+alloy-primitives = { version = "1.6.1", default-features = false, features = ["map-foldhash"] }
+alloy-sol-types = { version = "1.6.1", default-features = false }
+
+alloy-chains = { version = "0.2.33", default-features = false }
+alloy-eip2124 = { version = "0.2.0", default-features = false }
+alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
+alloy-evm = { version = "0.39.0", default-features = false }
+alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
+alloy-trie = { version = "0.9.8", default-features = false }
+
+alloy-hardforks = "0.4.10"
+
+alloy-consensus = { version = "2.5.0", default-features = false }
+alloy-contract = { version = "2.5.0", default-features = false }
+alloy-eips = { version = "2.5.0", default-features = false }
+alloy-genesis = { version = "2.5.0", default-features = false }
+alloy-json-rpc = { version = "2.5.0", default-features = false }
+alloy-network = { version = "2.5.0", default-features = false }
+alloy-node-bindings = "2.5.0"
+alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
+alloy-rpc-client = { version = "2.5.0", default-features = false }
+alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "2.5.0", default-features = false }
+alloy-rpc-types-anvil = { version = "2.5.0", default-features = false }
+alloy-rpc-types-beacon = { version = "2.5.0", default-features = false }
+alloy-rpc-types-debug = { version = "2.5.0", default-features = false }
+alloy-rpc-types-engine = { version = "2.5.0", default-features = false }
+alloy-rpc-types-eth = { version = "2.5.0", default-features = false }
+alloy-rpc-types-mev = { version = "2.5.0", default-features = false }
+alloy-rpc-types-trace = { version = "2.5.0", default-features = false }
+alloy-rpc-types-txpool = { version = "2.5.0", default-features = false }
+alloy-serde = { version = "2.5.0", default-features = false }
+alloy-signer = { version = "2.5.0", default-features = false }
+alloy-signer-local = { version = "2.5.0", default-features = false }
+alloy-transport = { version = "2.5.0" }
+
+# misc
+either = { version = "1.16.0", default-features = false }
+arrayvec = { version = "0.7.6", default-features = false }
+aquamarine = "0.6"
+auto_impl = "1"
+backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
+bedrock-assertions = { git = "https://github.com/oss-garage/bedrock" }
+bincode = "1.3"
+bitflags = "2.4"
+boyer-moore-magiclen = "0.2.16"
+bytes = { version = "1.11.1", default-features = false }
+blake3 = "1.8"
+brotli = "8"
+clap = "4"
+dashmap = "6.2"
+derive_more = { version = "2", default-features = false, features = ["full"] }
+dirs-next = "2.0.0"
+dyn-clone = "1.0.17"
+eyre = "0.6"
+fdlimit = "0.3.0"
+fixed-map = { version = "0.9", default-features = false }
+flate2 = "1.0"
+humantime = "2.1"
+imbl = "7"
+humantime-serde = "1.1"
+itertools = { version = "0.14", default-features = false }
+linked_hash_set = "0.1"
+libc = "0.2"
+lz4 = "1.28.1"
+modular-bitfield = "0.13.1"
+notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
+nybbles = { version = "0.4.8", default-features = false }
+once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
+parking_lot = "0.12"
+paste = "1.0"
+rand = "0.9"
+rayon = "1.7"
+thread-priority = "3.0.0"
+rustc-hash = { version = "2.0", default-features = false }
+schnellru = "0.2"
+serde = { version = "1.0", default-features = false }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde_with = { version = "3", default-features = false, features = ["macros"] }
+sha2 = { version = "0.10", default-features = false }
+smallvec = "1"
+strum = { version = "0.27", default-features = false }
+thiserror = { version = "2.0.0", default-features = false }
+tar = "0.4.46"
+tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
+tracing-appender = "0.2.5"
+url = { version = "2.3", default-features = false }
+zstd = "0.13"
+byteorder = "1"
+fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
+moka = "0.12"
+chrono = "0.4.41"
+
+# metrics
+metrics = "0.24.0"
+metrics-derive = "0.1.1"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+metrics-process = "2.1.0"
+metrics-util = { default-features = false, version = "0.20.3" }
+
+# tokio
+tokio = { version = "1.52.3", default-features = false }
+tokio-stream = "0.1.11"
+tokio-tungstenite = "0.29.0"
+tokio-util = { version = "0.7.11", features = ["codec"] }
+
+# async
+async-compression = { version = "0.4", default-features = false }
+async-stream = "0.3"
+async-trait = "0.1.68"
+futures = "0.3"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
+hyper = "1.9"
+hyper-util = "0.1.5"
+pin-project = "1.1.12"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+tracing-futures = "0.2"
+tower = "0.5"
+tower-http = "0.6"
+
+# p2p
+discv5 = { git = "https://github.com/sigp/discv5", rev = "7663c00" }
+if-addrs = "0.14"
+
+# rpc
+jsonrpsee = "0.26.0"
+jsonrpsee-core = "0.26.0"
+jsonrpsee-server = "0.26.0"
+jsonrpsee-http-client = "0.26.0"
+jsonrpsee-types = "0.26.0"
+
+# http
+http = "1.0"
+http-body-util = "0.1.2"
+proptest-arbitrary-interop = "0.1.0"
+
+# crypto
+enr = { version = "0.13", default-features = false }
+secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
+# rand 8 for secp256k1
+rand_08 = { package = "rand", version = "0.8" }
+
+# config
+toml = "0.9"
+
+# rocksdb
+rocksdb = { version = "0.24" }
+
+# otlp obs
+opentelemetry_sdk = "0.32"
+opentelemetry = "0.32"
+opentelemetry-otlp = "0.32"
+opentelemetry-semantic-conventions = "0.32"
+opentelemetry-appender-tracing = "0.32"
+tracing-opentelemetry = "0.33"
+
+# misc-testing
+arbitrary = "1.3"
+assert_matches = "1.5.0"
+criterion = { package = "codspeed-criterion-compat", version = "4.3" }
+insta = "1.47"
+proptest = "1.7"
+similar-asserts = { version = "1.5.0", features = ["serde"] }
+tempfile = "3.20"
+test-fuzz = "7"
+test-case = "3"
+
+# ssz encoding
+ethereum_ssz = "0.10.4"
+ethereum_ssz_derive = "0.10.4"
+
+# allocators
+jemalloc_pprof = { version = "0.8", default-features = false }
+tikv-jemalloc-ctl = "0.6"
+tikv-jemalloc-sys = "0.6"
+tikv-jemallocator = "0.6"
+tracy-client = { version = "0.18.0", features = ["demangle"] }
+snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
+
+aes = "0.8.1"
+anyhow = "1.0"
+bindgen = { version = "0.72", default-features = false }
+cc = "1.2.62"
+cipher = "0.4.3"
+comfy-table = "7.0"
+concat-kdf = "0.1.0"
+crossbeam-channel = "0.5.13"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
+crossterm = "0.29.0"
+ctr = "0.9.2"
+data-encoding = "2"
+digest = "0.10.5"
+hash-db = "=0.15.2"
+hickory-resolver = "0.26.1"
+hmac = "0.12.1"
+human_bytes = "0.4.1"
+indexmap = "2"
+interprocess = "2.4.2"
+lz4_flex = { version = "0.12", default-features = false }
+memmap2 = "0.9.11"
+num-traits = "0.2.15"
+page_size = "0.6.0"
+plain_hasher = "0.2"
+pretty_assertions = "1.4"
+ratatui = { version = "0.30", default-features = false }
+ringbuffer = "0.16.0"
+rmp-serde = "1.3"
+roaring = "0.11.3"
+rolling-file = "0.2.0"
+snap = "1.1.1"
+socket2 = { version = "0.6", default-features = false }
+sysinfo = { version = "0.38", default-features = false }
+tracing-journald = "0.3"
+tracing-logfmt = "0.3.7"
+tracing-samply = "0.1"
+tracing-chrome = "0.7.2"
+tracing-subscriber = { version = "0.3", default-features = false }
+tracing-tracy = "0.11"
+triehash = "0.8"
+vergen = "10.0.1"
+walkdir = "2.3.3"
+vergen-git2 = "10.0.1"
+
+# networking
+ipnet = "2.11"

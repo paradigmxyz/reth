@@ -1,0 +1,96 @@
+[package]
+name = "reth-storage-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth storage provider traits and types"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-models.workspace = true
+reth-chainspec.workspace = true
+reth-chain-state = { workspace = true, optional = true }
+reth-db-api = { workspace = true, optional = true }
+reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+revm.workspace = true
+reth-ethereum-primitives.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-eip7928.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+auto_impl.workspace = true
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
+    "reth-stages-types/std",
+    "revm/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
+    "reth-db-models/std",
+    "reth-trie-common/std",
+    "serde_json?/std",
+    "alloy-eip7928/std",
+]
+
+db-api = [
+    "dep:reth-db-api",
+    "dep:serde_json",
+]
+
+chain-state = [
+    "dep:reth-chain-state",
+    "dep:tokio",
+]
+
+serde = [
+    "reth-chain-state?/serde",
+    "reth-ethereum-primitives/serde",
+    "reth-db-models/serde",
+    "reth-execution-types/serde",
+    "reth-primitives-traits/serde",
+    "reth-prune-types/serde",
+    "reth-stages-types/serde",
+    "reth-trie-common/serde",
+    "revm/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-rpc-types-engine/serde",
+    "alloy-eip7928/serde",
+]
+
+serde-bincode-compat = [
+    "reth-execution-types/serde-bincode-compat",
+    "reth-trie-common/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+]

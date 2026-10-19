@@ -1,0 +1,19 @@
+[package]
+name = "example-txpool-tracing"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "pool", "cli", "rpc"] }
+
+alloy-primitives.workspace = true
+alloy-rpc-types-trace.workspace = true
+alloy-network.workspace = true
+
+clap = { workspace = true, features = ["derive"] }
+futures-util.workspace = true
+eyre.workspace = true
+
+[lints]

@@ -1,0 +1,78 @@
+//! Events related to Consensus Layer health.
+
+use alloy_consensus::Header;
+use futures::Stream;
+use reth_storage_api::CanonChainTracker;
+use std::{
+    fmt,
+    pin::Pin,
+    task::{ready, Context, Poll},
+    time::Duration,
+};
+use tokio::time::{Instant, Interval};
+
+/// Interval of checking Consensus Layer client health.
+const CHECK_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Period of not receiving fork choice updates from Consensus Layer client,
+/// after which the warning is issued.
+const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
+
+/// A Stream of [`ConsensusLayerHealthEvent`].
+pub struct ConsensusLayerHealthEvents<H = Header> {
+    interval: Interval,
+    canon_chain: Box<dyn CanonChainTracker<Header = H>>,
+}
+
+impl<H> fmt::Debug for ConsensusLayerHealthEvents<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
+    }
+}
+
+impl<H> ConsensusLayerHealthEvents<H> {
+    /// Creates a new [`ConsensusLayerHealthEvents`] with the given canonical chain tracker.
+    pub fn new(canon_chain: Box<dyn CanonChainTracker<Header = H>>) -> Self {
+        // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
+        let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
+        Self { interval, canon_chain }
+    }
+}
+
+impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
+    type Item = ConsensusLayerHealthEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+
+        loop {
+            ready!(this.interval.poll_tick(cx));
+
+            if let Some(fork_choice) = this.canon_chain.last_received_update_timestamp() {
+                if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD {
+                    // We had an FCU, and it's recent. CL is healthy.
+                    continue
+                }
+                // We had an FCU, but it's too old.
+                return Poll::Ready(Some(
+                    ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
+                        fork_choice.elapsed(),
+                    ),
+                ))
+            }
+
+            // We never received any forkchoice updates.
+            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen))
+        }
+    }
+}
+
+/// Event that is triggered when Consensus Layer health is degraded from the
+/// Execution Layer point of view.
+#[derive(Clone, Copy, Debug)]
+pub enum ConsensusLayerHealthEvent {
+    /// Consensus Layer client was never seen (no forkchoice updates received).
+    NeverSeen,
+    /// Forkchoice updates from the Consensus Layer client have not been received for a while.
+    HaveNotReceivedUpdatesForAWhile(Duration),
+}

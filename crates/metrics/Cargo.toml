@@ -1,0 +1,31 @@
+[package]
+name = "reth-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "reth metrics utilities"
+
+[lints]
+workspace = true
+
+[dependencies]
+# metrics
+metrics.workspace = true
+metrics-derive.workspace = true
+
+# reth
+reth-primitives-traits = { workspace = true, optional = true }
+
+# async
+tokio = { workspace = true, features = ["full"], optional = true }
+futures = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[features]
+common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]

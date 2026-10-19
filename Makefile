@@ -1,0 +1,333 @@
+# Heavily inspired by Lighthouse: https://github.com/sigp/lighthouse/blob/693886b94176faa4cb450f024696cb69cda2fe58/Makefile
+.DEFAULT_GOAL := help
+
+GIT_SHA ?= $(shell git rev-parse HEAD)
+GIT_TAG ?= $(shell git describe --tags --abbrev=0)
+BIN_DIR = "dist/bin"
+
+MDBX_PATH = "crates/storage/libmdbx-rs/mdbx-sys/libmdbx"
+DB_TOOLS_DIR = "db-tools"
+FULL_DB_TOOLS_DIR := $(shell pwd)/$(DB_TOOLS_DIR)/
+
+CARGO_TARGET_DIR ?= target
+
+# List of features to use when building. Can be overridden via the environment.
+FEATURES ?=
+
+# Cargo profile for builds. Default is for local builds, CI uses an override.
+PROFILE ?= release
+
+# Extra RUSTFLAGS to append to build targets (e.g., "-C target-cpu=x86-64-v3")
+EXTRA_RUSTFLAGS ?=
+
+# Extra flags for Cargo
+CARGO_INSTALL_EXTRA_FLAGS ?=
+
+# The release tag of https://github.com/ethereum/tests to use for EF tests
+EF_TESTS_TAG := v17.0
+EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
+EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
+
+# The release tag of https://github.com/ethereum/execution-spec-tests to use for EEST tests
+EEST_TESTS_TAG := v4.5.0
+EEST_TESTS_URL := https://github.com/ethereum/execution-spec-tests/releases/download/$(EEST_TESTS_TAG)/fixtures_stable.tar.gz
+EEST_TESTS_DIR := ./testing/ef-tests/execution-spec-tests
+
+##@ Help
+
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Build
+
+.PHONY: install
+install: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
+	cargo install --path bin/reth --bin reth --force --locked \
+		--features "$(FEATURES)" \
+		--profile "$(PROFILE)" \
+		$(CARGO_INSTALL_EXTRA_FLAGS)
+
+.PHONY: build
+build: ## Build the reth binary into `target` directory.
+	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+
+# Environment variables for reproducible builds
+# Set timestamp from last git commit for reproducible builds
+SOURCE_DATE ?= $(shell git log -1 --pretty=%ct)
+
+# Extra RUSTFLAGS for reproducible builds. Can be overridden via the environment.
+RUSTFLAGS_REPRODUCIBLE_EXTRA ?=
+
+# `reproducible` only supports reth on x86_64-unknown-linux-gnu
+build-%-reproducible:
+	@if [ "$*" != "reth" ]; then \
+		echo "Error: Reproducible builds are only supported for reth, not $*"; \
+		exit 1; \
+	fi
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
+	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=. $(RUSTFLAGS_REPRODUCIBLE_EXTRA)" \
+	LC_ALL=C \
+	TZ=UTC \
+	JEMALLOC_OVERRIDE=/usr/lib/x86_64-linux-gnu/libjemalloc.a \
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+
+.PHONY: build-debug
+build-debug: ## Build the reth binary into `target/debug` directory.
+	cargo build --bin reth --features "$(FEATURES)"
+# Builds the reth binary natively.
+build-native-%:
+	$(if $(EXTRA_RUSTFLAGS),RUSTFLAGS="$(EXTRA_RUSTFLAGS)") cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+# The following commands use `cross` to build a cross-compile.
+#
+# These commands require that:
+#
+# - `cross` is installed (`cargo install --locked cross`).
+# - Docker is running.
+# - The current user is in the `docker` group.
+#
+# The resulting binaries will be created in the `target/` directory.
+
+# For aarch64, set the page size for jemalloc.
+# When cross compiling, we must compile jemalloc with a large page size,
+# otherwise it will use the current system's page size which may not work
+# on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
+# pages. See: https://github.com/paradigmxyz/reth/issues/6742
+build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+build-native-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+
+# Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
+# See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
+build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_RUSTFLAGS)" \
+		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+
+# Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
+# If we wanted to, we would need to build a custom Docker image with the SDK available.
+#
+# Note: You must set `SDKROOT` and `MACOSX_DEPLOYMENT_TARGET`. These can be found using `xcrun`.
+#
+# `SDKROOT=$(xcrun -sdk macosx --show-sdk-path) MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)`
+build-x86_64-apple-darwin:
+	$(MAKE) build-native-x86_64-apple-darwin
+build-aarch64-apple-darwin:
+	$(MAKE) build-native-aarch64-apple-darwin
+build-deb-%:
+	@case "$*" in \
+		x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|riscv64gc-unknown-linux-gnu) \
+			echo "Building debian package for $*"; \
+			;; \
+		*) \
+			echo "Error: Debian packages are only supported for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, and riscv64gc-unknown-linux-gnu, not $*"; \
+			exit 1; \
+			;; \
+	esac
+	cargo install cargo-deb@3.6.0 --locked
+	cargo deb --profile $(PROFILE) --no-build --no-dbgsym --no-strip \
+		--target $* \
+		$(if $(VERSION),--deb-version "1~$(VERSION)") \
+		$(if $(VERSION),--output "target/$*/$(PROFILE)/reth-$(VERSION)-$*-$(PROFILE).deb")
+
+# Create a `.tar.gz` containing a binary for a specific target.
+define tarball_release_binary
+	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
+	cp -R LICENSES $(BIN_DIR)/LICENSES
+	cp README.md $(BIN_DIR)/README.md
+	cd $(BIN_DIR) && \
+		tar -czf reth-$(GIT_TAG)-$(1)$(3).tar.gz $(2) LICENSES README.md && \
+		rm -r $(2) LICENSES README.md
+endef
+
+# The current git tag will be used as the version in the output file names. You
+# will likely need to use `git tag` and create a semver tag (e.g., `v0.2.3`).
+#
+# Note: This excludes macOS tarballs because of SDK licensing issues.
+.PHONY: build-release-tarballs
+build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR directory, each containing a `reth` binary for a different target.
+	[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
+	$(MAKE) build-x86_64-unknown-linux-gnu
+	$(call tarball_release_binary,"x86_64-unknown-linux-gnu","reth","")
+	$(MAKE) build-aarch64-unknown-linux-gnu
+	$(call tarball_release_binary,"aarch64-unknown-linux-gnu","reth","")
+
+##@ Test
+
+UNIT_TEST_ARGS := --locked --workspace --features 'jemalloc-prof' -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+COV_FILE := lcov.info
+
+.PHONY: test-unit
+test-unit: ## Run unit tests.
+	cargo install cargo-nextest --locked
+	cargo nextest run --no-fail-fast $(UNIT_TEST_ARGS)
+
+
+.PHONY: cov-unit
+cov-unit: ## Run unit tests with coverage.
+	rm -f $(COV_FILE)
+	cargo llvm-cov nextest --lcov --output-path $(COV_FILE) $(UNIT_TEST_ARGS)
+
+.PHONY: cov-report-html
+cov-report-html: cov-unit ## Generate a HTML coverage report and open it in the browser.
+	cargo llvm-cov report --html
+	open target/llvm-cov/html/index.html
+
+# Downloads and unpacks Ethereum Foundation tests in the `$(EF_TESTS_DIR)` directory.
+#
+# Requires `wget` and `tar`
+$(EF_TESTS_DIR):
+	mkdir $(EF_TESTS_DIR)
+	wget $(EF_TESTS_URL) -O ethereum-tests.tar.gz
+	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
+	rm ethereum-tests.tar.gz
+
+# Downloads and unpacks EEST tests in the `$(EEST_TESTS_DIR)` directory.
+#
+# Requires `wget` and `tar`
+$(EEST_TESTS_DIR):
+	mkdir $(EEST_TESTS_DIR)
+	wget $(EEST_TESTS_URL) -O execution-spec-tests.tar.gz
+	tar -xzf execution-spec-tests.tar.gz --strip-components=1 -C $(EEST_TESTS_DIR)
+	rm execution-spec-tests.tar.gz
+
+.PHONY: ef-tests
+ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
+	cargo nextest run --no-fail-fast -p ef-tests --release --features ef-tests
+
+##@ Other
+
+.PHONY: clean
+clean: ## Perform a `cargo` clean and remove the binary and test vectors directories.
+	cargo clean
+	rm -rf $(BIN_DIR)
+	rm -rf $(EF_TESTS_DIR)
+
+.PHONY: db-tools
+db-tools: ## Compile MDBX debugging tools.
+	@echo "Building MDBX debugging tools..."
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 tools > /dev/null
+	@mkdir -p $(DB_TOOLS_DIR)
+	@cd $(MDBX_PATH) && \
+		mv mdbx_chk $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_copy $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_dump $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_drop $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_load $(FULL_DB_TOOLS_DIR) && \
+		mv mdbx_stat $(FULL_DB_TOOLS_DIR)
+    # `IOARENA=1` silences benchmarking info message that is printed to stderr
+	@$(MAKE) -C $(MDBX_PATH) IOARENA=1 clean > /dev/null
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_stat\" for the info about MDBX db file."
+	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
+
+.PHONY: update-book-cli
+update-book-cli: build-debug ## Update book cli documentation.
+	@echo "Updating book cli doc..."
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+
+.PHONY: profiling
+profiling: ## Builds `reth` with optimisations, but also symbols.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling
+
+.PHONY: maxperf
+maxperf: ## Builds `reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
+
+.PHONY: maxperf-no-asm
+maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,reth-revm/portable,js-tracer,keccak-cache-global,gmp
+
+fmt:
+	cargo +nightly fmt
+
+clippy:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	-- -D warnings
+
+lint-typos: ensure-typos
+	typos
+
+ensure-typos:
+	@if ! command -v typos &> /dev/null; then \
+		echo "typos not found. Please install it by running the command 'cargo install --locked typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
+		exit 1; \
+    fi
+
+# Lint and format all TOML files in the project using dprint.
+# This target ensures that TOML files follow consistent formatting rules,
+# such as using spaces instead of tabs, and enforces other style guidelines
+# defined in the dprint configuration file (e.g., dprint.json).
+#
+# Usage:
+#   make lint-toml
+#
+# Dependencies:
+#   - ensure-dprint: Ensures that dprint is installed and available in the system.
+lint-toml: ensure-dprint
+	dprint fmt
+
+ensure-dprint:
+	@if ! command -v dprint &> /dev/null; then \
+		echo "dprint not found. Please install it by running the command 'cargo install --locked dprint' or refer to the following link for more information: https://github.com/dprint/dprint"; \
+		exit 1; \
+    fi
+
+lint:
+	make fmt && \
+	make clippy && \
+	make lint-typos && \
+	make lint-toml
+
+clippy-fix:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint:
+	make clippy-fix && \
+	make fmt
+
+.PHONY: rustdocs
+rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
+	RUSTDOCFLAGS="\
+	--cfg docsrs \
+	--show-type-layout \
+	--generate-link-to-definition \
+	--enable-index-page -Zunstable-options -D warnings" \
+	cargo +nightly docs \
+	--document-private-items
+
+cargo-test:
+	cargo test \
+	--workspace \
+	--lib --examples \
+	--tests \
+	--benches \
+	--all-features
+
+test-doc:
+	cargo test --doc --workspace --all-features
+
+test:
+	make cargo-test && \
+	make test-doc
+
+pr:
+	make lint && \
+	make update-book-cli && \
+	cargo docs --document-private-items && \
+	make test

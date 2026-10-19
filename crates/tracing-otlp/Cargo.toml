@@ -1,0 +1,48 @@
+[package]
+name = "reth-tracing-otlp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# obs
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic", "reqwest-rustls"] }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+opentelemetry-appender-tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber.workspace = true
+tracing.workspace = true
+
+# misc
+base64 = "0.23"
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["otlp"]
+
+otlp = [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "opentelemetry-semantic-conventions",
+    "tracing-opentelemetry",
+]
+
+otlp-logs = [
+    "otlp",
+    "opentelemetry-appender-tracing",
+    "opentelemetry-appender-tracing/experimental_span_attributes",
+    "opentelemetry-otlp/logs",
+    "opentelemetry_sdk/logs",
+]

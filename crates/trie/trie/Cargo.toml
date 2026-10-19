@@ -1,0 +1,102 @@
+[package]
+name = "reth-trie"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Merkle trie implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-errors.workspace = true
+reth-primitives-traits = { workspace = true, features = ["std"] }
+reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-sparse = { workspace = true, features = ["std"] }
+reth-trie-common = { workspace = true, features = ["rayon"] }
+
+# alloy
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-trie.workspace = true
+
+# revm
+revm.workspace = true
+
+# tracing
+tracing = { workspace = true, features = ["attributes"] }
+
+# misc
+auto_impl.workspace = true
+itertools.workspace = true
+parking_lot.workspace = true
+
+# `metrics` feature
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+# `test-utils` feature
+triehash = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+
+# trie
+triehash.workspace = true
+
+# misc
+assert_matches.workspace = true
+criterion.workspace = true
+pretty_assertions.workspace = true
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+rand.workspace = true
+
+[features]
+dst = ["reth-trie-sparse/dst"]
+metrics = ["reth-metrics", "dep:metrics"]
+serde = [
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
+    "reth-stages-types/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "revm/serde",
+]
+test-utils = [
+    "triehash",
+    "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-trie-sparse/test-utils",
+    "reth-stages-types/test-utils",
+]
+serde-bincode-compat = [
+    "alloy-consensus/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "reth-trie-common/serde-bincode-compat",
+]
+account-ext = [
+    "reth-stages-types/account-ext",
+    "alloy-trie/account-ext",
+    "reth-primitives-traits/account-ext",
+    "revm/account-ext",
+]
+
+[[bench]]
+name = "proof_v2"
+required-features = ["test-utils"]
+harness = false

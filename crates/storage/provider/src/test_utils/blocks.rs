@@ -1,0 +1,509 @@
+//! Dummy blocks and data for tests
+
+use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
+use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
+use alloy_primitives::{
+    address, b256, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
+};
+
+use alloy_consensus::Header;
+use alloy_eips::eip4895::{Withdrawal, Withdrawals};
+use alloy_primitives::Signature;
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
+use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
+use reth_node_types::NodeTypes;
+use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
+use revm::{database::BundleState, state::AccountInfo};
+use std::{str::FromStr, sync::LazyLock};
+
+/// Assert genesis block
+pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
+    provider: &DatabaseProviderRW<DB, N>,
+    g: SealedBlock<reth_ethereum_primitives::Block>,
+) {
+    let n = g.number;
+    let h = B256::ZERO;
+    let tx = provider;
+
+    // check if tables contain only the genesis block data
+    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
+
+    assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
+    assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
+    assert_eq!(
+        tx.table::<tables::BlockBodyIndices>().unwrap(),
+        vec![(0, StoredBlockBodyIndices::default())]
+    );
+    assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
+    // Reorged bytecodes are not reverted per https://github.com/paradigmxyz/reth/issues/1588
+    // assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedStorages>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionSenders>().unwrap(), vec![]);
+    // StageCheckpoints is not updated in tests
+}
+
+pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Block>> =
+    LazyLock::new(|| {
+        SealedBlock::from_sealed_parts(
+            SealedHeader::new(
+                Header {
+                    parent_hash: b256!(
+                        "c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f"
+                    ),
+                    ommers_hash: EMPTY_OMMER_ROOT_HASH,
+                    beneficiary: address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
+                    state_root: b256!(
+                        "50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d"
+                    ),
+                    transactions_root: b256!(
+                        "0967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192"
+                    ),
+                    receipts_root: b256!(
+                        "e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290d"
+                    ),
+                    difficulty: U256::from(131_072),
+                    number: 0,
+                    gas_limit: 1_000_000,
+                    gas_used: 14_352,
+                    timestamp: 1_000,
+                    ..Default::default()
+                },
+                b256!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42"),
+            ),
+            BlockBody {
+                transactions: vec![TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                gas_price: 10,
+                gas_limit: 400_000,
+                to: TxKind::Call(address!("095e7baea6a6c7c4c2dfeb977efac326af552d87")),
+                ..Default::default()
+            }),
+            Signature::new(
+                U256::from_str(
+                    "51983300959770368863831494747186777928121405155922056726144551509338672451120",
+                )
+                .unwrap(),
+                U256::from_str(
+                    "29056683545955299640297374067888344259176096769870751649153779895496107008675",
+                )
+                .unwrap(),
+                false,
+            )
+        )],
+                ..Default::default()
+            },
+        )
+    });
+
+/// Test chain with genesis, blocks, execution results
+/// that have valid changesets.
+#[derive(Debug)]
+pub struct BlockchainTestData {
+    /// Genesis
+    pub genesis: SealedBlock<reth_ethereum_primitives::Block>,
+    /// Blocks with its execution result
+    pub blocks: Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome)>,
+}
+
+impl BlockchainTestData {
+    /// Create test data with two blocks that are connected, specifying their block numbers.
+    pub fn default_from_number(first: BlockNumber) -> Self {
+        let one = block1(first);
+        let mut extended_execution_outcome = one.1.clone();
+        let two = block2(first + 1, one.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(two.1.clone());
+        let three = block3(first + 2, two.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(three.1.clone());
+        let four = block4(first + 3, three.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(four.1.clone());
+        let five = block5(first + 4, four.0.hash(), &extended_execution_outcome);
+        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
+    }
+}
+
+impl Default for BlockchainTestData {
+    fn default() -> Self {
+        let one = block1(1);
+        let mut extended_execution_outcome = one.1.clone();
+        let two = block2(2, one.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(two.1.clone());
+        let three = block3(3, two.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(three.1.clone());
+        let four = block4(4, three.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(four.1.clone());
+        let five = block5(5, four.0.hash(), &extended_execution_outcome);
+        Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
+    }
+}
+
+/// Genesis block
+pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
+    SealedBlock::from_sealed_parts(
+        SealedHeader::new(
+            Header { number: 0, difficulty: U256::ONE, ..Default::default() },
+            B256::ZERO,
+        ),
+        Default::default(),
+    )
+}
+
+fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
+    state_root_unhashed(execution_outcome.bundle_accounts_iter().filter_map(
+        |(address, account)| {
+            account.info.as_ref().map(|info| {
+                (
+                    address,
+                    Account::from(info).into_trie_account(storage_root_unhashed(
+                        account
+                            .storage
+                            .iter()
+                            .filter(|(_, value)| !value.present_value.is_zero())
+                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                    )),
+                )
+            })
+        },
+    ))
+}
+
+/// Block one that points to genesis
+fn block1(
+    number: BlockNumber,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+    // block changes
+    let account1: Address = [0x60; 20].into();
+    let account2: Address = [0x61; 20].into();
+    let slot = U256::from(5);
+    let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
+
+    let execution_outcome = ExecutionOutcome::new(
+        BundleState::builder(number..=number)
+            .state_present_account_info(account1, info.clone())
+            .revert_account_info(number, account1, Some(None))
+            .state_present_account_info(account2, info)
+            .revert_account_info(number, account2, Some(None))
+            .state_storage(account1, HashMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]))
+            .build(),
+        vec![vec![Receipt {
+            tx_type: TxType::Eip2930,
+            success: true,
+            cumulative_gas_used: 300,
+            logs: vec![Log::new_unchecked(
+                Address::repeat_byte(0x60),
+                vec![B256::with_last_byte(1), B256::with_last_byte(2)],
+                Bytes::default(),
+            )],
+        }]],
+        number,
+        Vec::new(),
+    );
+
+    let state_root = bundle_state_root(&execution_outcome);
+    assert_eq!(
+        state_root,
+        b256!("0x5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
+    );
+
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
+    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    header.number = number;
+    header.state_root = state_root;
+    header.parent_hash = B256::ZERO;
+    let block = SealedBlock::seal_parts(header, body);
+
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x30)]), execution_outcome)
+}
+
+/// Block two that points to block 1
+fn block2(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+    // block changes
+    let account: Address = [0x60; 20].into();
+    let slot = U256::from(5);
+
+    let execution_outcome = ExecutionOutcome::new(
+        BundleState::builder(number..=number)
+            .state_present_account_info(
+                account,
+                AccountInfo { nonce: 3, balance: U256::from(20), ..Default::default() },
+            )
+            .state_storage(account, HashMap::from_iter([(slot, (U256::ZERO, U256::from(15)))]))
+            .revert_account_info(
+                number,
+                account,
+                Some(Some(AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() })),
+            )
+            .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
+            .build(),
+        vec![vec![Receipt {
+            tx_type: TxType::Eip1559,
+            success: false,
+            cumulative_gas_used: 400,
+            logs: vec![Log::new_unchecked(
+                Address::repeat_byte(0x61),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
+        }]],
+        number,
+        Vec::new(),
+    );
+
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
+    let state_root = bundle_state_root(&extended);
+    assert_eq!(
+        state_root,
+        b256!("0x90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
+    );
+
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
+
+    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    let block = SealedBlock::seal_parts(header, body);
+
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
+}
+
+/// Block three that points to block 2
+fn block3(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        bundle_state_builder = bundle_state_builder
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(idx), ..Default::default() },
+            )
+            .state_storage(
+                address,
+                slot_range
+                    .clone()
+                    .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot))))
+                    .collect(),
+            )
+            .revert_account_info(number, address, Some(None))
+            .revert_storage(number, address, Vec::new());
+    }
+    let execution_outcome = ExecutionOutcome::new(
+        bundle_state_builder.build(),
+        vec![vec![Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log::new_unchecked(
+                Address::repeat_byte(0x61),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
+        }]],
+        number,
+        Vec::new(),
+    );
+
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
+    let state_root = bundle_state_root(&extended);
+
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
+    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    let block = SealedBlock::seal_parts(header, body);
+
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
+}
+
+/// Block four that points to block 3
+fn block4(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        // increase balance for every even account and destroy every odd
+        bundle_state_builder = if idx.is_multiple_of(2) {
+            bundle_state_builder
+                .state_present_account_info(
+                    address,
+                    AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+                )
+                .state_storage(
+                    address,
+                    slot_range
+                        .clone()
+                        .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 2))))
+                        .collect(),
+                )
+        } else {
+            bundle_state_builder.state_address(address).state_storage(
+                address,
+                slot_range
+                    .clone()
+                    .map(|slot| (U256::from(slot), (U256::from(slot), U256::ZERO)))
+                    .collect(),
+            )
+        };
+        // record previous account info
+        bundle_state_builder = bundle_state_builder
+            .revert_account_info(
+                number,
+                address,
+                Some(Some(AccountInfo {
+                    nonce: 1,
+                    balance: U256::from(idx),
+                    ..Default::default()
+                })),
+            )
+            .revert_storage(
+                number,
+                address,
+                slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot))).collect(),
+            );
+    }
+    let execution_outcome = ExecutionOutcome::new(
+        bundle_state_builder.build(),
+        vec![vec![Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log::new_unchecked(
+                Address::repeat_byte(0x61),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
+        }]],
+        number,
+        Vec::new(),
+    );
+
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
+    let state_root = bundle_state_root(&extended);
+
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
+    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    let block = SealedBlock::seal_parts(header, body);
+
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
+}
+
+/// Block five that points to block 4
+fn block5(
+    number: BlockNumber,
+    parent_hash: B256,
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
+    let address_range = 1..=20;
+    let slot_range = 1..=100;
+
+    let mut bundle_state_builder = BundleState::builder(number..=number);
+    for idx in address_range {
+        let address = Address::with_last_byte(idx);
+        // update every even account and recreate every odd only with half of slots
+        bundle_state_builder = bundle_state_builder
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: 1, balance: U256::from(idx * 2), ..Default::default() },
+            )
+            .state_storage(
+                address,
+                slot_range
+                    .clone()
+                    .take(50)
+                    .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 4))))
+                    .collect(),
+            );
+        bundle_state_builder = if idx.is_multiple_of(2) {
+            bundle_state_builder
+                .revert_account_info(
+                    number,
+                    address,
+                    Some(Some(AccountInfo {
+                        nonce: 1,
+                        balance: U256::from(idx * 2),
+                        ..Default::default()
+                    })),
+                )
+                .revert_storage(
+                    number,
+                    address,
+                    slot_range
+                        .clone()
+                        .map(|slot| (U256::from(slot), U256::from(slot * 2)))
+                        .collect(),
+                )
+        } else {
+            bundle_state_builder.revert_address(number, address)
+        };
+    }
+    let execution_outcome = ExecutionOutcome::new(
+        bundle_state_builder.build(),
+        vec![vec![Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 400,
+            logs: vec![Log::new_unchecked(
+                Address::repeat_byte(0x61),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
+        }]],
+        number,
+        Vec::new(),
+    );
+
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
+    let state_root = bundle_state_root(&extended);
+
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
+    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    header.number = number;
+    header.state_root = state_root;
+    // parent_hash points to block1 hash
+    header.parent_hash = parent_hash;
+    let block = SealedBlock::seal_parts(header, body);
+
+    (RecoveredBlock::new_sealed(block, vec![Address::repeat_byte(0x31)]), execution_outcome)
+}

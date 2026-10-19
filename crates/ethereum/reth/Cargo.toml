@@ -1,0 +1,203 @@
+[package]
+name = "reth-ethereum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-chainspec.workspace = true
+reth-network = { workspace = true, optional = true }
+reth-network-api = { workspace = true, optional = true }
+reth-eth-wire = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
+reth-db = { workspace = true, optional = true, features = ["mdbx"] }
+reth-codecs = { workspace = true, optional = true }
+reth-storage-api = { workspace = true, optional = true }
+reth-node-api = { workspace = true, optional = true }
+reth-node-core = { workspace = true, optional = true }
+reth-consensus = { workspace = true, optional = true }
+reth-consensus-common = { workspace = true, optional = true }
+reth-evm = { workspace = true, optional = true }
+reth-revm = { workspace = true, optional = true }
+reth-transaction-pool = { workspace = true, optional = true }
+reth-rpc = { workspace = true, optional = true }
+reth-rpc-api = { workspace = true, optional = true }
+reth-rpc-eth-types = { workspace = true, optional = true }
+reth-rpc-builder = { workspace = true, optional = true }
+reth-exex = { workspace = true, optional = true }
+reth-trie = { workspace = true, optional = true }
+reth-trie-db = { workspace = true, optional = true }
+reth-node-builder = { workspace = true, optional = true }
+reth-tasks = { workspace = true, optional = true }
+reth-cli-util = { workspace = true, optional = true }
+reth-engine-local = { workspace = true, optional = true }
+
+# reth-ethereum
+reth-ethereum-primitives.workspace = true
+reth-ethereum-cli = { workspace = true, optional = true }
+reth-ethereum-consensus = { workspace = true, optional = true }
+reth-evm-ethereum = { workspace = true, optional = true }
+reth-node-ethereum = { workspace = true, optional = true }
+
+# alloy
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-rpc-types-engine = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+account-ext = [
+    "reth-ethereum-cli?/account-ext",
+    "reth-revm?/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
+    "reth-codecs?/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-node-ethereum?/account-ext",
+    "reth-provider?/account-ext",
+    "reth-trie?/account-ext",
+    "reth-rpc?/account-ext",
+    "reth-trie-db?/account-ext",
+]
+std = [
+    "reth-chainspec/std",
+    "reth-ethereum-primitives/std",
+    "reth-ethereum-consensus?/std",
+    "reth-primitives-traits/std",
+    "reth-consensus?/std",
+    "reth-consensus-common?/std",
+    "alloy-rpc-types-eth?/std",
+    "reth-storage-api?/std",
+    "reth-evm?/std",
+    "reth-evm-ethereum?/std",
+    "reth-revm?/std",
+    "alloy-rpc-types-engine?/std",
+    "reth-codecs?/std",
+]
+arbitrary = [
+    "std",
+    "reth-chainspec/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-db?/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
+    "reth-transaction-pool?/arbitrary",
+    "reth-eth-wire?/arbitrary",
+    "alloy-rpc-types-engine?/arbitrary",
+    "reth-codecs?/arbitrary",
+]
+keccak-cache-global = [
+    "reth-node-ethereum?/keccak-cache-global",
+    "reth-node-core?/keccak-cache-global",
+]
+test-utils = [
+    "reth-chainspec/test-utils",
+    "reth-consensus?/test-utils",
+    "reth-db?/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-evm?/test-utils",
+    "reth-revm?/test-utils",
+    "reth-network?/test-utils",
+    "reth-node-ethereum?/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider?/test-utils",
+    "reth-trie?/test-utils",
+    "reth-transaction-pool?/test-utils",
+    "reth-evm-ethereum?/test-utils",
+    "reth-node-builder?/test-utils",
+    "reth-trie-db?/test-utils",
+    "reth-codecs?/test-utils",
+    "reth-tasks?/test-utils",
+]
+
+full = [
+    "consensus",
+    "evm",
+    "node",
+    "provider",
+    "rpc",
+    "exex",
+    "trie",
+    "pool",
+    "network",
+]
+
+cli = ["dep:reth-ethereum-cli", "dep:reth-cli-util"]
+consensus = [
+    "dep:reth-consensus",
+    "dep:reth-consensus-common",
+    "dep:reth-ethereum-consensus",
+]
+evm = ["dep:reth-evm", "dep:reth-evm-ethereum", "dep:reth-revm"]
+exex = ["provider", "dep:reth-exex"]
+node-api = ["dep:reth-node-api", "dep:reth-node-core"]
+node = [
+    "provider",
+    "consensus",
+    "evm",
+    "network",
+    "node-api",
+    "dep:reth-node-ethereum",
+    "dep:reth-node-builder",
+    "dep:reth-engine-local",
+    "rpc",
+    "trie-db",
+    "pool",
+]
+pool = ["dep:reth-transaction-pool"]
+rpc = [
+    "tasks",
+    "dep:reth-rpc",
+    "dep:reth-rpc-builder",
+    "dep:reth-rpc-api",
+    "dep:reth-rpc-eth-types",
+    "dep:alloy-rpc-types-eth",
+    "dep:alloy-rpc-types-engine",
+]
+tasks = ["dep:reth-tasks"]
+jemalloc = [
+    "reth-cli-util?/jemalloc",
+    "reth-ethereum-cli?/jemalloc",
+    "reth-node-core?/jemalloc",
+    "reth-provider?/jemalloc",
+]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-cli-util?/jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-symbols",
+]
+jit = ["reth-node-ethereum?/jit"]
+js-tracer = [
+    "rpc",
+    "reth-rpc/js-tracer",
+    "reth-node-builder?/js-tracer",
+    "reth-node-ethereum?/js-tracer",
+    "reth-rpc-eth-types?/js-tracer",
+]
+network = ["dep:reth-network", "tasks", "dep:reth-network-api", "dep:reth-eth-wire"]
+otlp = [
+    "reth-ethereum-cli?/otlp",
+    "reth-node-core?/otlp",
+]
+portable = [
+    "reth-revm?/portable",
+]
+gmp = [
+    "reth-evm-ethereum?/gmp",
+    "reth-node-ethereum?/gmp",
+    "reth-revm?/gmp",
+]
+provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
+storage-api = ["dep:reth-storage-api"]
+trie = ["dep:reth-trie"]
+trie-db = ["trie", "dep:reth-trie-db"]

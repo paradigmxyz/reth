@@ -1,0 +1,119 @@
+pub use alloy_eips::eip1559::calculate_block_gas_limit;
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
+use alloy_primitives::Bytes;
+
+/// Settings for the Ethereum builder.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct EthereumBuilderConfig {
+    /// Desired gas limit.
+    pub desired_gas_limit: u64,
+    /// Waits for the first payload to be built if there is no payload built when the payload is
+    /// being resolved.
+    pub await_payload_on_missing: bool,
+    /// Maximum number of blobs to include per block (EIP-7872).
+    ///
+    /// If `None`, defaults to the protocol maximum.
+    pub max_blobs_per_block: Option<u64>,
+    /// Extra data for built blocks.
+    pub extra_data: Bytes,
+    /// Whether payload builds should skip state-root computation.
+    pub skip_state_root: bool,
+}
+
+impl Default for EthereumBuilderConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EthereumBuilderConfig {
+    /// Create new payload builder config.
+    pub const fn new() -> Self {
+        Self {
+            desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            await_payload_on_missing: true,
+            max_blobs_per_block: None,
+            extra_data: Bytes::new(),
+            skip_state_root: false,
+        }
+    }
+
+    /// Set desired gas limit.
+    pub const fn with_gas_limit(mut self, desired_gas_limit: u64) -> Self {
+        self.desired_gas_limit = desired_gas_limit;
+        self
+    }
+
+    /// Configures whether the initial payload should be awaited when the payload job is being
+    /// resolved and no payload has been built yet.
+    pub const fn with_await_payload_on_missing(mut self, await_payload_on_missing: bool) -> Self {
+        self.await_payload_on_missing = await_payload_on_missing;
+        self
+    }
+
+    /// Set the maximum number of blobs per block (EIP-7872).
+    pub const fn with_max_blobs_per_block(mut self, max_blobs_per_block: Option<u64>) -> Self {
+        self.max_blobs_per_block = max_blobs_per_block;
+        self
+    }
+
+    /// Set the extra data for built blocks.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.extra_data = extra_data;
+        self
+    }
+
+    /// Configures whether payload builds should skip state-root computation.
+    pub const fn with_skip_state_root(mut self, skip_state_root: bool) -> Self {
+        self.skip_state_root = skip_state_root;
+        self
+    }
+}
+
+impl EthereumBuilderConfig {
+    /// Returns the gas limit for the next block based
+    /// on parent and desired gas limits.
+    pub fn gas_limit(&self, parent_gas_limit: u64) -> u64 {
+        self.gas_limit_with_target(parent_gas_limit, None)
+    }
+
+    /// Returns the gas limit for the next block based on the parent gas limit and an optional
+    /// target from payload attributes.
+    pub fn gas_limit_with_target(
+        &self,
+        parent_gas_limit: u64,
+        target_gas_limit: Option<u64>,
+    ) -> u64 {
+        calculate_block_gas_limit(
+            parent_gas_limit,
+            target_gas_limit.unwrap_or(self.desired_gas_limit),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gas_limit_uses_payload_target_when_present() {
+        let parent_gas_limit = 30_000_000;
+        let target_gas_limit = parent_gas_limit - 100;
+        let config = EthereumBuilderConfig::new().with_gas_limit(parent_gas_limit + 100);
+
+        assert_eq!(
+            config.gas_limit_with_target(parent_gas_limit, Some(target_gas_limit)),
+            target_gas_limit
+        );
+    }
+
+    #[test]
+    fn gas_limit_falls_back_to_configured_target() {
+        let parent_gas_limit = 30_000_000;
+        let desired_gas_limit = parent_gas_limit + 100;
+        let config = EthereumBuilderConfig::new().with_gas_limit(desired_gas_limit);
+
+        assert_eq!(config.gas_limit_with_target(parent_gas_limit, None), desired_gas_limit);
+        assert_eq!(config.gas_limit(parent_gas_limit), desired_gas_limit);
+    }
+}

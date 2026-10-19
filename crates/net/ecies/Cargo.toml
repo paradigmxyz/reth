@@ -1,0 +1,42 @@
+[package]
+name = "reth-ecies"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
+
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["derive", "arrayvec"] }
+
+futures.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tokio-stream.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
+pin-project.workspace = true
+
+tracing = { workspace = true, features = ["attributes"] }
+
+byteorder.workspace = true
+
+# crypto
+ctr.workspace = true
+digest.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "rand"] }
+rand_08.workspace = true
+concat-kdf.workspace = true
+sha2.workspace = true
+aes.workspace = true
+hmac.workspace = true
+cipher.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "macros"] }

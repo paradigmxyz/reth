@@ -1,0 +1,37 @@
+[package]
+name = "reth-consensus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
+
+# misc
+auto_impl.workspace = true
+thiserror.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-primitives-traits/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "reth-execution-types/std",
+    "thiserror/std",
+    "alloy-eip7928/std",
+]
+test-utils = ["reth-primitives-traits/test-utils"]

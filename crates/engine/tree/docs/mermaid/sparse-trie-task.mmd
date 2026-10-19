@@ -1,0 +1,21 @@
+flowchart TD
+    subgraph SparseTrieTask[run_sparse_trie]
+        SparseTrieUpdate([SparseTrieUpdate channel])
+        SparseTrieUpdate --> SparseTrieUpdateAccumulate[Accumulate updates until the channel is empty]
+        SparseTrieUpdateAccumulate
+            --> SparseTrieReveal[Reveal multiproof in Sparse Trie]
+            --> SparseTrieStateUpdate[Update Sparse Trie with new state]
+            --> SparseTrieStorageRoots[Calculate sparse storage trie roots]
+            --> SparseTrieUpdateBelowLevel[Calculate sparse trie hashes below certain level]
+        SparseTrieUpdateBelowLevel --> SparseTrieUpdateClosed{{Is SparseTrieUpdate channel closed?}}
+        SparseTrieUpdateClosed -->|Yes| SparseTrieRoot[Calculate sparse trie root]
+        SparseTrieUpdateClosed -->|No| SparseTrieUpdate
+    end
+
+    subgraph StateRootTask
+        Incoming[Incoming SparseTrieUpdate messages]
+        StateRootMessage::RootCalculated
+    end
+
+    Incoming --> SparseTrieUpdate
+    SparseTrieRoot --> StateRootMessage::RootCalculated

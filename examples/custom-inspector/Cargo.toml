@@ -1,0 +1,17 @@
+[package]
+name = "example-custom-inspector"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "evm", "pool", "cli"] }
+alloy-rpc-types-eth.workspace = true
+clap = { workspace = true, features = ["derive"] }
+futures-util.workspace = true
+alloy-evm.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+[lints]

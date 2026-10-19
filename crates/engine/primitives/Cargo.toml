@@ -1,0 +1,70 @@
+[package]
+name = "reth-engine-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-evm = { workspace = true, optional = true }
+reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-builder-primitives = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-chain-state.workspace = true
+reth-errors.workspace = true
+reth-trie-common.workspace = true
+reth-storage-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync"], optional = true }
+futures = { workspace = true, optional = true }
+
+# misc
+auto_impl.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-rlp.workspace = true
+
+[features]
+default = ["std"]
+trie-debug = []
+std = [
+    "dep:reth-evm",
+    "dep:reth-payload-builder-primitives",
+    "reth-execution-errors/std",
+    "reth-execution-types/std",
+    "reth-ethereum-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-trie-common/std",
+    "reth-storage-api/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "alloy-eips/std",
+    "futures/std",
+    "tokio",
+    "serde/std",
+    "thiserror/std",
+    "tracing/std",
+    "reth-evm?/std",
+    "alloy-rlp/std",
+]

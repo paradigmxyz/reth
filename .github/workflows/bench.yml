@@ -1,0 +1,2357 @@
+# Runs benchmarks.
+#
+# The bench job replays real blocks either via the Engine API or by submitting
+# their transactions to a locally mined txpool against a reth node backed by a
+# local snapshot managed with schelk.
+#
+# It runs the baseline binary and the feature (candidate) binary on the
+# same block range (snapshot recovered between runs) to compare performance.
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      blocks:
+        description: "Number of blocks to benchmark (default: 500, big blocks: 30)"
+        required: false
+        default: ""
+        type: string
+      mode:
+        description: "Benchmark mode: Engine API blocks, RPC transactions, or RPC call replay"
+        required: false
+        default: "engine"
+        type: choice
+        options:
+          - engine
+          - rpc
+          - call
+      big_blocks:
+        description: "Use big blocks mode: false, true, or target gas like 100M/2G"
+        required: false
+        default: "false"
+        type: string
+      reorg:
+        description: "Enable reorg mode with the given depth"
+        required: false
+        default: ""
+        type: string
+      bal:
+        description: "Replay block access lists during big-block benchmarks"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+          - "feature"
+          - "baseline"
+      warmup:
+        description: "Number of warmup blocks (default: one-quarter of blocks)"
+        required: false
+        default: ""
+        type: string
+      baseline:
+        description: "Baseline git ref (default: merge-base)"
+        required: false
+        default: ""
+        type: string
+      feature:
+        description: "Feature git ref (default: branch head)"
+        required: false
+        default: ""
+        type: string
+      wait_time:
+        description: "Minimum interval between block submissions (e.g. 500ms, 1s)"
+        required: false
+        default: ""
+        type: string
+      mempool:
+        description: "Engine mode: submit each block's transactions to the txpool before its payload: true, DELAY, or DELAY,FRACTION (e.g. 200ms,0.5)"
+        required: false
+        default: ""
+        type: string
+      block_time:
+        description: "RPC mode local block interval (default: 1s)"
+        required: false
+        default: ""
+        type: string
+      baseline_args:
+        description: "Extra CLI args for the baseline reth node"
+        required: false
+        default: ""
+        type: string
+      feature_args:
+        description: "Extra CLI args for the feature reth node"
+        required: false
+        default: ""
+        type: string
+      samply:
+        description: "Enable samply profiling"
+        required: false
+        default: false
+        type: boolean
+      tracing_chrome:
+        description: "Enable Chrome trace recording"
+        required: false
+        default: false
+        type: boolean
+      cores:
+        description: "Limit reth to N CPU cores (0 = all available)"
+        required: false
+        default: "0"
+        type: string
+      slack:
+        description: "Slack notification policy"
+        required: false
+        default: "never"
+        type: choice
+        options:
+          - always
+          - on-win
+          - on-error
+          - never
+      run_pairs:
+        description: "Number of benchmark run pairs (default: 6, big blocks: 10)"
+        required: false
+        default: ""
+        type: string
+      otlp:
+        description: "Export OTLP traces and logs"
+        required: false
+        default: true
+        type: boolean
+      metrics:
+        description: "Upload txgen metrics to VictoriaMetrics"
+        required: false
+        default: false
+        type: boolean
+      call_args:
+        description: "Call mode arguments as key=value pairs (corpus, class, methods, rps, duration, passes, concurrency)"
+        required: false
+        default: ""
+        type: string
+      txgen_ref:
+        description: "txgen branch or commit to install instead of the default branch"
+        required: false
+        default: ""
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
+  BENCH_RUNNERS: 4
+
+name: bench
+
+permissions: {}
+
+jobs:
+  bench-ack:
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (
+        startsWith(github.event.comment.body, '@decofe bench') ||
+        startsWith(github.event.comment.body, 'derek bench') ||
+        startsWith(github.event.comment.body, '@decofe clear') ||
+        startsWith(github.event.comment.body, 'derek clear')
+      )) ||
+      github.event_name == 'workflow_dispatch'
+    name: bench-ack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      command: ${{ steps.command.outputs.command }}
+      pr: ${{ steps.args.outputs.pr }}
+      actor: ${{ steps.args.outputs.actor }}
+      blocks: ${{ steps.args.outputs.blocks }}
+      warmup: ${{ steps.args.outputs.warmup }}
+      baseline: ${{ steps.args.outputs.baseline }}
+      feature: ${{ steps.args.outputs.feature }}
+      baseline-name: ${{ steps.args.outputs.baseline-name }}
+      feature-name: ${{ steps.args.outputs.feature-name }}
+      samply: ${{ steps.args.outputs.samply }}
+      tracing-chrome: ${{ steps.args.outputs.tracing-chrome }}
+      slack: ${{ steps.args.outputs.slack }}
+      metrics: ${{ steps.args.outputs.metrics }}
+      cores: ${{ steps.args.outputs.cores }}
+      big-blocks: ${{ steps.args.outputs.big-blocks }}
+      big-blocks-target-gas: ${{ steps.args.outputs.big-blocks-target-gas }}
+      reorg: ${{ steps.args.outputs.reorg }}
+      bal: ${{ steps.args.outputs.bal }}
+      wait-time: ${{ steps.args.outputs.wait-time }}
+      mempool: ${{ steps.args.outputs.mempool }}
+      block-time: ${{ steps.args.outputs.block-time }}
+      baseline-args: ${{ steps.args.outputs.baseline-args }}
+      feature-args: ${{ steps.args.outputs.feature-args }}
+      run-pairs: ${{ steps.args.outputs.run-pairs }}
+      run-order: ${{ steps.args.outputs.run-order }}
+      otlp: ${{ steps.args.outputs.otlp }}
+      node-bin: ${{ steps.args.outputs.node-bin }}
+      mode: ${{ steps.args.outputs.mode }}
+      corpus: ${{ steps.args.outputs.corpus }}
+      class: ${{ steps.args.outputs.class }}
+      methods: ${{ steps.args.outputs.methods }}
+      rps: ${{ steps.args.outputs.rps }}
+      duration: ${{ steps.args.outputs.duration }}
+      passes: ${{ steps.args.outputs.passes }}
+      concurrency: ${{ steps.args.outputs.concurrency }}
+      top-gas: ${{ steps.args.outputs.top-gas }}
+      tracer: ${{ steps.args.outputs.tracer }}
+      tracer-config: ${{ steps.args.outputs.tracer-config }}
+      trace-options: ${{ steps.args.outputs.trace-options }}
+      namespace: ${{ steps.args.outputs.namespace }}
+      txgen-ref: ${{ steps.args.outputs.txgen-ref }}
+      comment-id: ${{ steps.ack.outputs.comment-id }}
+      pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
+      pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
+      pr-head-repo: ${{ steps.args.outputs.pr-head-repo }}
+    steps:
+      - name: Detect command
+        id: command
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const body = context.payload.comment?.body?.trim() || '';
+            const isClearCommand = context.eventName === 'issue_comment' && (body.startsWith('derek clear') || body.startsWith('@decofe clear'));
+            core.setOutput('command', isClearCommand ? 'clear' : 'bench');
+
+      - name: Check org membership
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_BENCH_ACK_TOKEN }}
+          script: |
+            const org = 'paradigmxyz';
+            const checkMembership = async (username) => {
+              try {
+                const { status } = await github.rest.orgs.checkMembershipForUser({ org, username });
+                return status === 204 || status === 302;
+              } catch {
+                return false;
+              }
+            };
+
+            const commenter = context.payload.comment.user.login;
+            if (!await checkMembership(commenter)) {
+              core.setFailed(`@${commenter} is not a member of ${org}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const prAuthor = pr.user.login;
+            if (!await checkMembership(prAuthor)) {
+              core.setFailed(`PR author @${prAuthor} is not a member of ${org}`);
+            }
+
+      - name: Clear benchmark comments
+        if: steps.command.outputs.command == 'clear'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+            const shouldHideComment = (comment) => {
+              const body = comment.body.trim();
+              return comment.user.login === 'decofe' || body.startsWith('derek') || body.startsWith('@decofe');
+            };
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            let hidden = 0;
+            for (const comment of comments) {
+              if (!shouldHideComment(comment)) continue;
+
+              await github.graphql(`
+                mutation($subjectId: ID!) {
+                  minimizeComment(input: {subjectId: $subjectId, classifier: OUTDATED}) {
+                    minimizedComment {
+                      isMinimized
+                    }
+                  }
+                }
+              `, {
+                subjectId: comment.node_id,
+              });
+              hidden += 1;
+            }
+
+            core.notice(`Hid ${hidden} Derek comment(s).`);
+
+      - name: Parse arguments
+        id: args
+        if: steps.command.outputs.command == 'bench'
+        env:
+          INPUT_BAL: ${{ github.event.inputs.bal }}
+          INPUT_BASELINE: ${{ github.event.inputs.baseline }}
+          INPUT_BASELINE_ARGS: ${{ github.event.inputs.baseline_args }}
+          INPUT_BIG_BLOCKS: ${{ github.event.inputs.big_blocks }}
+          INPUT_BLOCK_TIME: ${{ github.event.inputs.block_time }}
+          INPUT_BLOCKS: ${{ github.event.inputs.blocks }}
+          INPUT_CALL_ARGS: ${{ github.event.inputs.call_args }}
+          INPUT_CORES: ${{ github.event.inputs.cores }}
+          INPUT_FEATURE: ${{ github.event.inputs.feature }}
+          INPUT_FEATURE_ARGS: ${{ github.event.inputs.feature_args }}
+          INPUT_MEMPOOL: ${{ github.event.inputs.mempool }}
+          INPUT_METRICS: ${{ github.event.inputs.metrics }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          INPUT_OTLP: ${{ github.event.inputs.otlp }}
+          INPUT_REORG: ${{ github.event.inputs.reorg }}
+          INPUT_RUN_PAIRS: ${{ github.event.inputs.run_pairs }}
+          INPUT_SAMPLY: ${{ github.event.inputs.samply }}
+          INPUT_SLACK: ${{ github.event.inputs.slack }}
+          INPUT_TRACING_CHROME: ${{ github.event.inputs.tracing_chrome }}
+          INPUT_TXGEN_REF: ${{ github.event.inputs.txgen_ref }}
+          INPUT_WAIT_TIME: ${{ github.event.inputs.wait_time }}
+          INPUT_WARMUP: ${{ github.event.inputs.warmup }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
+            const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
+            const validModes = new Set(['engine', 'rpc', 'call']);
+            const validCallClasses = new Set(['call', 'tracecall', 'tracetx', 'traceblock']);
+            const validNamespaces = new Set(['debug', 'trace']);
+            const validCallMethods = new Set([
+              'eth_call', 'eth_estimateGas', 'eth_createAccessList',
+              'debug_traceCall', 'trace_call',
+              'debug_traceTransaction', 'trace_transaction', 'trace_replayTransaction',
+              'debug_traceBlockByNumber', 'trace_block', 'trace_replayBlockTransactions',
+            ]);
+            // Per class request shape defaults: method set, open-loop rate and closed-loop workers.
+            const callClassDefaults = {
+              call: { methods: 'eth_call', rps: '100', concurrency: '16' },
+              tracecall: { methods: 'debug_traceCall,trace_call', rps: '20', concurrency: '8' },
+              tracetx: { methods: 'debug_traceTransaction,trace_transaction', rps: '20', concurrency: '8' },
+              traceblock: { methods: 'debug_traceBlockByNumber,trace_block,trace_replayBlockTransactions', rps: '2', concurrency: '2' },
+            };
+            // A tracer spec is a tracer name, `structlog`, or `js:NAME` for a script staged on the runner.
+            const tracerSpecValid = (value) => {
+              const specs = value.split(',').map(s => s.trim()).filter(Boolean);
+              return specs.length > 0 && specs.every(s => /^[A-Za-z0-9_]+$/.test(s) || /^js:[A-Za-z0-9._-]+$/.test(s));
+            };
+            const jsonObjectValid = (value) => {
+              try { const parsed = JSON.parse(value); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed); } catch { return false; }
+            };
+            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [mempool[=DELAY[,FRACTION]]] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [namespace=debug|trace] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
+            let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
+            let corpus, callClass, callMethods, callRps, callDuration, callPasses, callConcurrency, callTopGas;
+            let callTracer, callTracerConfig, callTraceOptions, callNamespace;
+            let bigBlocksTargetGas = '';
+            let reorg = '';
+            let mempool = '';
+            let explicitBlocks = false;
+            let explicitWarmup = false;
+            let explicitRunPairs = false;
+
+            const parseBigBlocks = (value) => {
+              value = String(value || 'false');
+              if (value === 'true') return { enabled: 'true', targetGas: '' };
+              if (value === 'false') return { enabled: 'false', targetGas: '' };
+              if (/^\d+([kKmMgG])?$/.test(value)) return { enabled: 'true', targetGas: value };
+              return null;
+            };
+            const defaultBlocks = (isBigBlocks) => isBigBlocks ? '30' : '500';
+            const defaultWarmup = (blockCount) => String(Math.floor(Number(blockCount) / 4));
+            const defaultRunPairs = (isBigBlocks) => isBigBlocks ? '10' : '6';
+            const parseReorg = (value) => {
+              value = String(value || '');
+              if (value === '') return '';
+              if (/^[1-9]\d*$/.test(value)) return value;
+              return null;
+            };
+            // `true` uses txgen's defaults; otherwise a delay, optionally followed by a fraction.
+            const parseMempool = (value) => {
+              value = String(value || '');
+              if (value === '' || value === 'false') return '';
+              if (value === 'true' || /^\d+(ms|s)(,(0?\.\d*[1-9]\d*|1(\.0*)?))?$/.test(value)) return value;
+              return null;
+            };
+            const benchRunOrder = (runPairs) => {
+              const n = Number(runPairs);
+              if (!Number.isInteger(n) || n < 1) {
+                throw new Error('run pairs must be a positive integer');
+              }
+              return n % 2 === 0 ? 'ABBA'.repeat(n / 2) : 'AB'.repeat(n);
+            };
+
+            if (context.eventName === 'workflow_dispatch') {
+              actor = (process.env.GITHUB_ACTOR || '');
+              blocks = (process.env.INPUT_BLOCKS || '') || '';
+              var mode = (process.env.INPUT_MODE || '') || 'engine';
+              explicitBlocks = blocks !== '';
+              warmup = (process.env.INPUT_WARMUP || '') || '';
+              explicitWarmup = warmup !== '';
+              baseline = (process.env.INPUT_BASELINE || '');
+              feature = (process.env.INPUT_FEATURE || '');
+              samply = (process.env.INPUT_SAMPLY || '') === 'true' ? 'true' : 'false';
+              tracingChrome = (process.env.INPUT_TRACING_CHROME || '') === 'true' ? 'true' : 'false';
+              var slack = (process.env.INPUT_SLACK || '') || 'never';
+              cores = (process.env.INPUT_CORES || '') || '0';
+              const parsedBigBlocks = parseBigBlocks((process.env.INPUT_BIG_BLOCKS || ''));
+              if (!parsedBigBlocks) {
+                core.setFailed(`Invalid big_blocks value: ${process.env.INPUT_BIG_BLOCKS || ''} (must be false, true, or a gas value like 100M or 2G)`);
+                return;
+              }
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
+              reorg = parseReorg((process.env.INPUT_REORG || ''));
+              if (reorg === null) {
+                core.setFailed(`Invalid reorg value: ${process.env.INPUT_REORG || ''} (must be a positive integer)`);
+                return;
+              }
+              mempool = parseMempool((process.env.INPUT_MEMPOOL || ''));
+              if (mempool === null) {
+                core.setFailed(`Invalid mempool value: ${process.env.INPUT_MEMPOOL || ''} (must be true, a delay like 200ms, or a delay and fraction like 200ms,0.5)`);
+                return;
+              }
+              bal = (process.env.INPUT_BAL || '') || 'false';
+              var runPairs = (process.env.INPUT_RUN_PAIRS || '') || '';
+              explicitRunPairs = runPairs !== '';
+              var otlp = (process.env.INPUT_OTLP || '') === 'false' ? 'false' : 'true';
+              var metrics = (process.env.INPUT_METRICS || '') === 'true' ? 'true' : 'false';
+              var waitTime = (process.env.INPUT_WAIT_TIME || '') || '';
+              var blockTime = (process.env.INPUT_BLOCK_TIME || '') || '';
+              var baselineNodeArgs = (process.env.INPUT_BASELINE_ARGS || '') || '';
+              var featureNodeArgs = (process.env.INPUT_FEATURE_ARGS || '') || '';
+              var skipStateRoot = 'false';
+              var txgenRef = (process.env.INPUT_TXGEN_REF || '') || '';
+              // call_args carries the call-mode keys a comment would, validated the same way.
+              const callArgErrors = [];
+              const callArgValues = { corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
+              const callArgParts = [];
+              const callArgRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
+              let callArgMatch;
+              while ((callArgMatch = callArgRegex.exec((process.env.INPUT_CALL_ARGS || ''))) !== null) callArgParts.push(callArgMatch[1]);
+              for (const part of callArgParts) {
+                const eq = part.indexOf('=');
+                const key = eq === -1 ? part : part.slice(0, eq);
+                let value = eq === -1 ? '' : part.slice(eq + 1);
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.slice(1, -1);
+                }
+                if (!(key in callArgValues)) {
+                  callArgErrors.push(`unknown call argument \`${part}\``);
+                } else if (key === 'corpus' && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be \`static\` or a corpus name without path separators)`);
+                } else if (key === 'class' && !validCallClasses.has(value)) {
+                  callArgErrors.push(`\`${part}\` (must be one of: ${[...validCallClasses].join(', ')})`);
+                } else if (key === 'methods' && !(value && value.split(',').every(m => validCallMethods.has(m.trim())))) {
+                  callArgErrors.push(`\`${part}\` (must be a comma separated list of supported methods)`);
+                } else if (key === 'duration' && !/^\d+(ms|s|m)$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a duration like 500ms, 1s, 2m)`);
+                } else if (['rps', 'passes', 'concurrency', 'top-gas'].includes(key) && !/^\d+$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a positive integer)`);
+                } else if (key === 'namespace' && !validNamespaces.has(value)) {
+                  callArgErrors.push(`\`${part}\` (must be debug or trace)`);
+                } else if (key === 'tracer' && !tracerSpecValid(value)) {
+                  callArgErrors.push(`\`${part}\` (must be comma separated tracer specs: a tracer name, structlog, or js:NAME)`);
+                } else if ((key === 'tracer-config' || key === 'trace-options') && !jsonObjectValid(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a JSON object)`);
+                } else {
+                  callArgValues[key] = value;
+                }
+              }
+              if (callArgErrors.length) {
+                core.setFailed(`Invalid call_args: ${callArgErrors.join(', ')}`);
+                return;
+              }
+              corpus = callArgValues.corpus;
+              callClass = callArgValues.class;
+              callMethods = callArgValues.methods;
+              callRps = callArgValues.rps;
+              callDuration = callArgValues.duration;
+              callPasses = callArgValues.passes;
+              callConcurrency = callArgValues.concurrency;
+              callTopGas = callArgValues['top-gas'];
+              callTracer = callArgValues.tracer;
+              callTracerConfig = callArgValues['tracer-config'];
+              callTraceOptions = callArgValues['trace-options'];
+              callNamespace = callArgValues.namespace;
+
+              // Find PR for the selected branch
+              const branch = (process.env.GITHUB_REF_NAME || '');
+              const { data: prs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: `${context.repo.owner}:${branch}`,
+                state: 'open',
+                per_page: 1,
+              });
+              pr = prs.length ? String(prs[0].number) : '';
+              if (!pr) {
+                core.info(`No open PR found for branch '${branch}', results will be in job summary`);
+              }
+            } else {
+              pr = String(context.issue.number);
+              actor = context.payload.comment.user.login;
+
+              const body = context.payload.comment.body.trim();
+              const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs', 'rps', 'passes', 'concurrency', 'top-gas']);
+              const refArgs = new Set(['baseline', 'feature']);
+              const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics', 'skip-state-root']);
+              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes], ['class', validCallClasses], ['namespace', validNamespaces]]);
+              const durationArgs = new Set(['wait-time', 'block-time', 'duration']);
+              const stringArgs = new Set(['baseline-args', 'feature-args', 'txgen-ref']);
+              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', mempool: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
+              const unknown = [];
+              const invalid = [];
+              const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
+              // Parse args, handling quoted values like key="value with spaces"
+              const parts = [];
+              const argRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
+              let m;
+              while ((m = argRegex.exec(args)) !== null) parts.push(m[1]);
+              for (const part of parts) {
+                const eq = part.indexOf('=');
+                if (eq === -1) {
+                  if (part === 'big-blocks') {
+                    defaults[part] = 'true';
+                  } else if (part === 'reorg') {
+                    defaults[part] = '5';
+                  } else if (part === 'mempool') {
+                    defaults[part] = 'true';
+                  } else if (boolArgs.has(part)) {
+                    defaults[part] = 'true';
+                  } else {
+                    unknown.push(part);
+                  }
+                  continue;
+                }
+                const key = part.slice(0, eq);
+                let value = part.slice(eq + 1);
+                // Strip surrounding quotes
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.slice(1, -1);
+                }
+                if (key === 'big-blocks') {
+                  const parsed = parseBigBlocks(value);
+                  if (parsed) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be false, true, or a gas value like 100M or 2G)`);
+                  }
+                } else if (key === 'reorg') {
+                  const parsed = parseReorg(value);
+                  if (parsed) {
+                    defaults[key] = parsed;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                  }
+                } else if (key === 'mempool') {
+                  const parsed = parseMempool(value);
+                  if (parsed !== null) {
+                    defaults[key] = parsed;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be true, false, a delay like 200ms, or a delay and fraction like 200ms,0.5)`);
+                  }
+                } else if (key === 'corpus') {
+                  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be \`static\` or a corpus name without path separators)`);
+                  }
+                } else if (key === 'methods') {
+                  const requested = value.split(',').map(m => m.trim()).filter(Boolean);
+                  const unsupported = requested.filter(m => !validCallMethods.has(m));
+                  if (!requested.length) {
+                    invalid.push(`\`${key}=${value}\` (must be a comma separated method list)`);
+                  } else if (unsupported.length) {
+                    invalid.push(`\`${key}=${value}\` (unsupported method(s): ${unsupported.join(', ')})`);
+                  } else {
+                    defaults[key] = requested.join(',');
+                  }
+                } else if (boolArgs.has(key)) {
+                  if (value === 'true' || value === 'false') {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be true or false)`);
+                  }
+                } else if (durationArgs.has(key)) {
+                  if (/^\d+(ms|s|m)$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a duration like 500ms, 1s, 2m)`);
+                  }
+                } else if (enumArgs.has(key)) {
+                  if (enumArgs.get(key).has(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be one of: ${[...enumArgs.get(key)].join(', ')})`);
+                  }
+                } else if (intArgs.has(key)) {
+                  if (!/^\d+$/.test(value)) {
+                    invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
+                  } else {
+                    defaults[key] = value;
+                    if (key === 'blocks') explicitBlocks = true;
+                    if (key === 'warmup') explicitWarmup = true;
+                    if (key === 'run-pairs') explicitRunPairs = true;
+                  }
+                } else if (refArgs.has(key)) {
+                  if (!value) {
+                    invalid.push(`\`${key}=\` (must be a git ref)`);
+                  } else {
+                    defaults[key] = value;
+                  }
+                } else if (key === 'tracer') {
+                  if (tracerSpecValid(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be comma separated tracer specs: a tracer name, structlog, or js:NAME)`);
+                  }
+                } else if (key === 'tracer-config' || key === 'trace-options') {
+                  if (jsonObjectValid(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a quoted JSON object)`);
+                  }
+                } else if (stringArgs.has(key)) {
+                  defaults[key] = value;
+                } else {
+                  unknown.push(key);
+                }
+              }
+              const errors = [];
+              if (unknown.length) errors.push(`Unknown argument(s): \`${unknown.join('`, `')}\``);
+              if (invalid.length) errors.push(`Invalid value(s): ${invalid.join(', ')}`);
+              if (errors.length) {
+                const msg = `❌ **Invalid bench command**\n\n${errors.join('\n')}\n\n**Usage:** ${usage}`;
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: msg,
+                });
+                core.setFailed(msg);
+                return;
+              }
+              blocks = defaults.blocks;
+              var mode = defaults.mode;
+              warmup = defaults.warmup;
+              baseline = defaults.baseline;
+              feature = defaults.feature;
+              samply = defaults.samply;
+              tracingChrome = defaults['tracing-chrome'];
+              var slack = defaults.slack;
+              cores = defaults.cores;
+              const parsedBigBlocks = parseBigBlocks(defaults['big-blocks']);
+              bigBlocks = parsedBigBlocks.enabled;
+              bigBlocksTargetGas = parsedBigBlocks.targetGas;
+              reorg = defaults.reorg;
+              mempool = defaults.mempool;
+              bal = defaults.bal;
+              var runPairs = defaults['run-pairs'];
+              var otlp = defaults.otlp;
+              var metrics = defaults.metrics;
+              var waitTime = defaults['wait-time'];
+              var blockTime = defaults['block-time'];
+              var baselineNodeArgs = defaults['baseline-args'];
+              var featureNodeArgs = defaults['feature-args'];
+              var txgenRef = defaults['txgen-ref'];
+              var skipStateRoot = defaults['skip-state-root'];
+              corpus = defaults.corpus;
+              callClass = defaults.class;
+              callMethods = defaults.methods;
+              callRps = defaults.rps;
+              callDuration = defaults.duration;
+              callPasses = defaults.passes;
+              callConcurrency = defaults.concurrency;
+              callTopGas = defaults['top-gas'];
+              callTracer = defaults.tracer;
+              callTracerConfig = defaults['tracer-config'];
+              callTraceOptions = defaults['trace-options'];
+              callNamespace = defaults.namespace;
+            }
+
+            if (skipStateRoot === 'true') {
+              baselineNodeArgs = [baselineNodeArgs, '--debug.skip-state-root'].filter(Boolean).join(' ');
+              featureNodeArgs = [featureNodeArgs, '--debug.skip-state-root'].filter(Boolean).join(' ');
+            }
+
+            const useBigBlockDefaults = bigBlocks === 'true';
+            // In call mode `blocks` counts the chain blocks a static corpus is generated
+            // from and `warmup` is a warmup duration in seconds.
+            const isCall = mode === 'call';
+            if (!explicitBlocks) {
+              blocks = isCall ? '20' : defaultBlocks(useBigBlockDefaults);
+            }
+            if (!explicitRunPairs) {
+              runPairs = defaultRunPairs(useBigBlockDefaults);
+            }
+            if (!/^\d+$/.test(blocks)) {
+              core.setFailed(`Invalid blocks value: ${blocks} (must be a positive integer)`);
+              return;
+            }
+            if (explicitWarmup && !/^\d+$/.test(warmup)) {
+              core.setFailed(`Invalid warmup value: ${warmup} (must be a positive integer)`);
+              return;
+            }
+            if (!explicitWarmup) {
+              warmup = isCall ? '60' : defaultWarmup(blocks);
+            }
+            if (!/^[1-9]\d*$/.test(runPairs)) {
+              core.setFailed(`Invalid run-pairs value: ${runPairs} (must be a positive integer greater than zero)`);
+              return;
+            }
+            const runOrder = benchRunOrder(runPairs);
+
+            // Historical block headers lack a BAL hash. Use the existing big-block
+            // payload format to retain BALs, including when replaying older baseline refs.
+            if (mode === 'engine' && bal !== 'false' && bigBlocks !== 'true') {
+              bigBlocks = 'true';
+              bigBlocksTargetGas = '1';
+            }
+
+            const isBigBlocks = bigBlocks === 'true';
+
+            if (!validBalModes.has(bal)) {
+              core.setFailed(`Invalid bal mode: ${bal}`);
+              return;
+            }
+            if (!validModes.has(mode)) {
+              core.setFailed(`Invalid benchmark mode: ${mode}`);
+              return;
+            }
+            if (mode !== 'engine' && (isBigBlocks || reorg || bal !== 'false')) {
+              core.setFailed(`${mode} mode does not support big-blocks, reorg, or BAL`);
+              return;
+            }
+            if (isBigBlocks && reorg) {
+              core.setFailed('reorg is not supported with big-blocks or BAL (reth-bb cannot build reorg blocks)');
+              return;
+            }
+            if (mempool && (mode !== 'engine' || isBigBlocks || reorg)) {
+              core.setFailed('mempool is only supported in Engine mode without big-blocks or reorg');
+              return;
+            }
+            if (mode !== 'rpc' && blockTime) {
+              core.setFailed('block-time is only supported in RPC mode');
+              return;
+            }
+            if (mode !== 'engine' && waitTime) {
+              core.setFailed('wait-time is only supported in Engine mode');
+              return;
+            }
+            if (mode === 'rpc' && !blockTime) {
+              blockTime = '1s';
+            }
+
+            const callArgs = {
+              corpus, class: callClass, methods: callMethods,
+              rps: callRps, duration: callDuration, passes: callPasses, concurrency: callConcurrency,
+              'top-gas': callTopGas, tracer: callTracer, 'tracer-config': callTracerConfig, 'trace-options': callTraceOptions, namespace: callNamespace,
+            };
+            if (isCall) {
+              if (!corpus) corpus = 'static';
+              if (!callClass) callClass = 'call';
+              const classDefaults = callClassDefaults[callClass];
+              if (callNamespace && callClass === 'call') {
+                core.setFailed('namespace applies to the tracecall, tracetx and traceblock classes');
+                return;
+              }
+              if (!callMethods) {
+                // The namespace narrows the class default to one tracing API.
+                callMethods = classDefaults.methods.split(',').filter(m => !callNamespace || m.startsWith(`${callNamespace}_`)).join(',');
+              } else if (callNamespace) {
+                const outside = callMethods.split(',').filter(m => !m.startsWith(`${callNamespace}_`));
+                if (outside.length) {
+                  core.setFailed(`methods outside the ${callNamespace} namespace: ${outside.join(', ')}`);
+                  return;
+                }
+              }
+              if (!callRps) callRps = classDefaults.rps;
+              if (!callConcurrency) callConcurrency = classDefaults.concurrency;
+              if (!callDuration) callDuration = '120s';
+              if (!callPasses) callPasses = '20';
+              if (corpus !== 'static' && (callTracer || callTracerConfig || callTraceOptions)) {
+                core.setFailed('tracer, tracer-config and trace-options apply to corpus=static; a custom corpus carries its own tracer parameters');
+                return;
+              }
+            } else {
+              const provided = Object.entries(callArgs).filter(([, value]) => value !== '').map(([key]) => key);
+              if (provided.length) {
+                core.setFailed(`${provided.join(', ')} ${provided.length > 1 ? 'are' : 'is'} only supported in call mode`);
+                return;
+              }
+            }
+
+            const releaseRef = (ref) => /^v\d+\.\d+\.\d+/.test(ref || '');
+            if (releaseRef(baseline) || releaseRef(feature) || (process.env.GITHUB_REF_TYPE || '') === 'tag') {
+              otlp = 'false';
+            }
+
+            // Resolve display names for baseline/feature
+            let baselineName = baseline || 'main';
+            let featureName = feature;
+            if (pr) {
+              const { data: prData } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parseInt(pr),
+              });
+              core.setOutput('pr-head-sha', prData.head.sha);
+              core.setOutput('pr-head-ref', prData.head.ref);
+              core.setOutput('pr-head-repo', prData.head.repo.full_name);
+              if (!featureName) featureName = prData.head.ref;
+            } else {
+              if (!featureName) featureName = (process.env.GITHUB_REF_NAME || '');
+            }
+
+            const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
+
+            core.setOutput('pr', pr || '');
+            core.setOutput('actor', actor);
+            core.setOutput('blocks', blocks);
+            core.setOutput('warmup', warmup);
+            core.setOutput('baseline', baseline);
+            core.setOutput('feature', feature);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-name', featureName);
+            core.setOutput('samply', samply);
+            core.setOutput('tracing-chrome', tracingChrome);
+            core.setOutput('slack', slack);
+            core.setOutput('cores', cores);
+            core.setOutput('big-blocks', bigBlocks);
+            core.setOutput('big-blocks-target-gas', bigBlocksTargetGas);
+            core.setOutput('reorg', reorg);
+            core.setOutput('bal', bal);
+            core.setOutput('wait-time', waitTime);
+            core.setOutput('mempool', mempool);
+            core.setOutput('block-time', blockTime);
+            core.setOutput('baseline-args', baselineNodeArgs);
+            core.setOutput('feature-args', featureNodeArgs);
+            core.setOutput('run-pairs', runPairs);
+            core.setOutput('run-order', runOrder);
+            core.setOutput('otlp', otlp);
+            core.setOutput('metrics', metrics);
+            core.setOutput('node-bin', nodeBin);
+            core.setOutput('mode', mode);
+            core.setOutput('corpus', corpus);
+            core.setOutput('class', callClass);
+            core.setOutput('methods', callMethods);
+            core.setOutput('rps', callRps);
+            core.setOutput('duration', callDuration);
+            core.setOutput('passes', callPasses);
+            core.setOutput('concurrency', callConcurrency);
+            core.setOutput('top-gas', callTopGas);
+            core.setOutput('tracer', callTracer);
+            core.setOutput('tracer-config', callTracerConfig);
+            core.setOutput('trace-options', callTraceOptions);
+            core.setOutput('namespace', callNamespace);
+            core.setOutput('txgen-ref', txgenRef);
+
+      - name: Acknowledge request
+        id: ack
+        if: steps.command.outputs.command == 'bench'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_ACTOR: ${{ steps.args.outputs.actor }}
+          INPUT_BAL: ${{ steps.args.outputs.bal }}
+          INPUT_BASELINE_ARGS: ${{ steps.args.outputs.baseline-args }}
+          INPUT_BASELINE_NAME: ${{ steps.args.outputs.baseline-name }}
+          INPUT_BIG_BLOCKS: ${{ steps.args.outputs.big-blocks }}
+          INPUT_BLOCK_TIME: ${{ steps.args.outputs.block-time }}
+          INPUT_BLOCKS: ${{ steps.args.outputs.blocks }}
+          INPUT_CLASS: ${{ steps.args.outputs.class }}
+          INPUT_CONCURRENCY: ${{ steps.args.outputs.concurrency }}
+          INPUT_CORES: ${{ steps.args.outputs.cores }}
+          INPUT_CORPUS: ${{ steps.args.outputs.corpus }}
+          INPUT_DURATION: ${{ steps.args.outputs.duration }}
+          INPUT_FEATURE_ARGS: ${{ steps.args.outputs.feature-args }}
+          INPUT_FEATURE_NAME: ${{ steps.args.outputs.feature-name }}
+          INPUT_METHODS: ${{ steps.args.outputs.methods }}
+          INPUT_METRICS: ${{ steps.args.outputs.metrics }}
+          INPUT_MODE: ${{ steps.args.outputs.mode }}
+          INPUT_NAMESPACE: ${{ steps.args.outputs.namespace }}
+          INPUT_OTLP: ${{ steps.args.outputs.otlp }}
+          INPUT_PASSES: ${{ steps.args.outputs.passes }}
+          INPUT_PR: ${{ steps.args.outputs.pr }}
+          INPUT_REORG: ${{ steps.args.outputs.reorg }}
+          INPUT_RPS: ${{ steps.args.outputs.rps }}
+          INPUT_RUN_ORDER: ${{ steps.args.outputs.run-order }}
+          INPUT_RUN_PAIRS: ${{ steps.args.outputs.run-pairs }}
+          INPUT_SAMPLY: ${{ steps.args.outputs.samply }}
+          INPUT_SLACK: ${{ steps.args.outputs.slack }}
+          INPUT_TOP_GAS: ${{ steps.args.outputs.top-gas }}
+          INPUT_TRACER: ${{ steps.args.outputs.tracer }}
+          INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
+          INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
+          INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            if (context.eventName === 'issue_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            }
+
+            const pr = process.env.INPUT_PR;
+            if (!pr) return;
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Count queued/waiting bench runs ahead of this one.
+            // BENCH_RUNNERS is the number of self-hosted runners available.
+            let queueMsg = '';
+            let ahead = 0;
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
+            try {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              ahead = Math.max(0, totalAhead - numRunners + 1);
+              if (ahead > 0) {
+                queueMsg = `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`;
+              }
+            } catch (e) {
+              core.info(`Skipping queue tracking: ${e.message}`);
+            }
+
+            const actor = process.env.INPUT_ACTOR;
+            const blocks = process.env.INPUT_BLOCKS;
+            const warmup = process.env.INPUT_WARMUP;
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
+            const samply = process.env.INPUT_SAMPLY === 'true';
+            const tracingChrome = process.env.INPUT_TRACING_CHROME === 'true';
+            const slack = process.env.INPUT_SLACK || 'always';
+            const bigBlocks = process.env.INPUT_BIG_BLOCKS === 'true';
+            const mode = process.env.INPUT_MODE || 'engine';
+            const reorg = process.env.INPUT_REORG;
+            const bal = process.env.INPUT_BAL || 'false';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
+            const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
+            const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = process.env.INPUT_CORPUS;
+            const callClass = process.env.INPUT_CLASS;
+            const callMethods = process.env.INPUT_METHODS;
+            const callRps = process.env.INPUT_RPS;
+            const callDuration = process.env.INPUT_DURATION;
+            const callPasses = process.env.INPUT_PASSES;
+            const callConcurrency = process.env.INPUT_CONCURRENCY;
+            const callTopGas = process.env.INPUT_TOP_GAS;
+            const callNamespace = process.env.INPUT_NAMESPACE;
+            const callTracer = process.env.INPUT_TRACER;
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
+            const cores = process.env.INPUT_CORES;
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            const runPairs = process.env.INPUT_RUN_PAIRS || '6';
+            const runOrder = process.env.INPUT_RUN_ORDER;
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
+            const otlpEnabled = process.env.INPUT_OTLP !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = process.env.INPUT_METRICS === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
+            const waitTimeVal = process.env.INPUT_WAIT_TIME;
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.INPUT_MEMPOOL;
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
+            const blockTimeVal = process.env.INPUT_BLOCK_TIME;
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
+            const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = process.env.INPUT_FEATURE_ARGS;
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(pr),
+              body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
+            });
+            core.setOutput('comment-id', String(comment.id));
+            core.setOutput('queue-position', String(ahead || 0));
+
+      - name: Poll queue position
+        if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_COMMENT_ID: ${{ steps.ack.outputs.comment-id }}
+          INPUT_QUEUE_POSITION: ${{ steps.ack.outputs.queue-position }}
+          INPUT_ACTOR: ${{ steps.args.outputs.actor }}
+          INPUT_BAL: ${{ steps.args.outputs.bal }}
+          INPUT_BASELINE_ARGS: ${{ steps.args.outputs.baseline-args }}
+          INPUT_BASELINE_NAME: ${{ steps.args.outputs.baseline-name }}
+          INPUT_BIG_BLOCKS: ${{ steps.args.outputs.big-blocks }}
+          INPUT_BLOCK_TIME: ${{ steps.args.outputs.block-time }}
+          INPUT_BLOCKS: ${{ steps.args.outputs.blocks }}
+          INPUT_CLASS: ${{ steps.args.outputs.class }}
+          INPUT_CONCURRENCY: ${{ steps.args.outputs.concurrency }}
+          INPUT_CORES: ${{ steps.args.outputs.cores }}
+          INPUT_CORPUS: ${{ steps.args.outputs.corpus }}
+          INPUT_DURATION: ${{ steps.args.outputs.duration }}
+          INPUT_FEATURE_ARGS: ${{ steps.args.outputs.feature-args }}
+          INPUT_FEATURE_NAME: ${{ steps.args.outputs.feature-name }}
+          INPUT_METHODS: ${{ steps.args.outputs.methods }}
+          INPUT_METRICS: ${{ steps.args.outputs.metrics }}
+          INPUT_MODE: ${{ steps.args.outputs.mode }}
+          INPUT_NAMESPACE: ${{ steps.args.outputs.namespace }}
+          INPUT_OTLP: ${{ steps.args.outputs.otlp }}
+          INPUT_PASSES: ${{ steps.args.outputs.passes }}
+          INPUT_PR: ${{ steps.args.outputs.pr }}
+          INPUT_REORG: ${{ steps.args.outputs.reorg }}
+          INPUT_RPS: ${{ steps.args.outputs.rps }}
+          INPUT_RUN_ORDER: ${{ steps.args.outputs.run-order }}
+          INPUT_RUN_PAIRS: ${{ steps.args.outputs.run-pairs }}
+          INPUT_SAMPLY: ${{ steps.args.outputs.samply }}
+          INPUT_SLACK: ${{ steps.args.outputs.slack }}
+          INPUT_TOP_GAS: ${{ steps.args.outputs.top-gas }}
+          INPUT_TRACER: ${{ steps.args.outputs.tracer }}
+          INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
+          INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_MEMPOOL: ${{ steps.args.outputs.mempool }}
+          INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const pr = process.env.INPUT_PR;
+            const commentId = parseInt(process.env.INPUT_COMMENT_ID);
+            const actor = process.env.INPUT_ACTOR;
+            const blocks = process.env.INPUT_BLOCKS;
+            const warmup = process.env.INPUT_WARMUP;
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
+            const samply = process.env.INPUT_SAMPLY === 'true';
+            const tracingChrome = process.env.INPUT_TRACING_CHROME === 'true';
+            const slack = process.env.INPUT_SLACK || 'always';
+            const bigBlocks = process.env.INPUT_BIG_BLOCKS === 'true';
+            const mode = process.env.INPUT_MODE || 'engine';
+            const reorg = process.env.INPUT_REORG;
+            const bal = process.env.INPUT_BAL || 'false';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
+            const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
+            const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = process.env.INPUT_CORPUS;
+            const callClass = process.env.INPUT_CLASS;
+            const callMethods = process.env.INPUT_METHODS;
+            const callRps = process.env.INPUT_RPS;
+            const callDuration = process.env.INPUT_DURATION;
+            const callPasses = process.env.INPUT_PASSES;
+            const callConcurrency = process.env.INPUT_CONCURRENCY;
+            const callTopGas = process.env.INPUT_TOP_GAS;
+            const callNamespace = process.env.INPUT_NAMESPACE;
+            const callTracer = process.env.INPUT_TRACER;
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
+            const cores = process.env.INPUT_CORES;
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            const runPairs = process.env.INPUT_RUN_PAIRS || '6';
+            const runOrder = process.env.INPUT_RUN_ORDER;
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
+            const otlpEnabled = process.env.INPUT_OTLP !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = process.env.INPUT_METRICS === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
+            const waitTimeVal = process.env.INPUT_WAIT_TIME;
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.INPUT_MEMPOOL;
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
+            const blockTimeVal = process.env.INPUT_BLOCK_TIME;
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
+            const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = process.env.INPUT_FEATURE_ARGS;
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
+            async function getQueuePosition() {
+              const statuses = ['queued', 'in_progress', 'waiting', 'requested', 'pending'];
+              const allRuns = [];
+              for (const status of statuses) {
+                const { data: { workflow_runs: r } } = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'bench.yml',
+                  status,
+                  per_page: 100,
+                });
+                allRuns.push(...r);
+              }
+              const benchRuns = allRuns.filter(r => r.event === 'issue_comment' || r.event === 'workflow_dispatch');
+              const thisRun = benchRuns.find(r => r.id === context.runId);
+              const thisCreatedAt = thisRun ? new Date(thisRun.created_at) : new Date();
+              const totalAhead = benchRuns.filter(r => r.id !== context.runId && new Date(r.created_at) <= thisCreatedAt).length;
+              return { ahead: Math.max(0, totalAhead - numRunners + 1), numRunners };
+            }
+
+            let lastPosition = parseInt(process.env.INPUT_QUEUE_POSITION);
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            while (true) {
+              await sleep(10_000);
+              try {
+                const { ahead, numRunners } = await getQueuePosition();
+                if (ahead !== lastPosition) {
+                  lastPosition = ahead;
+                  const queueMsg = ahead > 0
+                    ? `\n🔢 **Queue position:** ${ahead} job(s) ahead (${numRunners} runner(s))`
+                    : '';
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: commentId,
+                    body: `cc @${actor}\n\n🚀 Benchmark queued! [View run](${runUrl})\n\n⏳ **Status:** Waiting for runner...${queueMsg}\n\n${config}`,
+                  });
+                }
+                if (ahead === 0) break;
+              } catch (e) {
+                core.info(`Queue poll error: ${e.message}`);
+              }
+            }
+
+  bench-txgen:
+    needs: bench-ack
+    if: needs.bench-ack.outputs.command == 'bench'
+    name: bench-txgen
+    runs-on: [self-hosted, Linux, X64, available]
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    timeout-minutes: 120
+    env:
+      BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
+      SCHELK_MOUNT: /reth-bench
+      RETH_SCOPE: reth-bench.scope
+      BENCH_WORK_DIR: ${{ github.workspace }}/bench-work
+      BENCH_PR: ${{ needs.bench-ack.outputs.pr }}
+      BENCH_PR_HEAD_SHA: ${{ needs.bench-ack.outputs.pr-head-sha }}
+      BENCH_PR_HEAD_REF: ${{ needs.bench-ack.outputs.pr-head-ref }}
+      BENCH_PR_HEAD_REPO: ${{ needs.bench-ack.outputs.pr-head-repo }}
+      BENCH_ACTOR: ${{ needs.bench-ack.outputs.actor }}
+      BENCH_BLOCKS: ${{ needs.bench-ack.outputs.blocks }}
+      BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
+      BENCH_SAMPLY: ${{ needs.bench-ack.outputs.samply }}
+      BENCH_TRACING_CHROME: ${{ needs.bench-ack.outputs.tracing-chrome }}
+      BENCH_CORES: ${{ needs.bench-ack.outputs.cores }}
+      BENCH_BIG_BLOCKS: ${{ needs.bench-ack.outputs.big-blocks }}
+      BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.bench-ack.outputs.big-blocks-target-gas }}
+      BENCH_REORG: ${{ needs.bench-ack.outputs.reorg }}
+      BENCH_BAL: ${{ needs.bench-ack.outputs.bal }}
+      BENCH_WAIT_TIME: ${{ needs.bench-ack.outputs.wait-time }}
+      BENCH_MEMPOOL: ${{ needs.bench-ack.outputs.mempool }}
+      BENCH_BLOCK_TIME: ${{ needs.bench-ack.outputs.block-time }}
+      BENCH_BASELINE_ARGS: ${{ needs.bench-ack.outputs.baseline-args }}
+      BENCH_FEATURE_ARGS: ${{ needs.bench-ack.outputs.feature-args }}
+      BENCH_RUN_PAIRS: ${{ needs.bench-ack.outputs.run-pairs }}
+      BENCH_RUN_ORDER: ${{ needs.bench-ack.outputs.run-order }}
+      BENCH_OTLP: ${{ needs.bench-ack.outputs.otlp }}
+      BENCH_METRICS: ${{ needs.bench-ack.outputs.metrics }}
+      BENCH_COMMENT_ID: ${{ needs.bench-ack.outputs.comment-id }}
+      BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
+      BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
+      BENCH_EXECUTION_MODE: ${{ needs.bench-ack.outputs.mode }}
+      BENCH_CORPUS: ${{ needs.bench-ack.outputs.corpus }}
+      BENCH_CORPUS_DIR: /reth-bench/corpora
+      BENCH_CALL_CLASS: ${{ needs.bench-ack.outputs.class }}
+      BENCH_CALL_METHODS: ${{ needs.bench-ack.outputs.methods }}
+      BENCH_CALL_RPS: ${{ needs.bench-ack.outputs.rps }}
+      BENCH_CALL_DURATION: ${{ needs.bench-ack.outputs.duration }}
+      BENCH_CALL_PASSES: ${{ needs.bench-ack.outputs.passes }}
+      BENCH_CALL_CONCURRENCY: ${{ needs.bench-ack.outputs.concurrency }}
+      BENCH_CALL_TOP_GAS: ${{ needs.bench-ack.outputs.top-gas }}
+      BENCH_CALL_TRACER: ${{ needs.bench-ack.outputs.tracer }}
+      BENCH_CALL_TRACER_CONFIG: ${{ needs.bench-ack.outputs.tracer-config }}
+      BENCH_CALL_TRACE_OPTIONS: ${{ needs.bench-ack.outputs.trace-options }}
+      BENCH_CALL_NAMESPACE: ${{ needs.bench-ack.outputs.namespace }}
+      BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
+      BENCH_METRICS_ADDR: "127.0.0.1:9001"
+      BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
+      BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
+      BENCH_OTLP_TRACES_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_TRACES_ENDPOINT || '' }}
+      BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
+      BENCH_VICTORIAMETRICS_URL: ${{ needs.bench-ack.outputs.metrics == 'true' && secrets.BENCH_VICTORIAMETRICS_URL || '' }}
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - name: Clean up previous bench-work
+        run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
+
+      - name: Resolve checkout ref
+        id: checkout-ref
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_REF: ${{ github.ref }}
+        with:
+          script: |
+            if (!process.env.BENCH_PR) {
+              core.setOutput('repository', '${{ github.repository }}');
+              core.setOutput('ref', process.env.INPUT_REF);
+              return;
+            }
+            const sha = process.env.BENCH_PR_HEAD_SHA;
+            if (!sha) {
+              core.setFailed('BENCH_PR_HEAD_SHA is not set — ack job must pin the PR head SHA');
+              return;
+            }
+            const repository = process.env.BENCH_PR_HEAD_REPO || '${{ github.repository }}';
+            core.info(`PR #${process.env.BENCH_PR}, using ${repository}@${sha}`);
+            core.setOutput('repository', repository);
+            core.setOutput('ref', sha);
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.checkout-ref.outputs.repository }}
+          persist-credentials: false
+          submodules: true
+          fetch-depth: 0
+          ref: ${{ steps.checkout-ref.outputs.ref }}
+
+      - name: Initialize run summary and update status
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_BASELINE_NAME: ${{ needs.bench-ack.outputs.baseline-name }}
+          INPUT_FEATURE_NAME: ${{ needs.bench-ack.outputs.feature-name }}
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const expectedJobName = 'bench-txgen';
+            const job = jobs.jobs.find(j => j.name === expectedJobName);
+            const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            core.exportVariable('BENCH_JOB_URL', jobUrl);
+            core.exportVariable('BENCH_RUN_URL', runUrl);
+
+            const blocks = process.env.BENCH_BLOCKS;
+            const warmup = process.env.BENCH_WARMUP_BLOCKS;
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
+            const samply = process.env.BENCH_SAMPLY === 'true';
+            const tracingChrome = process.env.BENCH_TRACING_CHROME === 'true';
+            const slack = process.env.BENCH_SLACK || 'always';
+            const bigBlocks = process.env.BENCH_BIG_BLOCKS === 'true';
+            const mode = process.env.BENCH_EXECUTION_MODE || 'engine';
+            const reorg = process.env.BENCH_REORG || '';
+            const bal = process.env.BENCH_BAL || 'false';
+            const samplyNote = samply ? ', samply: `enabled`' : '';
+            const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
+            const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
+            const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
+            const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
+            const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = process.env.BENCH_CORPUS || '';
+            const callClass = process.env.BENCH_CALL_CLASS || '';
+            const callMethods = process.env.BENCH_CALL_METHODS || '';
+            const callRps = process.env.BENCH_CALL_RPS || '';
+            const callDuration = process.env.BENCH_CALL_DURATION || '';
+            const callPasses = process.env.BENCH_CALL_PASSES || '';
+            const callConcurrency = process.env.BENCH_CALL_CONCURRENCY || '';
+            const callTopGas = process.env.BENCH_CALL_TOP_GAS || '';
+            const callNamespace = process.env.BENCH_CALL_NAMESPACE || '';
+            const callTracer = process.env.BENCH_CALL_TRACER || '';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
+            const cores = process.env.BENCH_CORES || '0';
+            const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
+            const runPairs = process.env.BENCH_RUN_PAIRS || '6';
+            const runOrder = process.env.BENCH_RUN_ORDER || '';
+            const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
+            const otlpEnabled = (process.env.BENCH_OTLP || 'false') !== 'false';
+            const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
+            const metricsEnabled = process.env.BENCH_METRICS === 'true';
+            const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
+            const waitTimeVal = process.env.BENCH_WAIT_TIME || '';
+            const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
+            const mempoolVal = process.env.BENCH_MEMPOOL || '';
+            const mempoolNote = mempoolVal ? `, mempool: \`${mempoolVal}\`` : '';
+            const blockTimeVal = process.env.BENCH_BLOCK_TIME || '';
+            const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
+            const baselineArgsVal = process.env.BENCH_BASELINE_ARGS || '';
+            const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
+            const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
+            const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${mempoolNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            core.exportVariable('BENCH_CONFIG', config);
+
+            const pr = process.env.BENCH_PR;
+            const metadata = pr
+              ? `**[PR #${pr}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/pull/${pr})** · triggered by @${process.env.BENCH_ACTOR}`
+              : `Triggered by @${process.env.BENCH_ACTOR}`;
+            await core.summary
+              .addHeading('⏳ Benchmark in progress')
+              .addRaw(`${metadata}\n\n${config}\n`)
+              .write();
+
+            if (process.env.BENCH_COMMENT_ID) {
+              const { buildBody } = require('./.github/scripts/bench-update-status.js');
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+                body: buildBody('Building binaries...'),
+              });
+            }
+
+      - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: stable
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        continue-on-error: true
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      - name: Mask OTLP endpoints
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const envName of ['BENCH_OTLP_TRACES_ENDPOINT', 'BENCH_OTLP_LOGS_ENDPOINT']) {
+              const endpoint = process.env[envName] || '';
+              if (!endpoint) {
+                continue;
+              }
+
+              core.setSecret(endpoint);
+              try {
+                const url = new URL(endpoint);
+                url.username = '';
+                url.password = '';
+                core.setSecret(url.toString());
+              } catch {
+                // The CLI parser will report malformed endpoints later; this step only masks.
+              }
+            }
+
+      - name: Install dependencies
+        env:
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # apt packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gh
+          sudo apt-get install -y --no-install-recommends \
+            python3 make jq zstd curl dmsetup m4 \
+            linux-tools-"$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+          # mc (MinIO client)
+          if ! command -v mc &>/dev/null; then
+            curl -sSfL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+            chmod +x "$HOME/.local/bin/mc"
+          fi
+
+          # llvm
+          .github/scripts/install_llvm.sh ubuntu
+
+          # uv (Python package manager)
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" sh
+          fi
+
+          # Configure git auth for private repos
+          git config --global url."https://x-access-token:${DEREK_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # thin-provisioning-tools (era_invalidate, required by schelk)
+          if ! command -v era_invalidate &>/dev/null; then
+            git clone --depth 1 https://github.com/jthornber/thin-provisioning-tools /tmp/tpt
+            sudo make -C /tmp/tpt install
+            rm -rf /tmp/tpt
+          fi
+
+          # schelk (snapshot rollback tool, invoked via sudo)
+          if ! sudo sh -c 'command -v schelk' &>/dev/null; then
+            cargo install --git https://github.com/tempoxyz/schelk --locked
+            sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
+          fi
+
+          # samply (optional CPU profiler, invoked via sudo)
+          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
+            sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
+          fi
+
+      # Verify all required tools are available
+      - name: Check dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          missing=()
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq llvm-config m4 gh; do
+            command -v "$cmd" &>/dev/null || missing+=("$cmd")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required tools: ${missing[*]}"
+            exit 1
+          fi
+          echo "All dependencies found"
+
+      # Build binaries
+      - name: Resolve PR head branch
+        id: pr-info
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_REF_NAME: ${{ github.ref_name }}
+        with:
+          script: |
+            if (process.env.BENCH_PR) {
+              const ref = process.env.BENCH_PR_HEAD_REF || process.env.INPUT_REF_NAME;
+              const sha = process.env.BENCH_PR_HEAD_SHA || '${{ github.sha }}';
+              core.setOutput('head-ref', ref);
+              core.setOutput('head-sha', sha);
+            } else {
+              core.setOutput('head-ref', process.env.INPUT_REF_NAME);
+              core.setOutput('head-sha', '${{ github.sha }}');
+            }
+
+      - name: Resolve refs
+        id: refs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_BASELINE: ${{ needs.bench-ack.outputs.baseline }}
+          INPUT_FEATURE: ${{ needs.bench-ack.outputs.feature }}
+          INPUT_HEAD_REF: ${{ steps.pr-info.outputs.head-ref }}
+          INPUT_HEAD_SHA: ${{ steps.pr-info.outputs.head-sha }}
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const run = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+
+            const baselineArg = process.env.INPUT_BASELINE;
+            const featureArg = process.env.INPUT_FEATURE;
+
+            let baselineRef, baselineName, featureRef, featureName;
+
+            if (baselineArg) {
+              try { run('fetch', '--quiet', '--', 'origin', baselineArg); } catch {}
+              try {
+                baselineRef = run('rev-parse', '--verify', '--end-of-options', baselineArg);
+              } catch {
+                baselineRef = run('rev-parse', '--verify', '--end-of-options', `origin/${baselineArg}`);
+              }
+              baselineName = baselineArg;
+            } else {
+              try {
+                baselineRef = run('merge-base', 'HEAD', 'origin/main');
+              } catch {
+                baselineRef = '${{ github.sha }}';
+              }
+              baselineName = 'main';
+            }
+
+            if (featureArg) {
+              try { run('fetch', '--quiet', '--', 'origin', featureArg); } catch {}
+              try {
+                featureRef = run('rev-parse', '--verify', '--end-of-options', featureArg);
+              } catch {
+                featureRef = run('rev-parse', '--verify', '--end-of-options', `origin/${featureArg}`);
+              }
+              featureName = featureArg;
+            } else {
+              featureRef = process.env.INPUT_HEAD_SHA;
+              featureName = process.env.INPUT_HEAD_REF;
+            }
+
+            core.setOutput('baseline-ref', baselineRef);
+            core.setOutput('baseline-name', baselineName);
+            core.setOutput('feature-ref', featureRef);
+            core.setOutput('feature-name', featureName);
+
+      - name: Prepare source dirs
+        env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+        run: |
+          prepare_source_dir() {
+            local dir="$1"
+            local ref="$2"
+
+            if [ -d "$dir" ]; then
+              git -C "$dir" reset --hard HEAD
+              git -C "$dir" clean -fdx
+              git -C "$dir" fetch origin "$ref"
+            else
+              git clone . "$dir"
+            fi
+
+            git -C "$dir" checkout --force "$ref"
+          }
+
+          BASELINE_REF="${INPUT_BASELINE_REF}"
+          prepare_source_dir ../reth-baseline "$BASELINE_REF"
+
+          FEATURE_REF="${INPUT_FEATURE_REF}"
+          prepare_source_dir ../reth-feature "$FEATURE_REF"
+
+      - name: Build binaries
+        id: build
+        env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
+          TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
+          TXGEN_REF: ${{ needs.bench-ack.outputs.txgen-ref }}
+          GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
+          DEREK_PAT: ${{ secrets.DEREK_PAT }}
+          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          BENCH_REPO: ${{ github.repository }}
+        run: |
+          BASELINE_DIR="$(cd ../reth-baseline && pwd)"
+          FEATURE_DIR="$(cd ../reth-feature && pwd)"
+
+          .github/scripts/bench-txgen-install.sh
+
+          .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${INPUT_BASELINE_REF}" &
+          PID_BASELINE=$!
+          .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${INPUT_FEATURE_REF}" &
+          PID_FEATURE=$!
+
+          FAIL=0
+          wait $PID_BASELINE || FAIL=1
+          wait $PID_FEATURE || FAIL=1
+          if [ $FAIL -ne 0 ]; then
+            echo "::error::One or more build tasks failed"
+            exit 1
+          fi
+
+      - name: Sync snapshot
+        id: snapshot-check
+        run: |
+          BENCH_RETH_BINARY="$(pwd)/../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            .github/scripts/bench-reth-snapshot.sh
+
+      # System tuning for reproducible benchmarks
+      - name: System setup
+        run: |
+          # Switch amd-pstate to passive mode so the kernel governor
+          # controls frequency directly (EPP is ignored in passive).
+          echo passive | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
+          sudo cpupower frequency-set -g performance || true
+          # Pin all cores to the nominal (base) frequency from CPPC.
+          NOMINAL_KHZ=""
+          if [ -f /sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq ]; then
+            NOMINAL_MHZ=$(cat /sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq)
+            NOMINAL_KHZ=$((NOMINAL_MHZ * 1000))
+          elif [ -f /sys/devices/system/cpu/cpu0/cpufreq/base_frequency ]; then
+            NOMINAL_KHZ=$(cat /sys/devices/system/cpu/cpu0/cpufreq/base_frequency)
+          fi
+          if [ -n "$NOMINAL_KHZ" ] && [ "$NOMINAL_KHZ" -gt 0 ] 2>/dev/null; then
+            echo "Pinning all cores to nominal frequency: $((NOMINAL_KHZ / 1000)) MHz"
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+              echo "$NOMINAL_KHZ" | sudo tee "$f" > /dev/null
+            done
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+              echo "$NOMINAL_KHZ" | sudo tee "$f" > /dev/null
+            done
+          fi
+          sudo swapoff -a || true
+          echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
+          # Disable SMT (hyperthreading)
+          for cpu in /sys/devices/system/cpu/cpu*/topology/thread_siblings_list; do
+            first=$(cut -d, -f1 < "$cpu" | cut -d- -f1)
+            current=$(echo "$cpu" | grep -o 'cpu[0-9]*' | grep -o '[0-9]*')
+            if [ "$current" != "$first" ]; then
+              echo 0 | sudo tee "/sys/devices/system/cpu/cpu${current}/online" || true
+            fi
+          done
+          echo "Online CPUs: $(nproc)"
+          # Disable transparent huge pages (compaction causes latency spikes)
+          for p in /sys/kernel/mm/transparent_hugepage /sys/kernel/mm/transparent_hugepages; do
+            [ -d "$p" ] && echo never | sudo tee "$p/enabled" && echo never | sudo tee "$p/defrag" && break
+          done || true
+          # Replace any stale PM QoS holders left behind by earlier benchmark jobs.
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
+          # Prevent deep C-states (avoids wake-up latency jitter)
+          sudo bash -c 'exec 3<>/dev/cpu_dma_latency; printf "\0\0\0\0" >&3; exec -a bench-cpu-dma-latency sleep infinity' &
+          echo "BENCH_CPU_DMA_LATENCY_PID=$!" >> "$GITHUB_ENV"
+          # Move all IRQs to core 0 (housekeeping core)
+          for irq in /proc/irq/*/smp_affinity_list; do
+            echo 0 | sudo tee "$irq" 2>/dev/null || true
+          done
+          # Stop noisy background services
+          sudo systemctl stop \
+            irqbalance cron atd unattended-upgrades snapd \
+            prometheus-node-exporter-apt.timer prometheus-node-exporter-apt.service \
+            prometheus-node-exporter-nvme.timer prometheus-node-exporter-nvme.service \
+            prometheus-node-exporter-ipmitool-sensor.timer prometheus-node-exporter-ipmitool-sensor.service \
+            sysstat-collect.timer sysstat-collect.service \
+            sysstat-summary.timer sysstat-summary.service \
+            2>/dev/null || true
+          # Log environment for reproducibility
+          echo "=== Benchmark environment ==="
+          uname -r
+          lscpu | grep -E 'Model name|CPU\(s\)|MHz|NUMA'
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+          cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+          echo "scaling_min_freq: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq)"
+          echo "scaling_max_freq: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq)"
+          cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || cat /sys/kernel/mm/transparent_hugepages/enabled 2>/dev/null || echo "THP: unknown"
+          free -h
+
+      # Clean up any leftover state
+      - name: Pre-flight cleanup
+        run: |
+          sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+          sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+          sudo schelk recover -y --kill || sudo schelk full-recover -y || true
+          rm -rf "$BENCH_WORK_DIR"
+          mkdir -p "$BENCH_WORK_DIR"
+
+      - name: Initialize benchmark metrics labels
+        env:
+          INPUT_BASELINE_NAME: ${{ needs.bench-ack.outputs.baseline-name }}
+          INPUT_FEATURE_NAME: ${{ needs.bench-ack.outputs.feature-name }}
+        run: |
+          if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+            echo "::add-mask::$BENCH_VICTORIAMETRICS_URL"
+          fi
+
+          quote_arg() {
+            local value="$1"
+            if [[ "$value" =~ ^[A-Za-z0-9._/:=@+,-]+$ ]]; then
+              printf '%s' "$value"
+            else
+              printf "'%s'" "${value//\'/\'\\\'\'}"
+            fi
+          }
+
+          derek_cmd=(derek bench)
+          [ "$BENCH_EXECUTION_MODE" != "engine" ] && derek_cmd+=(mode="$BENCH_EXECUTION_MODE")
+          [ "$BENCH_BIG_BLOCKS" = "true" ] && derek_cmd+=(big-blocks="${BENCH_BIG_BLOCKS_TARGET_GAS:-true}")
+          [ -n "$BENCH_REORG" ] && derek_cmd+=(reorg="$BENCH_REORG")
+          derek_cmd+=(
+            blocks="$BENCH_BLOCKS"
+            warmup="$BENCH_WARMUP_BLOCKS"
+            baseline="${INPUT_BASELINE_NAME}"
+            feature="${INPUT_FEATURE_NAME}"
+            bal="$BENCH_BAL"
+            cores="$BENCH_CORES"
+            run-pairs="$BENCH_RUN_PAIRS"
+            otlp="$BENCH_OTLP"
+            metrics="$BENCH_METRICS"
+            slack="$BENCH_SLACK"
+          )
+          if [ "$BENCH_EXECUTION_MODE" = "call" ]; then
+            derek_cmd+=(
+              corpus="$BENCH_CORPUS"
+              class="$BENCH_CALL_CLASS"
+              methods="$BENCH_CALL_METHODS"
+              rps="$BENCH_CALL_RPS"
+              duration="$BENCH_CALL_DURATION"
+              passes="$BENCH_CALL_PASSES"
+              concurrency="$BENCH_CALL_CONCURRENCY"
+            )
+            [ -n "$BENCH_CALL_TOP_GAS" ] && derek_cmd+=(top-gas="$BENCH_CALL_TOP_GAS")
+            [ -n "$BENCH_CALL_TRACER" ] && derek_cmd+=(tracer="$BENCH_CALL_TRACER")
+            [ -n "$BENCH_CALL_TRACER_CONFIG" ] && derek_cmd+=("tracer-config='$BENCH_CALL_TRACER_CONFIG'")
+            [ -n "$BENCH_CALL_TRACE_OPTIONS" ] && derek_cmd+=("trace-options='$BENCH_CALL_TRACE_OPTIONS'")
+            [ -n "$BENCH_CALL_NAMESPACE" ] && derek_cmd+=(namespace="$BENCH_CALL_NAMESPACE")
+          fi
+          [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
+          [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
+          [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
+          if [ "$BENCH_MEMPOOL" = "true" ]; then
+            derek_cmd+=(mempool)
+          elif [ -n "$BENCH_MEMPOOL" ]; then
+            derek_cmd+=(mempool="$BENCH_MEMPOOL")
+          fi
+          [ -n "$BENCH_BLOCK_TIME" ] && derek_cmd+=(block-time="$BENCH_BLOCK_TIME")
+          [ -n "$BENCH_BASELINE_ARGS" ] && derek_cmd+=(baseline-args="$BENCH_BASELINE_ARGS")
+          [ -n "$BENCH_FEATURE_ARGS" ] && derek_cmd+=(feature-args="$BENCH_FEATURE_ARGS")
+          DEREK_BENCH_COMMAND=""
+          for arg in "${derek_cmd[@]}"; do
+            if [ -n "$DEREK_BENCH_COMMAND" ]; then
+              DEREK_BENCH_COMMAND+=" "
+            fi
+            DEREK_BENCH_COMMAND+="$(quote_arg "$arg")"
+          done
+          echo "DEREK_BENCH_COMMAND=${DEREK_BENCH_COMMAND}" >> "$GITHUB_ENV"
+
+          BENCH_ID="ci-${{ github.run_id }}"
+          BENCH_REFERENCE_EPOCH=$(date +%s)
+          echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
+          echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
+
+          LABELS_FILE="$(mktemp "${RUNNER_TEMP:-/tmp}/bench-metrics-labels.XXXXXX")"
+          echo '{}' > "$LABELS_FILE"
+          echo "BENCH_LABELS_FILE=${LABELS_FILE}" >> "$GITHUB_ENV"
+
+      # Extract txgen payloads or transactions once so they are reused across all benchmark
+      # runs instead of re-fetching from the remote RPC for every run.
+      - name: Extract txgen payloads
+        run: |
+          PAYLOADS_DIR="$BENCH_WORK_DIR/txgen-payloads"
+          .github/scripts/bench-txgen-extract.sh \
+            "../reth-feature/target/profiling/${BENCH_NODE_BIN}" \
+            "$PAYLOADS_DIR"
+          echo "TXGEN_PAYLOADS_DIR=${PAYLOADS_DIR}" >> "$GITHUB_ENV"
+
+      # Interleaved run order (A=feature, B=baseline) to reduce systematic bias
+      # from thermal drift and cache warming.
+      - name: Run benchmarks
+        id: run-benchmarks
+        env:
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+          BENCH_GH_TOKEN: ${{ secrets.DEREK_PAT }}
+        run: |
+          set -euo pipefail
+
+          build_run_order() {
+            local run_pairs="$1"
+            if ! [[ "$run_pairs" =~ ^[1-9][0-9]*$ ]]; then
+              echo "run pairs must be a positive integer" >&2
+              return 1
+            fi
+            if [ $((run_pairs % 2)) -eq 0 ]; then
+              printf 'ABBA%.0s' $(seq 1 $((run_pairs / 2)))
+            else
+              printf 'AB%.0s' $(seq 1 "$run_pairs")
+            fi
+            echo
+          }
+
+          RUN_ORDER="$(build_run_order "${BENCH_RUN_PAIRS:-6}")"
+          echo "BENCH_RUN_ORDER=${RUN_ORDER}" >> "$GITHUB_ENV"
+          echo "${RUN_ORDER}" > "$BENCH_WORK_DIR/run_order.txt"
+          echo "Run order: ${RUN_ORDER} (A=feature, B=baseline)"
+
+          run_total="${#RUN_ORDER}"
+          run_progress=0
+          feature_index=0
+          baseline_index=0
+
+          for ((i = 0; i < ${#RUN_ORDER}; i++)); do
+            side="${RUN_ORDER:i:1}"
+            if [ "$side" = "A" ]; then
+              run_type="feature"
+              feature_index=$((feature_index + 1))
+              run_index="$feature_index"
+              ref="$FEATURE_REF"
+              binary="../reth-feature/target/profiling/${BENCH_NODE_BIN}"
+            elif [ "$side" = "B" ]; then
+              run_type="baseline"
+              baseline_index=$((baseline_index + 1))
+              run_index="$baseline_index"
+              ref="$BASELINE_REF"
+              binary="../reth-baseline/target/profiling/${BENCH_NODE_BIN}"
+            else
+              echo "::error::Invalid run-order entry '${side}'"
+              exit 1
+            fi
+
+            run_progress=$((run_progress + 1))
+            run_label="${run_type}-${run_index}"
+            .github/scripts/bench-update-status.sh "Running benchmark: ${run_label} (${run_progress}/${run_total})..."
+            LAST_RUN_START=$(date +%s)
+            echo "BENCH_LAST_RUN_START=${LAST_RUN_START}" >> "$GITHUB_ENV"
+            export OTEL_RESOURCE_ATTRIBUTES="benchmark_id=${BENCH_ID},benchmark_run=${run_label},run_type=${run_type},git_ref=${ref}"
+            cat > "$BENCH_LABELS_FILE" <<LABELS
+          {"benchmark_run":"${run_label}","run_type":"${run_type}","git_ref":"${ref}","bench_sha":"${ref}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
+          LABELS
+            taskset -c 0 .github/scripts/bench-txgen-run.sh "$run_type" "$binary" "$BENCH_WORK_DIR/${run_label}"
+          done
+
+          .github/scripts/bench-update-status.sh "Finalizing results..."
+
+      - name: Generate observability URLs
+        id: metrics
+        if: "!cancelled()"
+        run: |
+          FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
+          TO_MS=$(( $(date +%s) * 1000 ))
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          OBSERVABILITY_URLS="$(python3 - "$BENCH_ID" "$FROM_MS" "$TO_MS" <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import sys
+          from urllib.parse import quote
+
+          bench_id, from_ms, to_ms = sys.argv[1:4]
+          logs_uid = "cfk1hzy08xekgd"
+          traces_uid = "dfk1hrnxca9s0a"
+
+          def iso_from_epoch_ms(ms):
+              dt = datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+              return dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+          from_time = iso_from_epoch_ms(from_ms)
+          to_time = iso_from_epoch_ms(to_ms)
+
+          def explore_url(panes):
+              encoded = quote(json.dumps(panes, separators=(",", ":")), safe="")
+              return f"https://tempoxyz.grafana.net/explore?schemaVersion=1&panes={encoded}&orgId=1"
+
+          logs_pane = {
+              "pw4": {
+                  "datasource": logs_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "victoriametrics-logs-datasource", "uid": logs_uid},
+                      "editorMode": "code",
+                      "expr": f"benchmark_id:{bench_id}",
+                      "queryType": "instant",
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {
+                      "logs": {
+                          "sortOrder": "Descending",
+                          "columns": ["Time", "Line"],
+                          "visualisationType": "table",
+                          "labelFieldName": "labels",
+                      },
+                  },
+                  "compact": False,
+              },
+          }
+          traceql_query = "{resource.benchmark_id=" + json.dumps(bench_id) + "}"
+          traces_pane = {
+              "g39": {
+                  "datasource": traces_uid,
+                  "queries": [{
+                      "refId": "A",
+                      "datasource": {"type": "tempo", "uid": traces_uid},
+                      "queryType": "traceqlSearch",
+                      "serviceMapUseNativeHistograms": False,
+                      "filters": [
+                          {
+                              "id": "benchmark-id",
+                              "operator": "=",
+                              "scope": "resource",
+                              "tag": "benchmark_id",
+                              "value": [bench_id],
+                              "valueType": "string",
+                              "isCustomValue": True,
+                          },
+                      ],
+                      "query": traceql_query,
+                  }],
+                  "range": {"from": from_time, "to": to_time},
+                  "panelsState": {"logs": {"visualisationType": "table"}},
+                  "compact": False,
+              },
+          }
+
+          print(explore_url(logs_pane))
+          print(explore_url(traces_pane))
+          PY
+          )"
+          LOGS_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '1p')"
+          TRACES_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '2p')"
+          {
+            echo "grafana-url=${GRAFANA_URL}"
+            echo "logs-url=${LOGS_URL}"
+            echo "traces-url=${TRACES_URL}"
+            echo "observability-from-ms=${FROM_MS}"
+            echo "observability-to-ms=${TO_MS}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Grafana URL: ${GRAFANA_URL}"
+          echo "Logs URL: ${LOGS_URL}"
+          echo "Traces URL: ${TRACES_URL}"
+
+      - name: Scan logs for errors
+        if: "!cancelled()"
+        run: |
+          ERRORS_FILE="$BENCH_WORK_DIR/errors.md"
+          found=false
+          mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+          for run_dir in "${RUN_DIRS[@]}"; do
+            LOG="$BENCH_WORK_DIR/$run_dir/node.log"
+            if [ ! -f "$LOG" ]; then continue; fi
+
+            panics=$(grep -c -E 'panicked at' "$LOG" || true)
+            errors=$(grep -c ' ERROR ' "$LOG" || true)
+
+            if [ "$panics" -gt 0 ] || [ "$errors" -gt 0 ]; then
+              if [ "$found" = false ]; then
+                printf '### ⚠️ Node Errors\n\n' >> "$ERRORS_FILE"
+                found=true
+              fi
+              printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
+              if [ "$panics" -gt 0 ]; then
+                {
+                  printf '**Panics:**\n```\n'
+                  grep -E 'panicked at' "$LOG" | head -10
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
+              fi
+              if [ "$errors" -gt 0 ]; then
+                {
+                  printf '**Errors (first 20):**\n```\n'
+                  grep ' ERROR ' "$LOG" | head -20
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
+              fi
+              printf '\n</details>\n\n' >> "$ERRORS_FILE"
+            fi
+          done
+
+      - name: Upload samply profiles
+        if: success() && env.BENCH_SAMPLY == 'true'
+        run: |
+          PROFILER_API="https://api.profiler.firefox.com"
+          PROFILER_ACCEPT="Accept: application/vnd.firefox-profiler+json;version=1.0"
+
+          mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
+          for run_dir in "${RUN_DIRS[@]}"; do
+            PROFILE="$BENCH_WORK_DIR/$run_dir/samply-profile.json.gz"
+            if [ ! -f "$PROFILE" ]; then continue; fi
+
+            PROFILE_SIZE=$(du -h "$PROFILE" | cut -f1)
+            echo "Uploading $run_dir samply profile (${PROFILE_SIZE}) to Firefox Profiler..."
+
+            # Upload compressed profile and get JWT back
+            JWT=$(curl -sf -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "$PROFILER_ACCEPT" \
+              --data-binary "@$PROFILE" \
+              "$PROFILER_API/compressed-store") || {
+              echo "::warning::Failed to upload $run_dir profile to Firefox Profiler"
+              continue
+            }
+
+            # Extract profileToken from JWT payload (header.payload.signature)
+            PAYLOAD=$(echo "$JWT" | cut -d. -f2)
+            # Fix base64 padding
+            case $(( ${#PAYLOAD} % 4 )) in
+              2) PAYLOAD="${PAYLOAD}==" ;;
+              3) PAYLOAD="${PAYLOAD}=" ;;
+            esac
+            PROFILE_TOKEN=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['profileToken'])")
+            PROFILE_URL="https://profiler.firefox.com/public/${PROFILE_TOKEN}"
+            echo "Profile uploaded: $PROFILE_URL"
+
+            # Shorten the URL
+            SHORT_URL=$(curl -sf -X POST \
+              -H "Content-Type: application/json" \
+              -H "$PROFILER_ACCEPT" \
+              -d "{\"longUrl\":\"$PROFILE_URL\"}" \
+              "$PROFILER_API/shorten" | python3 -c "import sys,json; print(json.load(sys.stdin)['shortUrl'])" 2>/dev/null) || SHORT_URL="$PROFILE_URL"
+            echo "$SHORT_URL" > "$BENCH_WORK_DIR/$run_dir/samply-profile-url.txt"
+            echo "Short profile URL for $run_dir: $SHORT_URL"
+          done
+
+      # Results & charts
+      - name: Upload raw results
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-raw-results
+          # Replayed corpora can contain third-party traffic, so only their
+          # aggregate counts (corpus.meta.json) leave the runner.
+          path: |
+            ${{ env.BENCH_WORK_DIR }}
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl.gz
+
+      - name: Parse results
+        id: results
+        if: success()
+        env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
+          INPUT_LOGS_URL: ${{ steps.metrics.outputs.logs-url }}
+          INPUT_OBSERVABILITY_FROM_MS: ${{ steps.metrics.outputs.observability-from-ms }}
+          INPUT_OBSERVABILITY_TO_MS: ${{ steps.metrics.outputs.observability-to-ms }}
+          INPUT_TRACES_URL: ${{ steps.metrics.outputs.traces-url }}
+          BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+          FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+        run: |
+          git fetch origin "${BASELINE_NAME}" --quiet 2>/dev/null || true
+          BASELINE_HEAD=$(git rev-parse "origin/${BASELINE_NAME}" 2>/dev/null || echo "")
+          BEHIND_BASELINE=0
+          if [ -n "$BASELINE_HEAD" ] && [ "$BASELINE_REF" != "$BASELINE_HEAD" ]; then
+            BEHIND_BASELINE=$(git rev-list --count "${BASELINE_REF}..${BASELINE_HEAD}" 2>/dev/null || echo "0")
+          fi
+
+          if [ "${BENCH_EXECUTION_MODE:-engine}" = "call" ]; then
+            mapfile -t BASELINE_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'baseline-*' | sort -V)
+            mapfile -t FEATURE_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'feature-*' | sort -V)
+            if [ "${#BASELINE_DIRS[@]}" -eq 0 ] || [ "${#FEATURE_DIRS[@]}" -eq 0 ]; then
+              echo "::error::Missing baseline or feature run directories"
+              exit 1
+            fi
+            CALL_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+            CALL_ARGS="$CALL_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
+            CALL_ARGS="$CALL_ARGS --repo ${{ github.repository }}"
+            CALL_ARGS="$CALL_ARGS --baseline-ref ${BASELINE_REF}"
+            CALL_ARGS="$CALL_ARGS --baseline-name ${BASELINE_NAME}"
+            CALL_ARGS="$CALL_ARGS --feature-name ${FEATURE_NAME}"
+            CALL_ARGS="$CALL_ARGS --feature-ref ${FEATURE_REF}"
+            CALL_ARGS="$CALL_ARGS --baseline-dir ${BASELINE_DIRS[*]}"
+            CALL_ARGS="$CALL_ARGS --feature-dir ${FEATURE_DIRS[*]}"
+            CALL_ARGS="$CALL_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
+            CALL_ARGS="$CALL_ARGS --corpus-meta $TXGEN_PAYLOADS_DIR/corpus.meta.json"
+            CALL_ARGS="$CALL_ARGS --class ${BENCH_CALL_CLASS:-call}"
+            CALL_ARGS="$CALL_ARGS --rps ${BENCH_CALL_RPS:-100}"
+            CALL_ARGS="$CALL_ARGS --duration ${BENCH_CALL_DURATION:-120s}"
+            CALL_ARGS="$CALL_ARGS --passes ${BENCH_CALL_PASSES:-20}"
+            CALL_ARGS="$CALL_ARGS --concurrency ${BENCH_CALL_CONCURRENCY:-16}"
+            CALL_ARGS="$CALL_ARGS --warmup-seconds ${BENCH_WARMUP_BLOCKS:-0}"
+            if [ "$BEHIND_BASELINE" -gt 0 ]; then
+              CALL_ARGS="$CALL_ARGS --behind-baseline $BEHIND_BASELINE"
+            fi
+            if [ -n "${BENCH_ID:-}" ]; then
+              CALL_ARGS="$CALL_ARGS --benchmark-id $BENCH_ID"
+            fi
+            LOGS_URL="${INPUT_LOGS_URL}"
+            if [ -n "$LOGS_URL" ]; then
+              CALL_ARGS="$CALL_ARGS --logs-url $LOGS_URL"
+            fi
+            TRACES_URL="${INPUT_TRACES_URL}"
+            if [ -n "$TRACES_URL" ]; then
+              CALL_ARGS="$CALL_ARGS --traces-url $TRACES_URL"
+            fi
+            # shellcheck disable=SC2086
+            python3 .github/scripts/bench-call-summary.py $CALL_ARGS
+            exit 0
+          fi
+
+          SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+          SUMMARY_ARGS="$SUMMARY_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
+          SUMMARY_ARGS="$SUMMARY_ARGS --repo ${{ github.repository }}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-ref ${BASELINE_REF}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-name ${BASELINE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-name ${FEATURE_NAME}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-ref ${FEATURE_REF}"
+          mapfile -t BASELINE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/baseline-*/combined_latency.csv" -type f | sort -V)
+          mapfile -t FEATURE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/feature-*/combined_latency.csv" -type f | sort -V)
+          if [ "${#BASELINE_CSVS[@]}" -eq 0 ] || [ "${#FEATURE_CSVS[@]}" -eq 0 ]; then
+            echo "::error::Missing baseline or feature benchmark CSVs"
+            exit 1
+          fi
+          SUMMARY_ARGS="$SUMMARY_ARGS --baseline-csv ${BASELINE_CSVS[*]}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv ${FEATURE_CSVS[*]}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
+          SUMMARY_ARGS="$SUMMARY_ARGS --mode ${BENCH_EXECUTION_MODE:-engine}"
+          if [ "$BEHIND_BASELINE" -gt 0 ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --behind-baseline $BEHIND_BASELINE"
+          fi
+          if [ "${BENCH_BIG_BLOCKS:-false}" = "true" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --big-blocks"
+          fi
+          if [ -n "${BENCH_WARMUP_BLOCKS:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --warmup-blocks $BENCH_WARMUP_BLOCKS"
+          fi
+          if [ -n "${BENCH_WAIT_TIME:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --wait-time $BENCH_WAIT_TIME"
+          fi
+          if [ -n "${BENCH_BLOCK_TIME:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --block-time $BENCH_BLOCK_TIME"
+          fi
+          if [ -n "${BENCH_BAL:-}" ] && [ "${BENCH_BAL}" != "false" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --bal-mode $BENCH_BAL"
+          fi
+          if [ -n "${BENCH_ID:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
+          fi
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
+          if [ "${BENCH_METRICS:-false}" = "true" ] && [ -n "$GRAFANA_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
+          fi
+          LOGS_URL="${INPUT_LOGS_URL}"
+          if [ -n "$LOGS_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --logs-url $LOGS_URL"
+          fi
+          TRACES_URL="${INPUT_TRACES_URL}"
+          if [ -n "$TRACES_URL" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --traces-url $TRACES_URL"
+          fi
+          OBSERVABILITY_FROM_MS="${INPUT_OBSERVABILITY_FROM_MS}"
+          OBSERVABILITY_TO_MS="${INPUT_OBSERVABILITY_TO_MS}"
+          if [ -n "$OBSERVABILITY_FROM_MS" ] && [ -n "$OBSERVABILITY_TO_MS" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-from-ms $OBSERVABILITY_FROM_MS"
+            SUMMARY_ARGS="$SUMMARY_ARGS --observability-to-ms $OBSERVABILITY_TO_MS"
+          fi
+          if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+            SUMMARY_ARGS="$SUMMARY_ARGS --target-metrics-config $BENCH_TARGET_METRICS_CONFIG"
+          fi
+          # shellcheck disable=SC2086
+          python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
+
+      # Charts are block shaped; call mode reports latency distributions instead.
+      - name: Generate charts
+        if: success() && env.BENCH_EXECUTION_MODE != 'call'
+        env:
+          BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+        run: |
+          CHART_ARGS="--output-dir $BENCH_WORK_DIR/charts"
+          mapfile -t FEATURE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/feature-*/combined_latency.csv" -type f | sort -V)
+          mapfile -t BASELINE_CSVS < <(find "$BENCH_WORK_DIR" -path "$BENCH_WORK_DIR/baseline-*/combined_latency.csv" -type f | sort -V)
+          if [ "${#BASELINE_CSVS[@]}" -eq 0 ] || [ "${#FEATURE_CSVS[@]}" -eq 0 ]; then
+            echo "::error::Missing baseline or feature benchmark CSVs"
+            exit 1
+          fi
+          CHART_ARGS="$CHART_ARGS --feature ${FEATURE_CSVS[*]}"
+          CHART_ARGS="$CHART_ARGS --baseline ${BASELINE_CSVS[*]}"
+          CHART_ARGS="$CHART_ARGS --baseline-name ${BASELINE_NAME}"
+          CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
+          # shellcheck disable=SC2086
+          uv run --with matplotlib==3.10.8 --with pillow==12.3.0 python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+
+      - name: Upload chart attachments
+        id: upload-charts
+        if: success() && env.BENCH_EXECUTION_MODE != 'call'
+        env:
+          GH_TOKEN: ${{ secrets.DEREK_PAT }}
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
+
+      - name: Upload results
+        id: upload-results
+        if: "!cancelled()"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-results
+          # Replayed corpora can contain third-party traffic, so only their
+          # aggregate counts (corpus.meta.json) leave the runner.
+          path: |
+            ${{ env.BENCH_WORK_DIR }}
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl.gz
+
+      - name: Compare & comment
+        if: success() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const fs = require('fs');
+
+            let comment = '';
+            try {
+              comment = fs.readFileSync(process.env.BENCH_WORK_DIR + '/comment.md', 'utf8');
+            } catch (e) {
+              comment = '⚠️ Benchmark completed but failed to generate comparison.';
+            }
+
+            if (process.env.BENCH_EXECUTION_MODE !== 'call') {
+              comment += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
+            }
+
+            // Samply profile links (URLs point directly to Firefox Profiler)
+            if (process.env.BENCH_SAMPLY === 'true') {
+              const { loadSamplyUrls } = require('./.github/scripts/bench-utils');
+              const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);
+              const links = [];
+              for (const [run, url] of Object.entries(samplyUrls)) {
+                links.push(`- **${run}**: [Firefox Profiler](${url})`);
+              }
+              if (links.length > 0) {
+                comment += `\n\n### Samply Profiles\n\n${links.join('\n')}\n`;
+              }
+            }
+
+            if (process.env.BENCH_TRACING_CHROME === 'true') {
+              comment += `\n\n### Chrome Traces\n\n[Download bench-results](${process.env.BENCH_RESULTS_URL}), extract the archive, and open each run's \`tracing-chrome-profile.json\` in [Perfetto](https://ui.perfetto.dev/). GitHub sign-in is required; downloads are available until the artifact expires.\n`;
+            }
+
+            // Node errors (panics / ERROR logs)
+            try {
+              const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
+              if (errors.trim()) {
+                comment += '\n\n' + errors;
+              }
+            } catch (e) {}
+
+            const runUrl = process.env.BENCH_RUN_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
+            const ackCommentId = process.env.BENCH_COMMENT_ID;
+
+            if (ackCommentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(ackCommentId),
+                body,
+              });
+            }
+
+      - name: Write job summary
+        if: success()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_LOGS_URL: ${{ steps.metrics.outputs.logs-url }}
+          INPUT_TRACES_URL: ${{ steps.metrics.outputs.traces-url }}
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
+        with:
+          script: |
+            const jobSummary = require('./.github/scripts/bench-job-summary.js');
+            await jobSummary({
+              core,
+              context,
+              logsUrl: process.env.INPUT_LOGS_URL,
+              tracesUrl: process.env.INPUT_TRACES_URL,
+              runId: '${{ github.run_id }}',
+            });
+
+      - name: Send Slack notification (success)
+        if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.success({ core, context });
+
+      - name: Update status (failed)
+        if: failure() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const steps_status = [
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
+              ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
+              ['parsing results', '${{ steps.results.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+
+            const fs = require('fs');
+            let errorDetails = '';
+            try {
+              const errors = fs.readFileSync(process.env.BENCH_WORK_DIR + '/errors.md', 'utf8');
+              if (errors.trim()) {
+                errorDetails = '\n\n' + errors;
+              }
+            } catch (e) {}
+
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n❌ Benchmark failed while ${failedStep}. [View logs](${jobUrl})${errorDetails}`,
+            });
+
+      - name: Send Slack notification (failure)
+        if: failure() && env.BENCH_SLACK != 'never' && env.BENCH_SLACK != 'on-win'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
+          SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
+        with:
+          script: |
+            const steps_status = [
+              ['building binaries', '${{ steps.build.outcome }}'],
+              ['syncing snapshot', '${{ steps.snapshot-check.outcome }}'],
+              ['running benchmarks', '${{ steps.run-benchmarks.outcome }}'],
+              ['parsing results', '${{ steps.results.outcome }}'],
+            ];
+            const failed = steps_status.find(([, o]) => o === 'failure');
+            const failedStep = failed ? failed[0] : 'unknown step';
+            const notify = require('./.github/scripts/bench-slack-notify.js');
+            await notify.failure({ core, context, failedStep });
+
+      - name: Update status (cancelled)
+        if: cancelled() && env.BENCH_COMMENT_ID
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.DEREK_PAT }}
+          script: |
+            const jobUrl = process.env.BENCH_JOB_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: parseInt(process.env.BENCH_COMMENT_ID),
+              body: `cc @${process.env.BENCH_ACTOR}\n\n⚠️ Benchmark cancelled. [View logs](${jobUrl})`,
+            });
+
+      - name: Clean build outputs
+        if: always()
+        run: |
+          sudo rm -rf ../reth-baseline/target ../reth-feature/target "$BENCH_WORK_DIR" 2>/dev/null || true
+
+      - name: Restore system settings
+        if: always()
+        run: |
+          # Restore frequency scaling to full range
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_min_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
+          done
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_max_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
+          done
+          # Restore amd-pstate to active (EPP) mode with powersave governor
+          echo active | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
+          if [ -n "${BENCH_CPU_DMA_LATENCY_PID:-}" ]; then
+            sudo kill "$BENCH_CPU_DMA_LATENCY_PID" 2>/dev/null || true
+          fi
+          sudo pkill -f '^bench-cpu-dma-latency' 2>/dev/null || true
+          sudo cpupower frequency-set -g powersave 2>/dev/null || true
+          sudo systemctl start irqbalance cron atd 2>/dev/null || true

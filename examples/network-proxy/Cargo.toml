@@ -1,0 +1,16 @@
+[package]
+name = "example-network-proxy"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["network"] }
+reth-metrics.workspace = true
+reth-tracing.workspace = true
+futures.workspace = true
+tokio.workspace = true
+eyre.workspace = true
+
+[lints]

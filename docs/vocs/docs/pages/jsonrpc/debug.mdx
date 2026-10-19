@@ -1,0 +1,242 @@
+---
+description: Debug API for inspecting Ethereum state and traces.
+---
+# `debug` Namespace
+
+The `debug` API provides several methods to inspect the Ethereum state, including Geth-style traces.
+
+## `debug_getRawHeader`
+
+Returns an RLP-encoded header.
+
+| Client | Method invocation                                     |
+| ------ | ----------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawHeader", "params": [block]}` |
+
+## `debug_getRawBlock`
+
+Retrieves and returns the RLP encoded block by number, hash or tag.
+
+| Client | Method invocation                                    |
+| ------ | ---------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawBlock", "params": [block]}` |
+
+## `debug_getRawTransaction`
+
+Returns an EIP-2718 binary-encoded transaction.
+
+| Client | Method invocation                                            |
+| ------ | ------------------------------------------------------------ |
+| RPC    | `{"method": "debug_getRawTransaction", "params": [tx_hash]}` |
+
+## `debug_getRawTransactions`
+
+Returns an array of EIP-2718 binary-encoded transactions for the given block.
+
+| Client | Method invocation                                              |
+| ------ | -------------------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawTransactions", "params": [block]}` |
+
+## `debug_getRawReceipts`
+
+Returns an array of EIP-2718 binary-encoded receipts.
+
+| Client | Method invocation                                       |
+| ------ | ------------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawReceipts", "params": [block]}` |
+
+## `debug_getRawBlockAccessList`
+
+Returns the RLP-encoded EIP-7928 block access list of the given block. Returns an error if the block is unknown.
+
+| Client | Method invocation                                                |
+| ------ | ---------------------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawBlockAccessList", "params": [block]}`  |
+
+## `debug_getBadBlocks`
+
+Returns an array of recent bad blocks that the client has seen on the network.
+
+| Client | Method invocation                                |
+| ------ | ------------------------------------------------ |
+| RPC    | `{"method": "debug_getBadBlocks", "params": []}` |
+
+## `debug_traceBadBlock`
+
+Re-executes a block from the bad block cache (see `debug_getBadBlocks`) and returns the structured logs of every transaction, using the same tracer options as `debug_traceBlock`.
+
+| Client | Method invocation                                                   |
+| ------ | ------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceBadBlock", "params": [block_hash, opts]}`   |
+
+## `debug_clearTxpool`
+
+Removes all transactions from the transaction pool. Equivalent to `admin_clearTxpool`, but does not report the number of removed transactions.
+
+| Client | Method invocation                                |
+| ------ | ------------------------------------------------ |
+| RPC    | `{"method": "debug_clearTxpool", "params": []}` |
+
+## `debug_subscribe`, `debug_unsubscribe`
+
+Subscribes to structured logs created during EVM execution between two blocks. The start block is
+excluded and the end block is included. Pass `"traceChain"` as the subscription type and optionally
+provide tracing options.
+
+The subscription returns an ID and emits `debug_subscription` notifications containing the block
+number and its transaction traces. Empty intermediate blocks are omitted, but the end block is
+always emitted. Pass the subscription ID to `debug_unsubscribe` to stop receiving notifications.
+
+| Client | Method invocation                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_subscribe", "params": ["traceChain", start_block, end_block, opts]}` |
+| RPC    | `{"method": "debug_unsubscribe", "params": [subscription_id]}`                            |
+
+:::note
+Subscriptions are only available over WebSocket and IPC transports, as HTTP does not support
+server-initiated messages.
+:::
+
+## `debug_traceBlock`
+
+The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all transactions that were included in this block.
+
+This expects an RLP-encoded block.
+
+> **Note**
+>
+> The parent of this block must be present, or it will fail.
+
+| Client | Method invocation                                       |
+| ------ | ------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceBlock", "params": [rlp, opts]}` |
+
+## `debug_traceBlockByHash`
+
+Similar to [`debug_traceBlock`](#debug_traceblock), `debug_traceBlockByHash` accepts a block hash and will replay the block that is already present in the database.
+
+| Client | Method invocation                                                    |
+| ------ | -------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceBlockByHash", "params": [block_hash, opts]}` |
+
+## `debug_traceBlockByNumber`
+
+Similar to [`debug_traceBlockByHash`](#debug_traceblockbyhash), `debug_traceBlockByNumber` accepts a block number and will replay the block that is already present in the database.
+
+| Client | Method invocation                                                        |
+| ------ | ------------------------------------------------------------------------ |
+| RPC    | `{"method": "debug_traceBlockByNumber", "params": [block_number, opts]}` |
+
+## `debug_traceTransaction`
+
+The `debug_traceTransaction` debugging method will attempt to run the transaction in the exact same manner as it was executed on the network. It will replay any transaction that may have been executed prior to this one before it will finally attempt to execute the transaction that corresponds to the given hash.
+
+| Client | Method invocation                                                 |
+| ------ | ----------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceTransaction", "params": [tx_hash, opts]}` |
+
+## `debug_traceCall`
+
+The `debug_traceCall` method lets you run an `eth_call` within the context of the given block execution using the final state of the parent block as the base.
+
+The first argument (just as in `eth_call`) is a transaction request.
+
+The block can optionally be specified either by hash or by number as the second argument.
+
+| Client | Method invocation                                                     |
+| ------ | --------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceCall", "params": [call, block_number, opts]}` |
+
+## `debug_traceCallMany`
+
+The `debug_traceCallMany` method lets you run multiple `eth_call`s within the context of the given block execution using the final state of the parent block as the base, followed by n transactions.
+
+The first argument is a list of bundles. Each bundle can overwrite the block headers, which will affect all transactions in that bundle. The trace can be configured similar to `debug_traceTransaction`.
+
+This method returns nested lists of traces, where the outer list length is the number of bundles and the inner list length is the number of transactions in each bundle.
+
+| Client | Method invocation                                                                  |
+| ------ | ---------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceCallMany", "params": [bundles, state_context, opts]}` |
+
+## `debug_executionWitness`
+
+Allows for re-execution of a block with the purpose of generating an execution witness. The witness comprises a map of all hashed trie nodes to their preimages that were required during the execution of the block, including during state root recomputation.
+
+The `block` parameter accepts a block number, tag, hash, or EIP-1898 block object. An optional second parameter selects the witness generation mode.
+
+| Client | Method invocation                                            |
+| ------ | ------------------------------------------------------------ |
+| RPC    | `{"method": "debug_executionWitness", "params": [block]}` |
+
+## `debug_executionWitnessByBlockHash`
+
+Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a block hash and retains its dedicated method for compatibility.
+
+| Client | Method invocation                                                      |
+| ------ | ---------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_executionWitnessByBlockHash", "params": [hash]}` |
+
+## `debug_intermediateRoots`
+
+Executes a block and returns a list of intermediate state roots: the state root after each transaction within the block. Accepts both canonical and non-canonical (bad or side) blocks by hash.
+
+| Client | Method invocation                                                   |
+| ------ | ------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_intermediateRoots", "params": [block_hash]}` |
+
+## `debug_accountAt`
+
+Returns account information, including the storage root, after replaying a block through the transaction at the given index.
+
+| Client | Method invocation                                                   |
+| ------ | ------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_accountAt", "params": [block_id, tx_index, address]}` |
+
+## `debug_accountInfoAt`
+
+Returns account information, including balance, nonce, and code, after replaying a block through the transaction at the given index. Unlike `debug_accountAt`, the response does not include the storage root.
+
+| Client | Method invocation                                                       |
+| ------ | ----------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_accountInfoAt", "params": [block_id, tx_index, address]}` |
+
+## `debug_dbGet`
+
+Retrieves a raw value from the database.
+
+| Client | Method invocation                                  |
+| ------ | -------------------------------------------------- |
+| RPC    | `{"method": "debug_dbGet", "params": [key]}` |
+
+## `debug_stateRootWithUpdates`
+
+Computes the state root that results from applying the given `HashedPostState` on top of the state of the specified block and returns it together with the trie updates. If no block identifier is provided it defaults to `latest`.
+
+| Client | Method invocation                                                          |
+| ------ | -------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_stateRootWithUpdates", "params": [hashed_state, block]}` |
+
+## `debug_storageRangeAt`
+
+Returns the storage at the given block height and transaction index. The result can be paged by providing a `maxResult` to cap the number of storage slots returned as well as specifying the offset via `keyStart`.
+
+| Client | Method invocation                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
+
+## `debug_chainConfig`
+
+Returns the chain's genesis configuration as a `ChainConfig` object. Useful for confirming the active network parameters (chain ID, hard fork block numbers and timestamps, consensus settings) without parsing the genesis file manually.
+
+| Client | Method invocation                                    |
+| ------ | ---------------------------------------------------- |
+| RPC    | `{"method": "debug_chainConfig", "params": []}` |
+
+## `debug_codeByHash`
+
+Returns the contract bytecode associated with the given code hash at the specified block. If no block identifier is provided it defaults to `latest`. Returns `null` when no bytecode is found for the hash.
+
+| Client | Method invocation                                                        |
+| ------ | ------------------------------------------------------------------------ |
+| RPC    | `{"method": "debug_codeByHash", "params": [code_hash, block]}` |

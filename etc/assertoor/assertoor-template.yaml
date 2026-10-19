@@ -1,0 +1,45 @@
+participants:
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: lighthouse
+  cl_image: sigp/lighthouse:latest
+  count: 1
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: teku
+  cl_image: consensys/teku:latest
+  count: 1
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: prysm
+  cl_image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+  vc_type: prysm
+  vc_image: gcr.io/prysmaticlabs/prysm/validator:stable
+  count: 1
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: nimbus
+  cl_image: statusim/nimbus-eth2:amd64-latest
+  count: 1
+- el_type: reth
+  el_image: ghcr.io/paradigmxyz/reth
+  cl_type: lodestar
+  cl_image: chainsafe/lodestar:latest
+  count: 1
+network_params:
+  genesis_delay: 120
+  min_validator_withdrawability_delay: 1
+  shard_committee_period: 1
+  num_validator_keys_per_node: 250
+launch_additional_services: true
+additional_services:
+- assertoor
+snooper_enabled: true
+disable_peer_scoring: true
+assertoor_params:
+  image: "ethpandaops/assertoor:master"
+  run_stability_check: true
+  run_block_proposal_check: true
+  run_transaction_test: true
+  run_blob_transaction_test: false
+  run_opcodes_transaction_test: true

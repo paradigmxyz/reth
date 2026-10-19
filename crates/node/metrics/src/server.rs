@@ -1,0 +1,803 @@
+use crate::{
+    chain::ChainSpecInfo,
+    hooks::{Hook, Hooks},
+    process::register_process_metrics,
+    recorder::install_prometheus_recorder,
+    storage::StorageSettingsInfo,
+    version::VersionInfo,
+};
+use bytes::Bytes;
+use eyre::WrapErr;
+use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
+use http_body_util::{BodyExt, Full};
+use metrics::describe_gauge;
+use metrics_process::Collector;
+use reqwest::Client;
+use reth_metrics::metrics::Unit;
+use reth_tasks::TaskExecutor;
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
+use tower::Service;
+use tower_http::compression::Compression;
+
+/// Bound rendering and compression work across all metrics connections.
+const MAX_CONCURRENT_METRICS_REQUESTS: usize = 4;
+
+/// Configuration for the [`MetricServer`]
+#[derive(Debug)]
+pub struct MetricServerConfig {
+    listen_addr: SocketAddr,
+    version_info: VersionInfo,
+    chain_spec_info: ChainSpecInfo,
+    storage_settings_info: Option<StorageSettingsInfo>,
+    task_executor: TaskExecutor,
+    hooks: Hooks,
+    push_gateway_url: Option<String>,
+    push_gateway_interval: Duration,
+    pprof_dump_dir: PathBuf,
+}
+
+impl MetricServerConfig {
+    /// Create a new [`MetricServerConfig`] with the given configuration
+    pub const fn new(
+        listen_addr: SocketAddr,
+        version_info: VersionInfo,
+        chain_spec_info: ChainSpecInfo,
+        task_executor: TaskExecutor,
+        hooks: Hooks,
+        pprof_dump_dir: PathBuf,
+    ) -> Self {
+        Self {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            storage_settings_info: None,
+            push_gateway_url: None,
+            push_gateway_interval: Duration::from_secs(5),
+            pprof_dump_dir,
+        }
+    }
+
+    /// Set the storage settings information to expose over prometheus.
+    pub fn with_storage_settings_info(mut self, info: StorageSettingsInfo) -> Self {
+        self.storage_settings_info = Some(info);
+        self
+    }
+
+    /// Set the gateway URL and interval for pushing metrics
+    pub fn with_push_gateway(mut self, url: Option<String>, interval: Duration) -> Self {
+        self.push_gateway_url = url;
+        self.push_gateway_interval = interval;
+        self
+    }
+}
+
+/// [`MetricServer`] responsible for serving the metrics endpoint
+#[derive(Debug)]
+pub struct MetricServer {
+    config: MetricServerConfig,
+}
+
+impl MetricServer {
+    /// Create a new [`MetricServer`] with the given configuration
+    pub const fn new(config: MetricServerConfig) -> Self {
+        Self { config }
+    }
+
+    /// Spawns the metrics server
+    pub async fn serve(&self) -> eyre::Result<()> {
+        let MetricServerConfig {
+            listen_addr,
+            hooks,
+            task_executor,
+            version_info,
+            chain_spec_info,
+            storage_settings_info,
+            push_gateway_url,
+            push_gateway_interval,
+            pprof_dump_dir,
+        } = &self.config;
+
+        let hooks_for_endpoint = hooks.clone();
+        let executor_for_hooks = task_executor.clone();
+        self.start_endpoint(
+            *listen_addr,
+            Arc::new(move || {
+                hooks_for_endpoint.refresh_background(&executor_for_hooks);
+                hooks_for_endpoint.iter().for_each(|hook| hook());
+            }),
+            task_executor.clone(),
+            pprof_dump_dir.clone(),
+        )
+        .await
+        .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
+
+        // Start push-gateway task if configured
+        if let Some(url) = push_gateway_url {
+            self.start_push_gateway_task(
+                url.clone(),
+                *push_gateway_interval,
+                hooks.clone(),
+                task_executor.clone(),
+            )?;
+        }
+
+        // Describe metrics after recorder installation
+        describe_db_metrics();
+        describe_static_file_metrics();
+        describe_rocksdb_metrics();
+        Collector::default().describe();
+        describe_memory_stats();
+        describe_io_stats();
+
+        version_info.register_version_metrics();
+        chain_spec_info.register_chain_spec_metrics();
+        if let Some(storage_settings_info) = storage_settings_info {
+            storage_settings_info.register_storage_settings_metrics();
+        }
+        register_process_metrics();
+
+        Ok(())
+    }
+
+    async fn start_endpoint<F: Hook>(
+        &self,
+        listen_addr: SocketAddr,
+        hook: Arc<F>,
+        task_executor: TaskExecutor,
+        pprof_dump_dir: PathBuf,
+    ) -> eyre::Result<()> {
+        let listener = tokio::net::TcpListener::bind(listen_addr)
+            .await
+            .wrap_err("Could not bind to address")?;
+
+        tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
+
+        let executor = task_executor.clone();
+        let requests = Arc::new(Semaphore::new(MAX_CONCURRENT_METRICS_REQUESTS));
+        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| loop {
+            let io = tokio::select! {
+                _ = &mut signal => break,
+                io = listener.accept() => {
+                    match io {
+                        Ok((stream, _remote_addr)) => stream,
+                        Err(err) => {
+                            tracing::error!(%err, "failed to accept connection");
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            let handle = install_prometheus_recorder();
+            let hook = hook.clone();
+            let pprof_dump_dir = pprof_dump_dir.clone();
+            let executor = executor.clone();
+            let compression_executor = executor.clone();
+            let service = tower::service_fn(move |req: Request<_>| {
+                let hook = hook.clone();
+                let pprof_dump_dir = pprof_dump_dir.clone();
+                let executor = executor.clone();
+                async move {
+                    let response =
+                        handle_request(req.uri().path(), hook, executor, handle, &pprof_dump_dir)
+                            .await;
+                    Ok::<_, Infallible>(response)
+                }
+            });
+
+            let service = Compression::new(service).gzip(true).no_br().no_deflate().no_zstd();
+            let requests = requests.clone();
+            let service = tower::service_fn(move |req| {
+                let mut service = service.clone();
+                let executor = compression_executor.clone();
+                let permit = requests.clone().try_acquire_owned();
+                async move {
+                    let Ok(permit) = permit else {
+                        return Ok::<_, Infallible>(metrics_error_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Metrics collection is busy. Try again later.",
+                        ))
+                    };
+                    let response = service.call(req).await?;
+                    // CompressionBody performs CPU work when polled. Fully collect it on a
+                    // blocking worker so Hyper only polls the completed bytes on Tokio workers.
+                    let span = tracing::Span::current();
+                    let result = executor
+                        .spawn_blocking(move || {
+                            let _entered = span.enter();
+                            // Keep the concurrency slot even if the client disconnects.
+                            let _permit = permit;
+                            tokio::runtime::Handle::current().block_on(async move {
+                                let (parts, body) = response.into_parts();
+                                body.collect().await.map(|body| {
+                                    Response::from_parts(parts, Full::new(body.to_bytes()))
+                                })
+                            })
+                        })
+                        .await;
+                    let response = match result {
+                        Ok(Ok(response)) => response,
+                        error => {
+                            tracing::error!(target: "reth::cli", ?error, "Failed to encode metrics response");
+                            metrics_error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to encode metrics response.",
+                            )
+                        }
+                    };
+                    Ok(response)
+                }
+            });
+
+            let mut shutdown = signal.clone().ignore_guard();
+            tokio::task::spawn(async move {
+                let _ = jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
+                    .await
+                    .inspect_err(|error| tracing::debug!(%error, "failed to serve request"));
+            });
+        });
+
+        Ok(())
+    }
+
+    /// Starts a background task to push metrics to a metrics gateway
+    fn start_push_gateway_task(
+        &self,
+        url: String,
+        interval: Duration,
+        hooks: Hooks,
+        task_executor: TaskExecutor,
+    ) -> eyre::Result<()> {
+        let client = Client::builder()
+            .build()
+            .wrap_err("Could not create HTTP client to push metrics to gateway")?;
+        let executor = task_executor.clone();
+        task_executor.spawn_with_graceful_shutdown_signal(async move |mut signal| {
+            tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
+            let handle = install_prometheus_recorder();
+            loop {
+                tokio::select! {
+                    _ = &mut signal => {
+                        tracing::info!("Shutting down task to push metrics to gateway");
+                        break;
+                    }
+                    _ = tokio::time::sleep(interval) => {
+                        hooks.refresh_background(&executor);
+                        let hooks = hooks.clone();
+                        let metrics_handle = handle.handle().clone();
+                        let metrics = match executor.spawn_blocking(move || {
+                            hooks.iter().for_each(|hook| hook());
+                            metrics_handle.render()
+                        }).await {
+                            Ok(metrics) => metrics,
+                            Err(err) => {
+                                tracing::warn!(%err, "Failed to collect metrics for gateway");
+                                continue;
+                            }
+                        };
+                        match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
+                            Ok(response) => {
+                                if !response.status().is_success() {
+                                    tracing::warn!(
+                                        status = %response.status(),
+                                        "Failed to push metrics to gateway"
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                tracing::warn!(%err, "Failed to push metrics to gateway");
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        Ok(())
+    }
+}
+
+fn metrics_error_response(status: StatusCode, message: &'static str) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(message.as_bytes())));
+    *response.status_mut() = status;
+    response
+}
+
+fn describe_db_metrics() {
+    describe_gauge!("db.table_size", Unit::Bytes, "The size of a database table (in bytes)");
+    describe_gauge!("db.table_pages", "The number of database pages for a table");
+    describe_gauge!("db.table_entries", "The number of entries for a table");
+    describe_gauge!("db.freelist", "The number of pages on the freelist");
+    describe_gauge!("db.page_size", Unit::Bytes, "The size of a database page (in bytes)");
+    describe_gauge!(
+        "db.timed_out_not_aborted_transactions",
+        "Number of timed out transactions that were not aborted by the user yet"
+    );
+}
+
+fn describe_static_file_metrics() {
+    describe_gauge!("static_files.segment_size", Unit::Bytes, "The size of a static file segment");
+    describe_gauge!("static_files.segment_files", "The number of files for a static file segment");
+    describe_gauge!(
+        "static_files.segment_entries",
+        "The number of entries for a static file segment"
+    );
+}
+
+fn describe_rocksdb_metrics() {
+    describe_gauge!(
+        "rocksdb.table_size",
+        Unit::Bytes,
+        "The estimated size of a RocksDB table (SST + memtable)"
+    );
+    describe_gauge!("rocksdb.table_entries", "The estimated number of keys in a RocksDB table");
+    describe_gauge!(
+        "rocksdb.pending_compaction_bytes",
+        Unit::Bytes,
+        "Bytes pending compaction for a RocksDB table"
+    );
+    describe_gauge!("rocksdb.sst_size", Unit::Bytes, "The size of SST files for a RocksDB table");
+    describe_gauge!(
+        "rocksdb.memtable_size",
+        Unit::Bytes,
+        "The size of memtables for a RocksDB table"
+    );
+    describe_gauge!(
+        "rocksdb.wal_size",
+        Unit::Bytes,
+        "The total size of WAL (Write-Ahead Log) files. Important: this is not included in table_size or sst_size metrics"
+    );
+}
+
+#[cfg(all(feature = "jemalloc", unix))]
+fn describe_memory_stats() {
+    describe_gauge!(
+        "jemalloc.active",
+        Unit::Bytes,
+        "Total number of bytes in active pages allocated by the application"
+    );
+    describe_gauge!(
+        "jemalloc.allocated",
+        Unit::Bytes,
+        "Total number of bytes allocated by the application"
+    );
+    describe_gauge!(
+        "jemalloc.mapped",
+        Unit::Bytes,
+        "Total number of bytes in active extents mapped by the allocator"
+    );
+    describe_gauge!(
+        "jemalloc.metadata",
+        Unit::Bytes,
+        "Total number of bytes dedicated to jemalloc metadata"
+    );
+    describe_gauge!(
+        "jemalloc.resident",
+        Unit::Bytes,
+        "Total number of bytes in physically resident data pages mapped by the allocator"
+    );
+    describe_gauge!(
+        "jemalloc.retained",
+        Unit::Bytes,
+        "Total number of bytes in virtual memory mappings that were retained rather than \
+        being returned to the operating system via e.g. munmap(2)"
+    );
+}
+
+#[cfg(not(all(feature = "jemalloc", unix)))]
+const fn describe_memory_stats() {}
+
+#[cfg(target_os = "linux")]
+fn describe_io_stats() {
+    use metrics::describe_counter;
+
+    describe_counter!("io.rchar", "Characters read");
+    describe_counter!("io.wchar", "Characters written");
+    describe_counter!("io.syscr", "Read syscalls");
+    describe_counter!("io.syscw", "Write syscalls");
+    describe_counter!("io.read_bytes", Unit::Bytes, "Bytes read");
+    describe_counter!("io.write_bytes", Unit::Bytes, "Bytes written");
+    describe_counter!("io.cancelled_write_bytes", Unit::Bytes, "Cancelled write bytes");
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn describe_io_stats() {}
+
+async fn handle_request<F: Hook>(
+    path: &str,
+    hook: Arc<F>,
+    executor: TaskExecutor,
+    handle: &crate::recorder::PrometheusRecorder,
+    pprof_dump_dir: &PathBuf,
+) -> Response<Full<Bytes>> {
+    match path {
+        "/debug/pprof/heap" => handle_pprof_heap(pprof_dump_dir),
+        "/debug/tokio/dump" => handle_tokio_dump().await,
+        _ => {
+            let metrics_handle = handle.handle().clone();
+            let metrics = match executor
+                .spawn_blocking(move || {
+                    hook();
+                    metrics_handle.render()
+                })
+                .await
+            {
+                Ok(metrics) => metrics,
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to collect metrics: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    return response;
+                }
+            };
+            let mut response = Response::new(Full::new(Bytes::from(metrics)));
+            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+            response
+        }
+    }
+}
+
+#[cfg(all(feature = "jemalloc-prof", unix))]
+fn handle_pprof_heap(pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    use http::header::CONTENT_ENCODING;
+
+    match jemalloc_pprof::PROF_CTL.as_ref() {
+        Some(prof_ctl) => match prof_ctl.try_lock() {
+            Ok(_) => match jemalloc_pprof_dump(pprof_dump_dir) {
+                Ok(pprof) => {
+                    let mut response = Response::new(Full::new(Bytes::from(pprof)));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+                    response
+                }
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to dump pprof: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            },
+            Err(_) => {
+                let mut response = Response::new(Full::new(Bytes::from_static(
+                    b"Profile dump already in progress. Try again later.",
+                )));
+                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                response
+            }
+        },
+        None => {
+            let mut response = Response::new(Full::new(Bytes::from_static(
+                b"jemalloc profiling not enabled. \
+                 Set MALLOC_CONF=prof:true or rebuild with jemalloc-prof feature.",
+            )));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
+}
+
+/// Equivalent to [`jemalloc_pprof::JemallocProfCtl::dump`], but accepts a directory that the
+/// temporary pprof file will be written to. The file is deleted when the function exits.
+#[cfg(all(feature = "jemalloc-prof", unix))]
+fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
+    use std::{ffi::CString, io::BufReader};
+
+    use mappings::MAPPINGS;
+    use pprof_util::parse_jeheap;
+    use tempfile::NamedTempFile;
+
+    reth_fs_util::create_dir_all(pprof_dump_dir)?;
+    let f = NamedTempFile::new_in(pprof_dump_dir)?;
+    let path = CString::new(f.path().as_os_str().as_encoded_bytes()).unwrap();
+
+    // SAFETY: "prof.dump" is documented as being writable and taking a C string as input:
+    // http://jemalloc.net/jemalloc.3.html#prof.dump
+    unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", path.as_ptr()) }?;
+
+    let dump_reader = BufReader::new(f);
+    let profile =
+        parse_jeheap(dump_reader, MAPPINGS.as_deref()).map_err(|err| eyre::eyre!(Box::new(err)))?;
+    let pprof = profile.to_pprof(("inuse_space", "bytes"), ("space", "bytes"), None);
+
+    Ok(pprof)
+}
+
+#[cfg(not(all(feature = "jemalloc-prof", unix)))]
+fn handle_pprof_heap(_pprof_dump_dir: &PathBuf) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
+#[cfg(tokio_unstable)]
+async fn handle_tokio_dump() -> Response<Full<Bytes>> {
+    let handle = tokio::runtime::Handle::current();
+    let dump = handle.dump().await;
+
+    let mut output = String::new();
+    for (i, task) in dump.tasks().iter().enumerate() {
+        let trace = task.trace();
+        output.push_str(&format!("task {i}:\n{trace}\n\n"));
+    }
+
+    let mut response = Response::new(Full::new(Bytes::from(output)));
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+    response
+}
+
+#[cfg(not(tokio_unstable))]
+async fn handle_tokio_dump() -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"tokio task dump not available. Rebuild with RUSTFLAGS=\"--cfg tokio_unstable\" and tokio's `taskdump` feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::read::GzDecoder;
+    use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY};
+    use reqwest::Client;
+    use reth_tasks::Runtime;
+    use socket2::{Domain, Socket, Type};
+    use std::{
+        io::Read,
+        net::{SocketAddr, TcpListener},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Mutex,
+        },
+    };
+
+    fn get_random_available_addr() -> SocketAddr {
+        let addr = &"127.0.0.1:0".parse::<SocketAddr>().unwrap().into();
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket.set_reuse_address(true).unwrap();
+        socket.bind(addr).unwrap();
+        socket.listen(1).unwrap();
+        let listener = TcpListener::from(socket);
+        listener.local_addr().unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_endpoint() {
+        // Install the recorder before serve() so gauge registrations are captured,
+        // mirroring how start_prometheus_endpoint() works in the real node launch.
+        install_prometheus_recorder();
+
+        let chain_spec_info = ChainSpecInfo { name: "test".to_string() };
+        let storage_settings_info = StorageSettingsInfo {
+            storage_v2: true,
+            pruning_mode: "archive",
+            prune_config: r#"{"block_interval":5}"#.to_string(),
+        };
+        let version_info = VersionInfo {
+            version: "test",
+            build_timestamp: "test",
+            cargo_features: "test",
+            git_sha: "test",
+            target_triple: "test",
+            build_profile: "test",
+        };
+
+        let runtime = Runtime::test();
+
+        let hooks = Hooks::builder().build();
+
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(
+            listen_addr,
+            version_info,
+            chain_spec_info,
+            runtime.clone(),
+            hooks,
+            std::env::temp_dir(),
+        )
+        .with_storage_settings_info(storage_settings_info);
+
+        let server = MetricServer::new(config);
+        server.serve().await.unwrap();
+
+        // Send request to the metrics endpoint
+        let url = format!("http://{listen_addr}");
+        let client = Client::builder()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let response = client.get(&url).send().await.unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(response.headers().get(CONTENT_ENCODING), None);
+
+        // Check the response body
+        let body = response.text().await.unwrap();
+        assert!(body.contains("reth_process_cpu_seconds_total"));
+        assert!(body.contains("reth_process_start_time_seconds"));
+        assert!(body.contains("process_cli_args"), "expected process_cli_args metric in output");
+        assert!(body.contains("reth_storage_settings"), "expected storage settings metric");
+        assert!(body.contains("storage_v2=\"true\""), "expected storage v2 label");
+        assert!(body.contains("pruning_mode=\"archive\""), "expected pruning mode label");
+        assert!(body.contains("prune_config="), "expected prune config label");
+
+        let storage_metric =
+            body.lines().find(|line| line.starts_with("reth_storage_settings{")).unwrap();
+        for (accept_encoding, gzip) in [
+            ("gzip", true),
+            ("br, gzip;q=0.5", true),
+            ("gzip;q=0", false),
+            ("identity", false),
+            ("br", false),
+        ] {
+            let response =
+                client.get(&url).header(ACCEPT_ENCODING, accept_encoding).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+            assert_eq!(response.headers()[VARY], "accept-encoding");
+            assert_eq!(
+                response.headers().get(CONTENT_ENCODING),
+                gzip.then_some(&HeaderValue::from_static("gzip")),
+                "Accept-Encoding: {accept_encoding}"
+            );
+            let bytes = response.bytes().await.unwrap();
+            let decoded = if gzip {
+                let mut decoded = String::new();
+                GzDecoder::new(bytes.as_ref()).read_to_string(&mut decoded).unwrap();
+                decoded
+            } else {
+                String::from_utf8(bytes.to_vec()).unwrap()
+            };
+            assert_eq!(
+                decoded.lines().find(|line| line.starts_with("reth_storage_settings{")),
+                Some(storage_metric)
+            );
+        }
+
+        // Fill all request slots with blocked collectors on separate connections. Excess
+        // scrapes must fail promptly without starting more blocking work.
+        let busy_addr = get_random_available_addr();
+        let started = Arc::new(Semaphore::new(0));
+        let (release, wait_for_release) = mpsc::channel::<()>();
+        let wait_for_release = Mutex::new(wait_for_release);
+        let hook = {
+            let started = started.clone();
+            Arc::new(move || {
+                started.add_permits(1);
+                assert_eq!(
+                    wait_for_release.lock().unwrap().recv_timeout(Duration::from_secs(10)),
+                    Err(mpsc::RecvTimeoutError::Disconnected)
+                );
+            })
+        };
+        server
+            .start_endpoint(busy_addr, hook, runtime.clone(), std::env::temp_dir())
+            .await
+            .unwrap();
+        let busy_url = format!("http://{busy_addr}");
+        let mut scrapes = tokio::task::JoinSet::new();
+        for _ in 0..MAX_CONCURRENT_METRICS_REQUESTS {
+            let client = client.clone();
+            let url = busy_url.clone();
+            scrapes.spawn(async move {
+                let response =
+                    client.get(url).header(ACCEPT_ENCODING, "gzip").send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(response.headers()[CONTENT_ENCODING], "gzip");
+                response.bytes().await.unwrap();
+            });
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            started.acquire_many(MAX_CONCURRENT_METRICS_REQUESTS as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+        let response = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.get(&busy_url).header(ACCEPT_ENCODING, "gzip").send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(started.available_permits(), 0);
+        // Closing the channel releases every collector, including during panic unwinding.
+        drop(release);
+        while let Some(result) =
+            tokio::time::timeout(Duration::from_secs(10), scrapes.join_next()).await.unwrap()
+        {
+            result.unwrap();
+        }
+        assert_eq!(client.get(&busy_url).send().await.unwrap().status(), StatusCode::OK);
+
+        // Make sure the runtime is dropped after the test runs.
+        drop(runtime);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_background_hooks_do_not_block_collection() {
+        install_prometheus_recorder();
+
+        let collections = Arc::new(AtomicUsize::new(0));
+        let (release, wait_for_release) = mpsc::channel();
+        let wait_for_release = Mutex::new(Some(wait_for_release));
+        let completed = Arc::new(tokio::sync::Notify::new());
+        let hooks = Hooks::builder()
+            .with_background_interval(Duration::from_secs(60))
+            .with_background_hook({
+                let collections = collections.clone();
+                let completed = completed.clone();
+                move || {
+                    // Dropping the sender also unblocks the hook if a scrape assertion fails.
+                    if let Some(wait_for_release) = wait_for_release.lock().unwrap().take() &&
+                        wait_for_release.recv().is_err()
+                    {
+                        return
+                    }
+                    let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
+                    metrics::gauge!("test_background_hook_collections").set(collections as f64);
+                    completed.notify_one();
+                }
+            })
+            .build();
+
+        let runtime = Runtime::test();
+        let listen_addr = get_random_available_addr();
+        let config = MetricServerConfig::new(
+            listen_addr,
+            VersionInfo {
+                version: "test",
+                build_timestamp: "test",
+                cargo_features: "test",
+                git_sha: "test",
+                target_triple: "test",
+                build_profile: "test",
+            },
+            ChainSpecInfo { name: "test".to_string() },
+            runtime.clone(),
+            hooks,
+            std::env::temp_dir(),
+        );
+
+        MetricServer::new(config).serve().await.unwrap();
+
+        // the first scrape kicks off the background hook but must not wait for it
+        let url = format!("http://{listen_addr}");
+        let started = std::time::Instant::now();
+        let response =
+            Client::new().get(&url).timeout(Duration::from_millis(500)).send().await.unwrap();
+        assert!(response.status().is_success());
+        assert!(started.elapsed() < Duration::from_secs(1), "scrape waited for the hook");
+        assert_eq!(collections.load(Ordering::Relaxed), 0);
+
+        // once it completes, its values are rendered by the following scrape
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), completed.notified()).await.unwrap();
+        let body = Client::new().get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(
+            body.contains("test_background_hook_collections"),
+            "background hook metric missing: {body}"
+        );
+
+        // and scrapes within the interval do not collect again
+        assert_eq!(collections.load(Ordering::Relaxed), 1);
+
+        drop(runtime);
+    }
+}

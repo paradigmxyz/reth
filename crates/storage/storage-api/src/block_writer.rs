@@ -1,0 +1,123 @@
+use crate::NodePrimitivesProvider;
+use alloc::vec::Vec;
+use alloy_primitives::BlockNumber;
+use reth_db_models::StoredBlockBodyIndices;
+use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie_common::HashedPostStateSorted;
+
+/// `BlockExecution` Writer
+pub trait BlockExecutionWriter:
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter
+{
+    /// Take all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    fn take_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Chain<Self::Primitives>>;
+
+    /// Remove all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    ///
+    /// Returns the persistence frontiers after removal.
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<PersistenceFrontiers>;
+}
+
+impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
+    fn take_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Chain<Self::Primitives>> {
+        (*self).take_block_and_execution_above(block)
+    }
+
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<PersistenceFrontiers> {
+        (*self).remove_block_and_execution_above(block)
+    }
+}
+
+/// The database and state/trie persistence frontiers.
+///
+/// The state/trie frontier is never ahead of the database frontier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersistenceFrontiers {
+    /// The highest block whose non-state/trie outputs are persisted.
+    pub db_tip: BlockNumber,
+    /// The highest block whose state/trie outputs are persisted.
+    pub partial_state_trie: BlockNumber,
+}
+
+/// Block Writer
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait BlockWriter {
+    /// The body this writer can write.
+    type Block: Block;
+    /// The receipt type for [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
+
+    /// Insert full block and make it canonical. Parent tx num and transition id is taken from
+    /// parent block in database.
+    ///
+    /// Return [`StoredBlockBodyIndices`] that contains indices of the first and last transactions
+    /// and transition in the block.
+    fn insert_block(
+        &self,
+        block: &RecoveredBlock<Self::Block>,
+    ) -> ProviderResult<StoredBlockBodyIndices>;
+
+    /// Appends a batch of block bodies extending the canonical chain. This is invoked during
+    /// `Bodies` stage and does not write to `TransactionHashNumbers` and `TransactionSenders`
+    /// tables which are populated on later stages.
+    ///
+    /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
+    fn append_block_bodies(
+        &self,
+        bodies: Vec<(BlockNumber, Option<&<Self::Block as Block>::Body>)>,
+    ) -> ProviderResult<()>;
+
+    /// Removes all blocks above the given block number from the database.
+    ///
+    /// Note: This does not remove state or execution data.
+    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()>;
+
+    /// Removes all block bodies above the given block number from the database.
+    fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()>;
+
+    /// Appends a batch of sealed blocks to the blockchain, including sender information, and
+    /// updates the post-state.
+    ///
+    /// Inserts the blocks into the database and updates the state with
+    /// provided execution state. The database's trie state is _not_ updated.
+    ///
+    /// # Parameters
+    ///
+    /// - `blocks`: Vector of `RecoveredBlock` instances to append.
+    /// - `state`: Post-state information to update after appending.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error if any operation fails.
+    fn append_blocks_with_state(
+        &self,
+        blocks: Vec<RecoveredBlock<Self::Block>>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
+        hashed_state: HashedPostStateSorted,
+    ) -> ProviderResult<()>;
+
+    /// Clears the active transaction lookup index. `RocksDB` changes take effect immediately.
+    ///
+    /// Errors by default, so writers without a lookup index don't have to implement it.
+    fn clear_transaction_lookup(&self) -> ProviderResult<()> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}

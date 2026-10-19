@@ -1,0 +1,34 @@
+[package]
+name = "reth-rpc-layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-rpc-types-engine = { workspace = true, features = ["jwt-aws-lc-rs", "serde"] }
+
+http.workspace = true
+http-body-util.workspace = true
+jsonrpsee-http-client.workspace = true
+pin-project.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tower.workspace = true
+tower-http = { workspace = true, features = ["full"] }
+tracing.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+http-body = "1"
+reqwest.workspace = true
+tokio = { workspace = true, features = ["macros", "test-util"] }
+jsonrpsee = { workspace = true, features = ["server"] }
+
+flate2.workspace = true
+brotli.workspace = true
+zstd.workspace = true

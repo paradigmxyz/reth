@@ -1,0 +1,51 @@
+# Tag a specific Docker release version as latest
+
+name: docker-tag-latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to tag as latest (e.g., v1.8.4)'
+        required: true
+        type: string
+      tag_reth:
+        description: 'Tag reth image as latest'
+        required: false
+        type: boolean
+        default: true
+env:
+  DOCKER_USERNAME: ${{ github.actor }}
+
+permissions: {}
+
+jobs:
+  tag-reth-latest:
+    name: Tag reth as latest
+    runs-on: ubuntu-24.04
+    if: ${{ inputs.tag_reth }}
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Log in to Docker
+        env:
+          DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login ghcr.io --username "${DOCKER_USERNAME}" --password-stdin
+
+      - name: Pull reth release image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker pull "ghcr.io/${{ github.repository_owner }}/reth:${VERSION}"
+
+      - name: Tag reth as latest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker tag "ghcr.io/${{ github.repository_owner }}/reth:${VERSION}" ghcr.io/${{ github.repository_owner }}/reth:latest
+
+      - name: Push reth latest tag
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/reth:latest

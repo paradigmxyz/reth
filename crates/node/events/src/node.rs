@@ -1,0 +1,699 @@
+//! Support for handling events emitted by node components.
+
+use crate::cl::ConsensusLayerHealthEvent;
+use alloy_consensus::{
+    constants::{GWEI_TO_WEI, MGAS_TO_GAS},
+    BlockHeader,
+};
+use alloy_primitives::{BlockNumber, B256};
+use alloy_rpc_types_engine::ForkchoiceState;
+use futures::Stream;
+use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus, SlowBlockInfo};
+use reth_network_api::PeersInfo;
+use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
+use reth_prune_types::PrunerEvent;
+use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileProducerEvent;
+use std::{
+    fmt::{Display, Formatter},
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tokio::time::Interval;
+use tracing::{debug, info, warn};
+
+/// Interval of reporting node state.
+const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
+
+/// The current high-level state of the node, including the node's database environment, network
+/// connections, current processing stage, and the latest block information. It provides
+/// methods to handle different types of events that affect the node's state, such as pipeline
+/// events, network events, and consensus engine events.
+struct NodeState {
+    /// Information about connected peers.
+    peers_info: Option<Box<dyn PeersInfo>>,
+    /// The stage currently being executed.
+    current_stage: Option<CurrentStage>,
+    /// The latest block reached by either pipeline or consensus engine.
+    latest_block: Option<BlockNumber>,
+    /// Hash of the head block last set by fork choice update
+    head_block_hash: Option<B256>,
+    /// Hash of the safe block last set by fork choice update
+    safe_block_hash: Option<B256>,
+    /// Hash of finalized block last set by fork choice update
+    finalized_block_hash: Option<B256>,
+    /// The time when we last logged a status message
+    last_status_log_time: Option<u64>,
+}
+
+impl NodeState {
+    const fn new(
+        peers_info: Option<Box<dyn PeersInfo>>,
+        latest_block: Option<BlockNumber>,
+    ) -> Self {
+        Self {
+            peers_info,
+            current_stage: None,
+            latest_block,
+            head_block_hash: None,
+            safe_block_hash: None,
+            finalized_block_hash: None,
+            last_status_log_time: None,
+        }
+    }
+
+    fn num_connected_peers(&self) -> usize {
+        self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
+    }
+
+    fn build_current_stage(
+        &self,
+        stage_id: StageId,
+        checkpoint: StageCheckpoint,
+        target: Option<BlockNumber>,
+    ) -> CurrentStage {
+        let (eta, entities_checkpoint) = self
+            .current_stage
+            .as_ref()
+            .filter(|current_stage| current_stage.stage_id == stage_id)
+            .map_or_else(
+                || (Eta::default(), None),
+                |current_stage| (current_stage.eta, current_stage.entities_checkpoint),
+            );
+
+        CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }
+    }
+
+    /// Processes an event emitted by the pipeline
+    fn handle_pipeline_event(&mut self, event: PipelineEvent) {
+        match event {
+            PipelineEvent::Prepare { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = self.build_current_stage(stage_id, checkpoint, target);
+
+                info!(
+                    pipeline_stages = %pipeline_stages_progress,
+                    stage = %stage_id,
+                    checkpoint = %checkpoint.block_number,
+                    target = %OptionalField(target),
+                    "Preparing stage",
+                );
+
+                self.current_stage = Some(current_stage);
+            }
+            PipelineEvent::Run { pipeline_stages_progress, stage_id, checkpoint, target } => {
+                let checkpoint = checkpoint.unwrap_or_default();
+                let current_stage = self.build_current_stage(stage_id, checkpoint, target);
+
+                if let Some(stage_eta) = current_stage.eta.fmt_for_stage(stage_id) {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        target = %OptionalField(target),
+                        %stage_eta,
+                        "Executing stage",
+                    );
+                } else {
+                    info!(
+                        pipeline_stages = %pipeline_stages_progress,
+                        stage = %stage_id,
+                        checkpoint = %checkpoint.block_number,
+                        target = %OptionalField(target),
+                        "Executing stage",
+                    );
+                }
+
+                self.current_stage = Some(current_stage);
+            }
+            PipelineEvent::Ran {
+                pipeline_stages_progress,
+                stage_id,
+                result: ExecOutput { checkpoint, done },
+            } => {
+                if stage_id.is_finish() {
+                    self.latest_block = Some(checkpoint.block_number);
+                }
+
+                if let Some(current_stage) = self.current_stage.as_mut() {
+                    current_stage.checkpoint = checkpoint;
+                    current_stage.entities_checkpoint = checkpoint.entities();
+                    current_stage.eta.update(stage_id, checkpoint);
+
+                    let target = OptionalField(current_stage.target);
+                    let stage_progress = current_stage
+                        .entities_checkpoint
+                        .and_then(|entities| entities.fmt_percentage());
+                    let stage_eta = current_stage.eta.fmt_for_stage(stage_id);
+
+                    let message = if done { "Finished stage" } else { "Committed stage progress" };
+
+                    match (stage_progress, stage_eta) {
+                        (Some(stage_progress), Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (Some(stage_progress), None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_progress,
+                                "{message}",
+                            )
+                        }
+                        (None, Some(stage_eta)) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                %stage_eta,
+                                "{message}",
+                            )
+                        }
+                        (None, None) => {
+                            info!(
+                                pipeline_stages = %pipeline_stages_progress,
+                                stage = %stage_id,
+                                checkpoint = %checkpoint.block_number,
+                                %target,
+                                "{message}",
+                            )
+                        }
+                    }
+                }
+
+                if done {
+                    self.current_stage = None;
+                }
+            }
+            PipelineEvent::Unwind { stage_id, input } => {
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: Eta::default(),
+                    checkpoint: input.checkpoint,
+                    target: Some(input.unwind_to),
+                    entities_checkpoint: input.checkpoint.entities(),
+                };
+
+                self.current_stage = Some(current_stage);
+            }
+            PipelineEvent::Unwound { stage_id, result } => {
+                info!(stage = %stage_id, checkpoint = %result.checkpoint.block_number, "Unwound stage");
+                self.current_stage = None;
+            }
+            _ => (),
+        }
+    }
+
+    fn handle_consensus_engine_event<N: NodePrimitives>(&mut self, event: ConsensusEngineEvent<N>) {
+        match event {
+            ConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+                let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
+                    state;
+                if self.safe_block_hash != Some(safe_block_hash) &&
+                    self.finalized_block_hash != Some(finalized_block_hash)
+                {
+                    let msg = match status {
+                        ForkchoiceStatus::Valid => "Forkchoice updated",
+                        ForkchoiceStatus::Invalid => "Received invalid forkchoice updated message",
+                        ForkchoiceStatus::Syncing => {
+                            "Received forkchoice updated message when syncing"
+                        }
+                    };
+                    info!(?head_block_hash, ?safe_block_hash, ?finalized_block_hash, "{}", msg);
+                }
+                self.head_block_hash = Some(head_block_hash);
+                self.safe_block_hash = Some(safe_block_hash);
+                self.finalized_block_hash = Some(finalized_block_hash);
+            }
+            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
+                let mut full = block.gas_used() as f64 * 100.0 / block.gas_limit() as f64;
+                if full.is_nan() {
+                    full = 0.0;
+                }
+                info!(
+                    number=block.number(),
+                    hash=?block.hash(),
+                    peers=self.num_connected_peers(),
+                    txs=block.body().transactions().len(),
+                    gas_used=%format_gas(block.gas_used()),
+                    gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
+                    gas_limit=%format_gas(block.gas_limit()),
+                    full=%format_args!("{:.1}%", full),
+                    base_fee=%format_args!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    ?elapsed,
+                    "Block added to canonical chain"
+                );
+            }
+            ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                self.latest_block = Some(head.number());
+                info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
+            }
+            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
+                info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
+            }
+            ConsensusEngineEvent::InvalidBlock { block, error } => {
+                warn!(number=block.number(), hash=?block.hash(), %error, "Encountered invalid block");
+            }
+            ConsensusEngineEvent::BlockReceived(num_hash) => {
+                info!(number=num_hash.number, hash=?num_hash.hash, "Received new payload from consensus engine");
+            }
+            ConsensusEngineEvent::SlowBlock(info) => {
+                Self::log_slow_block(&info);
+            }
+        }
+    }
+
+    fn log_slow_block(info: &SlowBlockInfo) {
+        fn hit_rate(hits: usize, misses: usize) -> f64 {
+            let total = hits + misses;
+            if total > 0 {
+                (hits as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            }
+        }
+
+        let stats = &info.stats;
+        let processing_secs =
+            stats.execution_duration.as_secs_f64() + stats.state_hash_duration.as_secs_f64();
+        let mgas_per_sec = if processing_secs > 0.0 {
+            (stats.gas_used as f64 / MGAS_TO_GAS as f64) / processing_secs
+        } else {
+            0.0
+        };
+
+        // Macro for the shared fields — commit_ms is only included when known
+        // (after persistence), omitted entirely for the immediate post-execution emit.
+        macro_rules! log_slow_block_fields {
+            ($($commit_field:tt)*) => {
+                warn!(
+                    target: "reth::slow_block",
+                    message = "Slow block",
+                    block.number = stats.block_number,
+                    block.hash = ?stats.block_hash,
+                    block.gas_used = stats.gas_used,
+                    block.tx_count = stats.tx_count,
+                    timing.execution_ms = stats.execution_duration.as_millis(),
+                    timing.state_read_ms = stats.state_read_duration.as_millis(),
+                    timing.state_hash_ms = stats.state_hash_duration.as_millis(),
+                    $($commit_field)*
+                    timing.total_ms = info.total_duration.as_millis(),
+                    throughput.mgas_per_sec = format!("{:.2}", mgas_per_sec),
+                    state_reads.accounts = stats.accounts_read,
+                    state_reads.storage_slots = stats.storage_read,
+                    state_reads.code = stats.code_read,
+                    state_reads.code_bytes = stats.code_bytes_read,
+                    state_writes.accounts = stats.accounts_changed,
+                    state_writes.accounts_deleted = stats.accounts_deleted,
+                    state_writes.storage_slots = stats.storage_slots_changed,
+                    state_writes.storage_slots_deleted = stats.storage_slots_deleted,
+                    state_writes.code = stats.bytecodes_changed,
+                    state_writes.code_bytes = stats.code_bytes_written,
+                    state_writes.eip7702_delegations_set = stats.eip7702_delegations_set,
+                    state_writes.eip7702_delegations_cleared = stats.eip7702_delegations_cleared,
+                    cache.account.hits = stats.account_cache_hits,
+                    cache.account.misses = stats.account_cache_misses,
+                    cache.account.hit_rate = format!("{:.2}", hit_rate(stats.account_cache_hits, stats.account_cache_misses)),
+                    cache.storage.hits = stats.storage_cache_hits,
+                    cache.storage.misses = stats.storage_cache_misses,
+                    cache.storage.hit_rate = format!("{:.2}", hit_rate(stats.storage_cache_hits, stats.storage_cache_misses)),
+                    cache.code.hits = stats.code_cache_hits,
+                    cache.code.misses = stats.code_cache_misses,
+                    cache.code.hit_rate = format!("{:.2}", hit_rate(stats.code_cache_hits, stats.code_cache_misses)),
+                    cache.txpool_snapshot.account.hits = stats.txpool_snapshot_account_hits,
+                    cache.txpool_snapshot.account.misses = stats.txpool_snapshot_account_misses,
+                    cache.txpool_snapshot.account.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_account_hits, stats.txpool_snapshot_account_misses)),
+                    cache.txpool_snapshot.storage.hits = stats.txpool_snapshot_storage_hits,
+                    cache.txpool_snapshot.storage.misses = stats.txpool_snapshot_storage_misses,
+                    cache.txpool_snapshot.storage.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_storage_hits, stats.txpool_snapshot_storage_misses)),
+                    cache.txpool_snapshot.code.hits = stats.txpool_snapshot_code_hits,
+                    cache.txpool_snapshot.code.misses = stats.txpool_snapshot_code_misses,
+                    cache.txpool_snapshot.code.hit_rate = format!("{:.2}", hit_rate(stats.txpool_snapshot_code_hits, stats.txpool_snapshot_code_misses)),
+                );
+            }
+        }
+
+        if let Some(commit_dur) = info.commit_duration {
+            log_slow_block_fields!(timing.commit_ms = commit_dur.as_millis(),);
+        } else {
+            log_slow_block_fields!();
+        }
+    }
+
+    fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
+        // If pipeline is running, it's fine to not receive any messages from the CL.
+        // So we need to report about CL health only when pipeline is idle.
+        if self.current_stage.is_none() {
+            match event {
+                ConsensusLayerHealthEvent::NeverSeen => {
+                    warn!(
+                        "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
+                    )
+                }
+                ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
+                    warn!(
+                        ?period,
+                        "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!"
+                    )
+                }
+            }
+        }
+    }
+
+    fn handle_pruner_event(&self, event: PrunerEvent) {
+        match event {
+            PrunerEvent::Started { tip_block_number } => {
+                debug!(tip_block_number, "Pruner started");
+            }
+            PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
+            }
+        }
+    }
+
+    fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
+        match event {
+            StaticFileProducerEvent::Started { targets } => {
+                debug!(?targets, "Static File Producer started");
+            }
+            StaticFileProducerEvent::Finished { targets, elapsed } => {
+                debug!(?targets, ?elapsed, "Static File Producer finished");
+            }
+        }
+    }
+}
+
+/// Helper type for formatting of optional fields:
+/// - If [Some(x)], then `x` is written
+/// - If [None], then `None` is written
+struct OptionalField<T: Display>(Option<T>);
+
+impl<T: Display> Display for OptionalField<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(field) = &self.0 {
+            write!(f, "{field}")
+        } else {
+            write!(f, "None")
+        }
+    }
+}
+
+/// The stage currently being executed.
+struct CurrentStage {
+    stage_id: StageId,
+    eta: Eta,
+    checkpoint: StageCheckpoint,
+    /// The entities checkpoint for reporting the progress. If `None`, then the progress is not
+    /// available, probably because the stage didn't finish running and didn't update its
+    /// checkpoint yet.
+    entities_checkpoint: Option<EntitiesCheckpoint>,
+    target: Option<BlockNumber>,
+}
+
+/// A node event.
+#[derive(Debug, derive_more::From)]
+pub enum NodeEvent<N: NodePrimitives> {
+    /// A sync pipeline event.
+    Pipeline(PipelineEvent),
+    /// A consensus engine event.
+    ConsensusEngine(ConsensusEngineEvent<N>),
+    /// A Consensus Layer health event.
+    ConsensusLayerHealth(ConsensusLayerHealthEvent),
+    /// A pruner event
+    Pruner(PrunerEvent),
+    /// A `static_file_producer` event
+    StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
+}
+
+/// Displays relevant information to the user from components of the node, and periodically
+/// displays the high-level status of the node.
+pub async fn handle_events<E, N: NodePrimitives>(
+    peers_info: Option<Box<dyn PeersInfo>>,
+    latest_block_number: Option<BlockNumber>,
+    events: E,
+) where
+    E: Stream<Item = NodeEvent<N>> + Unpin,
+{
+    let state = NodeState::new(peers_info, latest_block_number);
+
+    let start = tokio::time::Instant::now() + Duration::from_secs(3);
+    let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
+    info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let handler = EventHandler { state, events, info_interval };
+    handler.await
+}
+
+/// Handles events emitted by the node and logs them accordingly.
+#[pin_project::pin_project]
+struct EventHandler<E> {
+    state: NodeState,
+    #[pin]
+    events: E,
+    #[pin]
+    info_interval: Interval,
+}
+
+impl<E, N: NodePrimitives> Future for EventHandler<E>
+where
+    E: Stream<Item = NodeEvent<N>> + Unpin,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        while this.info_interval.poll_tick(cx).is_ready() {
+            if let Some(CurrentStage { stage_id, eta, checkpoint, entities_checkpoint, target }) =
+                &this.state.current_stage
+            {
+                let stage_progress =
+                    entities_checkpoint.and_then(|entities| entities.fmt_percentage());
+                let stage_eta = eta.fmt_for_stage(*stage_id);
+
+                match (stage_progress, stage_eta) {
+                    (Some(stage_progress), Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (Some(stage_progress), None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_progress,
+                            "Status"
+                        )
+                    }
+                    (None, Some(stage_eta)) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            %stage_eta,
+                            "Status"
+                        )
+                    }
+                    (None, None) => {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            stage = %stage_id,
+                            checkpoint = checkpoint.block_number,
+                            target = %OptionalField(*target),
+                            "Status"
+                        )
+                    }
+                }
+            } else {
+                let now =
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+                // Only log status if we haven't logged recently
+                if now.saturating_sub(this.state.last_status_log_time.unwrap_or(0)) > 60 {
+                    if let Some(latest_block) = this.state.latest_block {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %latest_block,
+                            "Status"
+                        );
+                    } else {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            "Status"
+                        );
+                    }
+                    this.state.last_status_log_time = Some(now);
+                }
+            }
+        }
+
+        while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
+            match event {
+                NodeEvent::Pipeline(event) => {
+                    this.state.handle_pipeline_event(event);
+                }
+                NodeEvent::ConsensusEngine(event) => {
+                    this.state.handle_consensus_engine_event(event);
+                }
+                NodeEvent::ConsensusLayerHealth(event) => {
+                    this.state.handle_consensus_layer_health_event(event)
+                }
+                NodeEvent::Pruner(event) => {
+                    this.state.handle_pruner_event(event);
+                }
+                NodeEvent::StaticFileProducer(event) => {
+                    this.state.handle_static_file_producer_event(event);
+                }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
+                }
+            }
+        }
+
+        Poll::Pending
+    }
+}
+
+/// A container calculating the estimated time that a stage will complete in, based on stage
+/// checkpoints reported by the pipeline.
+///
+/// One `Eta` is only valid for a single stage.
+#[derive(Default, Copy, Clone)]
+struct Eta {
+    /// The last stage checkpoint
+    last_checkpoint: EntitiesCheckpoint,
+    /// The last time the stage reported its checkpoint
+    last_checkpoint_time: Option<Instant>,
+    /// The current ETA
+    eta: Option<Duration>,
+}
+
+impl Eta {
+    /// Update the ETA given the checkpoint, if possible.
+    fn update(&mut self, stage: StageId, checkpoint: StageCheckpoint) {
+        let Some(current) = checkpoint.entities() else { return };
+
+        if let Some(last_checkpoint_time) = &self.last_checkpoint_time {
+            let Some(processed_since_last) =
+                current.processed.checked_sub(self.last_checkpoint.processed)
+            else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
+                return
+            };
+            let elapsed = last_checkpoint_time.elapsed();
+            let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
+
+            let Some(remaining) = current.total.checked_sub(current.processed) else {
+                self.eta = None;
+                debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
+                return
+            };
+
+            self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
+        }
+
+        self.last_checkpoint = current;
+        self.last_checkpoint_time = Some(Instant::now());
+    }
+
+    /// Returns `true` if the ETA is available, i.e. at least one checkpoint has been reported.
+    fn is_available(&self) -> bool {
+        self.eta.zip(self.last_checkpoint_time).is_some()
+    }
+
+    /// Format ETA for a given stage.
+    ///
+    /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
+    /// It's not the case for network-dependent ([`StageId::Headers`] and [`StageId::Bodies`]) and
+    /// [`StageId::Execution`] stages.
+    fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        {
+            None
+        } else {
+            Some(self.to_string())
+        }
+    }
+}
+
+impl Display for Eta {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some((eta, last_checkpoint_time)) = self.eta.zip(self.last_checkpoint_time) {
+            let remaining = eta.checked_sub(last_checkpoint_time.elapsed());
+
+            if let Some(remaining) = remaining {
+                return write!(
+                    f,
+                    "{}",
+                    humantime::format_duration(Duration::from_secs(remaining.as_secs()))
+                        .to_string()
+                        .replace(' ', "")
+                )
+            }
+        }
+
+        write!(f, "unknown")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eta_display_no_milliseconds() {
+        let eta = Eta {
+            last_checkpoint_time: Some(Instant::now()),
+            eta: Some(Duration::from_millis(
+                13 * 60 * 1000 + // Minutes
+                    37 * 1000 + // Seconds
+                    999, // Milliseconds
+            )),
+            ..Default::default()
+        }
+        .to_string();
+
+        assert_eq!(eta, "13m37s");
+    }
+}

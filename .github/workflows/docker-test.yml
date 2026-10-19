@@ -1,0 +1,106 @@
+name: Build test Docker image
+
+on:
+  workflow_call:
+    secrets:
+      DEPOT_TOKEN:
+        required: false
+    inputs:
+      hive_target:
+        required: true
+        type: string
+        description: "Docker bake target to build (e.g. hive)"
+      artifact_name:
+        required: false
+        type: string
+        default: "artifacts"
+        description: "Name for the uploaded artifact"
+
+permissions: {}
+
+jobs:
+  build:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: mkdir -p artifacts
+
+      - name: Get git info
+        id: git
+        run: |
+          {
+            echo "sha=${{ github.sha }}"
+            echo "describe=$(git describe --always --tags)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Detect fork
+        id: fork
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "is_fork=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        if: steps.fork.outputs.is_fork == 'false'
+        with:
+          toolchain: "1.95.0"
+
+      - name: Check Reth dependencies through Aegis
+        if: steps.fork.outputs.is_fork == 'false'
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
+      # Depot build (upstream only)
+      - name: Set up Depot CLI
+        if: steps.fork.outputs.is_fork == 'false'
+        uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
+
+      - name: Build reth image (Depot)
+        if: steps.fork.outputs.is_fork == 'false'
+        uses: depot/bake-action@1d58c2668346981089b088b7ef36755b206b20e9 # v1.13.0
+        env:
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          files: docker-bake.hcl
+          targets: ${{ inputs.hive_target }}
+          push: false
+
+      # Docker build (forks)
+      - name: Set up Docker Buildx
+        if: steps.fork.outputs.is_fork == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build reth image (Docker)
+        if: steps.fork.outputs.is_fork == 'true'
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        env:
+          VERGEN_GIT_SHA: ${{ steps.git.outputs.sha }}
+          VERGEN_GIT_DESCRIBE: ${{ steps.git.outputs.describe }}
+        with:
+          files: docker-bake.hcl
+          targets: ${{ inputs.hive_target }}
+          push: false
+          set: |
+            *.dockerfile=Dockerfile
+
+      - name: Upload reth image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ./artifacts

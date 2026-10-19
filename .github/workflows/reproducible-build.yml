@@ -1,0 +1,91 @@
+name: reproducible-build
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 1 */2 * *"
+
+permissions: {}
+
+jobs:
+  build:
+    if: github.repository == 'paradigmxyz/reth'
+    name: build reproducible binaries
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            machine: machine-1
+          - runner: ubuntu-22.04
+            machine: machine-2
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build reproducible binary with Docker
+        run: |
+          RUST_TOOLCHAIN=$(rustc --version | cut -d' ' -f2)
+          docker build \
+            --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" \
+            -f Dockerfile.reproducible -t reth:release \
+            --target artifacts \
+            --output type=local,dest=./target .
+
+      - name: Calculate SHA256
+        id: sha256
+        run: |
+          sha256sum target/reth > checksum.sha256
+          echo "Binaries SHA256 on ${{ matrix.machine }}: $(cat checksum.sha256)"
+
+      - name: Upload the hash
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checksum-${{ matrix.machine }}
+          path: |
+            checksum.sha256
+          retention-days: 1
+
+  compare:
+    name: compare reproducible binaries
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from machine-1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: checksum-machine-1
+          path: machine-1/
+      - name: Download artifacts from machine-2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: checksum-machine-2
+          path: machine-2/
+      - name: Compare SHA256 hashes
+        run: |
+          echo "=== SHA256 Comparison ==="
+          echo "Machine 1 hash:"
+          cat machine-1/checksum.sha256
+          echo "Machine 2 hash:"
+          cat machine-2/checksum.sha256
+
+          if cmp -s machine-1/checksum.sha256 machine-2/checksum.sha256; then
+            echo "✅ SUCCESS: Binaries are identical (reproducible build verified)"
+          else
+            echo "❌ FAILURE: Binaries differ (reproducible build failed)"
+            exit 1
+          fi

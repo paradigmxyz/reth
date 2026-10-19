@@ -1,0 +1,318 @@
+//! Example tests using the test suite framework.
+
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::PayloadAttributes;
+use eyre::Result;
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{
+    eth_payload_attributes, test_chain_spec,
+    test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
+    testsuite::{
+        actions::{
+            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
+            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
+        },
+        setup::{NetworkSetup, Setup},
+        Environment, TestBuilder,
+    },
+    E2ETestSetupBuilder, E2ETestSetupExt,
+};
+use reth_node_api::TreeConfig;
+use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_provider::{DatabaseProviderFactory, MetadataProvider, StorageSettings};
+use tempfile::TempDir;
+use tracing::debug;
+
+#[tokio::test]
+async fn test_apply_with_import() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    // Create test chain spec
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+
+    // Generate test blocks
+    let test_blocks = generate_test_blocks(&chain_spec, 10);
+
+    // Write blocks to RLP file
+    let temp_dir = TempDir::new()?;
+    let rlp_path = temp_dir.path().join("test_chain.rlp");
+    write_blocks_to_rlp(&test_blocks, &rlp_path)?;
+
+    // Create setup with imported chain
+    let mut setup =
+        Setup::default().with_chain_spec(chain_spec).with_network(NetworkSetup::single_node());
+
+    // Create environment and apply setup with import
+    let mut env = Environment::<EthEngineTypes>::default();
+    setup.apply_with_import::<EthereumNode>(&mut env, &rlp_path).await?;
+
+    // Now run test actions on the environment with imported chain
+    // First check what block we're at after import
+    debug!("Current block info after import: {:?}", env.current_block_info());
+
+    // Update block info to sync environment state with the node
+    let mut update_block_info = UpdateBlockInfo::default();
+    update_block_info.execute(&mut env).await?;
+
+    // Make the imported chain canonical first
+    let mut make_canonical = MakeCanonical::new();
+    make_canonical.execute(&mut env).await?;
+
+    // Update block info again after making canonical
+    let mut update_block_info_2 = UpdateBlockInfo::default();
+    update_block_info_2.execute(&mut env).await?;
+
+    // Assert we're at block 10 after import
+    let mut assert_tip = AssertChainTip::new(10);
+    assert_tip.execute(&mut env).await?;
+
+    debug!("Successfully imported chain to block 10");
+
+    // Produce 5 more blocks
+    let mut produce_blocks = ProduceBlocks::<EthEngineTypes>::new(5);
+    produce_blocks.execute(&mut env).await?;
+
+    // Assert we're now at block 15
+    let mut assert_new_tip = AssertChainTip::new(15);
+    assert_new_tip.execute(&mut env).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_assert_mine_block() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Paris))
+        .with_network(NetworkSetup::single_node());
+
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<EthEngineTypes>::new(
+            0,
+            vec![],
+            Some(B256::ZERO),
+            // TODO: refactor once we have actions to generate payload attributes.
+            PayloadAttributes {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                prev_randao: B256::random(),
+                suggested_fee_recipient: Address::random(),
+                withdrawals: None,
+                parent_beacon_block_root: None,
+                slot_number: None,
+                ..Default::default()
+            },
+        ));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_produce_blocks() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
+        .with_network(NetworkSetup::single_node());
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(MakeCanonical::new())
+        .with_action(AssertChainTip::new(5));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_create_fork() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
+        .with_network(NetworkSetup::single_node());
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(MakeCanonical::new())
+        .with_action(CreateFork::<EthEngineTypes>::new(1, 3));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_reorg_with_tagging() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
+        .with_network(NetworkSetup::single_node());
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1)) // produce block 1
+        .with_action(CaptureBlock::new("fork_base"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2)) // produce blocks 2, 3
+        .with_action(CaptureBlock::new("main_tip"))
+        .with_action(MakeCanonical::new()) // make main chain tip canonical
+        // block production finalizes the produced blocks, so re-establish finality at the fork
+        // base: building below the finalized block is rejected as a too deep reorg
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
+                .with_head(BlockReference::Tag("main_tip".to_string())),
+        )
+        // fork from block 1, produce blocks 2', 3'
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 2))
+        .with_action(CaptureBlock::new("fork_tip")) // tag fork tip
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip")); // reorg to fork tip
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_deep_reorg() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
+        .with_network(NetworkSetup::single_node())
+        .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        // receive newPayload and forkchoiceUpdated with block height 1
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlock::new("block1"))
+        // receive forkchoiceUpdated with block hash A as head (block A at height 2)
+        .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
+        .with_action(CaptureBlock::new("blockA_height2"))
+        .with_action(MakeCanonical::new())
+        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
+        // canonical ancestor at the finalized block is accepted without unwinding the chain.
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
+        // receive newPayload with block hash B and height 2
+        .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
+        .with_action(CaptureBlock::new("blockB_height2"))
+        // receive forkchoiceUpdated with block hash B as head
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("blockB_height2"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Multi-node test demonstrating block creation and coordination across multiple nodes.
+///
+/// This test demonstrates the working multi-node framework:
+/// - Multiple nodes start from the same genesis
+/// - Nodes can be selected for specific operations
+/// - Block production can happen on different nodes
+/// - Chain tips can be compared between nodes
+/// - Node-specific state is properly tracked
+#[tokio::test]
+async fn test_testsuite_multinode_block_production() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
+        .with_network(NetworkSetup::multi_node(2)) // Create 2 nodes
+        .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        // both nodes start from genesis
+        .with_action(CaptureBlock::new("genesis"))
+        .with_action(CompareNodeChainTips::expect_same(0, 1))
+        // build main chain (blocks 1-3)
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlockOnNode::new("node0_tip", 0))
+        .with_action(CompareNodeChainTips::expect_same(0, 1))
+        // node 0 already has the state and can continue producing blocks
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlockOnNode::new("node0_tip_2", 0))
+        // verify both nodes remain in sync
+        .with_action(CompareNodeChainTips::expect_same(0, 1));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
+        })
+        .build_single()
+        .await?;
+
+    let genesis_hash = node.block_hash(0);
+    assert_ne!(genesis_hash, B256::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_storage_v2() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+
+    for storage_v2 in [false, true] {
+        // A node config modifier set afterwards must not reset the storage mode.
+        let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
+            .with_storage_v2(storage_v2)
+            .with_node_config_modifier(|config| config.set_dev(true))
+            .build_single()
+            .await?;
+
+        let provider = node.inner.provider.database_provider_ro()?;
+        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_attributes_generator() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let fee_recipient = Address::with_last_byte(0x42);
+    let attributes_chain_spec = chain_spec.clone();
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new_with_attributes_generator(
+        1,
+        chain_spec,
+        move |timestamp| PayloadAttributes {
+            suggested_fee_recipient: fee_recipient,
+            ..eth_payload_attributes(&attributes_chain_spec, timestamp)
+        },
+    )
+    .build_single()
+    .await?;
+
+    let payload = node.advance_block().await?;
+    assert_eq!(payload.block().header().beneficiary, fee_recipient);
+
+    Ok(())
+}

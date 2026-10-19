@@ -1,0 +1,14 @@
+[package]
+name = "example-db-access"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node"] }
+alloy-primitives.workspace = true
+
+eyre.workspace = true
+
+[lints]
