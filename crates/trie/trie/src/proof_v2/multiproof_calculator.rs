@@ -38,9 +38,9 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
     /// Prefixes invalidate cached branch hashes for keys whose leaf values have changed, and apply
     /// to every request served by this calculator.
     ///
-    /// `known_storage_roots` supplies roots keyed by hashed account address, valid for the same
-    /// snapshot as the factories. Accounts absent from the map calculate their storage roots from
-    /// the cursors. Explicit storage proof requests always use the cursors.
+    /// `known_storage_roots` supplies roots keyed by hashed account address. Each root must be
+    /// valid for the account leaf being encoded. Accounts absent from the map calculate their
+    /// storage roots from the cursors. Explicit storage proof requests always use the cursors.
     pub fn new(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
