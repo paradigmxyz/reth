@@ -1,5 +1,6 @@
 //! Multiproof calculators over database trie tables with an immutable in-memory overlay.
 
+use alloy_primitives::{map::B256Map, B256};
 use reth_db_api::transaction::DbTx;
 use reth_errors::ProviderResult;
 use reth_trie::{
@@ -43,6 +44,7 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
         input: &TrieInputSorted,
         is_v2: bool,
         metrics: ProofCursorMetrics,
+        known_storage_roots: Arc<B256Map<B256>>,
     ) -> Self {
         // SAFETY: The caller keeps these allocations alive and in place until the calculator drops.
         let (tx, nodes, state) = unsafe {
@@ -50,9 +52,15 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
         };
         let prefix_sets = input.prefix_sets.clone().freeze();
         if is_v2 {
-            Self::Packed(table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics))
+            Self::Packed(
+                table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics)
+                    .with_known_storage_roots(known_storage_roots),
+            )
         } else {
-            Self::Legacy(table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics))
+            Self::Legacy(
+                table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics)
+                    .with_known_storage_roots(known_storage_roots),
+            )
         }
     }
 

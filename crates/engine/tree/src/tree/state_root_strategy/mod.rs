@@ -531,12 +531,13 @@ impl DefaultStateRootStrategy {
     fn spawn_state_root<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
-        multiproof_provider_factory: F,
+        multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         options: StateRootTaskOptions<'_, N>,
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
+        OverlayStateProviderFactory<F, N>:
+            DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -549,9 +550,6 @@ impl DefaultStateRootStrategy {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        #[cfg(feature = "trie-debug")]
-        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let worker_counts = ProofWorkerCounts::new(
             Self::proof_worker_count(
                 executor.proof_storage_worker_pool().num_threads(),
@@ -566,12 +564,25 @@ impl DefaultStateRootStrategy {
                 gas_used,
             ),
         );
-        let proof_worker_handle = ProofWorkerHandle::new(
-            executor,
-            task_ctx,
-            worker_counts,
-            self.proof_worker_metrics.clone(),
-        );
+        let worker_executor = executor.clone();
+        let worker_metrics = self.proof_worker_metrics.clone();
+        let parent_epoch = TrieNodeEpoch::new(parent_header.number());
+        #[cfg(feature = "trie-debug")]
+        let proof_jitter = config.proof_jitter();
+        let start_proof_workers = move |trie: &mut SparseStateTrie, anchor_hash| {
+            let factory = if let Some(anchor_hash) = anchor_hash {
+                multiproof_provider_factory.with_skip_overlay_for_reused_sparse_trie(
+                    anchor_hash,
+                    trie.storage_roots(parent_epoch),
+                )
+            } else {
+                multiproof_provider_factory
+            };
+            let task_ctx = ProofTaskCtx::new(factory);
+            #[cfg(feature = "trie-debug")]
+            let task_ctx = task_ctx.with_proof_jitter(proof_jitter);
+            ProofWorkerHandle::new(&worker_executor, task_ctx, worker_counts, worker_metrics)
+        };
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
@@ -580,7 +591,7 @@ impl DefaultStateRootStrategy {
 
         self.spawn_sparse_trie_task(
             executor,
-            proof_worker_handle,
+            start_proof_workers,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
@@ -615,7 +626,9 @@ impl DefaultStateRootStrategy {
     fn spawn_sparse_trie_task<N: NodePrimitives>(
         &self,
         executor: &reth_tasks::Runtime,
-        proof_worker_handle: ProofWorkerHandle,
+        start_proof_workers: impl FnOnce(&mut SparseStateTrie, Option<B256>) -> ProofWorkerHandle
+            + Send
+            + 'static,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
@@ -662,7 +675,7 @@ impl DefaultStateRootStrategy {
 
             let mut sparse_trie_anchor_hash = parent_hash;
             let mut reused_preserved_sparse_trie = false;
-            let sparse_state_trie = match preserved_sparse_trie {
+            let mut sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
                     let preserved_anchor_hash = preserved.anchor_hash();
@@ -691,6 +704,10 @@ impl DefaultStateRootStrategy {
                 reused_preserved_sparse_trie,
                 parent_header.num_hash(),
                 pending_sparse_trie_prune_blocks.as_deref(),
+            );
+            let proof_worker_handle = start_proof_workers(
+                &mut sparse_state_trie,
+                reused_preserved_sparse_trie.then_some(sparse_trie_anchor_hash),
             );
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
@@ -876,19 +893,9 @@ where
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.block_hash() == parent_header.hash())
-            .map(|trie| trie.anchor_hash())
-        {
-            state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
-        } else {
-            state_provider_factory.clone()
-        };
-
         let (mut handle, pending_trie_rx) = self.spawn_state_root(
             executor,
-            proof_state_provider_factory,
+            state_provider_factory.clone(),
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -952,18 +959,9 @@ where
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.block_hash() == ctx.parent_hash())
-            .map(|trie| trie.anchor_hash())
-        {
-            ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
-        } else {
-            ctx.state_provider_factory.clone()
-        };
         let (handle, pending_trie_rx) = self.spawn_state_root(
             ctx.executor,
-            proof_state_provider_factory,
+            ctx.state_provider_factory.clone(),
             StateRootTaskOptions {
                 parent_header,
                 preserved_sparse_trie,

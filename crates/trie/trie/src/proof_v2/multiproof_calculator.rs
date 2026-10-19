@@ -27,6 +27,7 @@ pub struct MultiProofCalculator<'a, T: TrieCursorFactory + 'a, H: HashedCursorFa
     account_calculator: Option<AccountCalculatorOf<'a, T, H>>,
     storage_calculator: Option<Arc<Mutex<StorageCalculatorOf<'a, T, H>>>>,
     prefix_sets: TriePrefixSets,
+    known_storage_roots: Arc<B256Map<B256>>,
     // Cursors borrow these pinned factories. `Drop` releases them first.
     factories: Pin<Box<MultiProofCalculatorFactories<T, H>>>,
 }
@@ -45,12 +46,22 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
             account_calculator: None,
             storage_calculator: None,
             prefix_sets,
+            known_storage_roots: Default::default(),
             factories: Box::pin(MultiProofCalculatorFactories {
                 trie_cursor_factory,
                 hashed_cursor_factory,
                 _pin: PhantomPinned,
             }),
         }
+    }
+
+    /// Uses the supplied storage roots when encoding account leaves, avoiding root calculation.
+    ///
+    /// Keys are hashed account addresses. Roots must be valid for the account leaves being
+    /// encoded. Accounts absent from the map calculate their storage roots from the cursors.
+    pub fn with_known_storage_roots(mut self, roots: Arc<B256Map<B256>>) -> Self {
+        self.known_storage_roots = roots;
+        self
     }
 
     /// Generates account and storage proofs for `targets`.
@@ -104,8 +115,10 @@ impl<'a, T: TrieCursorFactory + 'a, H: HashedCursorFactory + 'a> MultiProofCalcu
                     )
                 }
             };
-            let mut encoder =
-                AccountValueEncoder { storage_calculator: storage_calculator.clone() };
+            let mut encoder = AccountValueEncoder {
+                storage_calculator: storage_calculator.clone(),
+                known_storage_roots: self.known_storage_roots.clone(),
+            };
             proof.account_proofs = account_calculator.proof(&mut encoder, &mut account_targets)?;
         }
 
@@ -212,6 +225,7 @@ struct AccountValueEncoder<TC, HC> {
     // Arc<Mutex<_>> keeps the calculator Send whenever its cursors are. The mutex never poisons,
     // which is why the calculator must not be reused after a panic.
     storage_calculator: Arc<Mutex<PrefixSetStorageCalculator<TC, HC>>>,
+    known_storage_roots: Arc<B256Map<B256>>,
 }
 
 impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> LeafValueEncoder
@@ -225,31 +239,46 @@ impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> LeafValueEnco
         hashed_address: B256,
         account: Account,
     ) -> Self::DeferredEncoder {
-        AccountDeferredValueEncoder {
-            storage_calculator: self.storage_calculator.clone(),
-            hashed_address,
-            account,
+        if let Some(root) = self.known_storage_roots.get(&hashed_address) {
+            AccountDeferredValueEncoder::Known { storage_root: *root, account }
+        } else {
+            AccountDeferredValueEncoder::Sync {
+                storage_calculator: self.storage_calculator.clone(),
+                hashed_address,
+                account,
+            }
         }
     }
 }
 
-/// Deferred account encoder that computes the account's storage root when encoded.
-struct AccountDeferredValueEncoder<TC, HC> {
-    storage_calculator: Arc<Mutex<PrefixSetStorageCalculator<TC, HC>>>,
-    hashed_address: B256,
-    account: Account,
+/// Deferred account encoder using a known storage root or synchronous root calculation.
+enum AccountDeferredValueEncoder<TC, HC> {
+    Known {
+        storage_root: B256,
+        account: Account,
+    },
+    Sync {
+        storage_calculator: Arc<Mutex<PrefixSetStorageCalculator<TC, HC>>>,
+        hashed_address: B256,
+        account: Account,
+    },
 }
 
 impl<TC: TrieStorageCursor, HC: HashedStorageCursor<Value = U256>> DeferredValueEncoder
     for AccountDeferredValueEncoder<TC, HC>
 {
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
-        let root = self
-            .storage_calculator
-            .lock()
-            .calculator_for(self.hashed_address)
-            .storage_root(self.hashed_address)?;
-        self.account.into_trie_account(root).encode(buf);
+        let (account, root) = match self {
+            Self::Known { storage_root, account } => (account, storage_root),
+            Self::Sync { storage_calculator, hashed_address, account } => {
+                let root = storage_calculator
+                    .lock()
+                    .calculator_for(hashed_address)
+                    .storage_root(hashed_address)?;
+                (account, root)
+            }
+        };
+        account.into_trie_account(root).encode(buf);
         Ok(())
     }
 }

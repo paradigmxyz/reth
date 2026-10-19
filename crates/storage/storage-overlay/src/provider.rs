@@ -2,7 +2,7 @@ use crate::{
     database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
     OverlayBuilder, StateTrieOverlay,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
@@ -73,6 +73,8 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     metrics: OverlayStateProviderFactoryMetrics,
     /// Cursor metric handles shared by the multiproof calculators of every provider.
     proof_cursor_metrics: ProofCursorMetrics,
+    /// Storage roots from the reused sparse trie, shared across proof workers.
+    known_storage_roots: Arc<B256Map<B256>>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
@@ -84,22 +86,31 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
             state_trie_overlay_cache: Default::default(),
             metrics: Default::default(),
             proof_cursor_metrics: Default::default(),
+            known_storage_roots: Default::default(),
         }
     }
 
     /// Skips managed overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
     ///
-    /// Trie cursors, hashed cursors and [`StateProofProvider::multiproof_v2`] of the resulting
-    /// providers then read durable database state only, which is valid solely for revealing nodes
-    /// into that reused sparse trie. Methods that layer the overlay into their input, such as state
+    /// Trie and hashed cursors then read durable database state only. V2 account proofs use the
+    /// supplied storage roots, which is valid solely for revealing nodes into that reused sparse
+    /// trie. Methods that layer the overlay into their input, such as state
     /// and storage roots, account and storage proofs, V1 multiproofs, witnesses and
     /// [`HashedPostStateProvider::hashed_post_state`], return
     /// [`ProviderError::UnsupportedProvider`].
-    pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
+    ///
+    /// `known_storage_roots` must contain the revealed storage roots at this factory's parent,
+    /// keyed by hashed account address. Account proofs reuse them when the overlay is skipped.
+    pub fn with_skip_overlay_for_reused_sparse_trie(
+        mut self,
+        anchor_hash: B256,
+        known_storage_roots: B256Map<B256>,
+    ) -> Self {
         self.overlay_builder =
             self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
         self.state_trie_overlay_cache = Default::default();
+        self.known_storage_roots = Arc::new(known_storage_roots);
         self
     }
 }
@@ -140,6 +151,7 @@ where
             Arc::clone(&self.state_trie_overlay_cache),
             self.metrics.clone(),
             self.proof_cursor_metrics.clone(),
+            self.known_storage_roots.clone(),
             is_v2,
         ))
     }
@@ -163,6 +175,8 @@ where
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     proof_cursor_metrics: ProofCursorMetrics,
+    /// Storage roots from the reused sparse trie, shared across proof workers.
+    known_storage_roots: Arc<B256Map<B256>>,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
@@ -182,6 +196,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             Default::default(),
             Default::default(),
             Default::default(),
+            Default::default(),
             is_v2,
         )
     }
@@ -195,6 +210,7 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
         let mut provider = Self::from_parts(
             OwnedProvider(provider),
             None,
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -221,6 +237,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
             Default::default(),
             Default::default(),
             Default::default(),
+            Default::default(),
             is_v2,
         )
     }
@@ -233,6 +250,7 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         let mut provider = Self::from_parts(
             provider,
             None,
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -257,6 +275,7 @@ where
         state_trie_overlay_cache: StateTrieOverlayCache,
         metrics: OverlayStateProviderFactoryMetrics,
         proof_cursor_metrics: ProofCursorMetrics,
+        known_storage_roots: Arc<B256Map<B256>>,
         is_v2: bool,
     ) -> Self {
         Self {
@@ -266,6 +285,7 @@ where
             state_trie_overlay_cache,
             metrics,
             proof_cursor_metrics,
+            known_storage_roots,
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
@@ -760,7 +780,13 @@ where
         let cached = match &mut *calculator_slot {
             Some(cached) if cached.requires_masks == requires_masks => cached,
             slot => {
-                let input = self.state_trie_overlay(requires_masks)?.input();
+                let overlay = self.state_trie_overlay(requires_masks)?;
+                let known_storage_roots = if overlay.skipped_for_reused_sparse_trie() {
+                    self.known_storage_roots.clone()
+                } else {
+                    Default::default()
+                };
+                let input = overlay.input();
                 // SAFETY: The transaction lives behind `provider`, which is pinned or borrowed for
                 // the provider's lifetime, and the overlay allocations live in `OnceCell`s that are
                 // never reset. `Drop` releases the calculator before either, and the calculator
@@ -774,6 +800,7 @@ where
                         input,
                         self.is_v2,
                         self.proof_cursor_metrics.clone(),
+                        known_storage_roots,
                     )
                 };
                 slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
