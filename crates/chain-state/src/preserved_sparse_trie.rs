@@ -7,7 +7,7 @@ use tracing::debug;
 
 /// A preserved sparse trie that can be reused across payload validations.
 pub struct PreservedSparseTrie {
-    /// The finalized sparse trie and storage roots, which may still be pending.
+    /// The finalized sparse trie and its revealed storage roots, which may still be pending.
     trie: Receiver<SparseTrieWithStorageRoots>,
     /// Hash of the block whose post-state this trie represents.
     ///
@@ -47,7 +47,8 @@ impl PreservedSparseTrie {
         self.anchor_hash
     }
 
-    /// Consumes self and returns the trie and storage roots if reusable for the parent block.
+    /// Consumes self and returns the sparse trie and its revealed storage roots if reusable for
+    /// the parent block.
     ///
     /// If the parent block hash does not match the preserved trie's block hash, this drops the
     /// trie and returns `None` so the caller can create a fresh sparse trie.
@@ -101,7 +102,7 @@ impl fmt::Display for PreservedSparseTrieError {
 
 impl std::error::Error for PreservedSparseTrieError {}
 
-/// A finalized sparse trie and its storage roots for the next block's proof workers.
+/// A finalized sparse trie and its revealed storage roots for the next block's proof workers.
 #[derive(Debug, Default)]
 pub struct SparseTrieWithStorageRoots {
     /// The sparse trie after finalization and pruning.

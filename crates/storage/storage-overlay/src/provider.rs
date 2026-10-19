@@ -73,7 +73,7 @@ pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     metrics: OverlayStateProviderFactoryMetrics,
     /// Cursor metric handles shared by the multiproof calculators of every provider.
     proof_cursor_metrics: ProofCursorMetrics,
-    /// Storage roots from the reused sparse trie, shared across proof workers.
+    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
     known_storage_roots: Arc<B256Map<B256>>,
 }
 
@@ -175,7 +175,7 @@ where
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
     proof_cursor_metrics: ProofCursorMetrics,
-    /// Storage roots from the reused sparse trie, shared across proof workers.
+    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
     known_storage_roots: Arc<B256Map<B256>>,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
