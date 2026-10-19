@@ -101,7 +101,7 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     /// [`ProviderError::UnsupportedProvider`].
     ///
     /// `known_storage_roots` must contain the revealed storage roots at this factory's parent,
-    /// keyed by hashed account address. Account proofs reuse them when the overlay is skipped.
+    /// keyed by hashed account address. Account proofs reuse them to avoid root calculation.
     pub fn with_skip_overlay_for_reused_sparse_trie(
         mut self,
         anchor_hash: B256,
@@ -780,13 +780,7 @@ where
         let cached = match &mut *calculator_slot {
             Some(cached) if cached.requires_masks == requires_masks => cached,
             slot => {
-                let overlay = self.state_trie_overlay(requires_masks)?;
-                let known_storage_roots = if overlay.skipped_for_reused_sparse_trie() {
-                    self.known_storage_roots.clone()
-                } else {
-                    Default::default()
-                };
-                let input = overlay.input();
+                let input = self.state_trie_overlay(requires_masks)?.input();
                 // SAFETY: The transaction lives behind `provider`, which is pinned or borrowed for
                 // the provider's lifetime, and the overlay allocations live in `OnceCell`s that are
                 // never reset. `Drop` releases the calculator before either, and the calculator
@@ -800,7 +794,7 @@ where
                         input,
                         self.is_v2,
                         self.proof_cursor_metrics.clone(),
-                        known_storage_roots,
+                        self.known_storage_roots.clone(),
                     )
                 };
                 slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
