@@ -1,10 +1,9 @@
-//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
+//! Contains a byte-weighted precompile cache with SIEVE eviction.
 
-use alloy_primitives::{
-    map::{DefaultHashBuilder, FbBuildHasher},
-    Address, Bytes,
-};
-use moka::policy::EvictionPolicy;
+mod sieve;
+
+use self::sieve::SieveCache;
+use alloy_primitives::{map::FbBuildHasher, Address, Bytes};
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use reth_primitives_traits::dashmap::DashMap;
 use reth_revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
@@ -43,7 +42,7 @@ where
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>)
+pub struct PrecompileCache<S>(Arc<SieveCache<S>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -52,14 +51,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .eviction_policy(EvictionPolicy::lru())
-                .weigher(|key: &Bytes, value: &CacheEntry<S>| {
-                    (key.len() + value.output.bytes.len()) as u32
-                })
-                .build_with_hasher(Default::default()),
-        )
+        Self(Arc::new(SieveCache::new(MAX_CACHE_SIZE as usize)))
     }
 }
 
@@ -73,8 +65,7 @@ where
 
     /// Inserts the given key and value into the cache, returning the new cache size.
     fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
-        self.0.entry_count() as usize
+        self.0.insert(input, value)
     }
 }
 
