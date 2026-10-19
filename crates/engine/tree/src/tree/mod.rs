@@ -6,6 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eip7928::bal::RawBal;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
@@ -879,7 +880,7 @@ where
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
-        match self.payload_validator.convert_payload_to_block(payload) {
+        match self.convert_payload_to_block_with_access_list(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
@@ -2748,12 +2749,12 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block))
+            return Err(InsertBlockError::consensus_error(err, block.split().0))
         }
-        self.state.buffer.insert_block(block.into());
+        self.state.buffer.insert_block(block);
         Ok(())
     }
 
@@ -3138,8 +3139,21 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
+            |this, payload| Ok(this.convert_payload_to_block_with_access_list(payload)?),
         )
+    }
+
+    /// Converts a payload into a block that keeps the payload's block access list.
+    ///
+    /// A block that is buffered because its parent is missing is executed later as a block, not a
+    /// payload, so the access list has to travel with it to be stored after execution.
+    fn convert_payload_to_block_with_access_list(
+        &self,
+        payload: T::ExecutionData,
+    ) -> Result<SealedBlockWithAccessList<N::Block>, NewPayloadError> {
+        let block_access_list = payload.block_access_list().cloned().map(RawBal::from);
+        let block = self.payload_validator.convert_payload_to_block(payload)?;
+        Ok(SealedBlockWithAccessList::new(block, block_access_list))
     }
 
     fn insert_block(

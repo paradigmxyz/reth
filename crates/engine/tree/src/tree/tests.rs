@@ -10,11 +10,13 @@ use crate::{
 };
 use reth_storage_overlay::OverlayManager;
 
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, eip7685::EMPTY_REQUESTS_HASH};
 use alloy_primitives::{
+    keccak256,
     map::{B256Map, B256Set},
-    Bytes, B256,
+    Bytes, B256, U256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
@@ -24,14 +26,14 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use futures::FutureExt as _;
 use reth_chain_state::test_utils::TestBlockBuilder;
-use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, ConsensusEngineHandle, EngineApiValidator, ForkchoiceStatus,
     NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes, EthPayloadAttributes};
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
@@ -3673,4 +3675,64 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
             self.0.lock().unwrap().push(ctx.span(id).unwrap().parent().map(|parent| parent.id()));
         }
     }
+}
+
+/// Returns an Amsterdam payload carrying a block access list, whose parent is unknown to the tree.
+fn amsterdam_payload_with_unknown_parent() -> (ExecutionData, B256, RawBal) {
+    let block_access_list = Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]);
+    let header = alloy_consensus::Header {
+        parent_hash: B256::repeat_byte(0x11),
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        transactions_root: EMPTY_ROOT_HASH,
+        receipts_root: EMPTY_ROOT_HASH,
+        withdrawals_root: Some(EMPTY_ROOT_HASH),
+        number: 2,
+        gas_limit: 30_000_000,
+        timestamp: 24,
+        base_fee_per_gas: Some(7),
+        blob_gas_used: Some(0),
+        excess_blob_gas: Some(0),
+        parent_beacon_block_root: Some(B256::ZERO),
+        requests_hash: Some(EMPTY_REQUESTS_HASH),
+        block_access_list_hash: Some(keccak256(&block_access_list)),
+        slot_number: Some(2),
+        ..Default::default()
+    };
+    let body = BlockBody { withdrawals: Some(Default::default()), ..Default::default() };
+    let sealed = Block::new(header, body).seal_slow();
+    let hash = sealed.hash();
+    let payload = EthBuiltPayload::new(
+        Arc::new(RecoveredBlock::new_sealed(sealed, vec![])),
+        U256::ZERO,
+        Some(Default::default()),
+        Some(block_access_list.clone()),
+    );
+    (payload.into(), hash, RawBal::from(block_access_list))
+}
+
+#[test]
+fn test_disconnected_payload_keeps_block_access_list() {
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+    let (payload, hash, block_access_list) = amsterdam_payload_with_unknown_parent();
+
+    let mut test_harness = TestHarness::new(chain_spec);
+    let outcome = test_harness.tree.on_new_payload(payload).unwrap();
+    assert!(outcome.outcome.is_syncing());
+
+    let buffered = test_harness.tree.state.buffer.blocks.get(&hash).unwrap();
+    assert_eq!(buffered.data().as_ref(), Some(&block_access_list));
+}
+
+#[test]
+fn test_backfill_buffered_payload_keeps_block_access_list() {
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+    let (payload, hash, block_access_list) = amsterdam_payload_with_unknown_parent();
+
+    let mut test_harness =
+        TestHarness::new(chain_spec).with_backfill_state(BackfillSyncState::Active);
+    let outcome = test_harness.tree.on_new_payload(payload).unwrap();
+    assert!(outcome.outcome.is_syncing());
+
+    let buffered = test_harness.tree.state.buffer.blocks.get(&hash).unwrap();
+    assert_eq!(buffered.data().as_ref(), Some(&block_access_list));
 }
