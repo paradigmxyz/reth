@@ -4,9 +4,7 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::engine_ssz_witness::{
-    EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
-};
+use crate::engine_ssz_witness::{EngineSszWitness, PayloadStatusWithWitness};
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
@@ -46,7 +44,6 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tower::{BoxError, Layer, Service};
-use tracing::debug;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 const APPLICATION_JSON: &str = "application/json";
@@ -407,18 +404,6 @@ where
         let witness = match status.status {
             PayloadStatusKind::Valid => match witness_handler.generate_witness(payload).await {
                 Ok(witness) => Some(witness),
-                // The block is valid but its parent is only known to the engine tree. The
-                // status stays authoritative; resubmitting once forkchoice has made the parent
-                // canonical yields the witness.
-                Err(EngineSszWitnessError::ParentStateUnavailable { parent, source }) => {
-                    debug!(
-                        target: "engine::ssz",
-                        %parent,
-                        %source,
-                        "witness omitted for valid payload"
-                    );
-                    None
-                }
                 Err(err) => {
                     return problem_response(
                         STATUS_INTERNAL_SERVER_ERROR,
@@ -1254,6 +1239,7 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_ssz_witness::EngineSszWitnessError;
     use alloy_rpc_types_engine::{
         ssz_engine_types::{
             PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
