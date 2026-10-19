@@ -150,17 +150,13 @@ impl Future for PendingPayloadId {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let res = ready!(this.pending_payload_id.poll_unpin(cx));
-        match res {
-            Ok(Ok(payload_id)) => Poll::Ready(Ok(ForkchoiceUpdated {
-                payload_status: this.payload_status.take().expect("Polled after completion"),
-                payload_id: Some(payload_id),
-            })),
-            Ok(Err(err)) => Poll::Ready(Err(BeaconForkChoiceUpdateError::PayloadJob(err))),
-            Err(_) => Poll::Ready(Err(BeaconForkChoiceUpdateError::PayloadJob(
-                PayloadBuilderError::ChannelClosed,
-            ))),
-        }
+        let payload_id = ready!(this.pending_payload_id.poll_unpin(cx))
+            .unwrap_or_else(|err| Err(err.into()))
+            .map_err(BeaconForkChoiceUpdateError::PayloadJob)?;
+        Poll::Ready(Ok(ForkchoiceUpdated {
+            payload_status: this.payload_status.take().expect("Polled after completion"),
+            payload_id: Some(payload_id),
+        }))
     }
 }
 
@@ -434,36 +430,37 @@ where
 mod tests {
     use super::*;
 
+    /// Resolves the forkchoice update for a payload job that answers with `result`, or whose sender
+    /// is dropped if `result` is `None`.
     fn on_payload_job(
-        pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
+        result: Option<Result<PayloadId, PayloadBuilderError>>,
     ) -> OnForkChoiceUpdatedResult {
+        let (tx, rx) = oneshot::channel();
+        match result {
+            Some(result) => tx.send(result).unwrap(),
+            None => drop(tx),
+        }
         OnForkChoiceUpdated::updated_with_pending_payload_id(
             PayloadStatus::from_status(PayloadStatusEnum::Valid),
-            pending_payload_id,
+            rx,
         )
         .now_or_never()
         .expect("payload job result is ready")
     }
 
-    fn started(result: Result<PayloadId, PayloadBuilderError>) -> OnForkChoiceUpdatedResult {
-        let (tx, rx) = oneshot::channel();
-        tx.send(result).unwrap();
-        on_payload_job(rx)
-    }
-
     #[test]
     fn payload_job_start_errors_are_returned() {
         let id = PayloadId::new([1; 8]);
-        assert_eq!(started(Ok(id)).unwrap().payload_id, Some(id));
+        assert_eq!(on_payload_job(Some(Ok(id))).unwrap().payload_id, Some(id));
 
-        let err = started(Err(PayloadBuilderError::MissingParentHeader(B256::ZERO))).unwrap_err();
+        let err = on_payload_job(Some(Err(PayloadBuilderError::MissingParentHeader(B256::ZERO))))
+            .unwrap_err();
         assert!(matches!(
             err,
             BeaconForkChoiceUpdateError::PayloadJob(PayloadBuilderError::MissingParentHeader(_))
         ));
 
-        let (_, dropped) = oneshot::channel();
-        let err = on_payload_job(dropped).unwrap_err();
+        let err = on_payload_job(None).unwrap_err();
         assert!(matches!(
             err,
             BeaconForkChoiceUpdateError::PayloadJob(PayloadBuilderError::ChannelClosed)

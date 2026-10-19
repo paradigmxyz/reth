@@ -34,8 +34,10 @@ pub enum PayloadBuilderError {
     /// The payload attributes are invalid on top of the parent block, e.g. a transaction they
     /// include is invalid.
     ///
-    /// This is the only variant that rejects the attributes. Failures of this node, such as a
-    /// failed state read during execution, must use another variant.
+    /// Returned from `PayloadJobGenerator::new_payload_job`, this is the only variant that rejects
+    /// the attributes; returned later from a running job, it is an internal error like any other.
+    /// Failures of this node, such as a failed state read during execution, must use another
+    /// variant.
     #[error("invalid payload attributes: {0}")]
     InvalidAttributes(Box<dyn core::error::Error + Send + Sync>),
 }

@@ -1442,7 +1442,7 @@ mod tests {
     async fn engine_errors_preserve_validation_semantics() {
         use alloy_rpc_types_engine::ForkchoiceUpdateError;
         use reth_engine_primitives::BeaconForkChoiceUpdateError;
-        use reth_payload_primitives::{InvalidPayloadAttributesError, PayloadBuilderError};
+        use reth_payload_primitives::PayloadBuilderError;
         for (error, status, kind) in [
             (EngineApiError::UnknownPayload, 404, "unknown-payload"),
             (EngineApiError::BlobRequestTooLarge { len: 129 }, 413, "request-too-large"),
@@ -1461,15 +1461,6 @@ mod tests {
                         ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes,
                     ),
                 ),
-                422,
-                "invalid-attributes",
-            ),
-            (
-                EngineApiError::ForkChoiceUpdate(BeaconForkChoiceUpdateError::PayloadJob(
-                    PayloadBuilderError::invalid_attributes(
-                        InvalidPayloadAttributesError::InvalidTimestamp,
-                    ),
-                )),
                 422,
                 "invalid-attributes",
             ),

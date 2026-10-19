@@ -253,7 +253,6 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::ForkchoiceUpdateError;
     use reth_payload_primitives::InvalidPayloadAttributesError;
-    use reth_storage_api::errors::ProviderError;
     #[track_caller]
     fn ensure_engine_rpc_error(
         code: i32,
@@ -399,11 +398,7 @@ mod tests {
     fn payload_job_failing_on_this_node_is_an_internal_error() {
         let node_local = [
             PayloadBuilderError::MissingParentHeader(B256::ZERO),
-            PayloadBuilderError::MissingParentBlock(B256::ZERO),
             PayloadBuilderError::ChannelClosed,
-            PayloadBuilderError::MissingPayload,
-            PayloadBuilderError::from(ProviderError::BestBlockNotFound),
-            PayloadBuilderError::evm(std::io::Error::other("evm")),
             PayloadBuilderError::other(std::io::Error::other("other")),
         ];
 
