@@ -35,18 +35,29 @@ impl WorkerThread {
     /// Spawns a new worker thread with the given name.
     fn new(name: &'static str) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<BoxedTask>();
+        let metrics = WorkerThreadMetrics::new(name);
         let handle = thread::Builder::new()
             .name(name.to_string())
-            .spawn(move || {
-                while let Some(task) = rx.blocking_recv() {
-                    let _ = std::panic::catch_unwind(AssertUnwindSafe(task));
+            .spawn({
+                let metrics = metrics.clone();
+                move || {
+                    while let Some(task) = rx.blocking_recv() {
+                        // A panicked task must not be silently discarded: waiters blocked
+                        // on the task's result channel or on handles the task was supposed
+                        // to publish need to observe the failure (see reth issue #27606).
+                        let result = std::panic::catch_unwind(AssertUnwindSafe(task));
+                        if result.is_err() {
+                            metrics.inc_task_panics();
+                            tracing::error!(worker = %name, "named-worker task panicked");
+                        }
+                    }
                 }
             })
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
         Self {
             tx,
-            metrics: WorkerThreadMetrics::new(name),
+            metrics,
             pending: Arc::new(AtomicUsize::new(0)),
             handle: Some(handle),
         }
