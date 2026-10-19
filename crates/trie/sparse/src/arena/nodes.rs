@@ -56,9 +56,9 @@ pub(super) struct ArenaSparseNodeBranch {
     /// Cached or dirty state of this node.
     pub(super) state: ArenaSparseNodeState,
     /// Revealed or blinded children, packed densely. The `state_mask` tracks which
-    /// nibble positions have entries in this `SmallVec`, which is sized to hold the maximum
-    /// of 16 children inline and therefore never spills.
-    pub(super) children: SmallVec<[BranchChild; 16]>,
+    /// nibble positions have entries in this `SmallVec`. Sparse branches hold up to four
+    /// children inline; higher-fanout branches spill to a heap allocation.
+    pub(super) children: SmallVec<[BranchChild; 4]>,
     /// Bitmask indicating which of the 16 child slots are occupied (have an entry
     /// in `children`).
     pub(super) state_mask: TrieMask,
