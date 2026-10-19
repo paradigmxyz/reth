@@ -240,6 +240,7 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
                 reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(self.tx()),
                 reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
                 Default::default(),
+                Default::default(),
             )
             .multiproof(targets)
             .map_err(ProviderError::from)
