@@ -260,7 +260,7 @@ impl HashedPostState {
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        sort_hashed_entries(&mut accounts);
 
         let storages = self
             .storages
@@ -276,7 +276,7 @@ impl HashedPostState {
     #[allow(clippy::clone_on_copy)]
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        sort_hashed_entries(&mut accounts);
 
         let storages = self
             .storages
@@ -408,7 +408,7 @@ impl HashedStorage {
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        sort_hashed_entries(&mut storage_slots);
 
         HashedStorageSorted { storage_slots }
     }
@@ -417,7 +417,7 @@ impl HashedStorage {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
-        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+        sort_hashed_entries(&mut storage_slots);
 
         HashedStorageSorted { storage_slots }
     }
@@ -822,6 +822,41 @@ impl Iterator for ChunkedHashedPostState {
         } else {
             Some(chunk)
         }
+    }
+}
+
+/// Partitions large hashed batches by their leading byte before sorting each bucket.
+/// The in-place American flag partition needs only fixed-size bucket metadata.
+fn sort_hashed_entries<V>(entries: &mut [(B256, V)]) {
+    if entries.len() < 1024 {
+        entries.sort_unstable_by_key(|(key, _)| *key);
+        return
+    }
+
+    let mut counts = [0usize; 256];
+    for (key, _) in entries.iter() {
+        counts[usize::from(key[0])] += 1;
+    }
+    let mut starts = [0usize; 256];
+    let mut ends = [0usize; 256];
+    let mut end = 0;
+    for bucket in 0..256 {
+        starts[bucket] = end;
+        end += counts[bucket];
+        ends[bucket] = end;
+    }
+    let mut next = starts;
+    for bucket in 0..256 {
+        while next[bucket] < ends[bucket] {
+            let destination = usize::from(entries[next[bucket]].0[0]);
+            if destination == bucket {
+                next[bucket] += 1;
+            } else {
+                entries.swap(next[bucket], next[destination]);
+                next[destination] += 1;
+            }
+        }
+        entries[starts[bucket]..ends[bucket]].sort_unstable_by_key(|(key, _)| *key);
     }
 }
 
@@ -1597,6 +1632,29 @@ mod tests {
 
         // Verify the original storage is not consumed
         assert_eq!(storage.storage.len(), 3);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn partitioned_sort_matches_comparison_sort(
+            entries in proptest::collection::vec(
+                proptest::prelude::any::<([u8; 32], u64)>(), 0..4096
+            ),
+            common_prefix in 0usize..33,
+        ) {
+            let entries = B256Map::from_iter(entries.into_iter().map(|(mut key, value)| {
+                key[..common_prefix].fill(0);
+                (B256::from(key), value)
+            }));
+            let mut actual = entries.into_iter().collect::<Vec<_>>();
+            let mut expected = actual.clone();
+            expected.sort_unstable_by_key(|(key, _)| *key);
+            sort_hashed_entries(&mut actual);
+            proptest::prop_assert_eq!(&actual, &expected);
+            actual.reverse();
+            sort_hashed_entries(&mut actual);
+            proptest::prop_assert_eq!(&actual, &expected);
+        }
     }
 }
 
