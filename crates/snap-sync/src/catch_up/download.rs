@@ -227,8 +227,8 @@ fn pending_headers<P: HeaderProvider + MetadataProvider + BlockHashReader>(
     if headers.is_empty() {
         return Err(SnapSyncError::MissingHeader { block: progress.next() })
     }
-    // A list is only authenticated by the header of the block it belongs to, so a gap in them
-    // ends the run as surely as a gap in the lists themselves.
+    // A list is only authenticated by the header of the block it belongs to, so a gap in the
+    // headers fails the request, unlike a gap in the lists, which only ends the run.
     for (number, header) in (progress.next()..=end).zip(&headers) {
         if header.number() != number {
             return Err(SnapSyncError::MissingHeader { block: number })
@@ -287,7 +287,7 @@ mod tests {
     // then moved to the chain's last block.
     fn started(chain: &BalChain, accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        insert_headers(&factory, &chain.headers);
+        insert_headers(&factory, &chain.headers_with_root(state_root(accounts)));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -309,7 +309,16 @@ mod tests {
         assert_ne!(chain.tip(), replacement.tip());
         let mut accounts = accounts();
         let factory = hashed_factory();
-        insert_headers(&factory, &chain.headers);
+        let mut current = accounts.clone();
+        current.iter_mut().find(|(key, _)| *key == keccak256(CHANGED)).unwrap().1.balance =
+            U256::from(30);
+        insert_headers(
+            &factory,
+            &chain.headers_with_roots(&[
+                (PIVOT, state_root(&accounts)),
+                (chain.tip().number, state_root(&current)),
+            ]),
+        );
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -403,7 +412,7 @@ mod tests {
         served: usize,
     ) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        insert_headers(&factory, &chain.headers);
+        insert_headers(&factory, &chain.headers_with_roots(&[(PIVOT, state_root(accounts))]));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -554,7 +563,7 @@ mod tests {
     async fn a_target_past_the_pivot_is_held_at_it() {
         let chain = chain();
         let factory = hashed_factory();
-        insert_headers(&factory, &chain.headers);
+        insert_headers(&factory, &chain.headers_with_root(state_root(&accounts())));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts()))).unwrap();
         provider.commit().unwrap();
@@ -571,11 +580,12 @@ mod tests {
         // The chain the node holds instead, forking before the pivot as a reorg leaves it.
         let reorged = BalChain::new(0, [credit(1), credit(2), credit(3)]);
         let factory = hashed_factory();
-        insert_headers(&factory, &reorged.headers);
+        insert_headers(&factory, &chain.headers_with_root(state_root(&accounts)));
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider.commit().unwrap();
+        reorged.replace_after(&factory, 0);
         let (_, mut catch_up) = catch_up([], factory);
 
         let forked = catch_up.next(write, PIVOT + 3).await;
@@ -639,8 +649,11 @@ mod tests {
     #[tokio::test]
     async fn downloads_split_across_pivots_converge_on_the_latest_pivot_state() {
         const FAR: B256 = B256::repeat_byte(0xfe);
-        let chain = chain();
         let at = |balance| accounts_with(balance, [(FAR, account(3))]);
+        let chain = chain().with_state_roots(&[
+            (PIVOT + 1, state_root(&at(10))),
+            (PIVOT + 2, state_root(&at(20))),
+        ]);
         assert_eq!(at(1).last().unwrap().0, FAR);
         // The pivot serves every account but the last.
         let (factory, write) = partially_downloaded(&chain, &at(1), 2);
@@ -672,8 +685,8 @@ mod tests {
 
     #[tokio::test]
     async fn an_account_lists_reach_before_its_range_is_taken_from_the_new_root() {
-        let chain = chain();
         let at = |balance| accounts_with(balance, []);
+        let chain = chain().with_state_roots(&[(PIVOT + 2, state_root(&at(20)))]);
         // Only the account before the changed one is downloaded at the pivot.
         assert_eq!(at(1)[1].0, keccak256(CHANGED));
         let (factory, write) = partially_downloaded(&chain, &at(1), 1);

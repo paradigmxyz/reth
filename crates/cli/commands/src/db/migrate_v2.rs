@@ -156,6 +156,10 @@ impl Command {
                 entries.push(entry);
             }
 
+            if matches!(walker.peek(), Some(Err(_))) {
+                walker.next().expect("peeked")?;
+            }
+
             count += entries.len() as u64;
             writer.append_account_changeset(entries, block)?;
         }
@@ -204,6 +208,10 @@ impl Command {
                     key: entry.key,
                     value: entry.value,
                 });
+            }
+
+            if matches!(walker.peek(), Some(Err(_))) {
+                walker.next().expect("peeked")?;
             }
 
             count += entries.len() as u64;
@@ -426,10 +434,19 @@ impl Command {
 
         info!(target: "reth::cli", ?db_path, ?compact_path, "Swapping compacted database");
 
-        std::fs::rename(db_path, &backup_path)?;
+        reth_fs_util::rename(db_path, &backup_path)?;
 
-        if let Err(e) = std::fs::rename(compact_path, db_path) {
-            let _ = std::fs::rename(&backup_path, db_path);
+        if let Err(e) = reth_fs_util::rename(compact_path, db_path) {
+            if let Err(restore_err) = reth_fs_util::rename(&backup_path, db_path) {
+                eyre::bail!(
+                    "failed to move compacted database into place ({e}) and failed to restore \
+                     the original ({restore_err}); the original database is now at {} and the \
+                     compacted copy is at {}; move the original back to {} manually",
+                    backup_path.display(),
+                    compact_path.display(),
+                    db_path.display(),
+                );
+            }
             return Err(e.into());
         }
 

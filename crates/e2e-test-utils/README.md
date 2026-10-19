@@ -515,8 +515,9 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
 - **`stop` needs the database to itself.** `stop` and `restart` consume the context and wait until
   the harness holds the last handle of the node's database. A clone of `inner.provider`, a
   `NodeClient` from `to_node_client`, or a handle of `inner.provider.rocksdb_provider()` makes them
-  fail after `node::DATABASE_RELEASE_TIMEOUT` (10 seconds), an open `database_provider_ro`
-  transaction right away. Drop those first. Payloads, `MinedBlock` with its `chain`, clones of
+  fail after `node::DATABASE_RELEASE_TIMEOUT` (10 seconds, or the timeout passed to
+  `stop_with_release_timeout`), an open `database_provider_ro` transaction right away. Drop those
+  first. Payloads, `MinedBlock` with its `chain`, clones of
   `node.engine` and alloy providers do not hold the database.
 - **A restart keeps the chain, not the context.** Stopping persists every canonical block and saves
   the local transactions of the pool, which the node reinserts when it starts; blocks that are not
@@ -524,6 +525,10 @@ async fn builds_with_fee_recipient() -> eyre::Result<()> {
   restarted node gets a forkchoice update that restates the head, safe and finalized blocks it
   persisted. It also gets a new `NodeTestContext`: its finality policy is `Finality::Head` again,
   and its `canonical_stream` only sees notifications from the restart on.
+- **An unfinished snap sync needs a target after restart.** The node may have saved headers before
+  downloading and verifying their state. The harness therefore skips the automatic forkchoice
+  update, which would require the saved head to be ready for execution. The test must reconnect
+  the node to its peers and explicitly send a forkchoice update with the target to sync to.
 - **A restarted node does not reconnect.** It keeps its peer id but listens on new ports, and test
   nodes do not persist their peers. Connect it with `restarted.connect(&mut peer)` once the peer
   noticed the disconnect, e.g. once `peer.inner.network.num_connected_peers()` dropped.
