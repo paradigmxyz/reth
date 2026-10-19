@@ -68,15 +68,15 @@ use reth_primitives_traits::{
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
-    StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
+    StageCheckpointReader, StateProofProvider, StateRootProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState,
+use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie_parallel::proof_task::{
+    metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
 };
-use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -469,6 +469,7 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    proof_worker_metrics: ProofWorkerIdleMetrics,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -535,11 +536,7 @@ impl DefaultStateRootStrategy {
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
+        F: DatabaseProviderROFactory<Provider: StateProofProvider> + Clone + Send + Sync + 'static,
     {
         let StateRootTaskOptions {
             parent_header,
@@ -569,7 +566,12 @@ impl DefaultStateRootStrategy {
                 gas_used,
             ),
         );
-        let proof_worker_handle = ProofWorkerHandle::new(executor, task_ctx, worker_counts);
+        let proof_worker_handle = ProofWorkerHandle::new(
+            executor,
+            task_ctx,
+            worker_counts,
+            self.proof_worker_metrics.clone(),
+        );
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();

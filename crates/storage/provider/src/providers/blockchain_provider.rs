@@ -1224,11 +1224,11 @@ mod tests {
             let root = blocks[number].recovered_block().state_root;
             state
                 .multiproof_v2(
-                    Default::default(),
                     MultiProofTargetsV2 {
                         account_targets: vec![keccak256(other_address).into()],
                         ..Default::default()
                     },
+                    false,
                 )?
                 .account_proof(other_address, &[])?
                 .verify(root)?;
