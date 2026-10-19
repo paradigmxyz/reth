@@ -1,4 +1,4 @@
-//! Contains a byte-weighted precompile cache with TinyLFU admission.
+//! Contains a byte-weighted precompile cache with `TinyLFU` admission.
 
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
