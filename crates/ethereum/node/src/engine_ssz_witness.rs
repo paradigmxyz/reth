@@ -18,8 +18,8 @@ use std::{future::Future, pin::Pin};
 ///
 /// The parent state must be available through the provider (persisted, canonical in-memory,
 /// or pending). Parents present only in the engine tree are reported as
-/// [`EngineSszWitnessError::ParentStateUnavailable`]. Submission can return the payload status
-/// alone; built-payload witness retrieval returns an internal error.
+/// [`EngineSszWitnessError::ParentStateUnavailable`]. Both witness routes return an internal
+/// error if witness generation fails.
 #[derive(Clone, Debug)]
 pub struct EngineSszWitnessGenerator<Provider, Evm> {
     provider: Provider,
@@ -203,9 +203,8 @@ pub type ExecutionWitness = ExecutionWitnessV1;
 /// REST-SSZ response for `POST /payloads/witness`.
 ///
 /// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
-/// only when the payload status is `VALID`. A `VALID` status without a witness means the parent
-/// state was not yet available through the provider (the parent is only known to the engine
-/// tree); resubmitting the payload once forkchoice has made the parent canonical yields it.
+/// for every `VALID` payload status and absent for all other statuses. A failure to generate
+/// the witness is returned as an HTTP error.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
 pub struct PayloadStatusWithWitness {
     /// Result of processing the submitted payload.
