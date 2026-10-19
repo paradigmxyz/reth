@@ -52,15 +52,23 @@ impl<TX: DbTx + 'static> OverlayMultiProofCalculator<TX> {
         };
         let prefix_sets = input.prefix_sets.clone().freeze();
         if is_v2 {
-            Self::Packed(
-                table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics)
-                    .with_known_storage_roots(known_storage_roots),
-            )
+            Self::Packed(table_multiproof_calculator(
+                tx,
+                nodes,
+                state,
+                prefix_sets,
+                metrics,
+                known_storage_roots,
+            ))
         } else {
-            Self::Legacy(
-                table_multiproof_calculator(tx, nodes, state, prefix_sets, metrics)
-                    .with_known_storage_roots(known_storage_roots),
-            )
+            Self::Legacy(table_multiproof_calculator(
+                tx,
+                nodes,
+                state,
+                prefix_sets,
+                metrics,
+                known_storage_roots,
+            ))
         }
     }
 
@@ -106,6 +114,7 @@ fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
     state: &'static HashedPostStateSorted,
     prefix_sets: TriePrefixSets,
     metrics: ProofCursorMetrics,
+    known_storage_roots: Arc<B256Map<B256>>,
 ) -> TableMultiProofCalculator<TX, A> {
     MultiProofCalculator::new(
         metrics.instrument_trie_factory(InMemoryTrieCursorFactory::new(
@@ -117,5 +126,6 @@ fn table_multiproof_calculator<TX: DbTx + 'static, A: TrieTableAdapter>(
             state,
         )),
         prefix_sets,
+        known_storage_roots,
     )
 }
