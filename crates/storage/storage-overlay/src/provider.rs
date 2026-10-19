@@ -46,6 +46,7 @@ use reth_trie_db::{
 use std::{
     cell::{OnceCell, RefCell},
     fmt,
+    marker::PhantomPinned,
     ops::Deref,
     pin::Pin,
     sync::Arc,
@@ -156,8 +157,8 @@ where
     /// first.
     multiproof_calculator:
         RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
-    /// Pinned so the transaction borrowed by `multiproof_calculator` keeps a stable address.
-    provider: Pin<Box<Provider>>,
+    /// The `!Unpin` pointee preserves cached transaction borrows when the owning box moves.
+    provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     state_trie_overlay_cache: StateTrieOverlayCache,
     metrics: OverlayStateProviderFactoryMetrics,
@@ -260,7 +261,7 @@ where
     ) -> Self {
         Self {
             multiproof_calculator: RefCell::new(None),
-            provider: Box::pin(provider),
+            provider: Box::pin((provider, PhantomPinned)),
             overlay_builder,
             state_trie_overlay_cache,
             metrics,
@@ -273,7 +274,7 @@ where
     }
 
     fn provider(&self) -> &Provider::Target {
-        &self.provider
+        &self.provider.as_ref().get_ref().0
     }
 
     fn state_trie_overlay(&self, trie_changesets: bool) -> ProviderResult<&StateTrieOverlay>
