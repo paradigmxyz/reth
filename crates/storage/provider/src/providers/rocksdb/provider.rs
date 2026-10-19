@@ -631,6 +631,35 @@ impl RocksDBProviderInner {
         }
     }
 
+    /// Returns a forward iterator over a column family over the keys in `[from, last]`.
+    ///
+    /// The bound matters when the range is followed by many deleted keys: an unbounded iterator
+    /// that runs out of live keys in the range skips every tombstone after it until it finds the
+    /// next live key, whereas a bounded one stops at the bound.
+    fn iterator_cf_inclusive_range(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        from: &[u8],
+        last: &[u8],
+    ) -> RocksDBIterEnum<'_> {
+        // The smallest key greater than `last` is `last` followed by a zero byte.
+        let mut upper_bound = Vec::with_capacity(last.len() + 1);
+        upper_bound.extend_from_slice(last);
+        upper_bound.push(0);
+
+        let mut opts = ReadOptions::default();
+        opts.set_iterate_upper_bound(upper_bound);
+        let mode = IteratorMode::From(from, rocksdb::Direction::Forward);
+        match self {
+            Self::ReadWrite { db, .. } => {
+                RocksDBIterEnum::ReadWrite(db.iterator_cf_opt(cf, opts, mode))
+            }
+            Self::Secondary { db, .. } => {
+                RocksDBIterEnum::ReadOnly(db.iterator_cf_opt(cf, opts, mode))
+            }
+        }
+    }
+
     /// Returns a read-only, point-in-time snapshot of the database.
     fn snapshot(&self) -> RocksReadSnapshotInner<'_> {
         match self {
@@ -1242,11 +1271,13 @@ impl RocksDBProvider {
         // ShardedKey is (address, highest_block_number) so this positions us at the beginning.
         let start_key = ShardedKey::new(address, 0u64);
         let start_bytes = start_key.encode();
+        // The sentinel shard is the last possible key for this address.
+        let last_bytes = ShardedKey::new(address, u64::MAX).encode();
 
-        // Create a forward iterator starting from our seek position.
-        let iter = self
-            .0
-            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+        // Create a forward iterator over this address's shards only, so an address without live
+        // shards does not scan the tombstones of the addresses after it.
+        let iter =
+            self.0.iterator_cf_inclusive_range(cf, start_bytes.as_ref(), last_bytes.as_ref());
 
         let mut result = Vec::new();
         for item in iter {
@@ -1292,10 +1323,11 @@ impl RocksDBProvider {
 
         let start_key = StorageShardedKey::new(address, storage_key, 0u64);
         let start_bytes = start_key.encode();
+        let last_bytes = StorageShardedKey::new(address, storage_key, u64::MAX).encode();
 
-        let iter = self
-            .0
-            .iterator_cf(cf, IteratorMode::From(start_bytes.as_ref(), rocksdb::Direction::Forward));
+        // Bounded to this slot's shards, see `account_history_shards`.
+        let iter =
+            self.0.iterator_cf_inclusive_range(cf, start_bytes.as_ref(), last_bytes.as_ref());
 
         let mut result = Vec::new();
         for item in iter {
@@ -3154,6 +3186,85 @@ mod tests {
         tables,
     };
     use tempfile::TempDir;
+
+    /// Number of deleted keys `RocksDB` skipped on this thread while running `f`.
+    fn deleted_keys_skipped<R>(f: impl FnOnce() -> R) -> (R, u64) {
+        use rocksdb::perf::{set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
+
+        set_perf_stats(PerfStatsLevel::EnableCount);
+        let mut ctx = PerfContext::default();
+        ctx.reset();
+        let result = f();
+        let skipped = ctx.metric(PerfMetric::InternalDeleteSkippedCount);
+        set_perf_stats(PerfStatsLevel::Disable);
+        (result, skipped)
+    }
+
+    fn address_at(i: u64) -> Address {
+        let mut bytes = [0u8; 20];
+        bytes[12..].copy_from_slice(&i.to_be_bytes());
+        Address::from(bytes)
+    }
+
+    /// Looking up the shards of an address whose history was already removed must not scan the
+    /// deleted history of every address after it. This happens when an unwind (or the startup
+    /// heal) removes the history of a large state import: each address's shards are looked up
+    /// in turn, so an unbounded scan makes the whole unwind quadratic in the number of accounts.
+    #[test]
+    fn test_history_shards_lookup_skips_only_own_deleted_keys() {
+        const ADDRESSES: u64 = 5_000;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let storage_key = B256::with_last_byte(1);
+        let list = BlockNumberList::new_pre_sorted([1]);
+
+        // History for many addresses, then a live address after all of them.
+        let mut batch = provider.batch();
+        for i in 0..ADDRESSES {
+            let address = address_at(i);
+            batch
+                .put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &list)
+                .unwrap();
+            batch
+                .put::<tables::StoragesHistory>(
+                    StorageShardedKey::new(address, storage_key, u64::MAX),
+                    &list,
+                )
+                .unwrap();
+        }
+        let live = Address::repeat_byte(0xff);
+        batch.put::<tables::AccountsHistory>(ShardedKey::new(live, u64::MAX), &list).unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(live, storage_key, u64::MAX),
+                &list,
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // Remove the history of all but the live address, as an unwind would.
+        let mut batch = provider.batch();
+        for i in 0..ADDRESSES {
+            batch.clear_account_history(address_at(i)).unwrap();
+            batch.clear_storage_history(address_at(i), storage_key).unwrap();
+        }
+        batch.commit().unwrap();
+
+        let (shards, skipped) =
+            deleted_keys_skipped(|| provider.account_history_shards(address_at(0)));
+        assert!(shards.unwrap().is_empty());
+        assert!(skipped <= 1, "account lookup skipped {skipped} deleted keys");
+
+        let (shards, skipped) =
+            deleted_keys_skipped(|| provider.storage_history_shards(address_at(0), storage_key));
+        assert!(shards.unwrap().is_empty());
+        assert!(skipped <= 1, "storage lookup skipped {skipped} deleted keys");
+
+        // The live address after the deleted range is still found.
+        assert_eq!(provider.account_history_shards(live).unwrap().len(), 1);
+        assert_eq!(provider.storage_history_shards(live, storage_key).unwrap().len(), 1);
+    }
 
     #[test]
     fn max_open_files_adapts_to_file_descriptor_limit() {
