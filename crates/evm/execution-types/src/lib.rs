@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[allow(missing_docs)]
+pub type RetainedExecutionData = alloc::sync::Arc<dyn core::any::Any + Send + Sync>;
+
 mod bal;
 pub use bal::*;
 

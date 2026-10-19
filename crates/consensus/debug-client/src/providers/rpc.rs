@@ -22,14 +22,18 @@ pub struct RpcBlockProvider<N: Network, ExecutionData> {
     url: String,
     fetch_block_access_list: bool,
     #[debug(skip)]
-    convert: Arc<dyn Fn(N::BlockResponse, PayloadExtras) -> ExecutionData + Send + Sync>,
+    convert:
+        Arc<dyn Fn(N::BlockResponse, PayloadExtras) -> eyre::Result<ExecutionData> + Send + Sync>,
 }
 
 impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
     /// Create a new RPC block provider with the given RPC URL.
     pub async fn new(
         rpc_url: &str,
-        convert: impl Fn(N::BlockResponse, PayloadExtras) -> ExecutionData + Send + Sync + 'static,
+        convert: impl Fn(N::BlockResponse, PayloadExtras) -> eyre::Result<ExecutionData>
+            + Send
+            + Sync
+            + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider: Arc::new(
@@ -142,7 +146,11 @@ where
                 match res {
                     Ok(block) => {
                         let extras = self.payload_extras(block.header()).await;
-                        let payload = (self.convert)(block, extras);
+                        let Ok(payload) = (self.convert)(block, extras).inspect_err(|err| {
+                            warn!(target: "consensus::debug-client", %err, "Failed to convert a block");
+                        }) else {
+                            continue;
+                        };
                         if tx.send(payload).await.is_err() {
                             // Channel closed - receiver dropped, exit completely.
                             return;
@@ -175,6 +183,6 @@ where
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
         let extras = self.payload_extras(block.header()).await;
-        Ok((self.convert)(block, extras))
+        (self.convert)(block, extras)
     }
 }

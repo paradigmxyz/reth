@@ -4,7 +4,7 @@ use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{EngineObjectValidationError, PayloadTypes};
 use reth_primitives_traits::SealedBlock;
 use reth_rpc_api::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus};
 use tracing::trace;
@@ -44,6 +44,8 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
                 let block = Decodable::decode(&mut block_rlp.as_ref())
                     .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
                 Payload::block_to_payload(SealedBlock::new_unhashed(block), bal)
+                    .map_err(EngineObjectValidationError::invalid_params)
+                    .map_err(EngineApiError::from)?
             }
         };
 

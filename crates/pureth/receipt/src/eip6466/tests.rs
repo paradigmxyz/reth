@@ -2,7 +2,7 @@ use super::*;
 use alloy_consensus::{Header, TxEip7702, TxLegacy};
 use alloy_primitives::{b256, hex, Log as ExecutionLog, Signature, TxKind};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-use reth_ethereum_primitives::{BlockBody, Transaction as EthereumTransaction};
+use reth_ethereum_primitives::{Block, BlockBody, Transaction as EthereumTransaction};
 
 fn chain_spec() -> ChainSpec {
     ChainSpecBuilder::mainnet().byzantium_activated().build()
@@ -709,10 +709,7 @@ fn block_conversion_rejects_input_count_mismatch() {
                 ReceiptConstructionError::SenderCountMismatch { transactions: 1, senders: count }
             );
             assert_eq!(
-                matches!(
-                    Eip6466SnapshotError::from_construction(error),
-                    Eip6466SnapshotError::MissingData(_)
-                ),
+                matches!(Eip6466SnapshotError::from(error), Eip6466SnapshotError::MissingData(_)),
                 count < 1
             );
         }

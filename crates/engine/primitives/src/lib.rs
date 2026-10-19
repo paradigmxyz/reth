@@ -12,6 +12,7 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip7685::RequestsOrHash;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
@@ -145,6 +146,24 @@ pub trait EngineApiValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static
         version: EngineApiMessageVersion,
         attributes: &Types::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError>;
+
+    #[allow(missing_docs)]
+    fn validate_payload_requests(
+        &self,
+        _timestamp: u64,
+        _requests: &RequestsOrHash,
+    ) -> Result<(), EngineObjectValidationError> {
+        Ok(())
+    }
+
+    #[allow(missing_docs)]
+    fn validate_get_payload_version(
+        &self,
+        _version: EngineApiMessageVersion,
+        _timestamp: u64,
+    ) -> Result<(), EngineObjectValidationError> {
+        Ok(())
+    }
 }
 
 /// Type that validates an [`ExecutionPayload`].

@@ -80,6 +80,7 @@ members = [
     "crates/prune/prune",
     "crates/prune/types",
     "crates/pureth/block",
+    "crates/pureth/node",
     "crates/pureth/query",
     "crates/pureth/receipt",
     "crates/pureth/ssz",
@@ -324,6 +325,7 @@ incremental = false
 [workspace.dependencies]
 pureth-withdrawal-root = { path = "crates/pureth/withdrawal-root" }
 reth-pureth-block = { path = "crates/pureth/block" }
+reth-pureth-node = { path = "crates/pureth/node" }
 # reth
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-chain-state = { path = "crates/chain-state" }

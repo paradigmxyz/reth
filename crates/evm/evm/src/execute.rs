@@ -216,6 +216,8 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_root: B256,
     /// Block access list hash (EIP-7928, Amsterdam).
     pub block_access_list_hash: Option<B256>,
+    #[allow(missing_docs)]
+    pub block_access_list: Option<&'b DecodedBal>,
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
@@ -245,6 +247,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             state_provider,
             state_root,
             block_access_list_hash,
+            block_access_list: None,
         }
     }
 }
@@ -541,6 +544,7 @@ where
             state_provider: &state,
             state_root,
             block_access_list_hash,
+            block_access_list: block_access_list.as_ref(),
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);

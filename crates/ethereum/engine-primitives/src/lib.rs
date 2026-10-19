@@ -25,7 +25,7 @@ pub use alloy_rpc_types_engine::{
     PayloadAttributes as EthPayloadAttributes,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
@@ -37,12 +37,7 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
 
 impl<T> PayloadTypes for EthEngineTypes<T>
 where
-    T: PayloadTypes<
-        ExecutionData = ExecutionData,
-        BuiltPayload: BuiltPayload<
-            Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
-        >,
-    >,
+    T: PayloadTypes<ExecutionData = ExecutionData>,
     ExecutionData: From<T::BuiltPayload>,
 {
     type ExecutionData = T::ExecutionData;
@@ -54,7 +49,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
         bal: Option<Bytes>,
-    ) -> Self::ExecutionData {
+    ) -> Result<Self::ExecutionData, NewPayloadError> {
         T::block_to_payload(block, bal)
     }
 }
@@ -63,7 +58,7 @@ impl<T> EngineTypes for EthEngineTypes<T>
 where
     T: PayloadTypes<ExecutionData = ExecutionData>,
     ExecutionData: From<T::BuiltPayload>,
-    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>>
+    T::BuiltPayload: BuiltPayload
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<ExecutionPayloadEnvelopeV3>
@@ -94,12 +89,12 @@ impl PayloadTypes for EthPayloadTypes {
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
         bal: Option<Bytes>,
-    ) -> Self::ExecutionData {
+    ) -> Result<Self::ExecutionData, NewPayloadError> {
         let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
             block.hash(),
             &block.into_block(),
             bal,
         );
-        ExecutionData { payload, sidecar }
+        Ok(ExecutionData { payload, sidecar })
     }
 }

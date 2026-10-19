@@ -598,6 +598,40 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
     let status = test_harness.tree.on_insert_block_error(error).unwrap();
     assert!(status.is_invalid());
     assert_eq!(status.latest_valid_hash, None);
+    let status = test_harness
+        .tree
+        .on_new_payload_error(
+            NewPayloadError::InvalidBlockAccessList(Box::new(alloy_rlp::Error::UnexpectedString)),
+            NumHash::new(1, B256::ZERO),
+            parent_hash,
+        )
+        .unwrap();
+    assert!(status.is_invalid());
+    assert_eq!(status.latest_valid_hash, None);
+    let status = test_harness
+        .tree
+        .on_new_payload_error(
+            NewPayloadError::Unavailable("local validation budget exhausted".into()),
+            NumHash::new(1, B256::ZERO),
+            parent_hash,
+        )
+        .unwrap();
+    assert!(status.is_syncing());
+    assert_eq!(status.latest_valid_hash, None);
+    let block = test_harness.block_builder.generate_random_block(1, parent_hash);
+    let hash = block.hash();
+    let status = test_harness
+        .tree
+        .on_insert_block_error(InsertBlockError::new(
+            block,
+            InsertBlockErrorKind::Consensus(ConsensusError::Unavailable(Arc::new(
+                std::io::Error::other("source budget exhausted"),
+            ))),
+        ))
+        .unwrap();
+    assert!(status.is_syncing());
+    assert_eq!(status.latest_valid_hash, None);
+    assert!(test_harness.tree.state.invalid_headers.get(&hash).is_none());
 }
 
 #[tokio::test]

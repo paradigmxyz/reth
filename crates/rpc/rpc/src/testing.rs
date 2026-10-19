@@ -352,7 +352,9 @@ where
         let requests = payload.requests();
         let block_access_list = payload.block_access_list().cloned();
         let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
-        let execution_data = Payload::block_to_payload(block, block_access_list);
+        let execution_data = Payload::block_to_payload(block, block_access_list)
+            .map_err(RethError::other)
+            .map_err(Eth::Error::from_eth_err)?;
         let execution_data = match (requests, execution_data.sidecar.cancun()) {
             (Some(requests), Some(cancun)) => ExecutionData::new(
                 execution_data.payload,

@@ -28,9 +28,31 @@ pub use primitives::{
 mod source;
 #[cfg(feature = "native-source")]
 pub use source::{
-    PayloadSourceError, PayloadSourceInput, PayloadSourceKind, PayloadSourceMetadata,
-    SourcePayloadSnapshot, StateRootStatus,
+    blob_fee as checked_blob_fee, ExecutionSource, ExecutionSourceProvider, PayloadSourceError,
+    PayloadSourceInput, PayloadSourceKind, PayloadSourceMetadata, SourcePayloadSnapshot,
+    StateRootStatus,
 };
+
+#[cfg(feature = "native-primitives")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExecutionForkConfig {
+    activation_timestamp: u64,
+}
+
+#[cfg(feature = "native-primitives")]
+impl ExecutionForkConfig {
+    pub const fn new(activation_timestamp: u64) -> Self {
+        Self { activation_timestamp }
+    }
+
+    pub const fn activation_timestamp(&self) -> u64 {
+        self.activation_timestamp
+    }
+
+    pub const fn is_active_at_timestamp(&self, timestamp: u64) -> bool {
+        timestamp >= self.activation_timestamp
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
 pub struct GasAmounts {

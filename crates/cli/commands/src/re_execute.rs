@@ -12,7 +12,7 @@ use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
@@ -208,12 +208,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             }
                         };
 
-                        let bal_hash = executor
-                            .take_bal()
-                            .map(|bal| Bal::from(bal).compute_hash_with_buf(&mut bal_buf));
+                        let built_bal = executor.take_bal().map(Bal::from);
+                        let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
+                        let block = Arc::new(block);
 
                         if let Err(err) = consensus
-                            .validate_block_post_execution(&block, &result, None, bal_hash)
+                            .validate_block_post_execution_with_data(&block, &result, None, bal_hash, built_bal.as_ref())
                             .wrap_err_with(|| {
                                 format!(
                                     "Failed to validate block {} {}",
@@ -222,6 +222,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                 )
                             })
                         {
+                            if matches!(err.downcast_ref::<ConsensusError>(), Some(ConsensusError::Unavailable(_))) {
+                                return Err(err);
+                            }
                             let correct_receipts = provider_factory
                                 .receipts_by_block(block.number().into())?
                                 .unwrap();
@@ -263,7 +266,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                         if skip_invalid_blocks {
                                             executor = evm_config
                                                 .batch_executor(db_at(block.number()));
-                                            let _ = info_tx.send((block, err));
+                                            let _ = info_tx.send((Arc::unwrap_or_clone(block), err));
                                             continue 'blocks;
                                         }
                                         return Err(err);
@@ -276,7 +279,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             if skip_invalid_blocks {
                                 executor =
                                     evm_config.batch_executor(db_at(block.number()));
-                                let _ = info_tx.send((block, err));
+                                let _ = info_tx.send((Arc::unwrap_or_clone(block), err));
                                 continue 'blocks;
                             }
                             return Err(err);

@@ -140,7 +140,7 @@ use reth_evm::{
     OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
-use reth_execution_types::DecodedRevmBal;
+use reth_execution_types::{DecodedRevmBal, RetainedExecutionData};
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
@@ -493,6 +493,13 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let parent_hash = input.parent_hash();
+        if self.config.skip_state_root() &&
+            self.consensus.requires_state_root_validation(input.timestamp())
+        {
+            return Err(
+                NewPayloadError::Unavailable("state root computation is required".into()).into()
+            );
+        }
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
             self.txpool_prewarm.as_ref().and_then(|prewarmer| prewarmer.snapshot(parent_hash));
@@ -539,9 +546,11 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        return Err(
-                            InsertBlockError::new($block.into_sealed_block(), e.into()).into()
+                        return Err(InsertBlockError::new(
+                            Arc::unwrap_or_clone($block).into_sealed_block(),
+                            e.into(),
                         )
+                        .into())
                     }
                 }
             };
@@ -783,7 +792,7 @@ where
             });
 
         let block = validated_block.try_into_inner().expect("sole handle")?;
-        let block = block.with_senders(senders);
+        let block = Arc::new(block.with_senders(senders));
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -804,7 +813,7 @@ where
                 .ok()
         };
 
-        ensure_ok_post_block!(
+        let retained_execution_data = ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
                 &parent_block,
@@ -878,7 +887,9 @@ where
             if err.is_validation_error() {
                 self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
             }
-            return Err(InsertBlockError::new(block.into_sealed_block(), err).into())
+            return Err(
+                InsertBlockError::new(Arc::unwrap_or_clone(block).into_sealed_block(), err).into()
+            )
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
@@ -898,7 +909,7 @@ where
             );
             let block_state_root = block.header().state_root();
             return Err(InsertBlockError::new(
-                block.into_sealed_block(),
+                Arc::unwrap_or_clone(block).into_sealed_block(),
                 ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block_state_root }.into(),
                 )
@@ -929,9 +940,9 @@ where
         let bal = revm_bal.zip(decoded_bal).map(|(revm_bal, decoded_bal)| {
             Arc::new(DecodedRevmBal::with_raw_bal(revm_bal, decoded_bal.as_raw_bal().clone()))
         });
-        let executed_block = self
-            .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
-            .with_bal(bal);
+        let mut executed_block =
+            self.spawn_deferred_trie_task(block, output, hashed_state, trie_output).with_bal(bal);
+        executed_block.retained_execution_data = retained_execution_data;
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1344,13 +1355,13 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn validate_post_execution<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
-        block: &RecoveredBlock<N::Block>,
+        block: &Arc<RecoveredBlock<N::Block>>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
         ctx: &mut TreeCtx<'_, N>,
         receipt_root_bloom: Option<ReceiptRootBloom>,
         built_bal: Option<BlockAccessList>,
-    ) -> Result<(), InsertBlockErrorKind>
+    ) -> Result<Option<RetainedExecutionData>, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -1371,19 +1382,22 @@ where
             .map(|bal| bal.validate_gas_limit(block.gas_limit()).map_err(ConsensusError::from))
             .transpose()
             .and_then(|_| {
-                self.consensus.validate_block_post_execution(
+                self.consensus.validate_block_post_execution_with_data(
                     block,
                     output,
                     receipt_root_bloom,
                     block_access_list_hash,
+                    built_bal.as_ref(),
                 )
             });
 
-        if let Err(err) = validation_result {
+        if let Err(err) = &validation_result {
             // call post-block hook
-            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            if !matches!(err, ConsensusError::Unavailable(_)) {
+                self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            }
         }
+        let retained = validation_result?;
         drop(_enter);
 
         // record post-execution validation duration
@@ -1392,7 +1406,7 @@ where
             .post_execution_validation_duration
             .record(start.elapsed().as_secs_f64());
 
-        Ok(())
+        Ok(retained)
     }
 
     /// Spawns transaction conversion and cache prewarming for payload validation.
@@ -2008,6 +2022,14 @@ pub enum BlockOrPayload<T: PayloadTypes> {
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {
+    #[allow(missing_docs)]
+    pub fn timestamp(&self) -> u64 {
+        match self {
+            Self::Payload(payload) => payload.timestamp(),
+            Self::Block(block) => block.timestamp(),
+        }
+    }
+
     /// Returns the hash of the block.
     pub fn hash(&self) -> B256 {
         match self {

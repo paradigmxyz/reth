@@ -5,8 +5,8 @@ use crate::tree::{
 use alloy_consensus::{BlockHeader, Transaction, TxType};
 use alloy_primitives::{Address, Bytes, Log as ExecutionLog, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_ethereum_primitives::{Block, Receipt as StoredReceipt, TransactionSigned};
-use reth_primitives_traits::RecoveredBlock;
+use reth_ethereum_primitives::{Receipt as StoredReceipt, TransactionSigned};
+use reth_primitives_traits::{Block, BlockBody, RecoveredBlock};
 use ssz::{SszEncoder, BYTES_PER_LENGTH_OFFSET, MAX_LENGTH_VALUE};
 use std::fmt;
 use tree_hash::TreeHash;
@@ -237,8 +237,8 @@ pub enum Eip6466SnapshotError {
     Tree(TreeConstructionError),
 }
 
-impl Eip6466SnapshotError {
-    fn from_construction(error: ReceiptConstructionError) -> Self {
+impl From<ReceiptConstructionError> for Eip6466SnapshotError {
+    fn from(error: ReceiptConstructionError) -> Self {
         if error.is_missing_data() {
             Self::MissingData(error)
         } else {
@@ -297,13 +297,13 @@ impl Eip6466ReceiptSnapshot {
         Ok(Self { receipts, serialized, tree })
     }
 
-    pub fn from_block(
-        block: &RecoveredBlock<Block>,
+    pub fn from_block<B: Block<Body: BlockBody<Transaction = TransactionSigned>>>(
+        block: &RecoveredBlock<B>,
         stored_receipts: &[StoredReceipt],
         chain_spec: &impl EthereumHardforks,
     ) -> Result<Self, Eip6466SnapshotError> {
         let receipts = receipts_from_block(block, stored_receipts, chain_spec)
-            .map_err(Eip6466SnapshotError::from_construction)?;
+            .map_err(Eip6466SnapshotError::from)?;
 
         Self::build(receipts)
     }
@@ -471,12 +471,12 @@ pub fn receipt_from_transaction(
     }
 }
 
-pub fn receipts_from_block(
-    block: &RecoveredBlock<Block>,
+pub fn receipts_from_block<B: Block<Body: BlockBody<Transaction = TransactionSigned>>>(
+    block: &RecoveredBlock<B>,
     stored_receipts: &[StoredReceipt],
     chain_spec: &impl EthereumHardforks,
 ) -> Result<Receipts, ReceiptConstructionError> {
-    let transaction_count = block.body().transactions.len();
+    let transaction_count = block.body().transactions().len();
 
     if transaction_count != stored_receipts.len() {
         return Err(ReceiptConstructionError::InputCountMismatch {

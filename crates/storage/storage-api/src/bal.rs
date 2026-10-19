@@ -198,6 +198,53 @@ impl BalStoreHandle {
     }
 }
 
+impl BalStore for BalStoreHandle {
+    fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
+        self.inner.insert(num_hash, bal)
+    }
+
+    fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
+        self.inner.insert_many(entries)
+    }
+
+    fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
+        self.inner.flush(blocks)
+    }
+
+    fn prune(&self, tip: BlockNumber) -> ProviderResult<usize> {
+        self.inner.prune(tip)
+    }
+
+    fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.inner.get_by_hashes(block_hashes)
+    }
+
+    fn get_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        self.inner.get_by_hash(block_hash)
+    }
+
+    fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
+        self.inner.get_decoded_by_hash(block_hash)
+    }
+
+    fn get_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.inner.get_by_hashes_with_limit(block_hashes, limit)
+    }
+
+    fn append_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+        out: &mut Vec<Option<Bytes>>,
+    ) -> ProviderResult<()> {
+        self.inner.append_by_hashes_with_limit(block_hashes, limit, out)
+    }
+}
+
 impl Default for BalStoreHandle {
     fn default() -> Self {
         Self::noop()
@@ -339,6 +386,12 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+        assert_eq!(BalStore::get_by_hash(&store, hash).unwrap(), Some(raw_bal));
+        assert_eq!(BalStore::prune(&store, 10).unwrap(), 1);
+        assert!(matches!(
+            BalStore::flush(&store, &[]),
+            Err(reth_storage_errors::provider::ProviderError::UnsupportedProvider)
+        ));
     }
 
     #[test]
@@ -376,7 +429,11 @@ mod tests {
         }
 
         fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Ok(0)
+            Ok(1)
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(reth_storage_errors::provider::ProviderError::UnsupportedProvider)
         }
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {

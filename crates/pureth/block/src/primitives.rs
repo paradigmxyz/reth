@@ -92,6 +92,10 @@ impl ExecutionHeader {
     pub fn summary_ssz(&self) -> Option<&[u8]> {
         self.summary.as_ref().map(|bytes| bytes.as_ref())
     }
+
+    pub const fn as_native(&self) -> &Header {
+        &self.native
+    }
 }
 
 impl Default for ExecutionHeader {

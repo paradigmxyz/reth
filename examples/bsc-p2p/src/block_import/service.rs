@@ -93,7 +93,15 @@ where
 
         Box::pin(async move {
             let sealed_block = block.block.block.clone().seal();
-            let payload = T::block_to_payload(sealed_block, None);
+            let payload = match T::block_to_payload(sealed_block, None) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    return Outcome::<T> {
+                        peer: peer_id,
+                        result: Err(BlockImportError::Other(err.into())),
+                    }
+                }
+            };
 
             match engine.new_payload(payload).await {
                 Ok(payload_status) => match payload_status.status {

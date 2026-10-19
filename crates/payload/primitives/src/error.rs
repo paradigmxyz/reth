@@ -148,6 +148,9 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("slot number pre-Amsterdam")]
     HasSlotNumberPreAmsterdam,
+    #[allow(missing_docs)]
+    #[error("no target gas limit post-Amsterdam")]
+    NoTargetGasLimitPostAmsterdam,
 }
 
 /// Error validating payload received over `newPayload` API.
@@ -159,6 +162,12 @@ pub enum NewPayloadError {
     /// Custom payload validation error.
     #[error(transparent)]
     Other(Box<dyn error::Error + Send + Sync>),
+    #[allow(missing_docs)]
+    #[error("invalid block access list: {0}")]
+    InvalidBlockAccessList(Box<dyn error::Error + Send + Sync>),
+    #[allow(missing_docs)]
+    #[error("payload validation unavailable: {0}")]
+    Unavailable(Box<dyn error::Error + Send + Sync>),
 }
 
 impl NewPayloadError {
@@ -179,10 +188,23 @@ impl NewPayloadError {
     pub const fn is_invalid_versioned_hashes(&self) -> bool {
         matches!(self, Self::Eth(PayloadError::InvalidVersionedHashes))
     }
+
+    #[allow(missing_docs)]
+    pub const fn is_invalid_block_access_list(&self) -> bool {
+        matches!(self, Self::InvalidBlockAccessList(_))
+    }
+
+    #[allow(missing_docs)]
+    pub const fn is_unavailable(&self) -> bool {
+        matches!(self, Self::Unavailable(_))
+    }
 }
 
 impl From<NewPayloadError> for PayloadStatusEnum {
     fn from(error: NewPayloadError) -> Self {
+        if error.is_unavailable() {
+            return Self::Syncing;
+        }
         Self::Invalid { validation_error: error.to_string() }
     }
 }
