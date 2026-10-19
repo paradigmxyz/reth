@@ -48,7 +48,6 @@ where
                             target: "engine::stream::skip_new_payload",
                             block_number = payload.block_number(),
                             block_hash = %payload.block_hash(),
-                            ?payload,
                             threshold=this.threshold,
                             skipped=this.skipped, "Skipping new payload"
                         );

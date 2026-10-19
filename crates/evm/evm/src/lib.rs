@@ -399,8 +399,29 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         DB: Database,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
+        self.create_block_builder_with(evm, parent, ctx, |executor| executor)
+    }
+
+    /// Creates a [`BlockBuilder`] like [`ConfigureEvm::create_block_builder`], with a customized
+    /// executor.
+    fn create_block_builder_with<'a, DB, I, E>(
+        &'a self,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+        f: impl FnOnce(BlockExecutorForEvm<'a, Self, DB, I>) -> E,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Executor = E>
+    where
+        DB: Database,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        E: alloy_evm::block::BlockExecutor<
+            Evm = EvmFor<Self, &'a mut State<DB>, I>,
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
+        >,
+    {
         BasicBlockBuilder {
-            executor: self.create_executor(evm, ctx.clone()),
+            executor: f(self.create_executor(evm, ctx.clone())),
             ctx,
             assembler: self.block_assembler(),
             parent,

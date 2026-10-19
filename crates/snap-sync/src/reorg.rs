@@ -180,12 +180,19 @@ mod tests {
     fn branches() -> (BalChain, BalChain) {
         let address = Address::repeat_byte(0x11);
         (
-            BalChain::new(ANCESTOR, [credit(address, 1), credit(address, 2)]),
+            BalChain::new(ANCESTOR, [credit(address, 1), credit(address, 2)])
+                .with_state_root(root()),
             BalChain::new(
                 ANCESTOR,
                 [credit(address, 10), credit(address, 20), credit(address, 30)],
-            ),
+            )
+            .with_state_root(root()),
         )
+    }
+
+    // Root of the accounts every chain commits to.
+    fn root() -> B256 {
+        state_root(&accounts().1)
     }
 
     // Three accounts, of which the first two are downloaded.
@@ -255,8 +262,9 @@ mod tests {
     #[test]
     fn the_ancestor_can_sit_just_below_the_kept_blocks() {
         let address = Address::repeat_byte(0x11);
-        let old = BalChain::new(0, [credit(address, 1), credit(address, 2)]);
-        let new = BalChain::new(0, [credit(address, 10)]);
+        let old =
+            BalChain::new(0, [credit(address, 1), credit(address, 2)]).with_state_root(root());
+        let new = BalChain::new(0, [credit(address, 10)]).with_state_root(root());
         let (factory, write) = started(&old, 2);
         new.replace_after(&factory, 0);
 
@@ -270,8 +278,9 @@ mod tests {
     fn a_reorg_below_the_kept_blocks_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
         let depth = KEPT_BLOCKS + 2;
-        let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
-        let new = BalChain::new(1, (0..depth).map(|n| credit(address, n + 100)));
+        let old = BalChain::new(1, (0..depth).map(|n| credit(address, n))).with_state_root(root());
+        let new =
+            BalChain::new(1, (0..depth).map(|n| credit(address, n + 100))).with_state_root(root());
         let (factory, write) = started(&old, 1 + depth);
         new.replace_after(&factory, 1);
 

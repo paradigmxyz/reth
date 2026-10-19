@@ -967,7 +967,7 @@ where
             };
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -975,7 +975,7 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
-                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
             drop(_enter);
@@ -983,7 +983,7 @@ where
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 

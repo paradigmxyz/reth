@@ -99,8 +99,7 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, generation, hashed_factory, insert_generation_headers, key, state_root,
-        verified_range,
+        account, generation, hashed_factory_with_roots, key, state_root, verified_range,
     };
     use alloy_primitives::bytes;
     use reth_provider::{
@@ -122,8 +121,7 @@ mod tests {
     }
 
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
-        let factory = hashed_factory();
-        insert_generation_headers(&factory);
+        let factory = hashed_factory_with_roots(&[state_root(accounts); 3]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.commit().unwrap();
@@ -203,7 +201,7 @@ mod tests {
         let accounts = vec![(key(1), contract(1, &wanted))];
         let (factory, write) = started(&accounts);
         let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(0xcc))).unwrap();
+        provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
 
         let refused = provider.commit_bytecodes(write, vec![(keccak256(&wanted), wanted.clone())]);
 

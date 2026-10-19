@@ -403,10 +403,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// This is useful for callers that key an overlay cache by the durable frontiers.
     ///
-    /// Set `trie_changesets` to true only for consumers that produce trie updates. Other consumers,
-    /// including roots, proofs, multiproofs, and witnesses, should leave it false. When reverts are
-    /// required, false avoids querying trie changesets and invalidates prefixes for both reverted
-    /// hashed-state keys and keys changed by in-memory blocks replayed on top of the anchor.
+    /// With `trie_changesets` set, reverted trie nodes are exact, including their hash and tree
+    /// masks, as required to produce trie updates. Without it, trie changesets are not read; the
+    /// overlay's prefix sets instead invalidate every key changed by reverts or by in-memory blocks
+    /// replayed on top of the anchor, so roots and proof hashes are exact but masks may not match
+    /// the stored trie.
     #[instrument(
         level = "debug",
         target = "storage::overlay",
