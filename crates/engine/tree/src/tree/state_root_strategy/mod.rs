@@ -655,7 +655,7 @@ impl DefaultStateRootStrategy {
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
-                parent: parent_span,
+                parent: &parent_span,
                 "sparse_trie_task"
             )
             .entered();
