@@ -283,24 +283,7 @@ impl PrefixSet {
             return true
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] > prefix {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key.starts_with(prefix) {
-                self.index += idx;
-                return true
-            }
-
-            if key > prefix {
-                self.index += idx;
-                return false
-            }
-        }
-
-        false
+        self.seek(prefix).is_some_and(|key| key.starts_with(prefix))
     }
 
     /// Returns `true` if any key in the set falls within the given half-open range
@@ -314,24 +297,7 @@ impl PrefixSet {
             return true
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] >= range.end {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key >= range.start && key < range.end {
-                self.index += idx;
-                return true
-            }
-
-            if key >= range.end {
-                self.index += idx;
-                return false
-            }
-        }
-
-        false
+        self.seek(range.start).is_some_and(|key| &key < range.end)
     }
 
     /// Returns `true` if any key in the set is at or after `start`.
@@ -341,19 +307,7 @@ impl PrefixSet {
             return true
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] > start {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key >= start {
-                self.index += idx;
-                return true
-            }
-        }
-
-        false
+        self.seek(start).is_some()
     }
 
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
@@ -379,6 +333,28 @@ impl PrefixSet {
     /// Returns `true` if the set is empty and `all` flag is not set.
     pub const fn is_empty(&self) -> bool {
         !self.all && self.keys.is_none()
+    }
+
+    /// Finds the first key at or after `target`, retaining a finger for nearby queries.
+    /// Forward jumps use exponential search; backward jumps use a binary search of the prefix.
+    fn seek(&mut self, target: &Nibbles) -> Option<Nibbles> {
+        let keys = self.keys.as_deref()?;
+        let mut index = self.index;
+        if &keys[index] < target {
+            let mut left = index + 1;
+            let mut right = left;
+            let mut step = 1usize;
+            while right < keys.len() && &keys[right] < target {
+                left = right + 1;
+                right = right.saturating_add(step).min(keys.len());
+                step = step.saturating_mul(2);
+            }
+            index = left + keys[left..right].partition_point(|key| key < target);
+        } else if index > 0 && &keys[index - 1] >= target {
+            index = keys[..index].partition_point(|key| key < target);
+        }
+        self.index = index.min(keys.len() - 1);
+        keys.get(index).copied()
     }
 }
 
@@ -516,5 +492,40 @@ mod tests {
         assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
         assert!(frozen.destroyed_accounts.contains(&destroyed_account));
         assert_eq!(other.account_prefix_set.len(), 1);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn cursor_queries_match_full_scan(
+            keys in proptest::collection::vec(proptest::prelude::any::<[u8; 32]>(), 0..256),
+            queries in proptest::collection::vec(
+                proptest::prelude::any::<([u8; 32], [u8; 32], u8)>(), 0..256
+            ),
+        ) {
+            let mut set = PrefixSetMut::from(keys.into_iter().map(Nibbles::unpack)).freeze();
+            let keys = set.slice().to_vec();
+            for (start, end, operation) in queries {
+                let start = Nibbles::unpack(start).slice(..usize::from(operation) % 65);
+                let end = Nibbles::unpack(end);
+                match operation % 3 {
+                    0 => proptest::prop_assert_eq!(
+                        set.contains(&start), keys.iter().any(|key| key.starts_with(&start))
+                    ),
+                    1 => proptest::prop_assert_eq!(
+                        set.contains_range(&start..&end),
+                        keys.iter().any(|key| key >= &start && key < &end)
+                    ),
+                    _ => proptest::prop_assert_eq!(
+                        set.contains_from(&start), keys.iter().any(|key| key >= &start)
+                    ),
+                }
+            }
+            // Exercise exact matches in both traversal directions, including the last key.
+            for key in keys.iter().chain(keys.iter().rev()) {
+                proptest::prop_assert!(set.contains(key));
+                proptest::prop_assert!(set.contains_from(key));
+                proptest::prop_assert!(!set.contains_range(key..key));
+            }
+        }
     }
 }
