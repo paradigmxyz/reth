@@ -141,6 +141,11 @@ Storage:
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 
+      --execution-batch-size <EXECUTION_BATCH_SIZE>
+          Upper bound on blocks unwound per Execution stage commit, capped further by config
+
+          [default: 10000]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

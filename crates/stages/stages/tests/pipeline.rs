@@ -4,6 +4,7 @@ use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip1559, TxReceipt};
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{bytes, Address, Bytes, TxKind, B256, U256};
+use futures_util::{FutureExt, StreamExt};
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider, MAINNET};
 use reth_config::config::StageConfig;
 use reth_consensus::noop::NoopConsensus;
@@ -37,8 +38,8 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{sets::DefaultStages, stages::StorageHashingStage};
 use reth_stages_api::{
-    ExecInput, ExecOutput, Pipeline, PipelineTarget, Stage, StageError, StageId, StageSet,
-    UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, Pipeline, PipelineEvent, PipelineTarget, Stage, StageError, StageId,
+    StageSet, UnwindInput, UnwindOutput,
 };
 use reth_static_file::StaticFileProducer;
 use reth_storage_api::{
@@ -233,6 +234,7 @@ async fn run_pipeline_forward_and_unwind(
     num_blocks: u64,
     unwind_target: u64,
     interrupt_unwind: bool,
+    execution_batch_size: Option<u64>,
 ) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -426,6 +428,9 @@ async fn run_pipeline_forward_and_unwind(
     let tip = file_client.tip().expect("tip");
 
     let mut stages_config = StageConfig::default();
+    if let Some(batch_size) = execution_batch_size {
+        stages_config.execution.max_blocks = Some(batch_size);
+    }
     if interrupt_unwind {
         // Exercise full Merkle rebuilds with the five-block interruption fixture.
         stages_config.merkle.rebuild_threshold = 1;
@@ -494,6 +499,8 @@ async fn run_pipeline_forward_and_unwind(
     // source
     assert_changesets_queryable(&pipeline_provider_factory, 1..=num_blocks)?;
 
+    let mut unwind_events = pipeline.events();
+
     // Interrupt after the real storage hashing unwind commit, while Execution is still ahead.
     if interrupt_unwind {
         assert_eq!(
@@ -546,6 +553,17 @@ async fn run_pipeline_forward_and_unwind(
         assert_eq!(pending_pipeline_unwind_target(&pipeline_provider_factory.provider()?)?, None);
     } else {
         pipeline.unwind(unwind_target, None)?;
+    }
+
+    if let Some(batch_size) = execution_batch_size {
+        let mut checkpoint = num_blocks;
+        while let Some(Some(event)) = unwind_events.next().now_or_never() {
+            if let PipelineEvent::Unwound { stage_id: StageId::Execution, result } = event {
+                assert!(checkpoint - result.checkpoint.block_number <= batch_size);
+                checkpoint = result.checkpoint.block_number;
+            }
+        }
+        assert_eq!(checkpoint, unwind_target);
     }
 
     // Verify unwind
@@ -684,7 +702,7 @@ async fn run_pipeline_forward_and_unwind(
 /// This exercises both account and storage hashing/history stages.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline() -> eyre::Result<()> {
-    run_pipeline_forward_and_unwind(None, 5, 2, false).await
+    run_pipeline_forward_and_unwind(None, 5, 2, false, None).await
 }
 
 /// Same as [`test_pipeline`] but runs with v2 storage settings (`use_hashed_state=true`,
@@ -697,13 +715,13 @@ async fn test_pipeline() -> eyre::Result<()> {
 /// - Unwind must still revert hashed state via the hashing stages before `MerkleUnwind` validates
 #[tokio::test(flavor = "multi_thread")]
 async fn test_pipeline_v2() -> eyre::Result<()> {
-    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, false).await
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, false, None).await
 }
 
 /// A fresh pipeline must finish the durable unwind before trusting Execution's checkpoint.
 #[tokio::test(flavor = "multi_thread")]
 async fn interrupted_storage_v2_unwind_recovers() -> eyre::Result<()> {
-    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, true).await
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, true, None).await
 }
 
 struct InterruptStorageHashing(StorageHashingStage);
@@ -772,4 +790,14 @@ async fn reopen_provider_factory(
         reth_tasks::Runtime::test(),
     )
     .map_err(Into::into)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn execution_unwind_batches_v1() -> eyre::Result<()> {
+    run_pipeline_forward_and_unwind(None, 5, 2, false, Some(1)).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn execution_unwind_batches_v2() -> eyre::Result<()> {
+    run_pipeline_forward_and_unwind(Some(StorageSettings::v2()), 5, 2, false, Some(1)).await
 }

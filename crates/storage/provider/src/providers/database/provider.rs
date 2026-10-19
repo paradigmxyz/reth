@@ -3032,7 +3032,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         block: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        self.take_state_above_until(block, self.last_block_number()?)
+    }
+
+    fn take_state_above_until(
+        &self,
+        block: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
+        let range = block + 1..=end;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -3054,7 +3062,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
             self.cached_storage_settings().storage_v2
         {
-            let changesets = self.storage_changesets_range(block + 1..=highest_block)?;
+            let changesets = self.storage_changesets_range(block + 1..=highest_block.min(end))?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
             changeset_writer.prune_storage_changesets(block)?;
@@ -3071,7 +3079,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             self.cached_storage_settings().storage_v2
         {
             // TODO: add a `take` method that removes and returns the items instead of doing this
-            let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
+            let changesets =
+                self.account_changesets_range(block + 1..highest_block.min(end) + 1)?;
             let mut changeset_writer =
                 self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
             changeset_writer.prune_account_changesets(block)?;
@@ -5995,5 +6004,33 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn take_state_above_until_excludes_later_blocks() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for block in 1..=3 {
+            provider
+                .tx_ref()
+                .put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+                )
+                .unwrap();
+        }
+        provider
+            .tx_ref()
+            .put::<tables::AccountChangeSets>(
+                3,
+                AccountBeforeTx { address: Address::repeat_byte(0x33), info: None },
+            )
+            .unwrap();
+
+        let outcome = provider.take_state_above_until(1, 2).unwrap();
+        assert_eq!(outcome.first_block(), 2);
+        assert_eq!(outcome.len(), 1);
+        assert!(provider.block_body_indices(3).unwrap().is_some());
+        assert!(provider.tx_ref().get::<tables::AccountChangeSets>(3).unwrap().is_some());
     }
 }
