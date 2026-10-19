@@ -58,6 +58,30 @@ pub use reth_storage_api::{
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use static_file::StaticFileSegment;
 
+/// Metadata key for an unwind that has not completed across all pipeline stages.
+pub const PENDING_PIPELINE_UNWIND_KEY: &str = "pending_pipeline_unwind";
+
+/// Returns the durable target of an unfinished pipeline unwind, or `None` if none is recorded.
+///
+/// A malformed marker is an error: ignoring it could allow forward sync with partially unwound
+/// state. Block zero is a valid target.
+pub fn pending_pipeline_unwind_target(
+    provider: &impl MetadataProvider,
+) -> ProviderResult<Option<u64>> {
+    provider
+        .get_metadata(PENDING_PIPELINE_UNWIND_KEY)?
+        .map(|bytes| {
+            let bytes: [u8; 8] = bytes.try_into().map_err(|_| {
+                ProviderError::other(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid pending pipeline unwind target",
+                ))
+            })?;
+            Ok(u64::from_be_bytes(bytes))
+        })
+        .transpose()
+}
+
 /// Converts a [`RangeBounds`](std::ops::RangeBounds) into a concrete [`Range`](std::ops::Range)
 pub fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

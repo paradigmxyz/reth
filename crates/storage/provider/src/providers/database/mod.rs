@@ -475,7 +475,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             (None, None) => return Ok(self),
             (Some(_), Some(_)) => "RocksDB and Static Files",
             (Some(_), None) => "RocksDB",
-            (None, Some(_)) => "Static Files",
+            (None, Some(_)) => "Static Files or interrupted pipeline unwind",
         };
 
         Err(ProviderError::MustUnwind {
@@ -488,9 +488,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         })
     }
 
-    /// Checks the consistency between the static files and the database. This
-    /// may result in static files being pruned or otherwise healed to ensure
-    /// consistency. I.e. this MAY result in writes to the static files.
+    /// Checks storage consistency and returns unwind targets, including a durable target from
+    /// an interrupted pipeline unwind. This may heal static files.
     #[instrument(err, skip(self))]
     pub fn check_consistency(&self) -> ProviderResult<(Option<u64>, Option<u64>)> {
         let provider_ro = self
@@ -513,6 +512,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
             },
         );
+        let pending_unwind = crate::pending_pipeline_unwind_target(&provider_ro)?;
+        let static_file_unwind = static_file_unwind.into_iter().chain(pending_unwind).min();
 
         // Step 4: Heal finalized/safe block numbers that may be ahead of the
         // highest header on nodes coming from <=1.10.2.
