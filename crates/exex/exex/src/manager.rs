@@ -524,7 +524,7 @@ where
         }
 
         // Offer buffered notifications before taking each new one: taking the whole backlog first
-        // spends the cooperative budget, the sends are refused and the ExExes starve.
+        // spends the cooperative budget, and the ExExes wait behind the whole backlog.
         loop {
             // Land the WAL work in flight
             let wal_busy = this.poll_wal(cx)?.is_pending();
