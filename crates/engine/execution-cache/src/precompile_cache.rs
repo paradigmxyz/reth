@@ -1,4 +1,4 @@
-//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
+//! Contains a byte-weighted precompile cache with TinyLFU admission.
 
 use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
@@ -54,7 +54,7 @@ where
     fn default() -> Self {
         Self(
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .eviction_policy(EvictionPolicy::lru())
+                .eviction_policy(EvictionPolicy::tiny_lfu())
                 .weigher(|key: &Bytes, value: &CacheEntry<S>| {
                     (key.len() + value.output.bytes.len()) as u32
                 })
