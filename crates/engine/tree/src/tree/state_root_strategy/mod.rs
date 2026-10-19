@@ -59,7 +59,7 @@ use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
+use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{
@@ -675,7 +675,8 @@ impl DefaultStateRootStrategy {
 
             let mut sparse_trie_anchor_hash = parent_hash;
             let mut reused_preserved_sparse_trie = false;
-            let mut sparse_state_trie = match preserved_sparse_trie {
+            let mut known_storage_roots = Default::default();
+            let sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
                     let preserved_anchor_hash = preserved.anchor_hash();
@@ -685,7 +686,8 @@ impl DefaultStateRootStrategy {
                         .record(start.elapsed().as_secs_f64());
 
                     match preserved {
-                        Ok(Some(trie)) => {
+                        Ok(Some(SparseTrieWithStorageRoots { trie, storage_roots })) => {
+                            known_storage_roots = storage_roots;
                             sparse_trie_anchor_hash = preserved_anchor_hash;
                             reused_preserved_sparse_trie = true;
                             trie
@@ -708,7 +710,7 @@ impl DefaultStateRootStrategy {
             let factory = if reused_preserved_sparse_trie {
                 multiproof_provider_factory.with_skip_overlay_for_reused_sparse_trie(
                     sparse_trie_anchor_hash,
-                    sparse_state_trie.storage_roots(TrieNodeEpoch::new(parent_header.number())),
+                    known_storage_roots,
                 )
             } else {
                 multiproof_provider_factory
@@ -762,6 +764,7 @@ impl DefaultStateRootStrategy {
                 // a builder may have accepted the matching root through another strategy.
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
+                let storage_roots = trie.storage_roots(new_epoch);
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
@@ -775,7 +778,13 @@ impl DefaultStateRootStrategy {
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                (completer.send(trie).err().map(|err| err.0), deferred)
+                (
+                    completer
+                        .send(SparseTrieWithStorageRoots { trie, storage_roots })
+                        .err()
+                        .map(|err| err.0.trie),
+                    deferred,
+                )
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -797,7 +806,7 @@ impl DefaultStateRootStrategy {
 struct PendingSparseTrie {
     state_root: B256,
     anchor_hash: B256,
-    trie: mpsc::Receiver<SparseStateTrie>,
+    trie: mpsc::Receiver<SparseTrieWithStorageRoots>,
 }
 
 fn publish_sparse_trie<N: NodePrimitives>(
@@ -1453,7 +1462,7 @@ mod tests {
                 assert_eq!(preserved.is_some(), finish && matching_root);
                 // Publication must finish before trie finalization does.
                 assert_eq!(
-                    completer.send(SparseStateTrie::default()).is_ok(),
+                    completer.send(SparseTrieWithStorageRoots::default()).is_ok(),
                     finish && matching_root
                 );
                 if let Some(preserved) = preserved {
