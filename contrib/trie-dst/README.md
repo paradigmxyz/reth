@@ -14,16 +14,14 @@ and the provider factory's shared overlay manager.
 From the reth repository root:
 
 ```sh
-CARGO_PROFILE_PROFILING_DEBUG_ASSERTIONS=true CARGO_PROFILE_PROFILING_OVERFLOW_CHECKS=true \
-  cargo build --locked -p reth-trie-dst --profile profiling
-target/profiling/reth-trie-dst '{"seed":42,"blocks":64}' > /tmp/reth-trie-dst-42.log
+cargo build --locked -p reth-trie-dst --profile dst
+target/dst/reth-trie-dst '{"seed":42,"blocks":64}' > /tmp/reth-trie-dst-42.log
 ```
 
 Prerequisites are reth's normal Rust/native build dependencies, including Clang
 for RocksDB's bindings. The crate belongs to the root workspace and uses its
-shared dependencies, `Cargo.lock`, and profiling profile. The command above and
-the packaging script enable debug assertions and overflow checks for this build
-without changing the root profile settings.
+shared dependencies, `Cargo.lock`, and `dst` profile. That profile inherits
+`profiling` and enables debug assertions and overflow checks.
 
 The executable accepts one optional JSON object:
 
@@ -89,7 +87,7 @@ RUN_DIR=/tmp/reth-trie-inputs ./scripts/dst/run.sh \
   --seeds 8 --out /tmp/reth-trie-runs
 ```
 
-The preparation hook builds the profiling executable and controller image,
+The preparation hook builds the DST executable and controller image,
 compiles the readiness helper against Bedrock's `guest/libvmcall.h`, and
 normalizes the image archive with Bedrock's archive tool. It keeps symbols in
 the original executable and strips debug sections only from the image copy.
