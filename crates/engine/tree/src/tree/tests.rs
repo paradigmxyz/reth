@@ -2081,7 +2081,36 @@ fn test_on_new_payload_backfill_known_block() {
         .unwrap();
 
     assert_eq!(outcome.outcome, PayloadStatus::new(PayloadStatusEnum::Valid, Some(hash)));
+    assert!(outcome.already_seen);
     assert!(test_harness.tree.state.buffer.block(&hash).is_none());
+}
+
+/// Test that a block the database holds above the persisted height is buffered during backfill
+#[test]
+fn test_on_new_payload_backfill_staged_block() {
+    reth_tracing::init_test_tracing();
+
+    let s = include_str!("../../test-data/holesky/1.rlp");
+    let sealed = Block::decode(&mut Bytes::from_str(s).unwrap().as_ref()).unwrap().seal_slow();
+    let hash = sealed.hash();
+    let block = sealed.into_block();
+    let payload = ExecutionPayloadV1::from_block_unchecked(hash, &block);
+
+    let mut test_harness =
+        TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
+    test_harness.provider.add_block(hash, block);
+
+    let outcome = test_harness
+        .tree
+        .on_new_payload(ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        })
+        .unwrap();
+
+    assert!(outcome.outcome.is_syncing());
+    assert!(!outcome.already_seen);
+    assert!(test_harness.tree.state.buffer.block(&hash).is_some());
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
@@ -2486,7 +2515,7 @@ mod payload_execution_tests {
         // Test buffering during backfill sync
         let result = test_harness.tree.try_buffer_payload(malformed_payload);
         assert!(result.is_ok(), "Should handle malformed payload gracefully");
-        let status = result.unwrap();
+        let status = result.unwrap().status;
         assert!(
             status.is_invalid() || status.is_syncing(),
             "Should return invalid or syncing status for malformed payload"
@@ -2512,7 +2541,7 @@ mod payload_execution_tests {
         // Test buffering during backfill sync
         let result = test_harness.tree.try_buffer_payload(payload);
         assert!(result.is_ok(), "Should handle valid payload gracefully");
-        let status = result.unwrap();
+        let status = result.unwrap().status;
         // The payload may be invalid due to missing withdrawals root, so accept either status
         assert!(
             status.is_syncing() || status.is_invalid(),
