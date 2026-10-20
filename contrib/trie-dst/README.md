@@ -100,7 +100,7 @@ requirements (Docker, Nix, and the Bedrock kernel/device setup). From that check
 RUN_DIR=/tmp/reth-trie-inputs ./scripts/dst/run.sh \
   --workload /absolute/path/to/reth/contrib/trie-dst/workload \
   --workload-arg blocks=64 --workload-arg proof_workers=2 \
-  --seeds 8 --out /tmp/reth-trie-runs
+  --duration 10m --workers 16 --out /tmp/reth-trie-runs
 ```
 
 The preparation hook builds the DST executable and controller image,
@@ -130,10 +130,25 @@ control scheduling. Mid-run semantic decision editing is unsupported.
 Finalization reports unfinished work as a failure and collects `reth-trie-dst-run.log`,
 `reth-trie-dst-controller.log`, and `reth-trie-dst-done.json` under `/bedrock/out` alongside
 the merged assertion stream. A worker timeout also fails the run. Increase the
-campaign duration if a larger configuration cannot finish before finalization.
+driver's per-seed virtual horizon (`--run-secs`) if a larger configuration cannot
+finish before finalization.
 
-For CI campaigns, check out both reth and Bedrock on the runner and invoke the
-same generic runner with this workload directory. A Bedrock-only checkout does
-not contain this workload. Preserve `RUN_DIR` and use the generic runner's
-`--prepared` option to reuse the exact inputs. For an actual recorded schedule, use Bedrock's replay command on the
+Bedrock's shared runner owns the host wall-clock budget: `--duration 10m`
+includes guest boot and warmup, and optional `--num-seeds 100` caps the total
+seeds across all workers. Omit the cap to run until the deadline. Each seed still
+executes its configured number of blocks. The deadline stops in-flight seeds and
+reports them as interrupted; they do not count as passing.
+
+For CI, use Bedrock's DST workflow with this external workload source, replacing
+`RETH_REF` with a branch, tag, or commit:
+
+```sh
+gh workflow run tempo-e2e.yml --repo tempoxyz/bedrock \
+  -f workload='git::https://github.com/paradigmxyz/reth.git//contrib/trie-dst/workload?ref=RETH_REF' \
+  -f workload_config='{}' -f duration=10m -f parallel_seeds=16
+```
+
+CI's `duration` is the same host budget; `num_seeds` is a global cap, unlimited
+when blank. The workflow fetches the selected Reth revision. Preserve `RUN_DIR`
+and use the generic runner's `--prepared` option to reuse the exact inputs. For an actual recorded schedule, use Bedrock's replay command on the
 recorded run; rebuilding an image or changing the binary changes the World.
