@@ -210,8 +210,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ///
     /// Block transactions must be replayed through the executor rather than its EVM: the executor
     /// tracks the transaction's position in the block and applies chain-specific per-transaction
-    /// settlement, such as OP Stack SDM refunds, that a bare EVM replay misses.
-    #[expect(clippy::type_complexity)]
+    /// settlement, such as OP Stack's post-execution gas refunds, that a bare EVM replay misses.
+    #[expect(clippy::type_complexity, reason = "the executor type is spelled out by its factory")]
     fn inspected_block_executor<'a, 'db, I>(
         &'a self,
         block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,
@@ -380,7 +380,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                         tx_info,
                         TracingCtx {
                             tx,
-                            result: result.clone(),
+                            result,
                             state,
                             inspector,
                             db,
@@ -388,12 +388,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                             was_fused: &mut was_fused,
                         },
                     )?);
-                    if !was_fused {
-                        *executor.evm_mut().inspector_mut() = fused_inspector.clone();
-                    }
-
-                    // the state of the last traced transaction is not needed
+                    // The inspector and state of the last traced transaction are not needed.
                     if transactions.peek().is_some() {
+                        if !was_fused {
+                            *executor.evm_mut().inspector_mut() = fused_inspector.clone();
+                        }
                         executor.commit_transaction(output);
                     }
                 }
@@ -481,25 +480,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
-
-    /// Applies chain-specific state transitions required before executing a block.
-    ///
-    /// Note: This should only be called when tracing an entire block vs individual transactions.
-    /// When tracing transactions on top of an already committed block state, those transitions are
-    /// already applied.
-    fn apply_pre_execution_changes(
-        &self,
-        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
-        db: &mut StateCacheDb,
-    ) -> Result<(), Self::Error> {
-        self.evm_config()
-            .executor_for_block(db, block.sealed_block())
-            .map_err(RethError::other)
-            .map_err(Self::Error::from_eth_err)?
-            .apply_pre_execution_changes()
-            .map_err(Self::Error::from_eth_err)?;
-        Ok(())
-    }
 }
 
 /// Context for one transaction of a block traced by [`Trace::trace_block_until_with_inspector`].
@@ -508,7 +488,7 @@ pub struct TracingCtx<'a, T, E: Evm> {
     /// The transaction that was just executed.
     pub tx: T,
     /// Result of transaction execution.
-    pub result: ExecutionResult<E::HaltReason>,
+    pub result: &'a ExecutionResult<E::HaltReason>,
     /// State changes after transaction.
     pub state: &'a EvmState,
     /// Inspector state after transaction.
