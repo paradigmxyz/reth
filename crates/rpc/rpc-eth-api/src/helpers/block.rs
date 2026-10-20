@@ -5,9 +5,10 @@ use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
 };
-use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
+use alloy_primitives::B256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
@@ -15,7 +16,10 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_rpc_eth_types::block::SharedReceipts;
-use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider,
+    ProviderHeader, ProviderReceipt, ProviderTx,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::state::bal::Bal as RevmBal;
 use std::sync::Arc;
@@ -43,9 +47,9 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         Self: FullEthApiTypes,
     {
         async move {
-            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+            let Some(header) = self.sealed_header_for_id(block_id).await? else { return Ok(None) };
             // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
-            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
+            let header = self.converter().convert_header(header, None)?;
             Ok(Some(header))
         }
     }
@@ -81,7 +85,45 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         &self,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
-        async move { Ok(self.recovered_block(block_id).await?.map(|b| b.body().transaction_count())) }
+        async move {
+            let Some((block_hash, block)) = self.block_hash_and_maybe_block(block_id).await? else {
+                return Ok(None)
+            };
+            if let Some(block) = block {
+                return Ok(Some(block.body().transaction_count()))
+            }
+
+            let provider = self.provider();
+            let Some(number) =
+                provider.block_number(block_hash).map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None)
+            };
+            Ok(provider
+                .block_body_indices(number)
+                .map_err(Self::Error::from_eth_err)?
+                .map(|indices| indices.tx_count as usize))
+        }
+    }
+
+    /// Returns the number of uncles in the given block.
+    ///
+    /// Returns `None` if the block does not exist.
+    fn ommers_count(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
+        async move {
+            let Some(header) = self.sealed_header_for_id(block_id).await? else { return Ok(None) };
+            if header.ommers_hash() == EMPTY_OMMER_ROOT_HASH {
+                return Ok(Some(0))
+            }
+
+            Ok(self
+                .recovered_block(block_id)
+                .await?
+                .map(|block| block.body().ommers().map_or(0, |ommers| ommers.len())))
+        }
     }
 
     /// Helper function for `eth_getBlockReceipts`.
@@ -296,6 +338,67 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
             };
 
             self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
+        }
+    }
+
+    /// Returns the hash of the block for the given block id, together with the block if it is
+    /// pending or already cached.
+    ///
+    /// Unlike [`LoadBlock::recovered_block`], this never loads the block into the cache, so callers
+    /// that need only part of the block can fall back to targeted provider reads. Returns `None`
+    /// if the block id can't be resolved.
+    #[expect(clippy::type_complexity)]
+    fn block_hash_and_maybe_block(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<
+        Output = Result<
+            Option<(B256, Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>)>,
+            Self::Error,
+        >,
+    > + Send {
+        async move {
+            if block_id.is_pending() {
+                return Ok(self
+                    .recovered_block(block_id)
+                    .await?
+                    .map(|block| (block.hash(), Some(block))));
+            }
+
+            let Some(block_hash) =
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None)
+            };
+            let block = self
+                .cache()
+                .get_maybe_block(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?;
+            Ok(Some((block_hash, block)))
+        }
+    }
+
+    /// Returns the sealed header for the given block id.
+    ///
+    /// Uses the pending or cached block if there is one, otherwise reads only the header.
+    #[expect(clippy::type_complexity)]
+    fn sealed_header_for_id(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<
+        Output = Result<Option<SealedHeader<ProviderHeader<Self::Provider>>>, Self::Error>,
+    > + Send {
+        async move {
+            let Some((block_hash, block)) = self.block_hash_and_maybe_block(block_id).await? else {
+                return Ok(None)
+            };
+            if let Some(block) = block {
+                return Ok(Some(block.clone_sealed_header()))
+            }
+
+            let header = self.provider().header(block_hash).map_err(Self::Error::from_eth_err)?;
+            Ok(header.map(|header| SealedHeader::new(header, block_hash)))
         }
     }
 

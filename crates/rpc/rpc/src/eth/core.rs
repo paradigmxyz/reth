@@ -550,7 +550,8 @@ where
 mod tests {
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+    use alloy_genesis::Genesis;
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
     use alloy_rpc_types::FeeHistory;
@@ -562,12 +563,17 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
-        PruneCheckpointReader, StageCheckpointReader,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+            NoopProvider,
+        },
+        BlockWriter, PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
     };
     use reth_rpc_eth_api::{
         helpers::{EthBlocks, EthCall, SpawnBlocking},
@@ -579,9 +585,12 @@ mod tests {
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
     use reth_tasks::cancel::is_cancelled;
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -1342,5 +1351,115 @@ mod tests {
                 EthBlocks::rpc_block(&api, BlockId::number(1), full).await.unwrap().unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
+    }
+
+    #[tokio::test]
+    async fn block_lookups_match_with_and_without_cached_block() {
+        use reth_rpc_eth_api::helpers::EthTransactions;
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let genesis_hash = init_genesis(&factory).unwrap();
+
+        let mut rng = generators::rng();
+        let block1 = random_block(
+            &mut rng,
+            1,
+            BlockParams {
+                parent: Some(genesis_hash),
+                tx_count: Some(2),
+                ommers_count: Some(1),
+                ..Default::default()
+            },
+        );
+        // Block 2 starts at a non-zero tx number, so its transactions are found via body indices.
+        let block2 = random_block(
+            &mut rng,
+            2,
+            BlockParams {
+                parent: Some(block1.hash()),
+                tx_count: Some(3),
+                ommers_count: Some(0),
+                ..Default::default()
+            },
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in [&block1, &block2] {
+            provider_rw.insert_block(&block.clone().try_recover().unwrap()).unwrap();
+        }
+        provider_rw.update_pipeline_stages(2, false).unwrap();
+        provider_rw.commit().unwrap();
+
+        let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+        let lookups = |block_id: BlockId, tx_count: usize| {
+            let api = &api;
+            async move {
+                let mut txs = Vec::new();
+                // One past the last index must return `None`.
+                for index in 0..=tx_count {
+                    txs.push((
+                        EthTransactions::transaction_by_block_and_tx_index(api, block_id, index)
+                            .await
+                            .unwrap(),
+                        EthTransactions::raw_transaction_by_block_and_tx_index(
+                            api, block_id, index,
+                        )
+                        .await
+                        .unwrap(),
+                    ));
+                }
+                let count = EthBlocks::block_transaction_count(api, block_id).await.unwrap();
+                let header = EthBlocks::rpc_block_header(api, block_id).await.unwrap();
+                (txs, count, header)
+            }
+        };
+
+        for (block, ommers_count) in [(&block1, 1), (&block2, 0)] {
+            let recovered = block.clone().try_recover().unwrap();
+            let tx_count = block.body().transactions.len();
+            let mut block_ids = vec![BlockId::number(block.number), BlockId::hash(block.hash())];
+            if block.number == 2 {
+                block_ids.push(BlockId::latest());
+            }
+
+            let mut uncached = Vec::new();
+            for &block_id in &block_ids {
+                uncached.push(lookups(block_id, tx_count).await);
+            }
+            assert!(api.cache().get_maybe_block(block.hash()).await.unwrap().is_none());
+
+            for (txs, count, header) in &uncached {
+                for (index, ((tx, raw), (signer, expected))) in
+                    txs.iter().zip(recovered.transactions_with_sender()).enumerate()
+                {
+                    let tx = tx.as_ref().unwrap();
+                    assert_eq!(tx.inner.tx_hash(), expected.tx_hash());
+                    assert_eq!(tx.inner.signer(), *signer);
+                    assert_eq!(tx.block_hash, Some(block.hash()));
+                    assert_eq!(tx.transaction_index, Some(index as u64));
+                    assert_eq!(raw.as_ref().unwrap(), &Bytes::from(expected.encoded_2718()));
+                }
+                assert_eq!(txs[tx_count], (None, None));
+                assert_eq!(*count, Some(tx_count));
+                assert_eq!(header.as_ref().unwrap().hash, block.hash());
+            }
+
+            // Uncle counts last, since a block with uncles is loaded into the cache.
+            for &block_id in &block_ids {
+                assert_eq!(
+                    EthBlocks::ommers_count(&api, block_id).await.unwrap(),
+                    Some(ommers_count)
+                );
+            }
+
+            api.cache().get_recovered_block(block.hash()).await.unwrap().unwrap();
+            for (&block_id, uncached) in block_ids.iter().zip(&uncached) {
+                assert_eq!(&lookups(block_id, tx_count).await, uncached);
+            }
+        }
+
+        let unknown = BlockId::hash(B256::random());
+        assert_eq!(lookups(unknown, 0).await, (vec![(None, None)], None, None));
+        assert_eq!(EthBlocks::ommers_count(&api, unknown).await.unwrap(), None);
     }
 }
