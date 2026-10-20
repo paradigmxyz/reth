@@ -166,13 +166,6 @@ where
             }
         }
 
-        // If binary_search_by_key doesn't find the block then:
-        // * start stays equal to end, so the segment covers just that one block.
-        // * segment_range stays 0..0, making the forward-update iterator empty.
-        // * The code reconstructs that block’s trie reverts from its state changesets and the
-        //   current overlay.
-        // * merge_iter receives only those calculated reverts.
-
         // Collect reverts for the segment and use them to generate the trie reverts for the
         // segment.
         let segment_state_reverts = HashedPostStateSorted::from_reverts(provider, start..=end)?;
