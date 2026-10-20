@@ -114,9 +114,14 @@ impl DatabaseEnvMetrics {
         }
     }
 
-    /// Returns pre-bound operation metric handles for a single table.
-    pub(crate) fn table_operation_metrics(&self, table: &'static str) -> TableOperationMetrics {
-        self.operations.get(table).expect("table operation metric handles not found").clone()
+    /// Returns pre-bound operation metric handles for a single table, or `None` for a table
+    /// without them, such as one a node creates beside reth's own. Like
+    /// [`Self::record_operation`], cursors on such a table then run without metrics.
+    pub(crate) fn table_operation_metrics(
+        &self,
+        table: &'static str,
+    ) -> Option<TableOperationMetrics> {
+        self.operations.get(table).cloned()
     }
 
     /// Record metrics for opening a database transaction.
