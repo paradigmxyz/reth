@@ -31,8 +31,7 @@ pub fn generate(
     let mut touched = BTreeMap::<Address, BTreeSet<U256>>::new();
     let mut stream = Vec::new();
     let mut operations = Vec::new();
-    // Empty blocks also have to complete and preserve the trie.
-    for _ in 0..if number.is_multiple_of(11) { 0 } else { updates } {
+    for _ in 0..updates {
         let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
         let new_account = !state.contains_key(&address);
         let entry = state.entry(address).or_default();

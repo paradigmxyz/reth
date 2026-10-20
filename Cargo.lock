@@ -11056,6 +11056,7 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-db-common",
+ "reth-engine-primitives",
  "reth-engine-tree",
  "reth-ethereum-primitives",
  "reth-execution-types",

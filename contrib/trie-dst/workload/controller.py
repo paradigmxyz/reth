@@ -10,9 +10,14 @@ import subprocess
 import sys
 import time
 
-DEFAULTS = {"blocks": 64, "updates": 64, "proof_workers": 2, "timeout_secs": 60}
-LIMITS = {"blocks": (16, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
-          "timeout_secs": (1, 3600)}
+# Persistence defaults match TreeConfig and EngineArgs in this Reth revision.
+DEFAULTS = {"blocks": 64, "updates": 64, "proof_workers": 2, "timeout_secs": 60,
+            "persistence_threshold": 50, "num_state_masking_blocks": 30,
+            "memory_block_buffer_target": None}
+LIMITS = {"blocks": (1, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
+          "timeout_secs": (1, 3600), "persistence_threshold": (0, 2**64 - 2),
+          "num_state_masking_blocks": (0, 2**64 - 1),
+          "memory_block_buffer_target": (0, 2**64 - 1)}
 STATE = Path("/tmp/reth-trie-dst")
 ASSERTIONS = Path("/bedrock/assertions/reth-trie-dst.jsonl")
 
@@ -23,8 +28,19 @@ def arguments(values):
         raise ValueError(f"unknown arguments: {sorted(unknown)}")
     result = DEFAULTS | values
     for key, (low, high) in LIMITS.items():
+        if key == "memory_block_buffer_target" and result[key] is None:
+            continue
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f"{key} must be an integer in {low}..={high}")
+    threshold = result["persistence_threshold"]
+    buffer = result["memory_block_buffer_target"]
+    if buffer is None:
+        buffer = min(5, threshold)
+    masking = result["num_state_masking_blocks"] if threshold else 0
+    if buffer > threshold:
+        raise ValueError("buffer must not exceed persistence threshold")
+    if masking and masking + buffer >= threshold:
+        raise ValueError("masking blocks + buffer must be less than persistence threshold")
     return result
 
 

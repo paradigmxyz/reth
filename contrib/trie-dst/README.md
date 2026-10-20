@@ -7,7 +7,8 @@ transactions.
 
 All harness files live here. The only production changes expose the existing
 state-root task entrypoint, its options and pending-trie publication function,
-and the provider factory's shared overlay manager.
+the engine's changeset-cache retention constant, and the provider factory's
+shared overlay manager.
 
 ## Build and run locally
 
@@ -28,23 +29,31 @@ The executable accepts one optional JSON object:
 | Field | Default | Range |
 | --- | --- | --- |
 | `seed` | 0 | unsigned 64-bit integer |
-| `blocks` | 64 | 16–1024 |
-| `updates` | 64 | 1–4096 per nonempty block |
+| `blocks` | 64 | 1–1024 |
+| `updates` | 64 | 1–4096 per block |
 | `proof_workers` | 2 | 1–16 per account/storage pool |
 | `timeout_secs` | 60 | 1–3600 per task result or persistence acknowledgement |
+| `persistence_threshold` | 50 | retained canonical block count must exceed this to start persistence |
+| `num_state_masking_blocks` | 30 | persisted suffix whose state/trie writes remain masked |
+| `memory_block_buffer_target` | min(5, threshold) | blocks to retain above the database tip; optional/null uses Reth's default |
+
+These are the defaults in this Reth revision. As in Reth, the buffer must not
+exceed the persistence threshold. With masking enabled, masking blocks plus the
+buffer must be strictly less than the threshold. A zero threshold disables
+masking. The backpressure threshold follows Reth's default, max(16, 2 × threshold).
 
 Each block's input operations and persistence frontiers are printed before its
 result is awaited. The final JSON line reports completion, commits, partial
-commits, cold starts, and counts from production metrics. A mismatch, timeout,
-or missing component effect exits unsuccessfully. Keep stdout and stderr.
+commits, and counts from production metrics. A mismatch or timeout exits
+unsuccessfully. Keep stdout and stderr.
 
 ## What runs
 
 The generator uses 16 accounts and 64 slots per account. It creates nonempty
 accounts, changes nonce/balance, performs storage-only updates, overwrites slots,
-and deletes individual slots. Every eleventh block is empty. It independently
-tracks the complete state and builds a per-block `BundleState` with original and
-final account/storage values and reverts.
+and deletes individual slots. Each block receives the configured number of
+updates. It independently tracks the complete state and builds a per-block
+`BundleState` with original and final account/storage values and reverts.
 
 The production task consumes streamed hashed updates. At each block boundary,
 its root must equal a root rebuilt from the reference maps with `HashBuilder`:
@@ -52,24 +61,31 @@ storage leaves first, followed by RLP account leaves. Its actual hashed state
 and trie updates are attached to the synthetic executed block alongside the
 bundle, then inserted into the real overlay manager.
 
-The task's pending trie is published only after the block root is accepted.
-Subsequent tasks reuse it and prune using the retained parent chain, newest
-first. Every seventh block starts cold, forcing proof loading through the
-normal overlay provider factory.
+The task's pending trie is published only after the block root is accepted and
+reused by subsequent tasks. Persistence acknowledgements request pruning by
+the next task using the retained parent chain, newest first.
 
-Every third block submits persistence after its first update, before its stream
-is finished. A background worker writes a contiguous prefix while the task and
-proof workers run. Alternating saves fully flush or retain a one/two-block
-masked suffix; the last save fully flushes the chain. Finish advances through
-the production implementation. Overlay blocks are removed only after commit
-acknowledgement, through the state/trie frontier.
+Persistence follows the engine tree's linear-chain happy path. After a block
+or persistence completion, an idle writer starts a save when the retained
+canonical block count exceeds `persistence_threshold`. It saves block data
+through `head - memory_block_buffer_target` and state/trie data through
+`new_db_tip - num_state_masking_blocks`, never moving either frontier backwards.
+The retained count includes the masked suffix, matching Reth's canonical
+in-memory chain. Exactly one save is in flight; subsequent blocks continue
+while it runs, with Reth's normal backpressure limit. Completion is polled at
+block boundaries. Finish advances through the production write path. Only after
+acknowledgement are persisted overlays removed through the state/trie frontier,
+the execution overlay precomputed at its new anchor, and trie pruning requested.
+At shutdown, the worker finishes any active save and fully persists the head,
+matching Reth's shutdown flush.
 
 After every commit, a fresh overlay-backed provider must expose the reference
 accounts and all 64 slots, including deleted slots, at the database tip. Account
 and storage proofs must verify against the independent root. Fully flushed
 commits additionally compare the complete raw hashed tables with the reference
-and calculate a fresh database-backed root. Completion requires observed proof
-revelation, trie reuse, pruning, overlay computation, and partial commits.
+and calculate a fresh database-backed root. Metrics report proof revelation,
+trie reuse, pruning, overlay computation, and partial commits. Their counts
+depend on the selected persistence settings and run length.
 
 The chain is linear. Reorgs, crash recovery, EVM execution, arbitrary account
 destruction and storage wipes are excluded. In particular, the generator does
