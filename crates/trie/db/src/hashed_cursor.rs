@@ -31,17 +31,15 @@ impl<'tx, TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&'tx TX>
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let tx: &'tx TX = self.0;
-        Ok(DatabaseHashedAccountCursor(tx.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let tx: &'tx TX = self.0;
         Ok(DatabaseHashedStorageCursor::new(
-            tx.cursor_dup_read::<tables::HashedStorages>()?,
+            self.0.cursor_dup_read::<tables::HashedStorages>()?,
             hashed_address,
         ))
     }

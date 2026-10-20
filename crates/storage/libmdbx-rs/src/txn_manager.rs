@@ -158,23 +158,24 @@ mod read_transactions {
             txn_manager
         }
 
-        /// Adds a new transaction to the list of active read transactions. `timed_out` is set
-        /// once the transaction has been open for too long.
+        /// Adds a new transaction to the list of active read transactions.
+        ///
+        /// Returns a flag that is set once the transaction has been open for too long, or `None` if
+        /// read transactions are not monitored.
         pub(crate) fn add_active_read_transaction(
             &self,
             ptr: *mut ffi::MDBX_txn,
-            timed_out: Arc<AtomicBool>,
-        ) {
-            if let Some(read_transactions) = &self.read_transactions {
-                read_transactions.add_active(ptr, timed_out);
-            }
+        ) -> Option<Arc<AtomicBool>> {
+            self.read_transactions
+                .as_ref()
+                .map(|read_transactions| read_transactions.add_active(ptr))
         }
 
         /// Removes a transaction from the list of active read transactions.
-        ///
-        /// Returns `true` if the transaction was found and removed.
-        pub(crate) fn remove_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) -> bool {
-            self.read_transactions.as_ref().is_some_and(|txs| txs.remove_active(ptr))
+        pub(crate) fn remove_active_read_transaction(&self, ptr: *mut ffi::MDBX_txn) {
+            if let Some(read_transactions) = &self.read_transactions {
+                read_transactions.remove_active(ptr);
+            }
         }
 
         /// Returns the number of timed out transactions that were not aborted by the user yet.
@@ -209,23 +210,28 @@ mod read_transactions {
             Self { max_duration, ..Default::default() }
         }
 
-        /// Adds a new transaction to the list of active read transactions.
-        pub(super) fn add_active(&self, ptr: *mut ffi::MDBX_txn, timed_out: Arc<AtomicBool>) {
+        /// Adds a new transaction to the list of active read transactions and returns its timeout
+        /// flag.
+        pub(super) fn add_active(&self, ptr: *mut ffi::MDBX_txn) -> Arc<AtomicBool> {
+            let timed_out = Arc::new(AtomicBool::new(false));
             let _ = self.active.insert(
                 ptr as usize,
                 (
-                    timed_out,
+                    timed_out.clone(),
                     Instant::now(),
                     cfg!(all(debug_assertions, not(feature = "dst")))
                         .then(|| Arc::new(Backtrace::force_capture())),
                 ),
             );
+            timed_out
         }
 
         /// Removes a transaction from the list of active read transactions.
-        pub(super) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) -> bool {
+        pub(super) fn remove_active(&self, ptr: *mut ffi::MDBX_txn) {
+            // Remove from `active` first: the monitor moves an entry to `timed_out_not_aborted`
+            // while holding the `active` shard lock, so the entry can't be moved after this.
+            self.active.remove(&(ptr as usize));
             self.timed_out_not_aborted.remove(&(ptr as usize));
-            self.active.remove(&(ptr as usize)).is_some()
         }
 
         /// Returns the number of timed out transactions that were not aborted by the user yet.
@@ -237,60 +243,29 @@ mod read_transactions {
         /// timeouts those that are open for longer than `ReadTransactions.max_duration`.
         pub(super) fn start_monitor(self: Arc<Self>) {
             let task = move || {
-                let mut timed_out_active = Vec::new();
-
                 loop {
                     let now = Instant::now();
                     let mut max_active_transaction_duration = None;
 
-                    // Iterate through active read transactions and time out those that's open for
-                    // longer than `self.max_duration`.
-                    for entry in &self.active {
-                        let (timed_out, start, backtrace) = entry.value();
+                    // Time out and remove read transactions that are open for longer than
+                    // `self.max_duration`.
+                    self.active.retain(|&ptr, (timed_out, start, backtrace)| {
                         let duration = now - *start;
-
-                        if duration > self.max_duration {
-                            // Only the thread that owns the transaction may use it, so it is not
-                            // reset here. Every following operation on it fails, and it releases
-                            // its snapshot when dropped.
-                            timed_out.store(true, Ordering::Relaxed);
-                            // We can't remove the transaction instantly from the list of active
-                            // transactions, because we iterate through it.
-                            timed_out_active.push((
-                                *entry.key(),
-                                timed_out.clone(),
-                                duration,
-                                backtrace.clone(),
-                            ));
-                        } else {
+                        if duration <= self.max_duration {
                             max_active_transaction_duration = Some(
                                 duration.max(max_active_transaction_duration.unwrap_or_default()),
                             );
+                            return true
                         }
-                    }
 
-                    // Walk through timed out transactions, and delete them from the list of active
-                    // transactions.
-                    for (ptr, timed_out, open_duration, backtrace) in
-                        timed_out_active.iter().cloned()
-                    {
-                        // The user may have dropped the transaction in the meantime, and a new
-                        // transaction may have reused its pointer.
-                        if self
-                            .active
-                            .remove_if(&ptr, |_, (flag, _, _)| Arc::ptr_eq(flag, &timed_out))
-                            .is_some()
-                        {
-                            warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
-                            // Add transaction to the list of timed out transactions that were not
-                            // aborted by the user yet.
-                            self.timed_out_not_aborted.insert(ptr);
-                        }
-                    }
-
-                    // Clear the list of timed out transactions, but not de-allocate the reserved
-                    // capacity to save on further pushes.
-                    timed_out_active.clear();
+                        // Only the thread that owns the transaction may use it, so it is not reset
+                        // here. Every following operation on it fails, and it releases its
+                        // snapshot when dropped.
+                        timed_out.store(true, Ordering::Relaxed);
+                        warn!(target: "libmdbx", open_duration = ?duration, ?backtrace, "Long-lived read transaction has been timed out");
+                        self.timed_out_not_aborted.insert(ptr);
+                        false
+                    });
 
                     if !self.active.is_empty() {
                         trace!(

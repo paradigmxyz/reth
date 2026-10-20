@@ -142,7 +142,7 @@ The `TX` type can be any type that implements the `DbTx` trait, which provides a
 
 ```rust ignore
 /// Read only transaction
-pub trait DbTx: Debug + Send {
+pub unsafe trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
     type Cursor<'tx, T: Table>: DbCursorRO<T>
     where

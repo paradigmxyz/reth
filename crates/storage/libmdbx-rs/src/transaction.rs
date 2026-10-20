@@ -8,16 +8,21 @@ use crate::{
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use std::{
+    cell::Cell,
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
+    marker::PhantomData,
     mem::size_of,
     ptr, slice,
-    sync::{atomic::AtomicBool, mpsc::sync_channel},
+    sync::mpsc::sync_channel,
     time::Duration,
 };
 
 #[cfg(feature = "read-tx-timeouts")]
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 mod private {
     use super::*;
@@ -68,7 +73,18 @@ pub struct Transaction<K>
 where
     K: TransactionKind,
 {
-    inner: TransactionInner<K>,
+    txn: *mut ffi::MDBX_txn,
+    /// Set by the read transaction monitor in `TxnManager` once the transaction has been open for
+    /// too long, or `None` if the transaction isn't monitored. Every following operation fails,
+    /// but the monitor doesn't reset the transaction, so it stays valid until dropped.
+    #[cfg(feature = "read-tx-timeouts")]
+    timed_out: Option<Arc<AtomicBool>>,
+    /// Whether a [`Self::txn_execute`] closure is running, to reject reentrant use of the
+    /// transaction, for example from a [`TableObject`] decoder.
+    executing: Cell<bool>,
+    committed: bool,
+    env: Environment,
+    _marker: PhantomData<fn(K)>,
 }
 
 impl<K> Transaction<K>
@@ -89,26 +105,20 @@ where
         }
     }
 
-    pub(crate) fn new_from_ptr(env: Environment, txn_ptr: *mut ffi::MDBX_txn) -> Self {
-        let txn = TransactionPtr {
-            txn: txn_ptr,
-            #[cfg(feature = "read-tx-timeouts")]
-            timed_out: Arc::new(AtomicBool::new(false)),
-        };
-
-        #[cfg(feature = "read-tx-timeouts")]
-        if K::IS_READ_ONLY {
-            env.txn_manager().add_active_read_transaction(txn_ptr, txn.timed_out.clone())
-        }
-
-        let inner = TransactionInner {
+    pub(crate) fn new_from_ptr(env: Environment, txn: *mut ffi::MDBX_txn) -> Self {
+        Self {
             txn,
-            committed: AtomicBool::new(false),
+            #[cfg(feature = "read-tx-timeouts")]
+            timed_out: if K::IS_READ_ONLY {
+                env.txn_manager().add_active_read_transaction(txn)
+            } else {
+                None
+            },
+            executing: Cell::new(false),
+            committed: false,
             env,
-            _marker: Default::default(),
-        };
-
-        Self { inner }
+            _marker: PhantomData,
+        }
     }
 
     /// Executes the given closure with the raw transaction pointer.
@@ -117,24 +127,37 @@ where
     ///
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from inside another `txn_execute` closure on the same transaction.
     #[inline]
     pub fn txn_execute<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        self.inner.txn.txn_execute(f)
+        #[cfg(feature = "read-tx-timeouts")]
+        if self.timed_out.as_ref().is_some_and(|timed_out| timed_out.load(Ordering::Relaxed)) {
+            return Err(Error::ReadTransactionTimeout)
+        }
+
+        // Values read by `f` point into MDBX pages, which a reentrant write could modify.
+        assert!(!self.executing.replace(true), "reentrant use of an MDBX transaction");
+        let result = f(self.txn);
+        self.executing.set(false);
+        Ok(result)
     }
 
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
     #[doc(hidden)]
     #[cfg(test)]
     pub const fn txn(&self) -> *mut ffi::MDBX_txn {
-        self.inner.txn.txn
+        self.txn
     }
 
     /// Returns a raw pointer to the MDBX environment.
     pub const fn env(&self) -> &Environment {
-        &self.inner.env
+        &self.env
     }
 
     /// Returns the transaction id.
@@ -170,7 +193,7 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
-    pub fn commit(self) -> Result<CommitLatency> {
+    pub fn commit(mut self) -> Result<CommitLatency> {
         match self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
                 #[cfg(feature = "read-tx-timeouts")]
@@ -189,14 +212,14 @@ where
         })? {
             //
             Ok((false, lat)) => {
-                self.inner.set_committed();
+                self.committed = true;
                 Ok(lat)
             }
             Ok((true, _)) => {
                 // MDBX_RESULT_TRUE means the transaction was aborted due to prior errors.
                 // The transaction is still finished/freed by MDBX, so we must mark it as
                 // committed to prevent the Drop impl from trying to abort it again.
-                self.inner.set_committed();
+                self.committed = true;
                 Err(Error::BotchedTransaction)
             }
             Err(e) => Err(e),
@@ -266,7 +289,7 @@ where
     #[cfg(feature = "read-tx-timeouts")]
     pub fn disable_timeout(&self) {
         if K::IS_READ_ONLY {
-            self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn);
+            self.env().txn_manager().remove_active_read_transaction(self.txn);
         }
     }
 }
@@ -280,44 +303,17 @@ where
     }
 }
 
-/// Internals of a transaction.
-struct TransactionInner<K>
-where
-    K: TransactionKind,
-{
-    /// The transaction pointer itself.
-    txn: TransactionPtr,
-    /// Whether the transaction has committed.
-    committed: AtomicBool,
-    env: Environment,
-    _marker: std::marker::PhantomData<fn(K)>,
-}
-
-impl<K> TransactionInner<K>
-where
-    K: TransactionKind,
-{
-    /// Marks the transaction as committed.
-    fn set_committed(&self) {
-        self.committed.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn has_committed(&self) -> bool {
-        self.committed.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-impl<K> Drop for TransactionInner<K>
+impl<K> Drop for Transaction<K>
 where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        if self.has_committed() {
+        if self.committed {
             return
         }
 
         // A timed out transaction is still valid, so it is released like any other.
-        let txn = self.txn.txn;
+        let txn = self.txn;
         if K::IS_READ_ONLY {
             #[cfg(feature = "read-tx-timeouts")]
             self.env.txn_manager().remove_active_read_transaction(txn);
@@ -491,7 +487,7 @@ impl Transaction<RO> {
 impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
     pub fn begin_nested_txn(&mut self) -> Result<Self> {
-        if self.inner.env.is_write_map() {
+        if self.env.is_write_map() {
             return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
         }
         self.txn_execute(|txn| {
@@ -504,35 +500,6 @@ impl Transaction<RW> {
 
             rx.recv().unwrap().map(|ptr| Self::new_from_ptr(self.env().clone(), ptr.0))
         })?
-    }
-}
-
-/// A pointer to an MDBX transaction, owned by a single [`Transaction`].
-#[derive(Debug)]
-pub(crate) struct TransactionPtr {
-    txn: *mut ffi::MDBX_txn,
-    /// Set by the read transaction monitor in `TxnManager` once the transaction has been open for
-    /// too long. Every following operation fails, but the monitor doesn't reset the transaction,
-    /// so it stays valid until dropped.
-    #[cfg(feature = "read-tx-timeouts")]
-    timed_out: Arc<AtomicBool>,
-}
-
-impl TransactionPtr {
-    /// Executes the given closure with the transaction pointer.
-    ///
-    /// Returns the result of the closure or an error if the transaction is timed out.
-    #[inline]
-    fn txn_execute<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(*mut ffi::MDBX_txn) -> T,
-    {
-        #[cfg(feature = "read-tx-timeouts")]
-        if self.timed_out.load(Ordering::Relaxed) {
-            return Err(Error::ReadTransactionTimeout)
-        }
-
-        Ok((f)(self.txn))
     }
 }
 
@@ -614,11 +581,11 @@ impl CommitLatency {
     }
 }
 
-// SAFETY: The pointer is owned by a single `Transaction`, which is not `Sync`, and its cursors
-// borrow the transaction, so only one thread uses it at a time. `MDBX_NOSTICKYTHREADS` lets that
-// thread differ from the one that started the transaction. Write transactions are still started,
-// committed, and aborted on the `TxnManager` thread.
-unsafe impl Send for TransactionPtr {}
+// SAFETY: `Transaction` owns its pointer and is not `Sync`, and its cursors borrow it, so only one
+// thread uses it at a time. `MDBX_NOSTICKYTHREADS` lets that thread differ from the one that
+// started the transaction. Write transactions are still started, committed, and aborted on the
+// `TxnManager` thread.
+unsafe impl<K> Send for Transaction<K> where K: TransactionKind {}
 
 #[cfg(test)]
 mod tests {
@@ -630,5 +597,14 @@ mod tests {
     const fn test_txn_send() {
         assert_send::<Transaction<RO>>();
         assert_send::<Transaction<RW>>();
+    }
+
+    #[test]
+    #[should_panic(expected = "reentrant use of an MDBX transaction")]
+    fn reentrant_txn_execute_panics() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+        let txn = env.begin_rw_txn().unwrap();
+        let _ = txn.txn_execute(|_| txn.txn_execute(|_| ()));
     }
 }

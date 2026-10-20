@@ -77,7 +77,8 @@ pub struct TxMock {
     _table: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
-impl DbTx for TxMock {
+// SAFETY: `CursorMock` is `Send`.
+unsafe impl DbTx for TxMock {
     type Cursor<'tx, T: Table> = CursorMock;
     type DupCursor<'tx, T: DupSort> = CursorMock;
 

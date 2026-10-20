@@ -187,17 +187,15 @@ where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        let tx: &'tx TX = self.tx;
-        Ok(DatabaseAccountTrieCursor::new(tx.cursor_read::<A::AccountTrieTable>()?))
+        Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<A::AccountTrieTable>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
-        let tx: &'tx TX = self.tx;
         Ok(DatabaseStorageTrieCursor::new(
-            tx.cursor_dup_read::<A::StorageTrieTable>()?,
+            self.tx.cursor_dup_read::<A::StorageTrieTable>()?,
             hashed_address,
         ))
     }
