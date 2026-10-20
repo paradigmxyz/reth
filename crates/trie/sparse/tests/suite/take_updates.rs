@@ -8,7 +8,7 @@ pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie>(
     let mut key_b = B256::ZERO;
     key_b.0[0] = 0x20;
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2))]);
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
@@ -206,7 +206,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
 pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
-    let val = U256::from(1u64);
+    let val = U256::ONE;
 
     let mut key_existing = B256::ZERO;
     key_existing.0[0] = 0xAA;
@@ -287,7 +287,7 @@ pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: Sparse
     key_c.0[0] = 0x02;
 
     let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
+        BTreeMap::from([(key_a, U256::ONE), (key_b, U256::from(2)), (key_c, U256::from(3))]);
 
     let harness = SuiteTestHarness::new(storage);
     let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);

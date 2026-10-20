@@ -1,6 +1,6 @@
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{B256Map, HashSet},
     Address, BlockNumber, B256,
 };
 use core::ops::RangeInclusive;
@@ -30,7 +30,7 @@ where
 
     // Initialize prefix sets.
     let mut account_prefix_set = PrefixSetMut::default();
-    let mut storage_prefix_sets = HashMap::<B256, PrefixSetMut>::default();
+    let mut storage_prefix_sets = B256Map::<PrefixSetMut>::default();
     let mut destroyed_accounts = HashSet::default();
 
     // Get account changesets using the provider (handles static files + database)

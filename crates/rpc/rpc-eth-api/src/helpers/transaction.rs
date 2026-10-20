@@ -8,7 +8,7 @@ use crate::{
     RpcTransaction,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
+    transaction::{TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -139,7 +139,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         timeout_ms: Option<u64>,
     ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
     where
-        Self: LoadReceipt + 'static,
+        Self: LoadReceipt,
     {
         let this = self.clone();
         let configured_timeout = self.send_raw_transaction_sync_timeout();
@@ -282,7 +282,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         hash: B256,
     ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
     where
-        Self: LoadReceipt + 'static,
+        Self: LoadReceipt,
     {
         async move {
             match self.load_transaction_and_receipt(hash).await? {
@@ -354,7 +354,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     return Ok(None);
                 };
 
-                let tx = tx.try_into_recovered_unchecked().map_err(Self::Error::from_eth_err)?;
+                let tx = this.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
 
                 let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
 
@@ -504,7 +504,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
+        Self: EthApiSpec + EstimateCall + LoadFee,
     {
         async move {
             let from = match request.as_ref().from() {
@@ -588,7 +588,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<FillTransaction<TxTy<Self::Primitives>>, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
+        Self: EthApiSpec + EstimateCall + LoadFee,
     {
         async move {
             if request.as_ref().value().is_none() {
@@ -768,6 +768,26 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         txs.into_iter().map(|tx| self.recover_raw_transaction(tx.as_ref())).collect()
     }
 
+    /// Recovers the sender of a mined transaction, reusing a cached sender when configured.
+    ///
+    /// Mined transactions can predate EIP-2, so recovery does not reject high-s signatures. A
+    /// sender recovered on a cache miss is not cached: lookups of mined transactions rarely
+    /// repeat, and caching them would evict senders that ingress and payload execution still need.
+    fn recover_mined_transaction<T: SignedTransaction>(&self, tx: T) -> EthResult<Recovered<T>> {
+        let cached = self
+            .eth_api_settings()
+            .sender_recovery_cache
+            .as_ref()
+            .and_then(|cache| cache.get(tx.tx_hash()));
+        let signer = match cached {
+            Some(signer) => signer,
+            None => tx
+                .recover_signer_unchecked()
+                .map_err(|_| EthApiError::InvalidTransactionSignature)?,
+        };
+        Ok(Recovered::new_unchecked(tx, signer))
+    }
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
@@ -800,9 +820,8 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 // Note: we assume this transaction is valid, because it's mined (or
                 // part of pending block) and already. We don't need to
                 // check for pre EIP-2 because this transaction could be pre-EIP-2.
-                let transaction = tx
-                    .try_into_recovered_unchecked()
-                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+                let transaction =
+                    self.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
 
                 return Ok(Some(TransactionSource::Block {
                     transaction,
@@ -840,9 +859,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
                 tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                tx @ TransactionSource::Block { block_hash, .. } => {
-                    (tx, BlockId::Hash(block_hash.into()))
-                }
+                tx @ TransactionSource::Block { block_hash, .. } => (tx, BlockId::hash(block_hash)),
             }))
         }
     }

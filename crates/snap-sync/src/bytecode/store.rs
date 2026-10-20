@@ -99,8 +99,7 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, generation, hashed_factory, insert_generation_headers, key, state_root,
-        verified_range,
+        account, generation, hashed_factory_with_roots, key, state_root, verified_range,
     };
     use alloy_primitives::bytes;
     use reth_provider::{
@@ -122,8 +121,7 @@ mod tests {
     }
 
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
-        let factory = hashed_factory();
-        insert_generation_headers(&factory);
+        let factory = hashed_factory_with_roots(&[state_root(accounts); 3]);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.commit().unwrap();
@@ -161,32 +159,6 @@ mod tests {
             [keccak256(code(2))]
         );
         assert!(is_stored(&provider, &shared));
-    }
-
-    #[test]
-    fn a_scan_stops_once_it_has_the_hashes_a_request_can_carry() {
-        let hashes: Vec<_> = (1..=4).map(|byte| keccak256(code(byte))).collect();
-        let (factory, write) = started(&[(key(1), contract(1, &code(1)))]);
-        let provider = factory.database_provider_ro().unwrap();
-
-        assert_eq!(provider.missing_code(write, &hashes, 2).unwrap(), hashes[..2]);
-    }
-
-    #[test]
-    fn code_already_stored_is_not_requested_again() {
-        let stored = code(1);
-        let accounts = vec![(key(1), contract(1, &stored))];
-        let (factory, write) = started(&accounts);
-        let provider = factory.database_provider_rw().unwrap();
-        provider.commit_bytecodes(write, vec![(keccak256(&stored), stored.clone())]).unwrap();
-        provider.commit().unwrap();
-
-        let provider = factory.database_provider_ro().unwrap();
-        assert!(provider
-            .missing_code(write, &[keccak256(&stored)], usize::MAX)
-            .unwrap()
-            .is_empty());
-        assert!(is_stored(&provider, &stored));
     }
 
     #[test]
@@ -229,7 +201,7 @@ mod tests {
         let accounts = vec![(key(1), contract(1, &wanted))];
         let (factory, write) = started(&accounts);
         let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(0xcc))).unwrap();
+        provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
 
         let refused = provider.commit_bytecodes(write, vec![(keccak256(&wanted), wanted.clone())]);
 

@@ -25,30 +25,16 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .await?;
     let node = &node.inner;
 
-    let canon_state = node.provider.canonical_in_memory_state();
-    let mut safe_block = canon_state.subscribe_safe_block();
-    let mut finalized_block = canon_state.subscribe_finalized_block();
-
     assert_chain_advances(node).await;
 
     let chain_info = node.provider.chain_info()?;
-    // Startup can leave an unread genesis notification, and the canonical head notification
-    // precedes the safe/finalized updates. Wait for the mined block itself on both channels.
-    tokio::time::timeout(Duration::from_secs(10), async {
-        tokio::try_join!(
-            safe_block.wait_for(|header| {
-                header.as_ref().is_some_and(|header| header.num_hash() == chain_info.into())
-            }),
-            finalized_block.wait_for(|header| {
-                header.as_ref().is_some_and(|header| header.num_hash() == chain_info.into())
-            }),
-        )
-        .map(|_| ())
+    // The canonical head notification precedes the safe/finalized updates.
+    poll_until("safe and finalized block to be the mined block", || async {
+        Ok((node.provider.safe_block_num_hash()? == Some(chain_info.into()) &&
+            node.provider.finalized_block_num_hash()? == Some(chain_info.into()))
+        .then_some(()))
     })
-    .await??;
-
-    assert_eq!(node.provider.safe_block_num_hash()?, Some(chain_info.into()));
-    assert_eq!(node.provider.finalized_block_num_hash()?, Some(chain_info.into()));
+    .await?;
 
     Ok(())
 }
