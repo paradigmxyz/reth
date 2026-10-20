@@ -189,20 +189,10 @@ where
         .1
         .into_sorted();
 
-        // Merging segment_trie_reverts into segment_trie_forward is a semi-hacky way to handle a
-        // particular edge-case:
-        // * Block 5: node N is absent
-        // * Block 6: node N is created
-        // * Block 8: node N is deleted
-        //
-        // In this case if we request reverts for 6..=8 then N wouldn't appear in them, because it
-        // did not undergo any change during the range (started absent, ended absent).
-        //
-        // By merging in the forward trie updates we incorporate N's most recent update which is a
-        // deletion in block 8, therefore deleting it in the reverts as well.
-        //
-        // N will appear in segment_trie_reverts in all other cases; segment_trie_forward only
-        // surfaces updates in this one case.
+        // A path missing from the calculated reverts has the same value at both segment ends, so
+        // its newest forward update is also its value before the segment. Merging the forward
+        // updates keeps nodes that appear and disappear inside the segment, e.g. a node created
+        // in block 6 and deleted in block 8 when reverting 6..=8.
         let segment_trie_forward =
             forward_updates[segment_range].iter().rev().map(|(_, updates)| updates.as_ref());
         let segment_trie_reverts =
