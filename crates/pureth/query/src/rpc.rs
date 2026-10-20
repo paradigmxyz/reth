@@ -1,6 +1,6 @@
 use crate::{
     QueryError, QueryHandler, QueryRequest, QueryResponse, SelectionError, SelectionExecutor,
-    SelectionLimits,
+    SelectionLimits, TransactionReceiptRequest, TransactionReceiptResponse,
 };
 use alloy_rpc_types_eth::error::EthRpcErrorCode;
 use jsonrpsee::{
@@ -8,6 +8,8 @@ use jsonrpsee::{
     proc_macros::rpc,
     types::{ErrorCode, ErrorObjectOwned},
 };
+use reth_provider::ProviderError;
+use reth_pureth_block::{PayloadSourceError, PayloadSourceInput};
 use reth_pureth_receipt::LookupError;
 use std::{sync::Arc, time::Duration};
 
@@ -15,6 +17,12 @@ use std::{sync::Arc, time::Duration};
 pub trait PurethApi {
     #[method(name = "query")]
     async fn query(&self, request: QueryRequest) -> RpcResult<QueryResponse>;
+
+    #[method(name = "transactionReceipt")]
+    async fn transaction_receipt(
+        &self,
+        request: TransactionReceiptRequest,
+    ) -> RpcResult<TransactionReceiptResponse>;
 }
 
 #[derive(Debug)]
@@ -57,6 +65,29 @@ impl<S: QueryHandler + Send + Sync + 'static> PurethApiServer for PurethRpc<S> {
             })
             .expect("the query method is registered once");
         module
+            .register_async_method("pureth_transactionReceipt", |params, context, _| async move {
+                if params.len_bytes() > SelectionLimits::default().request_bytes {
+                    return Err(rpc_error(QueryError::Selection(SelectionError::LimitExceeded(
+                        "request bytes",
+                    ))));
+                }
+                let service = Arc::clone(&context.service);
+                context
+                    .executor
+                    .run(Duration::from_secs(30), move |cancelled| {
+                        let request = if params.is_object() {
+                            params.parse::<TransactionReceiptParams>().map(|params| params.request)
+                        } else {
+                            params.one::<TransactionReceiptRequest>()
+                        }
+                        .map_err(|_| QueryError::Selection(SelectionError::InvalidValue))?;
+                        service.transaction_receipt_with_cancel(request, cancelled)
+                    })
+                    .await
+                    .map_err(rpc_error)
+            })
+            .expect("the transaction receipt method is registered once");
+        module
     }
 
     async fn query(&self, request: QueryRequest) -> RpcResult<QueryResponse> {
@@ -64,6 +95,19 @@ impl<S: QueryHandler + Send + Sync + 'static> PurethApiServer for PurethRpc<S> {
         self.executor
             .run(Duration::from_secs(30), move |cancelled| {
                 service.query_with_cancel(request, cancelled)
+            })
+            .await
+            .map_err(rpc_error)
+    }
+
+    async fn transaction_receipt(
+        &self,
+        request: TransactionReceiptRequest,
+    ) -> RpcResult<TransactionReceiptResponse> {
+        let service = Arc::clone(&self.service);
+        self.executor
+            .run(Duration::from_secs(30), move |cancelled| {
+                service.transaction_receipt_with_cancel(request, cancelled)
             })
             .await
             .map_err(rpc_error)
@@ -76,7 +120,13 @@ struct QueryParams {
     request: QueryRequest,
 }
 
-fn rpc_error(error: QueryError) -> ErrorObjectOwned {
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransactionReceiptParams {
+    request: TransactionReceiptRequest,
+}
+
+pub(crate) fn rpc_error(error: QueryError) -> ErrorObjectOwned {
     match error {
         QueryError::Provider(LookupError::UnknownBlock) => ErrorObjectOwned::owned(
             EthRpcErrorCode::ResourceNotFound.code(),
@@ -88,15 +138,53 @@ fn rpc_error(error: QueryError) -> ErrorObjectOwned {
             "requested data unavailable",
             None::<()>,
         ),
-        QueryError::Selection(SelectionError::Deadline | SelectionError::Cancelled) => {
+        QueryError::PayloadAcquisition(error) if payload_unavailable(&error) => {
+            ErrorObjectOwned::owned(
+                EthRpcErrorCode::ResourceNotFound.code(),
+                "requested data unavailable",
+                None::<()>,
+            )
+        }
+        QueryError::PayloadAcquisition(
+            PayloadSourceError::UnsupportedFork |
+            PayloadSourceError::UnsupportedFeeRange |
+            PayloadSourceError::LimitExceeded |
+            PayloadSourceError::Payload(reth_pureth_block::PayloadError::LimitExceeded(_)),
+        ) => ErrorObjectOwned::from(ErrorCode::InvalidParams),
+        QueryError::Selection(SelectionError::Deadline | SelectionError::Cancelled) |
+        QueryError::PayloadAcquisition(PayloadSourceError::Cancelled) => {
             ErrorObjectOwned::owned(-32000, "query deadline or cancellation", None::<()>)
         }
         QueryError::Selection(SelectionError::ExecutionFailed | SelectionError::InvalidProof) |
         QueryError::InvalidSnapshot |
-        QueryError::Acquisition(_) => ErrorObjectOwned::from(ErrorCode::InternalError),
+        QueryError::Acquisition(_) |
+        QueryError::PayloadAcquisition(_) => ErrorObjectOwned::from(ErrorCode::InternalError),
         QueryError::UnsupportedObject | QueryError::Provider(_) | QueryError::Selection(_) => {
             ErrorObjectOwned::from(ErrorCode::InvalidParams)
         }
+    }
+}
+
+const fn payload_unavailable(error: &PayloadSourceError) -> bool {
+    match error {
+        PayloadSourceError::MissingInput(_) |
+        PayloadSourceError::Receipts(reth_pureth_receipt::Eip6466SnapshotError::MissingData(_)) => {
+            true
+        }
+        PayloadSourceError::ProviderRead { input: PayloadSourceInput::Block, error } => matches!(
+            error,
+            ProviderError::BlockExpired { .. } |
+                ProviderError::BlockHashNotFound(_) |
+                ProviderError::UnknownBlockHash(_) |
+                ProviderError::HeaderNotFound(_)
+        ),
+        PayloadSourceError::ProviderRead {
+            input: PayloadSourceInput::Requests | PayloadSourceInput::BlockAccessList,
+            error,
+        } => {
+            matches!(error, ProviderError::BlockExpired { .. } | ProviderError::ReceiptNotFound(_))
+        }
+        _ => false,
     }
 }
 
@@ -298,7 +386,84 @@ mod tests {
         service: TestQueryService,
     }
 
+    #[test]
+    fn payload_errors_distinguish_unavailable_history_from_corruption_and_context() {
+        for input in [
+            PayloadSourceInput::Block,
+            PayloadSourceInput::Requests,
+            PayloadSourceInput::BlockAccessList,
+            PayloadSourceInput::Slot,
+            PayloadSourceInput::Withdrawals,
+            PayloadSourceInput::Receipts,
+            PayloadSourceInput::FullPayload,
+        ] {
+            assert_eq!(
+                rpc_error(QueryError::PayloadAcquisition(PayloadSourceError::MissingInput(input)))
+                    .code(),
+                -32001
+            );
+        }
+        for input in [
+            PayloadSourceInput::Block,
+            PayloadSourceInput::Requests,
+            PayloadSourceInput::BlockAccessList,
+        ] {
+            let error = PayloadSourceError::ProviderRead {
+                input,
+                error: ProviderError::BlockExpired { requested: 1, earliest_available: 2 },
+            };
+            assert_eq!(rpc_error(QueryError::PayloadAcquisition(error)).code(), -32001);
+            let error = PayloadSourceError::ProviderRead {
+                input,
+                error: ProviderError::InvalidStorageOutput,
+            };
+            assert_eq!(rpc_error(QueryError::PayloadAcquisition(error)).code(), -32603);
+        }
+        for input in [PayloadSourceInput::ConsistentView, PayloadSourceInput::CanonicalHash] {
+            let error = PayloadSourceError::ProviderRead {
+                input,
+                error: ProviderError::BlockExpired { requested: 1, earliest_available: 2 },
+            };
+            assert_eq!(rpc_error(QueryError::PayloadAcquisition(error)).code(), -32603);
+        }
+        for error in [
+            PayloadSourceError::SourceMismatch,
+            PayloadSourceError::NonCanonicalBal,
+            PayloadSourceError::NativeCommitmentMismatch(PayloadSourceInput::Requests),
+            PayloadSourceError::StateRootSkipped,
+            PayloadSourceError::Payload(reth_pureth_block::PayloadError::InvalidEncoding("BAL")),
+            PayloadSourceError::Payload(reth_pureth_block::PayloadError::ComponentMismatch(
+                "receipts root",
+            )),
+        ] {
+            assert_eq!(rpc_error(QueryError::PayloadAcquisition(error)).code(), -32603);
+        }
+        for error in [
+            PayloadSourceError::UnsupportedFork,
+            PayloadSourceError::UnsupportedFeeRange,
+            PayloadSourceError::LimitExceeded,
+            PayloadSourceError::Payload(reth_pureth_block::PayloadError::LimitExceeded(
+                "component bytes",
+            )),
+        ] {
+            assert_eq!(rpc_error(QueryError::PayloadAcquisition(error)).code(), -32602);
+        }
+        assert_eq!(
+            rpc_error(QueryError::PayloadAcquisition(PayloadSourceError::Cancelled)).code(),
+            -32000
+        );
+    }
+
     impl QueryHandler for CountingHandler {
+        fn transaction_receipt_with_cancel(
+            &self,
+            request: TransactionReceiptRequest,
+            cancelled: &AtomicBool,
+        ) -> Result<TransactionReceiptResponse, QueryError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.service.transaction_receipt_with_cancel(request, cancelled)
+        }
+
         fn query_with_cancel(
             &self,
             request: QueryRequest,
@@ -353,6 +518,51 @@ mod tests {
             let raw = format!(
                 "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"pureth_query\",\"params\":{params}}}"
             );
+            let before = calls.load(Ordering::Relaxed);
+            let (response, _) = module.raw_json_request(&raw, 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert_eq!(response["error"]["code"], -32602);
+            assert_eq!(calls.load(Ordering::Relaxed), before);
+        }
+    }
+
+    #[tokio::test]
+    async fn association_rpc_bounds_raw_params_before_dispatch() {
+        let (service, hash) = test_utils::service();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let module: Methods =
+            PurethRpc::new(CountingHandler { calls: Arc::clone(&calls), service })
+                .into_rpc()
+                .into();
+        let request = TransactionReceiptRequest { block_hash: hash, transaction_index: 0 };
+        let json = serde_json::to_string(&request).unwrap();
+        for named in [false, true] {
+            for length in [65_535, 65_536, 65_537, 70_000] {
+                let wrapper =
+                    if named { format!("{{\"request\":{json}}}") } else { format!("[{json}]") };
+                let params = format!(
+                    "{}{}{}",
+                    &wrapper[..1],
+                    " ".repeat(length - wrapper.len()),
+                    &wrapper[1..]
+                );
+                assert_eq!(params.len(), length);
+                let raw = format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"pureth_transactionReceipt\",\"params\":{params}}}");
+                let before = calls.load(Ordering::Relaxed);
+                let (response, _) = module.raw_json_request(&raw, 1).await.unwrap();
+                let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+                assert_eq!(response["error"]["code"], -32602);
+                assert_eq!(calls.load(Ordering::Relaxed), before + usize::from(length <= 65_536));
+            }
+        }
+        for params in [
+            format!("[{json},{json}]"),
+            format!("{{\"request\":{json},\"extra\":1}}"),
+            format!("[{{\"block_hash\":\"{hash}\",\"transaction_index\":-1}}]"),
+            format!("{{\"request\":{{\"block_hash\":\"{hash}\",\"transaction_index\":0,\"gindex\":1}}}}"),
+            format!("[{{\"block_hash\":\"{hash}\",\"transaction_index\":0,\"gindex\":1}}]"),
+        ] {
+            let raw = format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"pureth_transactionReceipt\",\"params\":{params}}}");
             let before = calls.load(Ordering::Relaxed);
             let (response, _) = module.raw_json_request(&raw, 1).await.unwrap();
             let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();

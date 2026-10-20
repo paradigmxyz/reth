@@ -36,6 +36,14 @@ fn payload_bytes_roots_and_summaries_match_independent_typed_references() {
         let snapshot = decoded(case);
         assert_eq!(snapshot.serialized(), bytes(&case["payload"]).as_ref());
         assert_eq!(snapshot.root(), case["root"].as_str().unwrap().parse::<B256>().unwrap());
+        assert_eq!(
+            ExecutionPayloadSnapshot::root_from_ssz(
+                snapshot.serialized(),
+                PayloadLimits::default()
+            )
+            .unwrap(),
+            snapshot.root()
+        );
         assert_eq!(snapshot.summary().serialized(), bytes(&case["summary"]).as_ref());
         assert_eq!(
             snapshot.components().transactions.transactions().len(),
@@ -109,6 +117,9 @@ fn payload_decoder_rejects_noncanonical_offsets_and_component_root_mismatches() 
     for offset in [84, 168, 268, 352] {
         let mut corrupt = original.to_vec();
         corrupt[offset..offset + 4].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(
+            ExecutionPayloadSnapshot::root_from_ssz(&corrupt, PayloadLimits::default()).is_err()
+        );
         let (receipts, requests) = sidecars(case);
         assert!(ExecutionPayloadSnapshot::from_ssz(
             &corrupt,
@@ -121,12 +132,21 @@ fn payload_decoder_rejects_noncanonical_offsets_and_component_root_mismatches() 
     for (offset, expected) in [(88, "receipts root"), (320, "requests root")] {
         let mut corrupt = original.to_vec();
         corrupt[offset] ^= 1;
+        assert_ne!(
+            ExecutionPayloadSnapshot::root_from_ssz(&corrupt, PayloadLimits::default()).unwrap(),
+            decoded(case).root()
+        );
         let (receipts, requests) = sidecars(case);
         assert!(
             matches!(ExecutionPayloadSnapshot::from_ssz(&corrupt, receipts, requests, PayloadLimits::default()), Err(PayloadError::ComponentMismatch(name)) if name == expected)
         );
     }
     for length in [0, 363, original.len() - 1] {
+        assert!(ExecutionPayloadSnapshot::root_from_ssz(
+            &original[..length],
+            PayloadLimits::default()
+        )
+        .is_err());
         let (receipts, requests) = sidecars(case);
         assert!(ExecutionPayloadSnapshot::from_ssz(
             &original[..length],
@@ -138,6 +158,7 @@ fn payload_decoder_rejects_noncanonical_offsets_and_component_root_mismatches() 
     }
     let mut trailing = original.to_vec();
     trailing.push(0);
+    assert!(ExecutionPayloadSnapshot::root_from_ssz(&trailing, PayloadLimits::default()).is_err());
     let (receipts, requests) = sidecars(case);
     assert!(ExecutionPayloadSnapshot::from_ssz(
         &trailing,
@@ -158,6 +179,10 @@ fn payload_limits_and_transaction_receipt_counts_fail_closed() {
         PayloadLimits { withdrawals: 0, ..PayloadLimits::default() },
         PayloadLimits { bal_bytes: 0, ..PayloadLimits::default() },
     ] {
+        assert!(matches!(
+            ExecutionPayloadSnapshot::root_from_ssz(&bytes(&case["payload"]), limits),
+            Err(PayloadError::LimitExceeded(_))
+        ));
         let (receipts, requests) = sidecars(case);
         assert!(matches!(
             ExecutionPayloadSnapshot::from_ssz(
@@ -190,6 +215,19 @@ fn payload_exact_byte_limits_include_sidecars_and_reject_invalid_summary_fields(
     let snapshot =
         ExecutionPayloadSnapshot::from_ssz(&encoded, receipts, requests, limits).unwrap();
     assert_eq!(snapshot.serialized(), encoded.as_ref());
+    assert_eq!(
+        ExecutionPayloadSnapshot::root_from_ssz(
+            &encoded,
+            PayloadLimits { bytes: encoded.len(), ..limits }
+        )
+        .unwrap(),
+        snapshot.root()
+    );
+    assert!(ExecutionPayloadSnapshot::root_from_ssz(
+        &bytes(&case["summary"]),
+        PayloadLimits::default()
+    )
+    .is_err());
     let (receipts, requests) = sidecars(case);
     assert!(matches!(
         ExecutionPayloadSnapshot::from_ssz(

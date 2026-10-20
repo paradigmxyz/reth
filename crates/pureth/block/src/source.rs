@@ -327,6 +327,7 @@ impl SourcePayloadSnapshot {
             PayloadSourceKind::Built,
             CanonicalityStatus::Unknown,
             limits,
+            &AtomicBool::new(false),
         )
     }
 
@@ -426,6 +427,7 @@ impl SourcePayloadSnapshot {
             PayloadSourceKind::Built,
             CanonicalityStatus::Unknown,
             limits,
+            &AtomicBool::new(false),
         )
     }
 
@@ -439,9 +441,31 @@ impl SourcePayloadSnapshot {
         N: ProviderNodeTypes<Primitives = EthPrimitives>,
         N::ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks,
     {
+        Self::from_reth_historical_with_cancel(
+            provider,
+            bal_store,
+            block_hash,
+            limits,
+            &AtomicBool::new(false),
+        )
+    }
+
+    pub fn from_reth_historical_with_cancel<N>(
+        provider: &BlockchainProvider<N>,
+        bal_store: &impl BalStore,
+        block_hash: B256,
+        limits: PayloadLimits,
+        cancelled: &AtomicBool,
+    ) -> Result<Self, PayloadSourceError>
+    where
+        N: ProviderNodeTypes<Primitives = EthPrimitives>,
+        N::ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks,
+    {
+        check_cancelled(cancelled)?;
         let view = provider.consistent_provider().map_err(|error| {
             PayloadSourceError::ProviderRead { input: PayloadSourceInput::ConsistentView, error }
         })?;
+        check_cancelled(cancelled)?;
         let block = view
             .recovered_block(block_hash.into(), TransactionVariant::WithHash)
             .map_err(|error| PayloadSourceError::ProviderRead {
@@ -449,12 +473,14 @@ impl SourcePayloadSnapshot {
                 error,
             })?
             .ok_or(PayloadSourceError::MissingInput(PayloadSourceInput::Block))?;
+        check_cancelled(cancelled)?;
         if block.hash() != block_hash {
             return Err(PayloadSourceError::SourceMismatch);
         }
         let canonical_hash = view.block_hash(block.number()).map_err(|error| {
             PayloadSourceError::ProviderRead { input: PayloadSourceInput::CanonicalHash, error }
         })?;
+        check_cancelled(cancelled)?;
         let canonicality = match canonical_hash {
             Some(hash) if hash == block_hash => CanonicalityStatus::Canonical,
             Some(_) => CanonicalityStatus::NonCanonical,
@@ -467,6 +493,7 @@ impl SourcePayloadSnapshot {
                 error,
             })?
             .ok_or(PayloadSourceError::MissingInput(PayloadSourceInput::Requests))?;
+        check_cancelled(cancelled)?;
         if execution.block_hash != block_hash {
             return Err(PayloadSourceError::SourceMismatch);
         }
@@ -481,6 +508,7 @@ impl SourcePayloadSnapshot {
                 })?
                 .ok_or(PayloadSourceError::MissingInput(PayloadSourceInput::BlockAccessList))?,
         };
+        check_cancelled(cancelled)?;
         Self::build(
             &block,
             &execution.result,
@@ -489,6 +517,7 @@ impl SourcePayloadSnapshot {
             PayloadSourceKind::Historical,
             canonicality,
             limits,
+            cancelled,
         )
     }
 
@@ -568,6 +597,7 @@ impl SourcePayloadSnapshot {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build<S>(
         block: &RecoveredBlock<Block>,
         result: &BlockExecutionResult<Receipt>,
@@ -576,12 +606,12 @@ impl SourcePayloadSnapshot {
         source_kind: PayloadSourceKind,
         canonicality: CanonicalityStatus,
         limits: PayloadLimits,
+        cancelled: &AtomicBool,
     ) -> Result<Self, PayloadSourceError>
     where
         S: EthChainSpec<Header = Header> + EthereumHardforks,
     {
-        let cancelled = AtomicBool::new(false);
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let header = block.header();
         if header.hash_slow() != block.hash() {
             return Err(PayloadSourceError::SourceMismatch);
@@ -666,23 +696,23 @@ impl SourcePayloadSnapshot {
         }
         validate_block_post_execution(block, chain_spec, result, None, Some(bal_hash))
             .map_err(PayloadSourceError::NativeValidation)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let transactions = TransactionSnapshot::build(
             convert_transactions(&block.body().transactions)
                 .map_err(PayloadSourceError::Transactions)?,
         )
         .map_err(PayloadSourceError::Transactions)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let receipts = Eip6466ReceiptSnapshot::from_block(block, &result.receipts, chain_spec)
             .map_err(PayloadSourceError::Receipts)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let withdrawals = WithdrawalSnapshot::build(withdrawals.to_vec())
             .map_err(PayloadSourceError::Withdrawals)?;
         let requests = ExecutionRequestsSnapshot::build(request_values)
             .map_err(PayloadSourceError::Requests)?;
         let block_access_list = BlockAccessListSnapshot::from_rlp(raw_bal, limits.bal_bytes)
             .map_err(PayloadSourceError::Payload)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let payload = ExecutionPayloadSnapshot::build(
             ExecutionPayloadFields {
                 parent_hash: header.parent_hash,
@@ -703,7 +733,7 @@ impl SourcePayloadSnapshot {
             limits,
         )
         .map_err(PayloadSourceError::Payload)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         Ok(Self {
             source: PayloadSourceMetadata {
                 native_block: BlockNumHash::new(header.number, block.hash()),
@@ -1615,6 +1645,19 @@ mod tests {
     fn source_missing_header_fields_and_unknown_requests_are_typed_failures() {
         let (_, outcome, _, _, _, spec, _) = build(BuildCase::Transfer);
         let raw = outcome.block_access_list.as_ref().unwrap().as_raw().clone();
+        assert!(matches!(
+            SourcePayloadSnapshot::build(
+                &outcome.block,
+                &outcome.execution_result,
+                raw.clone(),
+                spec.as_ref(),
+                PayloadSourceKind::Historical,
+                CanonicalityStatus::Unknown,
+                PayloadLimits::default(),
+                &AtomicBool::new(true),
+            ),
+            Err(PayloadSourceError::Cancelled)
+        ));
         for (field, expected) in [
             (0, PayloadSourceInput::Slot),
             (1, PayloadSourceInput::ParentBeaconRoot),
@@ -1635,7 +1678,7 @@ mod tests {
             }
             let block = RecoveredBlock::new_unhashed(native, outcome.block.senders().to_vec());
             assert!(
-                matches!(SourcePayloadSnapshot::build(&block, &outcome.execution_result, raw.clone(), spec.as_ref(), PayloadSourceKind::Historical, CanonicalityStatus::Unknown, PayloadLimits::default()), Err(PayloadSourceError::MissingInput(input)) if input == expected)
+                matches!(SourcePayloadSnapshot::build(&block, &outcome.execution_result, raw.clone(), spec.as_ref(), PayloadSourceKind::Historical, CanonicalityStatus::Unknown, PayloadLimits::default(), &AtomicBool::new(false)), Err(PayloadSourceError::MissingInput(input)) if input == expected)
             );
         }
         let mut result = outcome.execution_result.clone();
@@ -1648,7 +1691,8 @@ mod tests {
                 spec.as_ref(),
                 PayloadSourceKind::Historical,
                 CanonicalityStatus::Unknown,
-                PayloadLimits::default()
+                PayloadLimits::default(),
+                &AtomicBool::new(false)
             ),
             Err(PayloadSourceError::Requests(RequestsError::UnsupportedType(3)))
         ));

@@ -10185,6 +10185,8 @@ dependencies = [
  "reth-pureth-ssz",
  "reth-pureth-transaction",
  "reth-revm",
+ "reth-rpc-convert",
+ "reth-rpc-eth-types",
  "revm",
  "serde",
  "serde_json",

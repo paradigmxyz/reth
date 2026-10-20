@@ -23,13 +23,22 @@ use reth_provider::{
     StateWriteConfig, StateWriter,
 };
 use reth_pureth_query::{
-    convert_eip6466_block_receipts, convert_eip6466_receipt, extend_block_receipt_responses,
-    extend_receipt_response, query_snapshot, verify_eip6466_receipt_response,
-    verify_query_response, FilterOutput, FilterPredicate, PurethApiServer, PurethRpc, QueryError,
-    QueryHandler, QueryRequest, QueryResponse, QueryService, ReceiptProofSupport, ReceiptResponse,
-    ReceiptSelection, SelectionError, SelectionLimits, SelectionOperation, SelectionRequest,
+    convert_eip6466_block_receipts, convert_eip6466_receipt, convert_eip6466_receipt_from_retained,
+    extend_block_receipt_responses, extend_receipt_response, query_snapshot,
+    verify_eip6466_receipt_response, verify_query_response, FilterOutput, FilterPredicate,
+    PurethApiServer, PurethRpc, QueryError, QueryHandler, QueryRequest, QueryResponse,
+    QueryService, ReceiptProofSupport, ReceiptResponse, ReceiptSelection, SelectionError,
+    SelectionLimits, SelectionOperation, SelectionRequest,
 };
 use reth_pureth_receipt::{HistoricalAcquisitionError, ProviderSnapshot};
+use reth_rpc_convert::{
+    transaction::{ConvertReceiptInput, ReceiptConverter},
+    RpcConverter,
+};
+use reth_rpc_eth_types::{
+    logs_utils::{append_matching_block_logs, matching_block_logs_with_tx_hashes, ProviderOrBlock},
+    receipt::EthReceiptConverter,
+};
 use revm::{
     bytecode::Bytecode,
     context_interface::transaction::Authorization,
@@ -241,6 +250,167 @@ fn rpc_receipt(
     }
 }
 
+#[derive(Clone, Debug)]
+struct LogRpcTypes;
+
+impl reth_rpc_convert::RpcTypes for LogRpcTypes {
+    type Header = alloy_rpc_types_eth::Header;
+    type Receipt = TransactionReceipt;
+    type Log = Log;
+    type TransactionResponse = alloy_rpc_types_eth::Transaction;
+    type TransactionRequest = alloy_rpc_types_eth::TransactionRequest;
+}
+
+#[derive(Clone, Debug)]
+struct LocalLogConverter(
+    reth_rpc_eth_types::receipt::EthReceiptConverter<reth_chainspec::ChainSpec>,
+);
+
+impl reth_rpc_convert::transaction::ReceiptConverter<reth_ethereum_primitives::EthPrimitives>
+    for LocalLogConverter
+{
+    type RpcReceipt = TransactionReceipt;
+    type RpcLog = Log;
+    type Error = reth_rpc_eth_types::EthApiError;
+
+    fn convert_log(
+        &self,
+        log: Log,
+        _receipt: &reth_ethereum_primitives::Receipt,
+        _header: &reth_primitives_traits::SealedHeader,
+    ) -> Result<Log, Self::Error> {
+        Ok(log)
+    }
+
+    fn convert_log_with_index(
+        &self,
+        mut log: Log,
+        _receipt: &reth_ethereum_primitives::Receipt,
+        _header: &reth_primitives_traits::SealedHeader,
+        index: usize,
+    ) -> Result<Log, Self::Error> {
+        log.log_index = Some(index as u64);
+        Ok(log)
+    }
+
+    fn convert_receipts(
+        &self,
+        inputs: Vec<
+            reth_rpc_convert::transaction::ConvertReceiptInput<
+                '_,
+                reth_ethereum_primitives::EthPrimitives,
+            >,
+        >,
+    ) -> Result<Vec<TransactionReceipt>, Self::Error> {
+        self.0.convert_receipts(inputs)
+    }
+}
+
+#[test]
+fn both_log_filters_forward_original_positions_and_preserve_legacy_indices() {
+    let (provider, block, outcome, _) = fixture();
+    let chain = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+    let native = EthReceiptConverter::new(chain);
+    let local =
+        RpcConverter::<LogRpcTypes, EthEvmConfig, _>::new(LocalLogConverter(native.clone()));
+    let legacy = RpcConverter::<LogRpcTypes, EthEvmConfig, _>::new(native);
+    let address = Address::repeat_byte(0x7a);
+    let mut receipts = outcome.receipts[0].clone();
+    for receipt in &mut receipts {
+        receipt.logs = (0..6)
+            .map(|index| {
+                alloy_primitives::Log::new_unchecked(
+                    if index >= 4 { address } else { Address::ZERO },
+                    vec![],
+                    Bytes::from_static(b"duplicate"),
+                )
+            })
+            .collect();
+    }
+    let filter = alloy_rpc_types_eth::Filter::new().address(address);
+    let mut raw_header = block.header().clone();
+    raw_header.logs_bloom = alloy_primitives::Bloom::repeat_byte(0xff);
+    let header = reth_primitives_traits::SealedHeader::new(raw_header, block.hash());
+    let hashes = block.body().transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>();
+    for removed in [false, true] {
+        let expected = matching_block_logs_with_tx_hashes(
+            &local,
+            &filter,
+            &header,
+            hashes.iter().copied().zip(&receipts),
+            removed,
+        )
+        .unwrap();
+        assert_eq!(
+            expected.iter().map(|log| log.log_index.unwrap()).collect::<Vec<_>>(),
+            vec![4, 5, 4, 5, 4, 5, 4, 5, 4, 5]
+        );
+        assert!(expected
+            .iter()
+            .all(|log| log.removed == removed && log.block_hash == Some(block.hash())));
+        let mut from_block = vec![];
+        append_matching_block_logs::<BlockchainProvider<MockNodeTypesWithDB>, _>(
+            &mut from_block,
+            &local,
+            ProviderOrBlock::Block(Arc::new(block.clone())),
+            &filter,
+            &header,
+            &receipts,
+            removed,
+        )
+        .unwrap();
+        assert_eq!(from_block, expected);
+        let mut from_provider = vec![];
+        append_matching_block_logs(
+            &mut from_provider,
+            &local,
+            ProviderOrBlock::Provider(&provider),
+            &filter,
+            &header,
+            &receipts,
+            removed,
+        )
+        .unwrap();
+        assert_eq!(from_provider, expected);
+        let expected_legacy = matching_block_logs_with_tx_hashes(
+            &legacy,
+            &filter,
+            &header,
+            hashes.iter().copied().zip(&receipts),
+            removed,
+        )
+        .unwrap();
+        assert_eq!(
+            expected_legacy.iter().map(|log| log.log_index.unwrap()).collect::<Vec<_>>(),
+            vec![4, 5, 10, 11, 16, 17, 22, 23, 28, 29]
+        );
+        let mut legacy_logs = vec![];
+        append_matching_block_logs(
+            &mut legacy_logs,
+            &legacy,
+            ProviderOrBlock::Provider(&provider),
+            &filter,
+            &header,
+            &receipts,
+            removed,
+        )
+        .unwrap();
+        assert_eq!(legacy_logs, expected_legacy);
+        let mut no_match = vec![];
+        append_matching_block_logs(
+            &mut no_match,
+            &local,
+            ProviderOrBlock::Provider(&provider),
+            &alloy_rpc_types_eth::Filter::new().address(Address::repeat_byte(0xee)),
+            &header,
+            &receipts,
+            removed,
+        )
+        .unwrap();
+        assert!(no_match.is_empty());
+    }
+}
+
 #[test]
 fn persisted_execution_receipts_join_queries_filters_and_shared_proofs() {
     let (provider, block, _, authority) = fixture();
@@ -346,13 +516,53 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
     let snapshot = ProviderSnapshot::from_reth_historical(&provider, block.hash()).unwrap();
     let limits = SelectionLimits::default();
     let mut values = Vec::new();
+    let legacy_converter = reth_pureth_query::ExecutionReceiptConverter::new(
+        Arc::new(ChainSpecBuilder::mainnet().prague_activated().build()),
+        reth_pureth_block::ExecutionForkConfig::new(u64::MAX),
+        limits,
+    );
+    let proof_converter = legacy_converter.clone().with_receipt_proof(true);
     for index in 0..5 {
         let native = rpc_receipt(&block, &outcome, index);
+        let legacy_input = || ConvertReceiptInput {
+            receipt: outcome.receipts[0][index].clone(),
+            tx: Recovered::new_unchecked(&block.body().transactions[index], block.senders()[index]),
+            gas_used: native.gas_used,
+            next_log_index: outcome.receipts[0][..index]
+                .iter()
+                .map(|receipt| receipt.logs.len())
+                .sum(),
+            meta: reth_primitives_traits::TransactionMeta {
+                tx_hash: native.transaction_hash,
+                index: index as u64,
+                block_hash: block.hash(),
+                block_number: block.header().number,
+                timestamp: block.header().timestamp,
+                base_fee: block.header().base_fee_per_gas,
+                excess_blob_gas: block.header().excess_blob_gas,
+            },
+        };
+        let legacy_receipts = legacy_converter.convert_receipts(vec![legacy_input()]).unwrap();
+        assert_eq!(
+            serde_json::to_value(&legacy_receipts[0]).unwrap(),
+            serde_json::to_value(&native).unwrap()
+        );
+        let null_receipts = proof_converter.convert_receipts(vec![legacy_input()]).unwrap();
+        let null_json = serde_json::to_value(&null_receipts[0]).unwrap();
+        assert!(null_json.as_object().unwrap().contains_key("sszProof"));
+        assert!(null_json["sszProof"].is_null());
+        assert_eq!(
+            serde_json::to_value(
+                serde_json::from_value::<reth_pureth_query::ExecutionRpcReceipt>(null_json.clone())
+                    .unwrap()
+            )
+            .unwrap(),
+            null_json
+        );
         let mut expected_json = serde_json::to_value(&native).unwrap();
         let expected = snapshot.receipt_snapshot().receipts().get(index).unwrap();
         let object = expected_json.as_object_mut().unwrap();
         object.remove("logsBloom");
-        object.remove("cumulativeGasUsed");
         object.insert(
             "contractAddress".into(),
             serde_json::to_value(expected.contract_address()).unwrap(),
@@ -371,7 +581,7 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
         .unwrap();
         assert_eq!(serde_json::to_value(legacy).unwrap(), serde_json::to_value(&native).unwrap());
         let value = convert_eip6466_receipt(
-            native,
+            native.clone(),
             &block,
             &snapshot,
             index as u64,
@@ -379,9 +589,28 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
             &AtomicBool::new(false),
         )
         .unwrap();
+        assert_eq!(
+            convert_eip6466_receipt_from_retained(
+                native.clone(),
+                &block,
+                snapshot.receipt_snapshot(),
+                index as u64,
+                limits,
+                &AtomicBool::new(false),
+            )
+            .unwrap(),
+            value
+        );
         assert_eq!(value, expected_json);
+        let typed: reth_pureth_query::ExecutionRpcReceipt =
+            serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&typed).unwrap(), value);
+        let legacy_json = serde_json::to_value(&native).unwrap();
+        let legacy_typed: reth_pureth_query::ExecutionRpcReceipt =
+            serde_json::from_value(legacy_json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(legacy_typed).unwrap(), legacy_json);
         assert!(value.get("logsBloom").is_none());
-        assert!(value.get("cumulativeGasUsed").is_none());
+        assert_eq!(value["cumulativeGasUsed"], expected_json["cumulativeGasUsed"]);
         if index == 0 {
             assert_eq!(
                 value["authorities"],
@@ -395,6 +624,20 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
             assert_eq!(value["logs"][0]["logIndex"], "0x0");
         }
         values.push(value);
+    }
+    for (index, field, value) in [
+        (0, "status", serde_json::json!("0x2")),
+        (0, "logsBloom", serde_json::json!(alloy_primitives::Bloom::ZERO)),
+        (0, "type", serde_json::json!("0x5")),
+        (0, "authorities", serde_json::Value::Null),
+        (3, "authorities", serde_json::json!([])),
+    ] {
+        let mut invalid = values[index].clone();
+        invalid[field] = value;
+        assert!(
+            serde_json::from_value::<reth_pureth_query::ExecutionRpcReceipt>(invalid).is_err(),
+            "index={index}, field={field}"
+        );
     }
     let native = (0..5).map(|index| rpc_receipt(&block, &outcome, index)).collect::<Vec<_>>();
     assert_eq!(
@@ -448,37 +691,22 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
         let ReceiptResponse::WithProof { receipt, ssz_proof: Some(proof) } = response else {
             panic!("expected proof")
         };
-        verify_eip6466_receipt_response(
-            receipt,
-            proof,
-            block.hash(),
-            index as u64,
-            *block.body().transactions[index].hash(),
-            snapshot.root(),
-            limits,
-        )
-        .unwrap();
+        let verify = |receipt: &serde_json::Value, limits| {
+            verify_eip6466_receipt_response(
+                receipt,
+                proof,
+                block.hash(),
+                index as u64,
+                *block.body().transactions[index].hash(),
+                snapshot.root(),
+                limits,
+            )
+        };
+        verify(receipt, limits).unwrap();
         let response_bytes = serde_json::to_vec(response).unwrap().len();
-        verify_eip6466_receipt_response(
-            receipt,
-            proof,
-            block.hash(),
-            index as u64,
-            *block.body().transactions[index].hash(),
-            snapshot.root(),
-            SelectionLimits { response_bytes, ..limits },
-        )
-        .unwrap();
-        assert!(verify_eip6466_receipt_response(
-            receipt,
-            proof,
-            block.hash(),
-            index as u64,
-            *block.body().transactions[index].hash(),
-            snapshot.root(),
-            SelectionLimits { response_bytes: response_bytes - 1, ..limits }
-        )
-        .is_err());
+        verify(receipt, SelectionLimits { response_bytes, ..limits }).unwrap();
+        assert!(verify(receipt, SelectionLimits { response_bytes: response_bytes - 1, ..limits })
+            .is_err());
         for (field, value) in [
             ("from", serde_json::json!(Address::ZERO)),
             ("gasUsed", serde_json::json!("0x0")),
@@ -493,19 +721,16 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
         ] {
             let mut changed = receipt.clone();
             changed[field] = value;
-            assert!(
-                verify_eip6466_receipt_response(
-                    &changed,
-                    proof,
-                    block.hash(),
-                    index as u64,
-                    *block.body().transactions[index].hash(),
-                    snapshot.root(),
-                    limits
-                )
-                .is_err(),
-                "{field}"
-            );
+            assert!(verify(&changed, limits).is_err(), "{field}");
+        }
+        if index == 0 {
+            let mut changed = receipt.clone();
+            changed["cumulativeGasUsed"] = serde_json::json!("not a quantity");
+            assert!(verify(&changed, limits).is_err());
+            changed.as_object_mut().unwrap().remove("cumulativeGasUsed");
+            assert!(verify(&changed, limits).is_err());
+            changed["cumulativeGasUsed"] = serde_json::json!("0xffff");
+            verify(&changed, limits).unwrap();
         }
         if index == 0 || index == 3 {
             for field in ["address", "data", "topics", "logIndex", "removed"] {
@@ -516,16 +741,7 @@ fn native_receipt_fields_are_bound_and_legacy_responses_stay_unchanged() {
                     "topics" => serde_json::json!([]),
                     _ => serde_json::json!(true),
                 };
-                assert!(verify_eip6466_receipt_response(
-                    &changed,
-                    proof,
-                    block.hash(),
-                    index as u64,
-                    *block.body().transactions[index].hash(),
-                    snapshot.root(),
-                    limits
-                )
-                .is_err());
+                assert!(verify(&changed, limits).is_err());
             }
         }
     }

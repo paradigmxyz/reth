@@ -50,6 +50,17 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         header: &SealedHeaderFor<N>,
     ) -> Result<Self::RpcLog, Self::Error>;
 
+    #[allow(missing_docs)]
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &N::Receipt,
+        header: &SealedHeaderFor<N>,
+        _receipt_log_index: usize,
+    ) -> Result<Self::RpcLog, Self::Error> {
+        self.convert_log(log, receipt, header)
+    }
+
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
     fn convert_receipts(
@@ -178,6 +189,17 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
         receipt: &<Self::Primitives as NodePrimitives>::Receipt,
         header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<RpcLog<Self::Network>, Self::Error>;
+
+    #[allow(missing_docs)]
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+        _receipt_log_index: usize,
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.convert_log(log, receipt, header)
+    }
 
     /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
     /// receipts are from the same block.
@@ -757,6 +779,16 @@ where
         header: &SealedHeaderFor<Self::Primitives>,
     ) -> Result<RpcLog<Self::Network>, Self::Error> {
         self.receipt_converter.convert_log(log, receipt, header)
+    }
+
+    fn convert_log_with_index(
+        &self,
+        log: Log,
+        receipt: &<Self::Primitives as NodePrimitives>::Receipt,
+        header: &SealedHeaderFor<Self::Primitives>,
+        receipt_log_index: usize,
+    ) -> Result<RpcLog<Self::Network>, Self::Error> {
+        self.receipt_converter.convert_log_with_index(log, receipt, header, receipt_log_index)
     }
 
     fn convert_receipts(
