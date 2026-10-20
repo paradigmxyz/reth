@@ -503,7 +503,7 @@ RPC:
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
 
-          [default: 1.0]
+          [default: 1]
 
       --rpc.max-simulate-blocks <BLOCKS_COUNT>
           Maximum number of blocks for `eth_simulateV1` call
@@ -601,7 +601,7 @@ Gas Price Oracle:
       --gpo.ignoreprice <IGNORE_PRICE>
           Gas Price below which gpo will ignore transactions
 
-          [default: 0]
+          [default: 2]
 
       --gpo.maxprice <MAX_PRICE>
           Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
@@ -619,7 +619,7 @@ Gas Price Oracle:
       --rpc.send-raw-transaction-sync-timeout <SECONDS>
           Timeout for `send_raw_transaction_sync` RPC method
 
-          [default: 30s]
+          [default: 30]
 
       --testing.skip-invalid-transactions
           Skip invalid transactions in `testing_buildBlockV1` instead of failing.

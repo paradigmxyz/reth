@@ -36,6 +36,7 @@ tracing = { workspace = true, features = ["attributes"] }
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
+parking_lot.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -43,7 +44,6 @@ metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
-parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -57,7 +57,6 @@ triehash.workspace = true
 # misc
 assert_matches.workspace = true
 criterion.workspace = true
-parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -80,7 +79,6 @@ serde = [
 ]
 test-utils = [
     "triehash",
-    "parking_lot",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",

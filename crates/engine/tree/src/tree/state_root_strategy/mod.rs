@@ -59,7 +59,7 @@ use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
-use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
+use reth_chain_state::{ExecutedBlock, PreservedSparseTrie, SparseTrieWithStorageRoots};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{
@@ -72,11 +72,10 @@ use reth_provider::{
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
-use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState,
+use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie_parallel::proof_task::{
+    metrics::ProofWorkerIdleMetrics, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
 };
-use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -469,6 +468,7 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    proof_worker_metrics: ProofWorkerIdleMetrics,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -530,15 +530,18 @@ impl DefaultStateRootStrategy {
     fn spawn_state_root<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
-        multiproof_provider_factory: F,
+        multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         options: StateRootTaskOptions<'_, N>,
     ) -> (StateRootHandle, mpsc::Receiver<PendingSparseTrie>)
     where
         N: NodePrimitives,
-        F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-            + Clone
-            + Send
-            + Sync
+        F: DatabaseProviderFactory + Clone + 'static,
+        F::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
             + 'static,
     {
         let StateRootTaskOptions {
@@ -552,9 +555,6 @@ impl DefaultStateRootStrategy {
         let (updates_tx, from_multi_proof) = crossbeam_channel::unbounded();
         let (cancel_guard, cancel_rx) = StateRootTaskCancelGuard::channel();
 
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        #[cfg(feature = "trie-debug")]
-        let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let worker_counts = ProofWorkerCounts::new(
             Self::proof_worker_count(
                 executor.proof_storage_worker_pool().num_threads(),
@@ -569,8 +569,6 @@ impl DefaultStateRootStrategy {
                 gas_used,
             ),
         );
-        let proof_worker_handle = ProofWorkerHandle::new(executor, task_ctx, worker_counts);
-
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -578,7 +576,7 @@ impl DefaultStateRootStrategy {
 
         self.spawn_sparse_trie_task(
             executor,
-            proof_worker_handle,
+            multiproof_provider_factory,
             state_root_tx,
             hashed_state_tx,
             from_multi_proof,
@@ -588,6 +586,9 @@ impl DefaultStateRootStrategy {
                 preserved_sparse_trie,
                 pending_trie_tx,
                 chunk_size: config.multiproof_chunk_size(),
+                worker_counts,
+                #[cfg(feature = "trie-debug")]
+                proof_jitter: config.proof_jitter(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
                     None
                 } else {
@@ -610,24 +611,38 @@ impl DefaultStateRootStrategy {
 
     /// Spawns the sparse-trie task and hands off its pending trie for later publication.
     #[expect(clippy::too_many_arguments)]
-    fn spawn_sparse_trie_task<N: NodePrimitives>(
+    fn spawn_sparse_trie_task<N, F>(
         &self,
         executor: &reth_tasks::Runtime,
-        proof_worker_handle: ProofWorkerHandle,
+        multiproof_provider_factory: OverlayStateProviderFactory<F, N>,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, StateRootTaskError>>,
         hashed_state_tx: mpsc::Sender<Arc<HashedPostState>>,
         from_multi_proof: CrossbeamReceiver<StateRootMessage>,
         cancel_rx: CrossbeamReceiver<()>,
         options: SparseTrieTaskOptions<N>,
-    ) {
+    ) where
+        N: NodePrimitives,
+        F: DatabaseProviderFactory + Clone + 'static,
+        F::Provider: BlockNumReader
+            + PruneCheckpointReader
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + StorageSettingsCache
+            + 'static,
+    {
         let SparseTrieTaskOptions {
             parent_header,
             preserved_sparse_trie,
             pending_trie_tx,
             chunk_size,
+            worker_counts,
+            #[cfg(feature = "trie-debug")]
+            proof_jitter,
             pending_sparse_trie_prune_blocks,
         } = options;
         let trie_metrics = self.metrics.clone();
+        let worker_metrics = self.proof_worker_metrics.clone();
         let executor = executor.clone();
 
         let parent_span = Span::current();
@@ -640,7 +655,7 @@ impl DefaultStateRootStrategy {
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
-                parent: parent_span,
+                parent: &parent_span,
                 "sparse_trie_task"
             )
             .entered();
@@ -660,6 +675,7 @@ impl DefaultStateRootStrategy {
 
             let mut sparse_trie_anchor_hash = parent_hash;
             let mut reused_preserved_sparse_trie = false;
+            let mut known_storage_roots = Default::default();
             let sparse_state_trie = match preserved_sparse_trie {
                 Some(preserved) => {
                     let start = Instant::now();
@@ -670,7 +686,8 @@ impl DefaultStateRootStrategy {
                         .record(start.elapsed().as_secs_f64());
 
                     match preserved {
-                        Ok(Some(trie)) => {
+                        Ok(Some(SparseTrieWithStorageRoots { trie, storage_roots })) => {
+                            known_storage_roots = storage_roots;
                             sparse_trie_anchor_hash = preserved_anchor_hash;
                             reused_preserved_sparse_trie = true;
                             trie
@@ -690,6 +707,19 @@ impl DefaultStateRootStrategy {
                 parent_header.num_hash(),
                 pending_sparse_trie_prune_blocks.as_deref(),
             );
+            let factory = if reused_preserved_sparse_trie {
+                multiproof_provider_factory.with_skip_overlay_for_reused_sparse_trie(
+                    sparse_trie_anchor_hash,
+                    known_storage_roots,
+                )
+            } else {
+                multiproof_provider_factory
+            };
+            let task_ctx = ProofTaskCtx::new(factory);
+            #[cfg(feature = "trie-debug")]
+            let task_ctx = task_ctx.with_proof_jitter(proof_jitter);
+            let proof_worker_handle =
+                ProofWorkerHandle::new(&executor, task_ctx, worker_counts, worker_metrics);
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
@@ -734,6 +764,7 @@ impl DefaultStateRootStrategy {
                 // a builder may have accepted the matching root through another strategy.
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
+                let storage_roots = trie.storage_roots(new_epoch);
                 if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
@@ -747,7 +778,13 @@ impl DefaultStateRootStrategy {
                 trie_metrics
                     .sparse_trie_retained_storage_tries
                     .set(trie.retained_storage_tries_count() as f64);
-                (completer.send(trie).err().map(|err| err.0), deferred)
+                (
+                    completer
+                        .send(SparseTrieWithStorageRoots { trie, storage_roots })
+                        .err()
+                        .map(|err| err.0.trie),
+                    deferred,
+                )
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
@@ -769,7 +806,7 @@ impl DefaultStateRootStrategy {
 struct PendingSparseTrie {
     state_root: B256,
     anchor_hash: B256,
-    trie: mpsc::Receiver<SparseStateTrie>,
+    trie: mpsc::Receiver<SparseTrieWithStorageRoots>,
 }
 
 fn publish_sparse_trie<N: NodePrimitives>(
@@ -796,6 +833,9 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     pending_trie_tx: mpsc::Sender<PendingSparseTrie>,
     chunk_size: usize,
+    worker_counts: ProofWorkerCounts,
+    #[cfg(feature = "trie-debug")]
+    proof_jitter: Option<Duration>,
     /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
@@ -874,19 +914,9 @@ where
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.block_hash() == parent_header.hash())
-            .map(|trie| trie.anchor_hash())
-        {
-            state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
-        } else {
-            state_provider_factory.clone()
-        };
-
         let (mut handle, pending_trie_rx) = self.spawn_state_root(
             executor,
-            proof_state_provider_factory,
+            state_provider_factory.clone(),
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -950,18 +980,9 @@ where
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.block_hash() == ctx.parent_hash())
-            .map(|trie| trie.anchor_hash())
-        {
-            ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
-        } else {
-            ctx.state_provider_factory.clone()
-        };
         let (handle, pending_trie_rx) = self.spawn_state_root(
             ctx.executor,
-            proof_state_provider_factory,
+            ctx.state_provider_factory.clone(),
             StateRootTaskOptions {
                 parent_header,
                 preserved_sparse_trie,
@@ -1441,7 +1462,7 @@ mod tests {
                 assert_eq!(preserved.is_some(), finish && matching_root);
                 // Publication must finish before trie finalization does.
                 assert_eq!(
-                    completer.send(SparseStateTrie::default()).is_ok(),
+                    completer.send(SparseTrieWithStorageRoots::default()).is_ok(),
                     finish && matching_root
                 );
                 if let Some(preserved) = preserved {

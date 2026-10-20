@@ -124,7 +124,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self.changeset_cache
     }
 
-    /// Gets or computes cached changesets for an inclusive block range.
+    /// Gets complete trie before-values for an inclusive block range, oldest values taking
+    /// precedence. No updates from outside the requested range are included.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -631,7 +632,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
-    fn parent_chain(&self, parent_hash: B256) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+    pub(crate) fn parent_chain(
+        &self,
+        parent_hash: B256,
+    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;

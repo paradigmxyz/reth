@@ -16,11 +16,10 @@ use alloy_provider::{
     Provider, ProviderBuilder, RootProvider,
 };
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated,
-    PayloadStatus, PayloadStatusEnum,
+    ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{bail, ensure, eyre, Ok, WrapErr};
+use eyre::{bail, ensure, eyre, Ok, OptionExt, WrapErr};
 use futures_util::{
     future::{select, BoxFuture, Either},
     Future,
@@ -43,10 +42,11 @@ use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::RocksDBProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
     BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions, Chain,
-    DatabaseProviderFactory, HeaderProvider, PruneCheckpointReader, StageCheckpointReader,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, PruneCheckpointReader, SnapAttempt,
+    StageCheckpointReader,
 };
 use reth_prune_types::PruneSegment;
-use reth_rpc_api::TestingBuildBlockRequestV1;
+use reth_rpc_api::{TestingBuildBlockRequestV1, TestingBuildBlockResponseV1};
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
@@ -1004,6 +1004,14 @@ where
             .hash()
     }
 
+    /// Returns the snap attempt the node persisted.
+    pub fn snap_attempt(&self) -> eyre::Result<SnapAttempt>
+    where
+        <Node::Provider as DatabaseProviderFactory>::Provider: MetadataProvider,
+    {
+        self.inner.provider.database_provider_ro()?.snap_attempt()?.ok_or_eyre("no snap attempt")
+    }
+
     /// Sends FCU and waits for the node to sync to the given block.
     ///
     /// The forkchoice update makes the block the head, safe and finalized block, regardless of the
@@ -1407,11 +1415,11 @@ where
     pub async fn testing_build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> eyre::Result<ExecutionPayloadEnvelopeV5> {
+    ) -> eyre::Result<TestingBuildBlockResponseV1> {
         let client =
             self.rpc_client().ok_or_else(|| eyre::eyre!("HTTP RPC client not available"))?;
 
-        let res: ExecutionPayloadEnvelopeV5 =
+        let res: TestingBuildBlockResponseV1 =
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
     }
@@ -1442,7 +1450,16 @@ where
     ///   `RocksDB` is still open [`DATABASE_RELEASE_TIMEOUT`] after the node shut down.
     ///
     /// Drop such handles before stopping the node.
-    pub async fn stop(mut self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+    pub async fn stop(self) -> eyre::Result<StoppedNode<Node, AddOns>> {
+        self.stop_with_release_timeout(DATABASE_RELEASE_TIMEOUT).await
+    }
+
+    /// Stops the node like [`Self::stop`], but waits at most `release_timeout` instead of
+    /// [`DATABASE_RELEASE_TIMEOUT`] for the database and `RocksDB` to be released.
+    pub async fn stop_with_release_timeout(
+        mut self,
+        release_timeout: Duration,
+    ) -> eyre::Result<StoppedNode<Node, AddOns>> {
         let Some(NodeRestart { database, relaunch }) = self.restart.take() else {
             bail!(
                 "the node is not restartable, launch it with \
@@ -1465,7 +1482,7 @@ where
         .await?;
         ensure!(shut_down, "the node did not shut down within {WAIT_TIMEOUT:?}");
 
-        close_database(database, &data_dir).await?;
+        close_database(database, &data_dir, release_timeout).await?;
         Ok(StoppedNode { data_dir, relaunch, remove_data_dir: true })
     }
 
@@ -1518,8 +1535,12 @@ async fn wait_for_committed_chain<N: NodePrimitives>(
 /// database without removing its datadir, and waits until `RocksDB` is closed.
 ///
 /// Returns an error if the database or `RocksDB` is still open afterwards.
-async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<()> {
-    let released = tokio::time::timeout(DATABASE_RELEASE_TIMEOUT, async {
+async fn close_database(
+    database: TmpDB,
+    data_dir: &ChainPath<DataDirPath>,
+    release_timeout: Duration,
+) -> eyre::Result<()> {
+    let released = tokio::time::timeout(release_timeout, async {
         while Arc::strong_count(&database) > 1 {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -1527,9 +1548,9 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     .await;
     if released.is_err() {
         bail!(
-            "the database of the stopped node is still in use {DATABASE_RELEASE_TIMEOUT:?} after \
-             the node shut down: drop all handles that hold a provider of the node, e.g. a clone \
-             of `inner.provider`, before stopping it"
+            "the database of the stopped node is still in use {release_timeout:?} after the node \
+             shut down: drop all handles that hold a provider of the node, e.g. a clone of \
+             `inner.provider`, before stopping it"
         )
     }
     let database = Arc::into_inner(database)
@@ -1547,7 +1568,7 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
     // Providers drop their database handle before their `RocksDB` handle, whose drop flushes and
     // closes `RocksDB`, so the last provider can still be closing it. `RocksDB` does not open a
     // database twice in a process either, so wait until opening it succeeds.
-    let deadline = Instant::now() + DATABASE_RELEASE_TIMEOUT;
+    let deadline = Instant::now() + release_timeout;
     loop {
         let path = data_dir.rocksdb();
         let opened = tokio::task::spawn_blocking(move || {
@@ -1558,8 +1579,8 @@ async fn close_database(database: TmpDB, data_dir: &ChainPath<DataDirPath>) -> e
             Result::Ok(()) => return Ok(()),
             Err(err) if Instant::now() >= deadline => {
                 return Err(err).wrap_err(format!(
-                    "the RocksDB of the stopped node is still open {DATABASE_RELEASE_TIMEOUT:?} \
-                     after the node shut down: drop all handles of it, e.g. of \
+                    "the RocksDB of the stopped node is still open {release_timeout:?} after \
+                     the node shut down: drop all handles of it, e.g. of \
                      `inner.provider.rocksdb_provider()`, before stopping the node"
                 ))
             }
@@ -1779,6 +1800,7 @@ pub(crate) type Relaunch<Ctx> =
 mod tests {
     use super::*;
     use crate::{
+        snap::SnapControl,
         wait::{assert_holds_for, poll_until_with, PollOpts},
         NodeHelperType,
     };
@@ -1835,6 +1857,8 @@ mod tests {
         assert_send(node.import_payload(payload));
         assert_send(poll_until_with(PollOpts::default(), "", || async { Ok(Some(())) }));
         assert_send(assert_holds_for(Duration::ZERO, "", || async { Ok(true) }));
+        let gate = SnapControl::default().pause_on(|_| true);
+        assert_send(gate.reached());
     }
 
     /// Like [`test_helper_futures_are_send`], for the helpers that stop and restart a node.

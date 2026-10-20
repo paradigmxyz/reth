@@ -2687,12 +2687,12 @@ where
     /// and block body itself.
     fn validate_block(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate header");
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate block");
             return Err(e)
         }
 
