@@ -228,7 +228,7 @@ pub struct CachedPrecompileMetrics {
     /// Precompile cache misses
     pub precompile_cache_misses: metrics::Counter,
 
-    /// Precompile cache size. Uses the LRU cache length as the size metric.
+    /// Number of entries in the precompile cache.
     pub precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
