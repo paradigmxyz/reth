@@ -380,5 +380,5 @@ fn main() -> Result<()> {
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     recorder.install()?;
-    run(&config, &snapshotter).wrap_err_with(|| format!("trie-dst {config:?}"))
+    run(&config, &snapshotter).wrap_err_with(|| format!("reth-trie-dst {config:?}"))
 }

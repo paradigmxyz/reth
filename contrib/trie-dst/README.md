@@ -14,14 +14,16 @@ and the provider factory's shared overlay manager.
 From the reth repository root:
 
 ```sh
-cargo build --locked --manifest-path contrib/trie-dst/crates/Cargo.toml --profile profiling
-contrib/trie-dst/crates/target/profiling/trie-dst '{"seed":42,"blocks":64}' > /tmp/trie-dst-42.log
+CARGO_PROFILE_PROFILING_DEBUG_ASSERTIONS=true CARGO_PROFILE_PROFILING_OVERFLOW_CHECKS=true \
+  cargo build --locked -p reth-trie-dst --profile profiling
+target/profiling/reth-trie-dst '{"seed":42,"blocks":64}' > /tmp/reth-trie-dst-42.log
 ```
 
 Prerequisites are reth's normal Rust/native build dependencies, including Clang
-for RocksDB's bindings. The independent workspace pins its own dependencies in
-`crates/Cargo.lock`. Its profiling profile retains debug symbols and enables
-debug assertions and overflow checks. No production workspace member is added.
+for RocksDB's bindings. The crate belongs to the root workspace and uses its
+shared dependencies, `Cargo.lock`, and profiling profile. The command above and
+the packaging script enable debug assertions and overflow checks for this build
+without changing the root profile settings.
 
 The executable accepts one optional JSON object:
 
@@ -101,8 +103,8 @@ starts with a new empty database after the shared warm checkpoint. The seed
 controls generated operations; Bedrock's recorded random/preemption streams
 control scheduling. Mid-run semantic decision editing is unsupported.
 
-Finalization reports unfinished work as a failure and collects `trie-dst-run.log`,
-`trie-dst-controller.log`, and `trie-dst-done.json` under `/bedrock/out` alongside
+Finalization reports unfinished work as a failure and collects `reth-trie-dst-run.log`,
+`reth-trie-dst-controller.log`, and `reth-trie-dst-done.json` under `/bedrock/out` alongside
 the merged assertion stream. A worker timeout also fails the run. Increase the
 campaign duration if a larger configuration cannot finish before finalization.
 

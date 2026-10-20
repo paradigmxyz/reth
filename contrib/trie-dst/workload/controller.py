@@ -13,8 +13,8 @@ import time
 DEFAULTS = {"blocks": 64, "updates": 64, "proof_workers": 2, "timeout_secs": 60}
 LIMITS = {"blocks": (16, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
           "timeout_secs": (1, 3600)}
-STATE = Path("/tmp/trie-dst")
-ASSERTIONS = Path("/bedrock/assertions/trie-dst.jsonl")
+STATE = Path("/tmp/reth-trie-dst")
+ASSERTIONS = Path("/bedrock/assertions/reth-trie-dst.jsonl")
 
 
 def arguments(values):
@@ -32,7 +32,7 @@ def assertion(ok, detail):
     ASSERTIONS.parent.mkdir(parents=True, exist_ok=True)
     with ASSERTIONS.open("a") as output:
         record = {"condition": {"Bool": ok}, "result": ok,
-                  "message": f"E1/trie-dst: {detail}",
+                  "message": f"E1/reth-trie-dst: {detail}",
                   "location": {"file": "controller.py", "line": 35, "column": 1},
                   "timestamp_unix_nano": time.time_ns()}
         output.write(json.dumps({"Always": record}) + "\n")
@@ -64,7 +64,7 @@ def worker(config):
     try:
         with (STATE / "run.log").open("w") as output:
             result = subprocess.run(
-                ["/usr/local/bin/thread-fuzz", "/usr/local/bin/trie-dst",
+                ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
                  json.dumps(config["workload"])], stdout=output, stderr=subprocess.STDOUT,
                 timeout=max(1, config["run_secs"] - 5), check=False)
         ok = result.returncode == 0
@@ -104,7 +104,7 @@ def main():
                 "required": [], "replays_exactly": True, "action": None,
                 "notes": [], "host_decisions": []}
     if hook == "warmup":
-        return {"ready": True, "detail": "trie-dst controller ready; each branch starts with empty state"}
+        return {"ready": True, "detail": "reth-trie-dst controller ready; each branch starts with empty state"}
     if hook == "start":
         STATE.mkdir(parents=True, exist_ok=True)
         if (STATE / "worker.pid").exists():
@@ -131,7 +131,7 @@ def main():
         out.mkdir(parents=True, exist_ok=True)
         for name in ["run.log", "controller.log", "done.json"]:
             if (STATE / name).exists():
-                shutil.copyfile(STATE / name, out / ("trie-dst-" + name))
+                shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + name))
         collect(out / "assertions.jsonl")
     elif hook == "observe":
         return {"decisions": request["decisions"], "decision_diff": (["recorded decisions differ"] if request.get("original") is not None
