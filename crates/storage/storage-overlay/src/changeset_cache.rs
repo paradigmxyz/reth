@@ -286,7 +286,7 @@ impl ChangesetCache {
         let end_block = *range.end();
         let timer = Instant::now();
 
-        if !range.is_empty() && end_block > finish.number {
+        if end_block > finish.number {
             return Err(ProviderError::InsufficientChangesets {
                 requested: end_block,
                 available: 0..=finish.number,
