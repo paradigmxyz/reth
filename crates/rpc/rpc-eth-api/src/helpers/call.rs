@@ -21,8 +21,10 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    block::BlockExecutor, env::BlockEnvironment, execute::BlockBuilder, ConfigureEvm, Evm,
-    EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
+    block::{BlockExecutor, TxResult},
+    env::BlockEnvironment,
+    execute::BlockBuilder,
+    ConfigureEvm, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TransactionEnvMut, TxEnvFor,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
@@ -35,7 +37,6 @@ use reth_revm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::attach_bal_before_tx,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -707,13 +708,12 @@ pub trait Call:
 
     /// Retrieves the transaction if it exists and executes it.
     ///
-    /// Before the transaction is executed, the state is positioned right before the transaction,
-    /// either by attaching the block's cached BAL or by executing all previous transactions in the
-    /// block.
+    /// Before the transaction is executed, all previous transactions in the block are executed
+    /// through the block executor, which then executes the transaction itself, so the result
+    /// includes any chain-specific per-transaction settlement. A cached BAL is not used, because
+    /// the target would then run outside an executor that has replayed the block up to it.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
-    /// and the database that points to the beginning of the transaction. The database may have
-    /// the block's BAL attached and must only be used for reads, because an attached BAL takes
-    /// read precedence over state committed on top, see [`attach_bal_before_tx`].
+    /// and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
@@ -734,11 +734,10 @@ pub trait Call:
         R: Send + 'static,
     {
         async move {
-            let (transaction, block, bal) =
-                match self.transaction_and_block_and_maybe_bal(hash).await? {
-                    None => return Ok(None),
-                    Some(res) => res,
-                };
+            let (transaction, block) = match self.transaction_and_block(hash).await? {
+                None => return Ok(None),
+                Some(res) => res,
+            };
             let (tx, tx_info) = transaction.split();
 
             // we need to get the state of the parent block because we're essentially replaying the
@@ -746,15 +745,6 @@ pub trait Call:
             let parent_block = block.parent_hash();
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
-                    attach_bal_before_tx(&mut db, &bal, tx_index as usize);
-
-                    let evm_env = this.evm_env_for_header(block.sealed_block().sealed_header())?;
-                    let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                    let res = this.transact(&mut db, evm_env, tx_env)?;
-                    return f(tx_info, res, db)
-                }
-
                 let block_txs = block.transactions_recovered();
 
                 let mut executor = RpcNodeCore::evm_config(&this)
@@ -774,9 +764,10 @@ pub trait Call:
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
 
-                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-
-                let res = executor.evm_mut().transact(tx_env).map_err(Self::Error::from_evm_err)?;
+                let res = executor
+                    .execute_transaction_without_commit(tx)
+                    .map_err(Self::Error::from_eth_err)?
+                    .into_result();
                 drop(executor);
                 f(tx_info, res, db)
             })
@@ -789,8 +780,11 @@ pub trait Call:
     ///
     /// This executes on a caller provided EVM, so the target transaction can then be run on the
     /// same EVM, keeping any block-scoped EVM state intact. The EVM's inspector configuration is
-    /// left untouched; see
-    /// [`Trace::inspect_transaction_in_block`] to replay without inspection and trace the target.
+    /// left untouched.
+    ///
+    /// This bypasses the block executor, so it misses any chain-specific per-transaction
+    /// settlement the executor applies. To replay a block's own transactions, use
+    /// [`Trace::replay_block_until`] or [`Trace::inspect_transaction_in_block`] instead.
     ///
     /// If the target index is greater than or equal to the iterator length, all transactions are
     /// replayed.
