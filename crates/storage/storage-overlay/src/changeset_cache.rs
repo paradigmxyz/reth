@@ -410,9 +410,7 @@ impl ChangesetCache {
         let mut forward_updates = overlay_manager
             .parent_chain(finish.hash)
             .take_while(|block| block.recovered_block().number() >= start_block)
-            .map(|block| {
-                (block.recovered_block().number(), Arc::clone(&block.trie_data().trie_updates))
-            })
+            .map(|block| (block.recovered_block().number(), block.trie_updates()))
             .collect::<Vec<_>>();
         forward_updates.reverse();
 
