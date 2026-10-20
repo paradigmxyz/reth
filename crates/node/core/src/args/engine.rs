@@ -397,6 +397,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
 
+    /// Reuse fully validated prewarming results after checking their canonical read sets.
+    #[arg(long = "engine.prewarm-reuse", default_value_t = false)]
+    pub prewarm_reuse: bool,
+
     /// Enable best-effort txpool transaction prewarming between payloads.
     #[arg(
         long = "engine.txpool-prewarming",
@@ -660,6 +664,7 @@ impl Default for EngineArgs {
             caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
+            prewarm_reuse: false,
             txpool_prewarming_enabled,
             sender_recovery_cache_enabled,
             parallel_sparse_trie_enabled: true,
@@ -777,6 +782,7 @@ impl EngineArgs {
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
+            .with_prewarm_reuse(self.prewarm_reuse)
             .with_txpool_prewarming(self.txpool_prewarming_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
@@ -991,6 +997,7 @@ mod tests {
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
+            prewarm_reuse: false,
             // conflicts with --engine.disable-state-cache, covered by its own test below
             txpool_prewarming_enabled: false,
             sender_recovery_cache_enabled: true,

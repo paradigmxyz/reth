@@ -133,7 +133,7 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
-    ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
+    ConfigureEvm, Evm as _, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -1026,6 +1026,7 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        let prewarm_results = handle.prewarm_results();
         let execution_start = Instant::now();
         let evm_config =
             self.evm_config.clone().with_jit_support().with_precompile_cache_metrics(true);
@@ -1049,6 +1050,7 @@ where
                     handle.iter_transactions(),
                     &receipt_tx,
                     &executed_tx_index,
+                    prewarm_results.as_deref(),
                 )?;
 
                 let post_exec_start = Instant::now();
@@ -1195,6 +1197,7 @@ where
         transactions: impl Iterator<Item = Result<Tx, Err>>,
         receipt_tx: &ReceiptRootSender<N>,
         executed_tx_index: &AtomicUsize,
+        prewarm_results: Option<&super::payload_processor::prewarm::PrewarmResults>,
     ) -> Result<Vec<Address>, BlockExecutionError>
     where
         Tx: ExecutableTxFor<Evm>,
@@ -1229,7 +1232,26 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            if prewarm_results.is_some() {
+                metrics::counter!("engine.prewarm_reuse.attempts").increment(1);
+            }
+            let reused = if let Some(output) =
+                prewarm_results.and_then(|results| results.take(senders.len() - 1))
+            {
+                if output.matches_prestate(executor.evm_mut().state_db_mut())? {
+                    executor.try_commit_prewarmed(&tx, output)?
+                } else {
+                    metrics::counter!("engine.prewarm_reuse.conflicts").increment(1);
+                    false
+                }
+            } else {
+                false
+            };
+            if reused {
+                metrics::counter!("engine.prewarm_reuse.accepted").increment(1);
+            } else {
+                executor.execute_transaction(tx)?;
+            }
             self.metrics.record_transaction_execution(tx_start.elapsed());
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 

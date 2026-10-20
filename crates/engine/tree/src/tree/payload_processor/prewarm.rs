@@ -41,7 +41,7 @@ use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
-    Arc,
+    Arc, Mutex,
 };
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
@@ -244,18 +244,24 @@ where
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
-            match evm.transact_and_discard(&tx_env, &mut proof_targets) {
-                Ok(()) => {}
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree::payload_processor::prewarm",
-                        %err,
-                        "Error when executing prewarm transaction",
-                    );
-                    ctx.metrics.transaction_errors.increment(1);
-                    return;
-                }
+            let execution = if let Some(results) = &ctx.prewarm_results {
+                ctx.evm_config.prewarm_transaction(evm, tx_env).map(|output| {
+                    if let Some(output) = output {
+                        // Keep the existing trie-prefetch hints for reused execution.
+                        let _ =
+                            evm2::evm::StateChangeSource::visit(&output.state, &mut proof_targets);
+                        results.insert(index, output, &ctx.executed_tx_index);
+                    }
+                })
+            } else {
+                evm.transact_and_discard(&tx_env, &mut proof_targets)
             };
+            if let Err(err) = execution {
+                trace!(target: "engine::tree::payload_processor::prewarm", %err,
+                    "Error when executing prewarm transaction");
+                ctx.metrics.transaction_errors.increment(1);
+                return;
+            }
             ctx.metrics.execution_duration.record(start.elapsed());
 
             if ctx.should_stop() {
@@ -571,6 +577,8 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
+    /// Optional result handoff for this payload.
+    pub prewarm_results: Option<Arc<PrewarmResults>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -620,8 +628,11 @@ where
             );
         }
 
-        let evm_env =
-            self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
+        let evm_env = if self.prewarm_results.is_some() {
+            self.env.evm_env.clone()
+        } else {
+            self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled()
+        };
 
         Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
@@ -902,6 +913,7 @@ mod tests {
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
         };
         let (task, actions_tx) =
             PrewarmCacheTask::new(Runtime::test(), PayloadExecutionCache::default(), ctx);
@@ -943,6 +955,7 @@ mod tests {
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            prewarm_results: None,
         }
     }
 
@@ -1114,6 +1127,7 @@ mod tests {
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
                 cache_metrics: None,
+                prewarm_results: None,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
             _span: Span::none(),
@@ -1322,5 +1336,54 @@ mod tests {
             assert!(targets.storage_targets.contains_key(&keccak256(retained)));
             assert_eq!(count, 1);
         }
+    }
+}
+
+/// Bounded handoff of speculative results, scoped to one payload.
+#[derive(Debug, Default)]
+pub struct PrewarmResults(
+    Mutex<std::collections::BTreeMap<usize, reth_evm::execute::PrewarmResult>>,
+);
+
+impl PrewarmResults {
+    /// Removes stale results and returns the next canonical transaction's result without waiting.
+    pub fn take(&self, index: usize) -> Option<reth_evm::execute::PrewarmResult> {
+        let mut results = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut pending = results.split_off(&index);
+        let output = pending.remove(&index);
+        *results = pending;
+        output
+    }
+
+    fn insert(
+        &self,
+        index: usize,
+        output: reth_evm::execute::PrewarmResult,
+        executed: &AtomicUsize,
+    ) {
+        let mut results = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if index >= executed.load(Ordering::Relaxed) && results.len() < 1024 {
+            results.insert(index, output);
+        }
+    }
+}
+
+#[cfg(test)]
+mod reuse_tests {
+    use super::*;
+    use evm2::evm::PendingState;
+    use reth_evm::execute::PrewarmResult;
+
+    #[test]
+    fn prewarm_reuse_handoff_drops_late_and_stale_outputs() {
+        let results = PrewarmResults::default();
+        let executed = AtomicUsize::new(2);
+        let output = || PrewarmResult { state: PendingState::default(), result: Box::new(()) };
+        results.insert(1, output(), &executed);
+        assert!(results.take(1).is_none());
+        results.insert(2, output(), &executed);
+        results.insert(3, output(), &executed);
+        assert!(results.take(3).is_some());
+        assert!(results.take(2).is_none());
     }
 }

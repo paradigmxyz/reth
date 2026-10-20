@@ -93,6 +93,7 @@ where
     cross_block_cache_size: usize,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    prewarm_reuse: bool,
     /// Whether state cache should be disable
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
@@ -118,6 +119,7 @@ where
             execution_cache: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
+            prewarm_reuse: config.prewarm_reuse(),
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             cache_metrics: (!config.disable_cache_metrics())
@@ -426,6 +428,8 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let prewarm_results = (self.prewarm_reuse && self.evm_config.supports_prewarm_reuse())
+            .then(|| Arc::new(prewarm::PrewarmResults::default()));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -438,6 +442,7 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
+            prewarm_results: prewarm_results.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
         };
@@ -454,6 +459,7 @@ where
         CacheTaskHandle {
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
+            prewarm_results,
             executed_tx_index,
             cache_metrics: self.cache_metrics.clone(),
         }
@@ -618,6 +624,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
+    /// Returns the per-payload speculative result handoff.
+    pub fn prewarm_results(&self) -> Option<Arc<prewarm::PrewarmResults>> {
+        self.prewarm_handle.prewarm_results.clone()
+    }
+
     /// Returns iterator yielding transactions from the stream.
     pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
         self.transactions.iter().map(|(_, tx)| tx)
@@ -642,6 +653,7 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    prewarm_results: Option<Arc<prewarm::PrewarmResults>>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
@@ -856,6 +868,7 @@ mod tests {
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
                     cache_metrics: None,
+                    prewarm_results: None,
                 },
                 transactions: receiver,
                 _span: tracing::Span::none(),
