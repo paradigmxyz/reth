@@ -100,14 +100,18 @@ use crate::tree::{
         BlockAccessListDecodeError, InsertBlockError, InsertBlockErrorKind, InsertPayloadError,
     },
     instrumented_state::{InstrumentedStateProvider, StateProviderMetrics, StateProviderStats},
-    payload_processor::PayloadProcessor,
+    metrics::PrewarmReuseStats,
+    payload_processor::{
+        reuse::{PrewarmResults, ReuseMiss},
+        PayloadProcessor,
+    },
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     txpool_prewarm,
     types::{InsertPayloadResult, ValidationOutput},
     CacheWaitDurations, CachedStateProvider, EngineApiMetrics, EngineApiTreeState, ExecutionEnv,
     PayloadHandle, StateProviderDatabase, TreeConfig, WaitForCaches,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::{transaction::Either, Transaction as _, TxReceipt as _};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
@@ -136,8 +140,10 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    OnStateHook, SpecFor,
+    block::{BlockExecutor, TxResult},
+    execute::ExecutableTxFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, HaltReasonFor, OnStateHook, SpecFor,
+    TxExecutionResultFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedRevmBal;
@@ -149,10 +155,10 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockBody, BlockTy, FastInstant as Instant, GotExpected, NodePrimitives,
-    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
+    RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable, TxTy,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
+    BlockExecutionOutput, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
     StorageChangeSetReader, StorageSettingsCache,
@@ -160,7 +166,10 @@ use reth_provider::{
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, LazyTrieData};
-use revm::state::{bal::Bal as RevmBal, AccountInfo};
+use revm::{
+    context::Block as _,
+    state::{bal::Bal as RevmBal, AccountInfo},
+};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -308,7 +317,6 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -380,6 +388,7 @@ where
             &self.runtime,
             Arc::new(source),
             self.evm_config.clone(),
+            self.evm_config.reuses_prewarm_results() && self.config.prewarm_reuse(),
         ));
         self
     }
@@ -566,6 +575,10 @@ where
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm_env")
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
+        let pool_seeds = self
+            .txpool_prewarm
+            .as_ref()
+            .and_then(|prewarmer| prewarmer.seeds(parent_hash, &evm_env));
 
         // Extract the decoded BAL, if present. Undecodable block access list bytes invalidate the
         // payload.
@@ -591,6 +604,7 @@ where
             withdrawals: input.withdrawals().map(|w| w.to_vec()),
             decoded_bal: decoded_bal.as_ref().map(Arc::clone),
             txpool_snapshot: txpool_snapshot.clone(),
+            pool_seeds,
         };
 
         // Get an iterator over the transactions in the payload
@@ -953,7 +967,7 @@ where
             };
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -961,7 +975,7 @@ where
             let _enter = debug_span!(target: "engine::tree::payload_validator", "validate_header_against_parent").entered();
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
-                warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
             drop(_enter);
@@ -969,7 +983,7 @@ where
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
-                error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
+                error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, block).into())
             }
 
@@ -1007,7 +1021,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, HaltReasonFor<Evm>>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1065,6 +1079,8 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
+        // Reads made to validate prewarm results would be recorded in the built BAL.
+        let prewarm_results = handle.prewarm_results().filter(|_| !has_bal);
         executor.evm_mut().db_mut().set_state_hook(state_hook);
 
         let execution_start = Instant::now();
@@ -1077,8 +1093,13 @@ where
             &receipt_tx,
             &executed_tx_index,
             has_bal,
+            prewarm_results.as_deref(),
         )?;
         drop(receipt_tx);
+        // Free stale results off the execution path.
+        if let Some(prewarm_results) = prewarm_results {
+            self.runtime.spawn_drop(prewarm_results);
+        }
 
         // Finish execution and get the result
         let post_exec_start = Instant::now();
@@ -1145,7 +1166,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &PayloadHandle<Tx, Err, N::Receipt>,
+        handle: &PayloadHandle<Tx, Err, N::Receipt, HaltReasonFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
@@ -1229,7 +1250,8 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
-    fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
+    #[expect(clippy::too_many_arguments)]
+    fn execute_transactions<'a, E, Tx, Err, DB>(
         &self,
         mut executor: E,
         transaction_count: usize,
@@ -1237,15 +1259,20 @@ where
         receipt_tx: &crossbeam_channel::Sender<IndexedReceipt<N::Receipt>>,
         executed_tx_index: &AtomicUsize,
         has_bal: bool,
+        prewarm_results: Option<&PrewarmResults<HaltReasonFor<Evm>>>,
     ) -> Result<(E, Vec<Address>), BlockExecutionError>
     where
-        E: BlockExecutor<Receipt = N::Receipt, Evm: alloy_evm::Evm<DB = &'a mut State<DB>>>,
-        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<InnerTx>,
-        InnerTx: TxHashRef,
+        E: BlockExecutor<
+            Receipt = N::Receipt,
+            Result = TxExecutionResultFor<Evm>,
+            Evm: alloy_evm::Evm<DB = &'a mut State<DB>, HaltReason = HaltReasonFor<Evm>>,
+        >,
+        Tx: alloy_evm::block::ExecutableTx<E> + alloy_evm::RecoveredTx<TxTy<N>>,
         DB: revm::Database + 'a,
         Err: core::error::Error + Send + Sync + 'static,
     {
         let mut senders = Vec::with_capacity(transaction_count);
+        let mut reuse_stats = PrewarmReuseStats::default();
 
         // Apply pre-execution changes (e.g., beacon root update)
         let pre_exec_start = Instant::now();
@@ -1274,7 +1301,7 @@ where
             self.metrics.record_transaction_wait(wait_start.elapsed());
 
             let tx = tx_result.map_err(BlockValidationError::other)?;
-            let tx_signer = *<Tx as alloy_evm::RecoveredTx<InnerTx>>::signer(&tx);
+            let tx_signer = *<Tx as alloy_evm::RecoveredTx<TxTy<N>>>::signer(&tx);
 
             senders.push(tx_signer);
 
@@ -1291,7 +1318,27 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx)?;
+            let index = senders.len() - 1;
+            match prewarm_results {
+                Some(results) => {
+                    let outcome = self.commit_prewarm_result(
+                        &mut executor,
+                        results,
+                        index,
+                        <Tx as alloy_evm::RecoveredTx<TxTy<N>>>::tx(&tx),
+                    )?;
+                    if outcome.is_err() {
+                        // Later prewarm results are refreshed against the actual writes.
+                        executor.execute_transaction_with_result_closure(tx, |result| {
+                            results.publish_executed(index, &result.result().state)
+                        })?;
+                    }
+                    reuse_stats.record(outcome);
+                }
+                None => {
+                    executor.execute_transaction(tx)?;
+                }
+            }
             self.metrics.record_transaction_execution(tx_start.elapsed());
 
             // advance the shared counter so prewarm workers skip already-executed txs
@@ -1314,7 +1361,50 @@ where
 
         drop(exec_span);
 
+        if prewarm_results.is_some() {
+            self.metrics.prewarm_reuse.record(reuse_stats);
+        }
+
         Ok((executor, senders))
+    }
+
+    /// Commits the prewarm result of the transaction at `index` instead of executing it, if the
+    /// result is ready and its reads match the current state.
+    fn commit_prewarm_result<'a, E, DB>(
+        &self,
+        executor: &mut E,
+        results: &PrewarmResults<HaltReasonFor<Evm>>,
+        index: usize,
+        tx: &TxTy<N>,
+    ) -> Result<Result<(), ReuseMiss>, BlockExecutionError>
+    where
+        E: BlockExecutor<
+            Receipt = N::Receipt,
+            Result = TxExecutionResultFor<Evm>,
+            Evm: alloy_evm::Evm<DB = &'a mut State<DB>, HaltReason = HaltReasonFor<Evm>>,
+        >,
+        DB: revm::Database + 'a,
+    {
+        // Skipping execution bypasses the block executor's available gas check. Ignoring the
+        // transaction gas limit cap makes this check stricter; normal execution handles the rest.
+        let block = executor.evm().block();
+        let block_gas_used = executor.receipts().last().map_or(0, |r| r.cumulative_gas_used());
+        if tx.gas_limit() > block.gas_limit().saturating_sub(block_gas_used) {
+            return Ok(Err(ReuseMiss::Stale))
+        }
+
+        let result = match results
+            .take_valid(index, executor.evm_mut().db_mut())
+            .map_err(BlockExecutionError::other)?
+        {
+            Ok(result) => result,
+            Err(miss) => return Ok(Err(miss)),
+        };
+        let Some(result) = self.evm_config.prewarm_tx_result(tx, result) else {
+            return Ok(Err(ReuseMiss::Stale))
+        };
+        executor.commit_transaction(result);
+        Ok(Ok(()))
     }
 
     /// Validates the block after execution.
@@ -1409,6 +1499,7 @@ where
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
             N::Receipt,
+            HaltReasonFor<Evm>,
         >,
         InsertBlockErrorKind,
     > {
@@ -1797,7 +1888,6 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: BlockReader
-                          + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
@@ -1883,9 +1973,10 @@ where
                 return
             }
         };
-        // Warming reuses the head block's own environment rather than predicting the next
-        // block's: attribute-level accuracy (timestamp, basefee) doesn't matter for collecting
-        // state reads, and the worker disables the fee checks a stale basefee would trip.
+        // Unless results are recorded, warming reuses the head block's own environment rather
+        // than predicting the next block's: attribute-level accuracy (timestamp, basefee) doesn't
+        // matter for collecting state reads, and the worker disables the fee checks a stale
+        // basefee would trip.
         let evm_env = match self.evm_config.evm_env(parent.header()) {
             Ok(evm_env) => evm_env,
             Err(err) => {
@@ -1913,7 +2004,7 @@ where
                 return
             }
         };
-        txpool_prewarm.start(parent.hash(), evm_env, state_provider_factory)
+        txpool_prewarm.start(&parent, evm_env, state_provider_factory)
     }
 
     fn payload_builder_resources(

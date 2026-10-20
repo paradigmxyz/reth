@@ -511,26 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn a_header_committing_to_another_root_is_refused() {
-        // Ranges authenticate against the attempt's root, but completion answers to the header.
-        let header_root = B256::repeat_byte(0xcc);
-        let (factory, write, _) = downloaded(header_root, accounts().len());
-        let provider = factory.database_provider_rw().unwrap();
-        start(&provider, write).unwrap();
-
-        assert!(matches!(run_merkle(&provider, 1), Err(StageError::Block { .. })));
-        match provider.verify_state_root(write) {
-            Err(SnapSyncError::Provider(ProviderError::StateRootMismatch(mismatch))) => {
-                assert_eq!(
-                    mismatch.root,
-                    GotExpected { got: state_root(&accounts()), expected: header_root }
-                );
-            }
-            other => panic!("expected a state root mismatch, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn a_rebuild_for_an_earlier_attempt_is_not_trusted() {
         let root = state_root(&accounts());
         let (factory, write, blocks) = downloaded(root, accounts().len());

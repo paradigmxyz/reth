@@ -215,16 +215,17 @@ pub trait EthState: LoadState + SpawnBlocking {
                 for (address, slots) in &targets {
                     let hashed_address = keccak256(address);
                     proof_targets.account_targets.push(ProofV2Target::new(hashed_address));
-                    proof_targets
-                        .storage_targets
-                        .entry(hashed_address)
-                        .or_default()
-                        .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    if !slots.is_empty() {
+                        proof_targets
+                            .storage_targets
+                            .entry(hashed_address)
+                            .or_default()
+                            .extend(slots.iter().map(|slot| ProofV2Target::new(keccak256(slot))));
+                    }
                 }
 
-                let multiproof = state
-                    .multiproof_v2(Default::default(), proof_targets)
-                    .map_err(Self::Error::from_eth_err)?;
+                let multiproof =
+                    state.multiproof_v2(proof_targets, false).map_err(Self::Error::from_eth_err)?;
 
                 targets
                     .into_iter()
@@ -477,7 +478,7 @@ pub trait LoadState:
         >,
     > + Send
     where
-        Self: SpawnBlocking + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             if at.is_pending() {

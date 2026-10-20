@@ -27,7 +27,7 @@ pub struct RequiredBlockFilter<N> {
 
 impl<N> RequiredBlockFilter<N>
 where
-    N: NetworkEventListenerProvider + Peers + Clone + Send + Sync + 'static,
+    N: NetworkEventListenerProvider + Peers + Clone + 'static,
 {
     /// Creates a new required block peer filter.
     pub const fn new(network: N, block_num_hashes: Vec<BlockNumHash>) -> Self {

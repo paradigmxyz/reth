@@ -323,11 +323,11 @@ where
     runtime: reth_tasks::Runtime,
 }
 
-impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
+impl<N, P: Debug, T: PayloadTypes, V: Debug, C> std::fmt::Debug
     for EngineApiTreeHandler<N, P, T, V, C>
 where
     N: NodePrimitives,
-    C: Debug + ConfigureEvm<Primitives = N>,
+    C: ConfigureEvm<Primitives = N>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
@@ -518,6 +518,14 @@ where
     ///
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
+        let terminated = self.run_until_exit();
+        drop(self);
+        if let Some(tx) = terminated {
+            let _ = tx.send(());
+        }
+    }
+
+    fn run_until_exit(&mut self) -> Option<oneshot::Sender<()>> {
         loop {
             // Each iteration has three phases:
             //
@@ -547,14 +555,14 @@ where
                 Ok(true) => {
                     if let Err(err) = self.advance_persistence() {
                         error!(target: "engine::tree", %err, "Advancing persistence failed");
-                        return
+                        return None
                     }
                     continue;
                 }
                 Ok(false) => {}
                 Err(err) => {
                     error!(target: "engine::tree", %err, "Polling persistence failed");
-                    return
+                    return None
                 }
             }
 
@@ -573,24 +581,24 @@ where
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
-                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Break(tx)) => return Some(tx),
                         Ok(ops::ControlFlow::Continue(())) => {}
                         Err(fatal) => {
                             error!(target: "engine::tree", %fatal, "insert block fatal error");
-                            return
+                            return None
                         }
                     }
                 }
                 LoopEvent::PersistenceComplete { result, start_time } => {
                     if let Err(err) = self.on_persistence_complete(result, start_time) {
                         error!(target: "engine::tree", %err, "Persistence complete handling failed");
-                        return
+                        return None
                     }
                 }
                 LoopEvent::PayloadBuildFinished => {}
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
-                    return
+                    return None
                 }
             }
 
@@ -600,7 +608,7 @@ where
             // - After persistence completion: we can now persist more blocks if needed
             if let Err(err) = self.advance_persistence() {
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
-                return
+                return None
             }
         }
     }
@@ -1469,20 +1477,6 @@ where
         Ok(())
     }
 
-    /// Finishes termination by persisting all remaining blocks and signaling completion.
-    ///
-    /// This blocks until all persistence is complete. Always signals completion,
-    /// even if an error occurs.
-    fn finish_termination(
-        &mut self,
-        pending_termination: oneshot::Sender<()>,
-    ) -> Result<(), AdvancePersistenceError> {
-        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
-        let result = self.persist_until_complete();
-        let _ = pending_termination.send(());
-        result
-    }
-
     /// Persists all remaining blocks until none are left.
     fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
@@ -1585,11 +1579,12 @@ where
 
     /// Handles a message from the engine.
     ///
-    /// Returns `ControlFlow::Break(())` if the engine should terminate.
+    /// Returns `ControlFlow::Break` with the sender of the termination request if the engine
+    /// should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<oneshot::Sender<()>>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1601,10 +1596,11 @@ where
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
-                    if let Err(err) = self.finish_termination(tx) {
+                    trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
+                    if let Err(err) = self.persist_until_complete() {
                         error!(target: "engine::tree", %err, "Termination failed");
                     }
-                    return Ok(ops::ControlFlow::Break(()))
+                    return Ok(ops::ControlFlow::Break(tx))
                 }
             },
             FromEngine::Request(request) => {
@@ -2691,12 +2687,12 @@ where
     /// and block body itself.
     fn validate_block(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
-            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate header");
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
+            error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate block");
             return Err(e)
         }
 

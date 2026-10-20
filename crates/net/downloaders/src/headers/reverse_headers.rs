@@ -279,50 +279,8 @@ where
         }
 
         // If the last (smallest) validated header attaches to the local head, validate it.
-        if let Some((last_header, head)) = validated
-            .last_mut()
-            .zip(self.local_head.as_ref())
-            .filter(|(last, head)| last.number() == head.number() + 1)
-        {
-            // Every header must be valid on its own
-            if let Err(error) = self.consensus.validate_header(&*last_header) {
-                trace!(target: "downloaders::headers", %error, "Failed to validate header");
-                return Err(HeadersResponseError {
-                    request,
-                    peer_id: Some(peer_id),
-                    error: DownloadError::HeaderValidation {
-                        hash: head.hash(),
-                        number: head.number(),
-                        error: Box::new(error),
-                    },
-                }
-                .into())
-            }
-
-            // If the header is valid on its own, but not against its parent, we return it as
-            // detached head error.
-            // In stage sync this will trigger an unwind because this means that the local head
-            // is not part of the chain the sync target is on. In other words, the downloader was
-            // unable to connect the sync target with the local head because the sync target and
-            // the local head or on different chains.
-            if let Err(error) = self.consensus.validate_header_against_parent(&*last_header, head) {
-                let local_head = head.clone();
-                // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", %error, number = last_header.number(), hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
-
-                // Reset trackers so that we can start over the next time the sync target is
-                // updated.
-                // The expected event flow when that happens is that the node will unwind the local
-                // chain and restart the downloader.
-                self.reset();
-
-                return Err(HeadersDownloaderError::DetachedHead {
-                    local_head: Box::new(local_head),
-                    header: Box::new(last_header.clone()),
-                    error: Box::new(error),
-                }
-                .into())
-            }
+        if let Some(last_header) = validated.last() {
+            self.validate_attachment(last_header, request, peer_id)?;
         }
 
         // update tracked block info (falling block number)
@@ -330,6 +288,62 @@ where
             validated.last().expect("exists").number().saturating_sub(1);
         self.queued_validated_headers.extend(validated);
 
+        Ok(())
+    }
+
+    /// Validates `header` against the local head if it is the head's direct successor.
+    ///
+    /// Returns [`HeadersDownloaderError::DetachedHead`] if the header does not attach to it.
+    fn validate_attachment(
+        &mut self,
+        header: &SealedHeader<H::Header>,
+        request: HeadersRequest,
+        peer_id: PeerId,
+    ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
+        let Some(head) =
+            self.local_head.as_ref().filter(|head| header.number() == head.number() + 1)
+        else {
+            return Ok(())
+        };
+        // Every header must be valid on its own
+        if let Err(error) = self.consensus.validate_header(header) {
+            trace!(target: "downloaders::headers", %error, "Failed to validate header");
+            return Err(HeadersResponseError {
+                request,
+                peer_id: Some(peer_id),
+                error: DownloadError::HeaderValidation {
+                    hash: head.hash(),
+                    number: head.number(),
+                    error: Box::new(error),
+                },
+            }
+            .into())
+        }
+
+        // If the header is valid on its own, but not against its parent, we return it as
+        // detached head error.
+        // In stage sync this will trigger an unwind because this means that the local head
+        // is not part of the chain the sync target is on. In other words, the downloader was
+        // unable to connect the sync target with the local head because the sync target and
+        // the local head or on different chains.
+        if let Err(error) = self.consensus.validate_header_against_parent(header, head) {
+            let local_head = head.clone();
+            // Replace the last header with a detached variant
+            error!(target: "downloaders::headers", %error, number = header.number(), hash = ?header.hash(), "Header cannot be attached to known canonical chain");
+
+            // Reset trackers so that we can start over the next time the sync target is
+            // updated.
+            // The expected event flow when that happens is that the node will unwind the local
+            // chain and restart the downloader.
+            self.reset();
+
+            return Err(HeadersDownloaderError::DetachedHead {
+                local_head: Box::new(local_head),
+                header: Box::new(header.clone()),
+                error: Box::new(error),
+            }
+            .into())
+        }
         Ok(())
     }
 
@@ -429,6 +443,9 @@ where
                 }
 
                 trace!(target: "downloaders::headers", head=?self.local_block_number(), hash=?target.hash(), number=%target.number(), "Received sync target");
+
+                // A target right above the local head has no batch below it to attach.
+                self.validate_attachment(&target, request, peer_id)?;
 
                 // This is the next block we need to start issuing requests from
                 let parent_block_number = target.number().saturating_sub(1);
@@ -1539,6 +1556,32 @@ mod tests {
 
         assert_eq!(heap.pop().unwrap().block_number(), hi);
         assert_eq!(heap.pop().unwrap().block_number(), lo);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_detached_sync_target_above_the_local_head() {
+        let head = SealedHeader::<Header>::default();
+        let target = SealedHeader::seal_slow(Header {
+            number: 1,
+            parent_hash: B256::repeat_byte(1),
+            ..Default::default()
+        });
+        let client = Arc::new(TestHeadersClient::default());
+        client.extend(vec![target.as_ref().clone()]).await;
+        let consensus = TestConsensus::default();
+        consensus.set_fail_header_against_parent(true);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(Arc::clone(&client), Arc::new(consensus));
+        downloader.update_local_head(head.clone());
+        downloader.update_sync_target(SyncTarget::Tip(target.hash()));
+
+        let error = downloader.next().await.unwrap().unwrap_err();
+
+        assert_matches!(
+            error,
+            HeadersDownloaderError::DetachedHead { local_head, header, .. }
+                if *local_head == head && *header == target
+        );
     }
 
     #[tokio::test]
