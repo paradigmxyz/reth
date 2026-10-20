@@ -263,6 +263,21 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         transaction.into_tx_env()
     }
 
+    /// Whether this chain provides fully validated speculative outputs for reuse.
+    fn supports_prewarm_reuse(&self) -> bool {
+        false
+    }
+
+    /// Executes a transaction with all chain-specific validation enabled for later ordered reuse.
+    #[cfg(feature = "std")]
+    fn prewarm_transaction(
+        &self,
+        _evm: &mut EvmFor<'_, Self>,
+        _transaction: TxEnvFor<Self>,
+    ) -> Result<Option<execute::PrewarmResult>, execute::BlockExecutionError> {
+        Ok(None)
+    }
+
     /// Provides a reference to the configured EVM factory state.
     #[cfg(feature = "std")]
     fn evm_factory(&self) -> &EvmFactoryFor<Self> {

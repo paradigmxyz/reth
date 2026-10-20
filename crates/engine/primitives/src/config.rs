@@ -154,6 +154,8 @@ pub struct TreeConfig {
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
+    /// Whether fully validated speculative results can be reused after read-set checks.
+    prewarm_reuse: bool,
     /// Whether txpool-driven prewarming between payloads is enabled.
     txpool_prewarming: bool,
     /// Whether to enable state provider metrics.
@@ -264,6 +266,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
+            prewarm_reuse: false,
             txpool_prewarming: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
@@ -355,6 +358,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
+            prewarm_reuse: false,
             txpool_prewarming: false,
             state_provider_metrics,
             cross_block_cache_size,
@@ -869,6 +873,17 @@ impl TreeConfig {
     pub const fn with_proof_jitter(mut self, proof_jitter: Option<Duration>) -> Self {
         self.proof_jitter = proof_jitter;
         self
+    }
+
+    /// Enables reusing fully validated speculative transaction results.
+    pub const fn with_prewarm_reuse(mut self, enabled: bool) -> Self {
+        self.prewarm_reuse = enabled;
+        self
+    }
+
+    /// Returns whether speculative transaction reuse is enabled.
+    pub const fn prewarm_reuse(&self) -> bool {
+        self.prewarm_reuse
     }
 }
 

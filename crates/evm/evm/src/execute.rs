@@ -396,6 +396,15 @@ pub trait BlockExecutor: Sized {
     fn validate_transaction_gas_limit(&mut self, gas_limit: u64)
         -> Result<(), BlockExecutionError>;
 
+    /// Accepts a prewarmed result after canonical read-set validation, when supported.
+    fn try_commit_prewarmed(
+        &mut self,
+        _transaction: &impl RecoveredTx<Self::Transaction>,
+        _output: PrewarmResult,
+    ) -> Result<bool, BlockExecutionError> {
+        Ok(false)
+    }
+
     /// Executes a transaction and detaches its state changes without committing them.
     fn execute_transaction_without_commit(
         &mut self,
@@ -1558,5 +1567,80 @@ mod tests {
                 input: Bytes::from_static(&[7]),
             })
         );
+    }
+}
+
+/// A successful, fully validated speculative transaction and its complete read/write state.
+#[derive(Debug)]
+pub struct PrewarmResult {
+    /// Every account and storage slot observed during execution.
+    pub state: evm2::evm::PendingState,
+    /// Chain-specific result metadata, consumed by that chain's block executor.
+    pub result: Box<dyn core::any::Any + Send>,
+}
+
+impl PrewarmResult {
+    /// Checks all transaction-boundary reads against the canonical accepted overlay.
+    pub fn matches_prestate(&self, db: &mut dyn DynDatabase) -> Result<bool, BlockExecutionError> {
+        for account in self.state.account_changes() {
+            if db.get_account(&account.address).map_err(map_database_error)?.as_ref() !=
+                account.original
+            {
+                return Ok(false);
+            }
+            // Lifecycle changes need additional dependency tracking; replay these serially.
+            if account.created || account.selfdestructed || account.storage.wiped {
+                return Ok(false);
+            }
+            for (key, slot) in &account.storage.slots {
+                if db.get_storage(&account.address, key).map_err(map_database_error)? !=
+                    slot.value.original
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod prewarm_reuse_tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use evm2::evm::{AccountInfo, InMemoryDB, PendingState};
+
+    #[test]
+    fn prewarm_reuse_checks_unchanged_reads_and_writes() {
+        let address = Address::repeat_byte(0x42);
+        let info = AccountInfo::default();
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(&address, info.clone());
+        database.insert_account_storage(&address, &U256::ZERO, &U256::from(7));
+        database.insert_account_storage(&address, &U256::from(1), &U256::from(8));
+        let mut state = PendingState::default();
+        state.insert_account(address, Some(info.clone()), Some(info.clone()));
+        // Slot zero was only read; it must be checked just like the written slot.
+        state.insert_storage(address, U256::ZERO, U256::from(7), U256::from(7));
+        state.insert_storage(address, U256::from(1), U256::from(8), U256::from(9));
+        let output = PrewarmResult { state, result: Box::new(()) };
+        assert!(output.matches_prestate(&mut database).unwrap());
+        database.insert_account_storage(&address, &U256::ZERO, &U256::from(6));
+        assert!(!output.matches_prestate(&mut database).unwrap());
+        database.insert_account_storage(&address, &U256::ZERO, &U256::from(7));
+        database.insert_account_info(&address, AccountInfo { nonce: 1, ..info });
+        assert!(!output.matches_prestate(&mut database).unwrap());
+    }
+
+    #[test]
+    fn prewarm_reuse_checks_missing_accounts() {
+        let address = Address::repeat_byte(0x42);
+        let mut state = PendingState::default();
+        state.insert_account(address, None, None);
+        let output = PrewarmResult { state, result: Box::new(()) };
+        let mut database = InMemoryDB::default();
+        assert!(output.matches_prestate(&mut database).unwrap());
+        database.insert_account_info(&address, AccountInfo { nonce: 1, ..Default::default() });
+        assert!(!output.matches_prestate(&mut database).unwrap());
     }
 }
