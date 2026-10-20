@@ -1,0 +1,10 @@
+prepare: [./prepare.sh]
+compose: compose.yaml
+planner: controller.py
+command: podman exec trie-dst /usr/local/bin/controller.py
+memory_mb: 4096
+workload_args:
+  blocks: 64
+  updates: 64
+  proof_workers: 2
+  timeout_secs: 60

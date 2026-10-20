@@ -1,0 +1,9 @@
+[workspace]
+members = ["trie-dst"]
+resolver = "2"
+
+[profile.profiling]
+inherits = "release"
+debug = 1
+debug-assertions = true
+overflow-checks = true

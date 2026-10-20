@@ -204,7 +204,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the shared overlay manager.
-    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
+    pub const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
         &self.overlay_manager
     }
 
