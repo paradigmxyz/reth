@@ -10,8 +10,8 @@ esac
 # Validate before building; parse-args is also used by the host driver.
 python3 -c 'import json,sys; print(json.dumps({"config_file":sys.argv[1],"args":[]}))' "$2" | "$root/workload/controller.py" parse-args - >/dev/null
 read -r -a docker_cmd <<< "${DOCKER:-docker}"
-cache=${TEMPO_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst}
-sccache=${TEMPO_SCCACHE_DIR:-$cache/sccache}
+cache=${BEDROCK_DST_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst}
+sccache=${BEDROCK_DST_SCCACHE_DIR:-$cache/sccache}
 mkdir -p "$cache" "$sccache" "$RUN_DIR"
 cache=$(cd "$cache" && pwd)
 sccache=$(cd "$sccache" && pwd)
