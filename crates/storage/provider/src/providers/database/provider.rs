@@ -874,20 +874,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Unwinds trie state starting at and including the given block.
-    ///
-    /// This includes calculating the resulted state root and comparing it with the parent block
-    /// state root.
+    /// Unwinds hashed state, history indices and trie tables from the Finish checkpoint down to and
+    /// including the given block.
     pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
-        let finish =
-            self.get_stage_checkpoint(reth_stages_types::StageId::Finish)?.ok_or_else(|| {
-                ProviderError::InsufficientChangesets { requested: from, available: 0..=0 }
-            })?;
+        let db_tip_block = self
+            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: from,
+                available: 0..=0,
+            })?
+            .block_number;
 
-        // Calculate changesets before modifying hashed state used to reconstruct historical tries.
+        // Calculate the trie revert before unwinding the hashed state it is reconstructed from.
         let trie_revert = self
             .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
+            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
 
         let changed_accounts = self.account_changesets_range(from..)?;
 
@@ -905,6 +906,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind storage history indices.
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
+        // Unwind accounts/storages trie tables using the revert.
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())

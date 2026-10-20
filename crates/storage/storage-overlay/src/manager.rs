@@ -124,8 +124,18 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self.changeset_cache
     }
 
-    /// Gets complete trie before-values for an inclusive block range, oldest values taking
-    /// precedence. No updates from outside the requested range are included.
+    /// Gets the trie reverts for an inclusive block range, restoring the trie to its state before
+    /// the range. Every trie path changed within the range is included, oldest values taking
+    /// precedence, and no path changed only outside the range is included. An empty range returns
+    /// empty reverts.
+    ///
+    /// Reverts are computed from the provider's current hashed state and stage checkpoints, so
+    /// this must be called before unwinding them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the Finish checkpoint is missing, the range ends beyond it, or
+    /// database access fails.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
@@ -632,16 +642,33 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Returns every in-memory block in the chain whose tip is `parent_hash`.
-    pub(crate) fn parent_chain(
-        &self,
-        parent_hash: B256,
-    ) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
+    fn parent_chain(&self, parent_hash: B256) -> impl Iterator<Item = ExecutedBlock<N>> + '_ {
         let mut hash = parent_hash;
         std::iter::from_fn(move || {
             let block = self.blocks.get(&hash)?;
             hash = block.recovered_block().parent_hash();
             Some(block.clone())
         })
+    }
+
+    /// Returns the trie updates of in-memory blocks numbered `from_block` or later in the chain
+    /// whose tip is `tip_hash`, in increasing block order.
+    ///
+    /// Stops at the first block that is not in memory, so older blocks may be missing.
+    pub(crate) fn chain_trie_updates(
+        &self,
+        tip_hash: B256,
+        from_block: BlockNumber,
+    ) -> Vec<(BlockNumber, Arc<TrieUpdatesSorted>)> {
+        let mut trie_updates = self
+            .parent_chain(tip_hash)
+            .take_while(|block| block.recovered_block().number() >= from_block)
+            .map(|block| {
+                (block.recovered_block().number(), Arc::clone(&block.trie_data().trie_updates))
+            })
+            .collect::<Vec<_>>();
+        trie_updates.reverse();
+        trie_updates
     }
 
     /// Returns true if `hash` is in the parent chain segment from `anchor_hash` inclusive to
