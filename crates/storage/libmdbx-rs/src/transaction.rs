@@ -8,7 +8,7 @@ use crate::{
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use std::{
-    cell::Cell,
+    cell::RefCell,
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
     marker::PhantomData,
@@ -79,9 +79,10 @@ where
     /// but the monitor doesn't reset the transaction, so it stays valid until dropped.
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Option<Arc<AtomicBool>>,
-    /// Whether a [`Self::txn_execute`] closure is running, to reject reentrant use of the
-    /// transaction, for example from a [`TableObject`] decoder.
-    executing: Cell<bool>,
+    /// Held while a [`Self::txn_execute`] closure runs, to reject reentrant use of the
+    /// transaction, for example by a [`TableObject`] decoder that reaches it through a thread
+    /// local.
+    executing: RefCell<()>,
     committed: bool,
     env: Environment,
     _marker: PhantomData<fn(K)>,
@@ -114,7 +115,7 @@ where
             } else {
                 None
             },
-            executing: Cell::new(false),
+            executing: RefCell::new(()),
             committed: false,
             env,
             _marker: PhantomData,
@@ -141,11 +142,10 @@ where
             return Err(Error::ReadTransactionTimeout)
         }
 
-        // Values read by `f` point into MDBX pages, which a reentrant write could modify.
-        assert!(!self.executing.replace(true), "reentrant use of an MDBX transaction");
-        let result = f(self.txn);
-        self.executing.set(false);
-        Ok(result)
+        // Values read by `f` point into MDBX pages, which a reentrant write could modify. The guard
+        // is released when `f` returns or unwinds.
+        let _guard = self.executing.try_borrow_mut().expect("reentrant use of an MDBX transaction");
+        Ok(f(self.txn))
     }
 
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
@@ -590,6 +590,7 @@ unsafe impl<K> Send for Transaction<K> where K: TransactionKind {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     const fn assert_send<T: Send>() {}
 
@@ -606,5 +607,17 @@ mod tests {
         let env = Environment::builder().open(dir.path()).unwrap();
         let txn = env.begin_rw_txn().unwrap();
         let _ = txn.txn_execute(|_| txn.txn_execute(|_| ()));
+    }
+
+    #[test]
+    fn txn_execute_after_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().open(dir.path()).unwrap();
+        let txn = env.begin_ro_txn().unwrap();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _ = txn.txn_execute(|_| panic!("decoder failed"));
+        }));
+        assert!(result.is_err());
+        txn.id().unwrap();
     }
 }

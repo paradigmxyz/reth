@@ -25,7 +25,8 @@ pub type DupCursorMutTy<'tx, TX, T> = <TX as DbTxMut>::DupCursorMut<'tx, T>;
 /// # Safety
 ///
 /// Cursors must be safe to send to another thread together with the transaction they borrow, as
-/// long as neither is used on the original thread afterwards.
+/// long as neither is used on the original thread afterwards. If the transaction is `Sync`, its
+/// cursors must also be safe to send to another thread on their own.
 pub unsafe trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
     type Cursor<'tx, T: Table>: DbCursorRO<T>

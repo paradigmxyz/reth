@@ -246,6 +246,7 @@ mod read_transactions {
                 loop {
                     let now = Instant::now();
                     let mut max_active_transaction_duration = None;
+                    let mut newly_timed_out = Vec::new();
 
                     // Time out and remove read transactions that are open for longer than
                     // `self.max_duration`.
@@ -262,10 +263,16 @@ mod read_transactions {
                         // here. Every following operation on it fails, and it releases its
                         // snapshot when dropped.
                         timed_out.store(true, Ordering::Relaxed);
-                        warn!(target: "libmdbx", open_duration = ?duration, ?backtrace, "Long-lived read transaction has been timed out");
                         self.timed_out_not_aborted.insert(ptr);
+                        newly_timed_out.push((duration, backtrace.take()));
                         false
                     });
+
+                    // Log outside of `retain`, which holds a shard lock that blocks opening and
+                    // dropping read transactions.
+                    for (open_duration, backtrace) in newly_timed_out {
+                        warn!(target: "libmdbx", ?open_duration, ?backtrace, "Long-lived read transaction has been timed out");
+                    }
 
                     if !self.active.is_empty() {
                         trace!(
