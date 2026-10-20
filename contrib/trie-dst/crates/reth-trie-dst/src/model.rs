@@ -42,7 +42,7 @@ pub fn generate(
         if new_account || rng.random_ratio(1, 4) {
             entry.account.nonce += 1;
             entry.account.balance = U256::from(rng.random_range(1..=1_000_000u64));
-            delta.accounts.insert(hashed_address, Some(entry.account));
+            delta.accounts.insert(hashed_address, Some(entry.account.to_owned()));
             operations.push(json!({"address": address, "account": entry.account}));
         } else {
             let slot = U256::from(rng.random_range(0..64u64));
@@ -121,7 +121,8 @@ pub fn root(state: &Model) -> B256 {
     let leaves = state
         .iter()
         .map(|(address, entry)| {
-            let account: TrieAccount = entry.account.into_trie_account(storage_root(entry));
+            let account: TrieAccount =
+                entry.account.to_owned().into_trie_account(storage_root(entry));
             (keccak256(address), alloy_rlp::encode(account))
         })
         .collect::<BTreeMap<_, _>>();

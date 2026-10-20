@@ -78,7 +78,7 @@ fn verify(
     .database_provider_ro()?;
     for (address, entry) in state {
         ensure!(
-            view.basic_account(address)? == Some(entry.account),
+            view.basic_account(address)?.as_ref() == Some(&entry.account),
             "plain account {address} at {tip}"
         );
         // Include deleted and never-written slots, not only surviving leaves.
@@ -91,7 +91,7 @@ fn verify(
             );
         }
         let proof = view.proof(Default::default(), *address, &slots)?;
-        ensure!(proof.info == Some(entry.account), "proof account {address} at {tip}");
+        ensure!(proof.info.as_ref() == Some(&entry.account), "proof account {address} at {tip}");
         ensure!(proof.storage_root == storage_root(entry), "proof storage root {address} at {tip}");
         proof.verify(root(state))?;
     }
@@ -105,7 +105,7 @@ fn verify(
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let expected = state
             .iter()
-            .map(|(address, entry)| (keccak256(address), entry.account))
+            .map(|(address, entry)| (keccak256(address), entry.account.to_owned()))
             .collect::<BTreeMap<_, _>>();
         ensure!(accounts == expected, "persisted hashed accounts at {tip}");
         let storage = provider
