@@ -46,6 +46,9 @@ where
 
 /// Computes aggregate trie changesets for an inclusive block range.
 ///
+/// Returns the value before `range.start()` of every trie node touched by a block in `range`,
+/// including nodes created and removed within it.
+///
 /// `state_trie_provider` must expose the complete trie and hashed state at `db_tip_block`.
 ///
 /// `forward_updates` contains original executed-block trie updates on that same chain, sorted by
