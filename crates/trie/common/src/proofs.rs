@@ -840,7 +840,7 @@ impl AccountProof {
     /// Convert into an EIP-1186 account proof response.
     ///
     /// For non-existent accounts, this returns `KECCAK_EMPTY` for `codeHash` and
-    /// `EMPTY_ROOT_HASH` for `storageHash`, matching reth's default behavior.
+    /// `EMPTY_ROOT_HASH` for `storageHash`.
     ///
     /// Use [`Self::into_eip1186_response_with`] to customize the behavior for
     /// non-existent accounts (e.g. returning `B256::ZERO` for geth compatibility).
@@ -858,7 +858,7 @@ impl AccountProof {
     /// for both `codeHash` and `storageHash`, matching geth's behavior since v1.13.4
     /// ([go-ethereum#28357](https://github.com/ethereum/go-ethereum/pull/28357)).
     ///
-    /// When `false`, returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH` (reth default).
+    /// When `false`, returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH`.
     ///
     /// See: <https://github.com/ethereum/go-ethereum/issues/28441>
     pub fn into_eip1186_response_with(
@@ -874,6 +874,9 @@ impl AccountProof {
         } else {
             (info.get_bytecode_hash(), self.storage_root)
         };
+        // `storage_proofs` holds one proof per requested slot, in request order. Providers that
+        // do not compute proofs return none, so those slots get an empty proof.
+        let mut storage_proofs = self.storage_proofs.into_iter();
         alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: self.address,
             balance: info.balance,
@@ -881,12 +884,13 @@ impl AccountProof {
             nonce: info.nonce,
             storage_hash,
             account_proof: normalize_eip1186_empty_trie_proof(self.proof),
-            storage_proof: self
-                .storage_proofs
+            storage_proof: slots
                 .into_iter()
-                .filter_map(|proof| {
-                    let input_slot = slots.iter().find(|s| s.as_b256() == proof.key)?;
-                    Some(proof.into_eip1186_proof(*input_slot))
+                .map(|slot| {
+                    let proof =
+                        storage_proofs.next().unwrap_or_else(|| StorageProof::new(slot.as_b256()));
+                    debug_assert_eq!(proof.key, slot.as_b256());
+                    proof.into_eip1186_proof(slot)
                 })
                 .collect(),
         }
@@ -1851,5 +1855,45 @@ mod tests {
 
         assert_eq!(resp.account_proof, multi);
         assert_eq!(resp.storage_proof[0].proof, single_non_sentinel);
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_keeps_key_of_each_requested_slot() {
+        let slot = B256::with_last_byte(1);
+        let value = U256::from(7);
+        let mut proof = StorageProof::new(slot);
+        proof.value = value;
+        let account = AccountProof {
+            address: Address::ZERO,
+            info: None,
+            proof: vec![],
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: vec![proof.clone(), proof.clone(), proof],
+        };
+        let keys = vec![
+            alloy_serde::JsonStorageKey::Number(U256::from(1)),
+            alloy_serde::JsonStorageKey::Hash(slot),
+            alloy_serde::JsonStorageKey::Number(U256::from(1)),
+        ];
+
+        let resp = account.into_eip1186_response(keys.clone());
+
+        assert_eq!(resp.storage_proof.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
+        assert!(resp.storage_proof.iter().all(|p| p.value == value));
+    }
+
+    #[cfg(feature = "eip1186")]
+    #[test]
+    fn eip1186_response_without_storage_proofs_has_entry_per_slot() {
+        let keys = vec![
+            alloy_serde::JsonStorageKey::Number(U256::from(1)),
+            alloy_serde::JsonStorageKey::Hash(B256::with_last_byte(1)),
+        ];
+
+        let resp = AccountProof::new(Address::ZERO).into_eip1186_response(keys.clone());
+
+        assert_eq!(resp.storage_proof.iter().map(|p| p.key).collect::<Vec<_>>(), keys);
+        assert!(resp.storage_proof.iter().all(|p| p.value.is_zero() && p.proof.is_empty()));
     }
 }

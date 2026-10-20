@@ -298,7 +298,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
             EthApiError::RequestBeyondHead { .. } |
-            EthApiError::ExceedsMaxProofWindow |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
@@ -308,6 +307,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
+            EthApiError::Internal(RethError::Provider(
+                reth_errors::ProviderError::StateAtBlockPruned(_),
+            )) => rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string()),
             EthApiError::PrevrandaoNotSet |
             EthApiError::ExcessBlobGasNotSet |
             EthApiError::InvalidBlockData(_) |
@@ -359,7 +361,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            EthApiError::PrunedHistoryUnavailable { .. } => {
+            EthApiError::PrunedHistoryUnavailable { .. } | EthApiError::ExceedsMaxProofWindow => {
                 rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
@@ -1278,6 +1280,18 @@ mod tests {
             .into_rpc_err();
             assert_eq!(err.code(), -32603);
         }
+    }
+
+    #[test]
+    fn unserved_state_errors_use_history_unavailable_code() {
+        let err =
+            EthApiError::from(reth_errors::ProviderError::StateAtBlockPruned(7)).into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "state at block #7 is pruned");
+
+        let err = EthApiError::ExceedsMaxProofWindow.into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "distance to target block exceeds maximum proof window");
     }
 
     #[test]
