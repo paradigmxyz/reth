@@ -2,22 +2,24 @@
 set -eo pipefail
 
 fixture_variant="${1:-amsterdam}"
-# Cache-bump for the EELS frame-mapping update (a1945ddfd).
+# EELS simulator image tag, tests@v21.0.1 covers Osaka, BPO and Amsterdam
+eels_tag="v21.0.1"
+eels_build_args=(--sim.buildarg tag="${eels_tag}")
+eels_blob_build_args=("${eels_build_args[@]}")
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet@v7.2.1/fixtures_glamsterdam-devnet.tar.gz"
-        eels_branch="devnets/glamsterdam/7"
         eels_fork="Amsterdam"
         ;;
     osaka)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
-        eels_branch="mainnet"
         eels_fork="Osaka"
         ;;
     bogota)
+        # Bogota fixtures are not part of the mainnet simulator image release.
         eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-bogota-devnet@v1.1.0/fixtures_bogota-devnet.tar.gz"
         eels_branch="devnets/bogota/1"
+        eels_build_args=(--sim.buildarg fixtures="${eels_fixtures}" --sim.buildarg branch="${eels_branch}")
+        eels_blob_build_args=(--sim.buildarg branch="${eels_branch}")
         eels_fork="Bogota"
         ;;
     *)
@@ -34,19 +36,16 @@ go build .
 
 ./hive -client reth # first builds and caches the client
 
-# Build the fixture-heavy EELS images serially to avoid exhausting the runner
-# while both builds download and unpack the same large fixture archive.
+# Build EELS images serially because Bogota still downloads and unpacks fixtures.
 echo "Building images"
 ./hive -client reth --sim "ethereum/eels/consume-engine" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
+    "${eels_build_args[@]}" \
     --sim.timelimit 1s || true
 ./hive -client reth --sim "ethereum/eels/consume-rlp" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
+    "${eels_build_args[@]}" \
     --sim.timelimit 1s || true
 ./hive -client reth --sim "ethereum/eels/execute-blobs" \
-    --sim.buildarg branch="${eels_branch}" \
+    "${eels_blob_build_args[@]}" \
     --sim.buildarg fork="${eels_fork}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
