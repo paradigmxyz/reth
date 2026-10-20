@@ -18,8 +18,8 @@ cargo build --locked -p reth-trie-dst --profile dst
 target/dst/reth-trie-dst '{"seed":42,"blocks":64}' > /tmp/reth-trie-dst-42.log
 ```
 
-Prerequisites are reth's normal Rust/native build dependencies, including Clang
-for RocksDB's bindings. The crate belongs to the root workspace and uses its
+Prerequisites for native builds are reth's normal Rust/native build dependencies,
+including Clang for RocksDB's bindings. The crate belongs to the root workspace and uses its
 shared dependencies, `Cargo.lock`, and `dst` profile. That profile inherits
 `profiling` and enables debug assertions and overflow checks.
 
@@ -91,8 +91,18 @@ The preparation hook builds the DST executable and controller image,
 compiles the readiness helper against Bedrock's `guest/libvmcall.h`, and
 normalizes the image archive with Bedrock's archive tool. It keeps symbols in
 the original executable and strips debug sections only from the image copy.
-`DOCKER` and `CARGO_BUILD_JOBS` customize the build tools. Container packaging
-requires an x86-64 Linux host with glibc no newer than the runtime image's glibc.
+The inline builder supplies Rust, Clang, sccache, and mold; the host needs Docker,
+Python 3, and `flock` on x86-64 Linux. `DOCKER` and `CARGO_BUILD_JOBS` customize
+the build tools.
+
+Cargo downloads, compiled targets, and the unstripped executable persist under
+`TEMPO_BUILD_CACHE` (Bedrock CI's workload cache), defaulting to
+`${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst`. Compilation uses sccache and mold
+with the `dst` profile. `TEMPO_SCCACHE_DIR` selects the compiler cache, defaulting
+to the workload cache's `sccache` directory; `SCCACHE_CACHE_SIZE` defaults to `10G`.
+Preparation writes timings and cache paths to `RUN_DIR/cache-info.env` and
+compiler statistics to `RUN_DIR/sccache.txt`, which Bedrock CI displays and
+uploads with its artifacts.
 
 The controller implements `parse-args`, `config`, `warmup`, `start`, `progress`,
 `finalize` and `observe`. It starts the executable under Bedrock's `thread-fuzz`,

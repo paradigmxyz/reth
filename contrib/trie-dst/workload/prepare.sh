@@ -10,18 +10,55 @@ esac
 # Validate before building; parse-args is also used by the host driver.
 python3 -c 'import json,sys; print(json.dumps({"config_file":sys.argv[1],"args":[]}))' "$2" | "$root/workload/controller.py" parse-args - >/dev/null
 read -r -a docker_cmd <<< "${DOCKER:-docker}"
-cargo build --locked --manifest-path "$root/crates/reth-trie-dst/Cargo.toml" --profile dst -j "${CARGO_BUILD_JOBS:-6}"
+cache=${TEMPO_BUILD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/reth-trie-dst}
+sccache=${TEMPO_SCCACHE_DIR:-$cache/sccache}
+mkdir -p "$cache" "$sccache" "$RUN_DIR"
+cache=$(cd "$cache" && pwd)
+sccache=$(cd "$sccache" && pwd)
+# Share the lock with Bedrock's cache pruning.
+exec 9>"$cache/build.lock"
+flock 9
 context=$(mktemp -d)
-trap 'rm -rf "$context"' EXIT
-# Keep symbols in the original executable for debugging recorded failures.
-objcopy --strip-debug "${CARGO_TARGET_DIR:-$root/../../target}/dst/reth-trie-dst" "$context/reth-trie-dst"
-cc -O2 -I "$BEDROCK_ROOT/guest" -x c - -o "$context/bedrock-ready" <<'C'
+build_started=$SECONDS
+trap 'printf "prepare_secs=%s\n" "$((SECONDS - build_started))" >> "$RUN_DIR/cache-info.env"; rm -rf "$context"' EXIT
+printf 'cache_dir=%s\nsccache_dir=%s\n' "$cache" "$sccache" > "$RUN_DIR/cache-info.env"
+printf '%s\n' bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 bedrock/reth-trie-dst:latest > "$RUN_DIR/docker-images"
+"${docker_cmd[@]}" build -f - -t bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 "$context" <<'DOCKERFILE'
+FROM rust:1.96-bookworm@sha256:19817ead3289c8c631c73df281e18b59b172f6a31f4f563290f69cddd06c30e9
+RUN apt-get update && apt-get install -y --no-install-recommends clang libclang-dev mold \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install sccache --version 0.14.0 --locked
+DOCKERFILE
+# Stable paths let fresh CI checkouts reuse compiler results.
+"${docker_cmd[@]}" run --rm -i --user "$(id -u):$(id -g)" \
+  --mount "type=bind,src=$(cd "$root/../.." && pwd),dst=/workspace,readonly" \
+  --mount "type=bind,src=$cache,dst=/cache" \
+  --mount "type=bind,src=$sccache,dst=/cache/sccache" \
+  --mount "type=bind,src=$context,dst=/out" \
+  --mount "type=bind,src=$RUN_DIR,dst=/run-info" \
+  --mount "type=bind,src=$BEDROCK_ROOT/guest,dst=/bedrock-guest,readonly" \
+  -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
+  -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-10G}" \
+  -w /workspace bedrock/reth-trie-dst-builder:rust1.96-sccache0.14 bash -seu <<'BUILD'
+export HOME=/cache CARGO_HOME=/cache/cargo CARGO_TARGET_DIR=/cache/target/reth-trie-dst
+export SCCACHE_DIR=/cache/sccache RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
+export CC='sccache gcc' CXX='sccache g++' RUSTFLAGS='-C link-arg=-fuse-ld=mold'
+mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$SCCACHE_DIR"
+touch "$CARGO_HOME" "$CARGO_TARGET_DIR"
+sccache --zero-stats >/dev/null
+trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' EXIT
+cargo build --locked -p reth-trie-dst --profile dst
+printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
+# Keep symbols in the cached executable for debugging recorded failures.
+objcopy --strip-debug "$CARGO_TARGET_DIR/dst/reth-trie-dst" /out/reth-trie-dst
+sccache gcc -O2 -I /bedrock-guest -x c - -o /out/bedrock-ready <<'C'
 #include "libvmcall.h"
 int main(void) {
     vmcall_ready();
     return 0;
 }
 C
+BUILD
 cp "$root/workload/controller.py" "$context/controller.py"
 "${docker_cmd[@]}" build -f - -t bedrock/reth-trie-dst:latest "$context" <<'DOCKERFILE'
 FROM debian:trixie-slim
