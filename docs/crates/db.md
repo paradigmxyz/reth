@@ -80,9 +80,9 @@ Reth's database design revolves around its main [Database trait](https://github.
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
 pub trait Database: Send + Sync + Debug {
     /// Read-Only database transaction
-    type TX: DbTx + Send + Sync + Debug + 'static;
+    type TX: DbTx + 'static;
     /// Read-Write database transaction
-    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
+    type TXMut: DbTx + TableImporter + 'static;
 
     /// Create read only transaction.
     #[track_caller]
@@ -142,11 +142,15 @@ The `TX` type can be any type that implements the `DbTx` trait, which provides a
 
 ```rust ignore
 /// Read only transaction
-pub trait DbTx: Debug + Send + Sync {
+pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
-    type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
+    type Cursor<'tx, T: Table>: DbCursorRO<T>
+    where
+        Self: 'tx;
     /// `DupCursor` type for this read-only transaction
-    type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
+    type DupCursor<'tx, T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T>
+    where
+        Self: 'tx;
 
     /// Get value by an owned key
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
@@ -161,9 +165,9 @@ pub trait DbTx: Debug + Send + Sync {
     /// Aborts transaction
     fn abort(self);
     /// Iterate over read only values in table.
-    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError>;
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError>;
     /// Returns number of entries in the table.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.
@@ -177,16 +181,18 @@ The `TXMut` type can be any type that implements the `DbTxMut` trait, which prov
 
 ```rust ignore
 /// Read write transaction that allows writing to database
-pub trait DbTxMut: Send + Sync {
+pub trait DbTxMut: Send {
     /// Read-Write Cursor type
-    type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
+    type CursorMut<'tx, T: Table>: DbCursorRW<T> + DbCursorRO<T>
+    where
+        Self: 'tx;
     /// Read-Write `DupCursor` type
-    type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
+    type DupCursorMut<'tx, T: DupSort>: DbDupCursorRW<T>
         + DbCursorRW<T>
         + DbDupCursorRO<T>
         + DbCursorRO<T>
-        + Send
-        + Sync;
+    where
+        Self: 'tx;
 
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
@@ -200,9 +206,9 @@ pub trait DbTxMut: Send + Sync {
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), DatabaseError>;
     /// Cursor mut
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError>;
     /// `DupCursor` mut.
-    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError>;
 }
 ```
 
@@ -245,7 +251,7 @@ self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 ```
 
 Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
-The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
+The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTx + TableImporter + 'static;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 This next example shows reading headers from static files using the static-file provider.
 

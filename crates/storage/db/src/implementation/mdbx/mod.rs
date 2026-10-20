@@ -661,6 +661,7 @@ impl DatabaseEnv {
                 SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
                 &version,
             )?;
+            drop(version_cursor);
             tx.commit()?;
         }
 
@@ -1159,6 +1160,7 @@ mod tests {
         }));
         assert_eq!(cursor.current().unwrap(), Some((key_to_insert, B256::ZERO)));
 
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -1166,6 +1168,7 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1240,6 +1243,7 @@ mod tests {
             assert!(cursor.insert(pos, &B256::ZERO).is_ok());
             assert_eq!(cursor.current().unwrap(), Some((pos, B256::ZERO)));
         }
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -1247,6 +1251,7 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1267,6 +1272,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         assert!(cursor.append(key_to_append, &B256::ZERO).is_ok());
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -1274,6 +1280,7 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1302,6 +1309,7 @@ mod tests {
             key: key_to_append.encode().into(),
         }));
         assert_eq!(cursor.current().unwrap(), Some((5, B256::ZERO))); // the end of table
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -1309,6 +1317,7 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 3, 4, 5]);
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
     }
 
@@ -1364,6 +1373,7 @@ mod tests {
                 )
             })
             .expect(ERROR_APPEND);
+        drop(cursor);
         tx.commit().expect(ERROR_COMMIT);
 
         // APPEND DUP & APPEND

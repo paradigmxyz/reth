@@ -78,8 +78,8 @@ pub struct TxMock {
 }
 
 impl DbTx for TxMock {
-    type Cursor<T: Table> = CursorMock;
-    type DupCursor<T: DupSort> = CursorMock;
+    type Cursor<'tx, T: Table> = CursorMock;
+    type DupCursor<'tx, T: DupSort> = CursorMock;
 
     /// Retrieves a value by key from the specified table.
     ///
@@ -120,7 +120,7 @@ impl DbTx for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data (all cursor operations return `None`).
-    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -128,7 +128,7 @@ impl DbTx for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data (all cursor operations return `None`).
-    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -148,8 +148,8 @@ impl DbTx for TxMock {
 }
 
 impl DbTxMut for TxMock {
-    type CursorMut<T: Table> = CursorMock;
-    type DupCursorMut<T: DupSort> = CursorMock;
+    type CursorMut<'tx, T: Table> = CursorMock;
+    type DupCursorMut<'tx, T: DupSort> = CursorMock;
 
     /// Inserts or updates a key-value pair in the specified table.
     ///
@@ -184,7 +184,7 @@ impl DbTxMut for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data and all write operations will be no-ops.
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 
@@ -192,7 +192,7 @@ impl DbTxMut for TxMock {
     ///
     /// **Mock behavior**: Returns a default [`CursorMock`] that will not
     /// iterate over any data and all write operations will be no-ops.
-    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<'_, T>, DatabaseError> {
         Ok(CursorMock { _cursor: 0 })
     }
 }

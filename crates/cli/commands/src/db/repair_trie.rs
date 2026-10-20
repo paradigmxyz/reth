@@ -172,7 +172,7 @@ fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
 }
 
 /// Checks that the merkle stage has completed running up to the account and storage hashing stages.
-fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> {
+fn verify_checkpoints(provider: &impl StageCheckpointReader) -> eyre::Result<()> {
     let account_hashing_checkpoint =
         provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
     let storage_hashing_checkpoint =
@@ -239,15 +239,14 @@ fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
 where
     <N::DB as reth_db_api::database::Database>::TXMut: DbTxMut + DbTx,
 {
+    provider_rw.tx_mut().disable_long_read_transaction_safety();
+
     // Create cursors for making modifications with
-    let tx = provider_rw.tx_mut();
-    tx.disable_long_read_transaction_safety();
+    let tx = provider_rw.tx_ref();
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they
-    // require it to be AsRef.
-    let tx = provider_rw.tx_ref();
+    // Create the cursor factories.
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
 

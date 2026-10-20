@@ -170,31 +170,34 @@ impl<T, A: TrieKeyAdapter> DatabaseTrieCursorFactory<T, A> {
     }
 }
 
-impl<TX, A> TrieCursorFactory for DatabaseTrieCursorFactory<&TX, A>
+impl<'tx, TX, A> TrieCursorFactory for DatabaseTrieCursorFactory<&'tx TX, A>
 where
     TX: DbTx,
     A: TrieTableAdapter,
 {
+    // The cursors borrow the transaction, not the factory, so they can outlive the factory.
     type AccountTrieCursor<'a>
-        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<A::AccountTrieTable>, A>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<'tx, A::AccountTrieTable>, A>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<A::StorageTrieTable>, A>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<'tx, A::StorageTrieTable>, A>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.tx.cursor_read::<A::AccountTrieTable>()?))
+        let tx: &'tx TX = self.tx;
+        Ok(DatabaseAccountTrieCursor::new(tx.cursor_read::<A::AccountTrieTable>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        let tx: &'tx TX = self.tx;
         Ok(DatabaseStorageTrieCursor::new(
-            self.tx.cursor_dup_read::<A::StorageTrieTable>()?,
+            tx.cursor_dup_read::<A::StorageTrieTable>()?,
             hashed_address,
         ))
     }
@@ -214,7 +217,7 @@ impl<C, A: TrieKeyAdapter> DatabaseAccountTrieCursor<C, A> {
 impl<C, A> TrieCursor for DatabaseAccountTrieCursor<C, A>
 where
     A: TrieTableAdapter,
-    C: DbCursorRO<A::AccountTrieTable> + Send,
+    C: DbCursorRO<A::AccountTrieTable>,
 {
     fn seek_exact(
         &mut self,
@@ -308,7 +311,7 @@ where
 impl<C, A> TrieCursor for DatabaseStorageTrieCursor<C, A>
 where
     A: TrieTableAdapter,
-    C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable> + Send,
+    C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable>,
 {
     fn seek_exact(
         &mut self,
@@ -356,7 +359,7 @@ where
 impl<C, A> TrieStorageCursor for DatabaseStorageTrieCursor<C, A>
 where
     A: TrieTableAdapter,
-    C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable> + Send,
+    C: DbCursorRO<A::StorageTrieTable> + DbDupCursorRO<A::StorageTrieTable>,
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;

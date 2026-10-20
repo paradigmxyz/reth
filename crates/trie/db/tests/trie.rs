@@ -494,6 +494,7 @@ fn storage_root_regression() {
     for (hashed_slot, value) in storage.clone() {
         hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
     }
+    drop(hashed_storage_cursor);
     tx.commit().unwrap();
     let tx = factory.provider_rw().unwrap();
 
@@ -674,6 +675,8 @@ fn account_and_storage_trie() {
     assert_eq!(nibbles2b.to_vec(), vec![0xB, 0x0]);
     let node2b = node2b.as_ref().unwrap();
     assert_eq!(node2a, node2b);
+    drop(hashed_account_cursor);
+    drop(hashed_storage_cursor);
     tx.commit().unwrap();
 
     {

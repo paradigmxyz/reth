@@ -6,9 +6,9 @@ use std::{fmt::Debug, path::PathBuf, sync::Arc};
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
 pub trait Database: Send + Sync + Debug {
     /// Read-Only database transaction
-    type TX: DbTx + Sync + 'static;
+    type TX: DbTx + 'static;
     /// Read-Write database transaction
-    type TXMut: DbTx + TableImporter + Sync + 'static;
+    type TXMut: DbTx + TableImporter + 'static;
 
     /// Create read only transaction.
     #[track_caller]

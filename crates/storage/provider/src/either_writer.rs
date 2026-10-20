@@ -43,7 +43,7 @@ use strum::{Display, EnumIs};
 type EitherReaderTy<'a, 'db, P, T> = EitherReader<
     'a,
     'db,
-    CursorTy<<P as DbTxProvider>::Tx, T>,
+    CursorTy<'a, <P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
@@ -51,21 +51,21 @@ type EitherReaderTy<'a, 'db, P, T> = EitherReader<
 type DupEitherReaderTy<'a, 'db, P, T> = EitherReader<
     'a,
     'db,
-    DupCursorTy<<P as DbTxProvider>::Tx, T>,
+    DupCursorTy<'a, <P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for dup [`EitherWriter`] constructors.
 type DupEitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    DupCursorMutTy<<P as DbTxProvider>::Tx, T>,
+    DupCursorMutTy<'a, <P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    CursorMutTy<<P as DbTxProvider>::Tx, T>,
+    CursorMutTy<'a, <P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
@@ -230,7 +230,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
@@ -246,7 +246,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
@@ -264,7 +264,7 @@ impl<'a> EitherWriter<'a, (), ()> {
 
     /// Creates a new [`EitherWriter`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
-        provider: &P,
+        provider: &'a P,
         _rocksdb_batch: RocksBatchArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
     where
@@ -686,7 +686,7 @@ pub enum EitherReader<'a, 'db, CURSOR, N> {
 impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
-        provider: &P,
+        provider: &'a P,
     ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionSenders>>
     where
         P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
@@ -704,7 +704,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
 
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
-        provider: &P,
+        provider: &'a P,
         rocksdb: RocksDBRefArg<'a, 'db>,
     ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::StoragesHistory>>
     where
@@ -725,7 +725,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
-        provider: &P,
+        provider: &'a P,
         rocksdb: RocksDBRefArg<'a, 'db>,
     ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionHashNumbers>>
     where
@@ -746,7 +746,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
 
     /// Creates a new [`EitherReader`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
-        provider: &P,
+        provider: &'a P,
         rocksdb: RocksDBRefArg<'a, 'db>,
     ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::AccountsHistory>>
     where
@@ -767,7 +767,7 @@ impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
-        provider: &P,
+        provider: &'a P,
     ) -> ProviderResult<DupEitherReaderTy<'a, 'db, P, tables::AccountChangeSets>>
     where
         P: DBProvider + StorageSettingsCache + StaticFileProviderFactory,
@@ -1394,14 +1394,14 @@ mod rocksdb_tests {
     }
 
     // Type aliases for cursor types (needed for EitherWriter/EitherReader type inference)
-    type AccountsHistoryWriteCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::AccountsHistory>;
-    type StoragesHistoryWriteCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::StoragesHistory>;
-    type AccountsHistoryReadCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::AccountsHistory>;
-    type StoragesHistoryReadCursor =
-        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::StoragesHistory>;
+    type AccountsHistoryWriteCursor<'tx> =
+        reth_db::mdbx::cursor::Cursor<'tx, reth_db::mdbx::RW, tables::AccountsHistory>;
+    type StoragesHistoryWriteCursor<'tx> =
+        reth_db::mdbx::cursor::Cursor<'tx, reth_db::mdbx::RW, tables::StoragesHistory>;
+    type AccountsHistoryReadCursor<'tx> =
+        reth_db::mdbx::cursor::Cursor<'tx, reth_db::mdbx::RO, tables::AccountsHistory>;
+    type StoragesHistoryReadCursor<'tx> =
+        reth_db::mdbx::cursor::Cursor<'tx, reth_db::mdbx::RO, tables::StoragesHistory>;
 
     /// Runs the same account history queries against both MDBX and `RocksDB` backends,
     /// asserting they produce identical results.
@@ -1417,11 +1417,11 @@ mod rocksdb_tests {
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
 
         // Create writers for both backends
-        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::Database(
                 mdbx_provider.tx_ref().cursor_write::<tables::AccountsHistory>().unwrap(),
             );
-        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::RocksDB(rocks_provider.batch());
 
         // Write identical data to both backends in a single loop
@@ -1445,11 +1445,15 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, '_, AccountsHistoryReadCursor, EthPrimitives> =
-                EitherReader::Database(
-                    mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
-                    PhantomData,
-                );
+            let mut mdbx_reader: EitherReader<
+                '_,
+                '_,
+                AccountsHistoryReadCursor<'_>,
+                EthPrimitives,
+            > = EitherReader::Database(
+                mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
+                PhantomData,
+            );
             let mdbx_result = mdbx_reader
                 .account_history_info(address, query.block_number, query.lowest_available, u64::MAX)
                 .unwrap();
@@ -1506,11 +1510,11 @@ mod rocksdb_tests {
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
 
         // Create writers for both backends
-        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::Database(
                 mdbx_provider.tx_ref().cursor_write::<tables::StoragesHistory>().unwrap(),
             );
-        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor<'_>, EthPrimitives> =
             EitherWriter::RocksDB(rocks_provider.batch());
 
         // Write identical data to both backends in a single loop
@@ -1534,11 +1538,15 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, '_, StoragesHistoryReadCursor, EthPrimitives> =
-                EitherReader::Database(
-                    mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
-                    PhantomData,
-                );
+            let mut mdbx_reader: EitherReader<
+                '_,
+                '_,
+                StoragesHistoryReadCursor<'_>,
+                EthPrimitives,
+            > = EitherReader::Database(
+                mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
+                PhantomData,
+            );
             let mdbx_result = mdbx_reader
                 .storage_history_info(
                     address,
