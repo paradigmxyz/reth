@@ -494,16 +494,26 @@ where
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                // First try to get cached block and receipts, as it's likely they're already
-                // cached. The cache reads missing receipts on its own blocking tasks.
-                let cached = self.eth_cache().get_receipts_and_maybe_block(block_hash).await?;
+                // Only take what the cache already holds, so that the receipts of a block whose
+                // bloom rules out the filter are never read.
+                let (maybe_block, receipts) =
+                    self.eth_cache().maybe_cached_block_and_receipts(block_hash).await?;
 
-                // With the block in the cache, serving its logs needs no further reads.
-                if let Some((receipts, Some(block))) = cached {
+                // With the block in the cache, serving its logs needs no further reads besides
+                // the receipts, which the cache reads on its own blocking tasks.
+                if let Some(block) = maybe_block {
                     let header = block.clone_sealed_header();
                     if !Self::block_logs_may_match(self.provider(), &filter, &header)? {
                         return Ok(Vec::new())
                     }
+                    let receipts = match receipts {
+                        Some(receipts) => receipts,
+                        None => self
+                            .eth_cache()
+                            .get_receipts(block_hash)
+                            .await?
+                            .ok_or(EthFilterError::ReceiptsUnavailable(header.number()))?,
+                    };
 
                     let mut all_logs = Vec::new();
                     append_matching_block_logs(
@@ -520,7 +530,6 @@ where
 
                 // Everything else is read from the provider, which shares the budget for blocking
                 // IO requests with the range scans instead of blocking an executor thread.
-                let receipts = cached.map(|(receipts, _)| receipts);
                 let permit = self
                     .eth_api
                     .acquire_owned_blocking_io()
@@ -813,7 +822,8 @@ where
     /// Returns the logs of the block with the given hash that match the filter, reading what the
     /// cache did not provide from the provider.
     ///
-    /// `receipts` are the receipts of the block, if the cache found them.
+    /// `receipts` are the receipts of the block, if the cache holds them. Otherwise they are only
+    /// read if the bloom of the block allows logs matching the filter.
     ///
     /// This performs blocking reads and must run on a blocking task.
     fn block_hash_logs_from_provider(
@@ -823,25 +833,6 @@ where
         receipts: Option<Arc<Vec<ProviderReceipt<Eth::Provider>>>>,
     ) -> Result<Vec<RpcLog<Eth::NetworkTypes>>, EthFilterError> {
         let provider = eth_api.provider();
-        let Some(receipts) = receipts else {
-            // the block itself may still exist with its receipts pruned
-            return Err(match provider.block_number(block_hash)? {
-                Some(number) => {
-                    let earliest_available = provider.earliest_block_number()?;
-                    if number < earliest_available {
-                        EthApiError::PrunedHistoryUnavailable {
-                            requested: number,
-                            earliest_available,
-                        }
-                        .into()
-                    } else {
-                        EthFilterError::ReceiptsUnavailable(number)
-                    }
-                }
-                None => ProviderError::HeaderNotFound(block_hash.into()).into(),
-            })
-        };
-
         let header = provider
             .header_by_hash_or_number(block_hash.into())?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
@@ -849,6 +840,14 @@ where
         if !Self::block_logs_may_match(provider, filter, &header)? {
             return Ok(Vec::new())
         }
+
+        let receipts = match receipts {
+            Some(receipts) => receipts,
+            None => provider
+                .receipts_by_block(block_hash.into())?
+                .map(Arc::new)
+                .ok_or(EthFilterError::ReceiptsUnavailable(header.number()))?,
+        };
 
         // The transactions are read with a single provider call once a log matches, instead of
         // with one call per receipt with a matching log.
@@ -2673,5 +2672,42 @@ mod tests {
             ),
             "{err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_logs_at_block_hash_bloom_miss_skips_receipts() {
+        let provider = MockEthProvider::default();
+        let header = alloy_consensus::Header { number: 3, ..Default::default() };
+        let hash = header.hash_slow();
+        // a block whose receipts were pruned
+        provider.add_block(hash, Block { header, body: Default::default() });
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            EthFilter::new(eth_api.clone(), EthFilterConfig::default(), Runtime::test());
+
+        for cached in [false, true] {
+            if cached {
+                eth_api.cache().get_recovered_block(hash).await.unwrap().unwrap();
+            }
+
+            // the empty bloom rules out the address, so the receipts are not needed
+            let logs = eth_filter
+                .logs_for_filter(
+                    Filter::new().address(Address::repeat_byte(1)).at_block_hash(hash),
+                    QueryLimits::default(),
+                )
+                .await
+                .unwrap();
+            assert!(logs.is_empty(), "cached: {cached}");
+
+            let err = eth_filter
+                .logs_for_filter(Filter::new().at_block_hash(hash), QueryLimits::default())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, EthFilterError::ReceiptsUnavailable(3)),
+                "cached: {cached}, {err:?}"
+            );
+        }
     }
 }
