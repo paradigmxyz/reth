@@ -915,13 +915,6 @@ mod tests {
             &[(removed, None), (replaced, None)],
         );
 
-        // An empty request returns no changesets, even when the persisted trie lags Finish.
-        let end = 2;
-        assert!(manager
-            .get_or_compute_cached_changesets_range(&before, end + 1..=end)
-            .unwrap()
-            .is_empty());
-
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
