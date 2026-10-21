@@ -7,7 +7,8 @@ use crate::{
 use alloy_primitives::B256;
 use reth_db_api::{tables, transaction::DbTx, DatabaseError};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, verify::STORAGE_WORKERS,
+    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory,
+    verify::default_storage_workers,
 };
 use std::marker::PhantomData;
 
@@ -36,7 +37,8 @@ impl<TX: DbTx, A: TrieTableAdapter> VerifierCursorFactory<TX, A> {
         };
         let account = open()?;
         let lookahead = open()?;
-        let storage = (0..STORAGE_WORKERS).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
+        let storage =
+            (0..default_storage_workers()).map(|_| open()).collect::<Result<Vec<_>, _>>()?;
         Ok(Self { account, lookahead, storage, adapter: PhantomData })
     }
 

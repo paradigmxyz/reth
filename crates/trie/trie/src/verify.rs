@@ -182,8 +182,10 @@ pub struct Verifier<'a, T: TrieCursorFactory, H> {
     complete: bool,
 }
 
-/// Number of storage workers used by the verifier.
-pub const STORAGE_WORKERS: usize = 8;
+/// Defaults to the available CPU count, or one worker if it cannot be determined.
+pub fn default_storage_workers() -> usize {
+    std::thread::available_parallelism().map_or(1, usize::from)
+}
 
 const ACCOUNT_BATCH_SIZE: usize = 16_384;
 const QUEUE_CAPACITY: usize = 256;
@@ -207,7 +209,7 @@ where
             hash_builder: crate::HashBuilder::default().with_updates(true),
             last_account: None,
             outputs: Default::default(),
-            pool: reth_tasks::WorkerPool::new(STORAGE_WORKERS, "trie-verify"),
+            pool: reth_tasks::WorkerPool::new(default_storage_workers(), "trie-verify"),
             complete: false,
         })
     }
