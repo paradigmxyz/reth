@@ -2,6 +2,8 @@ use blake3::Hasher;
 use eyre::Result;
 use rayon::prelude::*;
 use reqwest::Client;
+use reth_db::static_file::iter_static_files;
+use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -101,7 +103,10 @@ pub struct SingleArchive {
 pub struct ChunkedArchive {
     /// Number of blocks per archive file. Matches reth's `blocks_per_file` config.
     pub blocks_per_file: u64,
-    /// Total number of blocks covered by this component.
+    /// Total number of blocks covered by this component, including block zero.
+    ///
+    /// Coverage is contiguous from block zero. The final chunk may be partial; its actual
+    /// last block is `total_blocks - 1`, irrespective of its filename's range end.
     pub total_blocks: u64,
     /// Compressed size of each chunk in bytes, ordered from first to last.
     /// Computed during manifest generation. Older manifests may omit this.
@@ -582,6 +587,9 @@ pub async fn fetch_manifest(manifest_url: &str) -> Result<SnapshotManifest> {
 }
 
 /// Package chunk archives from a source datadir and generate a manifest.
+///
+/// `block` selects chunks whose nominal ranges start at or before the snapshot height. Each
+/// selected file is archived in full; component block counts come from its actual stored ranges.
 pub fn generate_manifest(
     source_datadir: &Path,
     output_dir: &Path,
@@ -594,6 +602,12 @@ pub fn generate_manifest(
     std::fs::create_dir_all(output_dir)?;
 
     let mut components = BTreeMap::new();
+    let mut static_files_dir = source_datadir.join("static_files");
+    if !static_files_dir.exists() {
+        static_files_dir = source_datadir.to_path_buf();
+    }
+
+    let static_files = iter_static_files(&static_files_dir)?;
 
     // Package chunked static-file components.
     for ty in &[
@@ -605,10 +619,23 @@ pub fn generate_manifest(
         SnapshotComponentType::StorageChangesets,
     ] {
         let key = ty.key();
-        let num_chunks = block.div_ceil(blocks_per_file);
+        let segment = static_segment(*ty).expect("chunked components have a static file segment");
+        let Some((last_range, _)) = static_files.get(segment).and_then(|ranges| {
+            ranges.iter().rfind(|(_, header)| header.expected_block_range().start() <= block)
+        }) else {
+            continue;
+        };
+
+        // Coverage starts at block zero, and selected files are archived in full, even past
+        // `block`.
+        let total_blocks = last_range
+            .end()
+            .checked_add(1)
+            .ok_or_else(|| eyre::eyre!("Block count overflows for {key}"))?;
+
+        let num_chunks = total_blocks.div_ceil(blocks_per_file);
         let mut planned_chunks = Vec::with_capacity(num_chunks as usize);
         let mut found_any = false;
-
         for i in 0..num_chunks {
             let start = i * blocks_per_file;
             let end = (i + 1) * blocks_per_file - 1;
@@ -650,7 +677,7 @@ pub fn generate_manifest(
             info!(target: "reth::cli",
                 component = ty.display_name(),
                 chunks = chunk_sizes.len(),
-                total_blocks = block,
+                total_blocks,
                 size = %super::DownloadProgress::format_size(total_size),
                 "Found chunked component"
             );
@@ -658,7 +685,7 @@ pub fn generate_manifest(
                 key.to_string(),
                 ComponentManifest::Chunked(ChunkedArchive {
                     blocks_per_file,
-                    total_blocks: block,
+                    total_blocks,
                     chunk_sizes,
                     chunk_decompressed_sizes: chunk_output_files
                         .iter()
@@ -748,14 +775,14 @@ fn source_files_for_chunk(
     start: u64,
     end: u64,
 ) -> Result<Vec<PathBuf>> {
-    let Some(segment_name) = static_segment_name(component) else {
+    let Some(segment) = static_segment(component) else {
         return Ok(Vec::new());
     };
 
     let static_files_dir = source_datadir.join("static_files");
     let static_files_dir =
         if static_files_dir.exists() { static_files_dir } else { source_datadir.to_path_buf() };
-    let prefix = format!("static_file_{segment_name}_{start}_{end}");
+    let prefix = format!("static_file_{}_{start}_{end}", segment.as_str());
 
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&static_files_dir)? {
@@ -772,14 +799,14 @@ fn source_files_for_chunk(
     Ok(files)
 }
 
-fn static_segment_name(component: SnapshotComponentType) -> Option<&'static str> {
+fn static_segment(component: SnapshotComponentType) -> Option<StaticFileSegment> {
     match component {
-        SnapshotComponentType::Headers => Some("headers"),
-        SnapshotComponentType::Transactions => Some("transactions"),
-        SnapshotComponentType::TransactionSenders => Some("transaction-senders"),
-        SnapshotComponentType::Receipts => Some("receipts"),
-        SnapshotComponentType::AccountChangesets => Some("account-change-sets"),
-        SnapshotComponentType::StorageChangesets => Some("storage-change-sets"),
+        SnapshotComponentType::Headers => Some(StaticFileSegment::Headers),
+        SnapshotComponentType::Transactions => Some(StaticFileSegment::Transactions),
+        SnapshotComponentType::TransactionSenders => Some(StaticFileSegment::TransactionSenders),
+        SnapshotComponentType::Receipts => Some(StaticFileSegment::Receipts),
+        SnapshotComponentType::AccountChangesets => Some(StaticFileSegment::AccountChangeSets),
+        SnapshotComponentType::StorageChangesets => Some(StaticFileSegment::StorageChangeSets),
         SnapshotComponentType::State | SnapshotComponentType::RocksdbIndices => None,
     }
 }
@@ -957,6 +984,10 @@ impl<R: Read> Read for HashingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_node_api::NodeTypes;
+    use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
     use tempfile::tempdir;
 
     fn test_manifest() -> SnapshotManifest {
@@ -1003,6 +1034,36 @@ mod tests {
             components,
             extensions: Default::default(),
         }
+    }
+
+    fn snapshot_source() -> tempfile::TempDir {
+        let source = tempdir().unwrap();
+        reth_fs_util::create_dir_all(source.path().join("db")).unwrap();
+        reth_fs_util::write(source.path().join("db/mdbx.dat"), b"state-data").unwrap();
+        source
+    }
+
+    fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
+        let static_files = source.join("static_files");
+        reth_fs_util::create_dir_all(&static_files).unwrap();
+
+        let provider = StaticFileProviderBuilder::read_write(&static_files)
+            .with_blocks_per_file(10)
+            .build::<<MockNodeTypes as NodeTypes>::Primitives>()
+            .unwrap();
+
+        let mut writer = provider.get_writer(0, segment).unwrap();
+        for number in 0..=tip {
+            if segment == StaticFileSegment::Headers {
+                writer
+                    .append_header(&Header { number, ..Default::default() }, &B256::ZERO)
+                    .unwrap();
+            } else {
+                writer.increment_block(number).unwrap();
+            }
+        }
+
+        writer.commit().unwrap();
     }
 
     #[test]
@@ -1590,5 +1651,78 @@ mod tests {
             "mismatched chunk_files must not partially apply"
         );
         assert_eq!(urls[1], "https://example.com/mainnet/headers-500000-999999.tar.zst");
+    }
+
+    #[test]
+    fn generate_manifest_uses_actual_component_block_ranges() {
+        let source = snapshot_source();
+        let output = tempdir().unwrap();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+        write_test_static_files(source.path(), StaticFileSegment::Transactions, 21);
+
+        // The declared height is beyond both components' actual tips, within the same chunk.
+        let manifest = generate_manifest(source.path(), output.path(), None, 29, 1, 10).unwrap();
+        assert_eq!(manifest.block, 29);
+        for (component, expected_blocks) in
+            [(SnapshotComponentType::Headers, 25), (SnapshotComponentType::Transactions, 22)]
+        {
+            let ComponentManifest::Chunked(chunked) = manifest.component(component).unwrap() else {
+                panic!("component should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, expected_blocks);
+            assert_eq!(chunked.num_chunks(), 3);
+            assert_eq!(chunked.chunk_sizes.len(), 3);
+            assert_eq!(chunked.chunk_output_files.len(), 3);
+            assert_eq!(chunked.tail_chunks_for_distance(6), 2);
+            for (index, size) in chunked.chunk_sizes.iter().enumerate() {
+                let path =
+                    output.path().join(chunked.chunk_relative_path(component.key(), index as u64));
+                assert_eq!(reth_fs_util::metadata(path).unwrap().len(), *size);
+            }
+        }
+    }
+
+    #[test]
+    fn generate_manifest_includes_genesis_and_chunk_boundary_blocks() {
+        for tip in [0, 9, 10, 19, 20] {
+            let source = snapshot_source();
+            let output = tempdir().unwrap();
+            write_test_static_files(source.path(), StaticFileSegment::Headers, tip);
+
+            let manifest =
+                generate_manifest(source.path(), output.path(), None, tip, 1, 10).unwrap();
+            let ComponentManifest::Chunked(chunked) =
+                manifest.component(SnapshotComponentType::Headers).unwrap()
+            else {
+                panic!("headers should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, tip + 1);
+            assert_eq!(chunked.num_chunks(), tip / 10 + 1);
+            assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
+        }
+    }
+
+    #[test]
+    fn generate_manifest_counts_whole_selected_chunks() {
+        let source = snapshot_source();
+        write_test_static_files(source.path(), StaticFileSegment::Headers, 24);
+
+        // Selecting a chunk copies its whole file, including blocks beyond the declared height.
+        for (block, expected_blocks) in [(9, 10), (10, 20), (20, 25), (39, 25)] {
+            let output = tempdir().unwrap();
+            let manifest =
+                generate_manifest(source.path(), output.path(), None, block, 1, 10).unwrap();
+
+            let ComponentManifest::Chunked(chunked) =
+                manifest.component(SnapshotComponentType::Headers).unwrap()
+            else {
+                panic!("headers should be chunked");
+            };
+
+            assert_eq!(chunked.total_blocks, expected_blocks);
+            assert_eq!(chunked.chunk_sizes.len() as u64, chunked.num_chunks());
+        }
     }
 }
