@@ -590,6 +590,11 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     if let Some(trie) = manager.take_sparse_trie() {
         ensure!(trie.into_trie_for(parent.hash())?.is_some(), "missing final reusable trie");
     }
+    // Root delivery precedes worker teardown. Drain their queues so the last database handle
+    // closes before process exit destroys RocksDB's global scheduler.
+    for name in ["sparse-trie", "trie-hashing", "storage-workers", "account-workers", "drop"] {
+        runtime.spawn_blocking_named(name, || {}).get();
+    }
     let metrics = metric_counts(snapshotter);
     println!(
         "{}",

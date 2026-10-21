@@ -88,6 +88,8 @@ acknowledgement are persisted overlays removed through the state/trie frontier,
 the execution overlay precomputed at its new anchor, and trie pruning requested.
 At shutdown, the worker finishes any active save and fully persists the head,
 matching Reth's shutdown flush.
+It then drains trie, proof-worker, and deferred-drop queues before exiting, so
+all database handles close while RocksDB's global scheduler is still alive.
 
 After every commit, a fresh overlay-backed provider must expose the reference
 accounts and all 64 slots, including deleted slots, at the database tip. Account
