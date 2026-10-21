@@ -4,6 +4,7 @@
 //! so a run stopped anywhere resumes from what the database holds.
 
 use crate::{
+    metrics::{SnapPhase, SnapSyncMetrics},
     AccountRangeDownload, AccountRangeStep, BlockAccessListCatchUp, BytecodeDownload, BytecodeStep,
     CatchUpStep, SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapGeneration,
     SnapPivotPolicy, SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite,
@@ -50,6 +51,7 @@ pub struct SnapBootstrap<C, F, X> {
     storage: StorageRangeDownload<C, F>,
     bytecode: BytecodeDownload<C, F>,
     catch_up: BlockAccessListCatchUp<C, F>,
+    metrics: SnapSyncMetrics,
 }
 
 impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
@@ -69,6 +71,7 @@ impl<C: Clone, F: Clone, X> SnapBootstrap<C, F, X> {
             ranges_per_check: DEFAULT_RANGES_PER_CHECK,
             cancel: CancellationToken::new(),
             shutdown: None,
+            metrics: SnapSyncMetrics::default(),
         }
     }
 }
@@ -131,7 +134,10 @@ where
             }
             let head = self.context.head()?;
             let step = match self.resolve(head)? {
-                Resolved::Verified(pivot) => return Ok(SnapBootstrapOutcome::Verified { pivot }),
+                Resolved::Verified(pivot) => {
+                    self.metrics.set_phase(SnapPhase::HandedOff);
+                    return Ok(SnapBootstrapOutcome::Verified { pivot })
+                }
                 Resolved::BeforeBlockAccessLists => {
                     return Ok(SnapBootstrapOutcome::BeforeBlockAccessLists)
                 }
@@ -141,6 +147,7 @@ where
                     } else {
                         info!(target: "sync::snap", head, "No eligible snap pivot yet, waiting for headers");
                     }
+                    self.metrics.pivot_waits.increment(1);
                     Step::Wait
                 }
                 Resolved::Active(write) => match self.drive(write, head).await {
@@ -152,10 +159,12 @@ where
                         } else {
                             info!(target: "sync::snap", "No connected peer serves snap/2, waiting for one");
                         }
+                        self.metrics.snap_peer_waits.increment(1);
                         Step::Wait
                     }
                     Err(error) if error.is_transient() => {
                         debug!(target: "sync::snap", %error, "Waiting for peers or headers");
+                        self.metrics.transient_waits.increment(1);
                         Step::Wait
                     }
                     // The next pass finds the pivot orphaned and recovers or restarts it.
@@ -179,10 +188,12 @@ where
                 Step::HandedOff(write) => {
                     let pivot = self.pivot()?;
                     info!(target: "sync::snap", ?pivot, "Snap state handed to the trie rebuild");
+                    self.metrics.set_phase(SnapPhase::HandedOff);
                     return Ok(SnapBootstrapOutcome::TrieRebuild { write, pivot })
                 }
                 Step::Continue => announced = None,
                 Step::Wait => {
+                    self.metrics.set_phase(SnapPhase::Waiting);
                     if !self.wait(head).await {
                         return Ok(SnapBootstrapOutcome::Stopped)
                     }
@@ -191,6 +202,7 @@ where
                     let provider = self.factory.database_provider_rw()?;
                     provider.abandon_snap_attempt()?;
                     provider.commit()?;
+                    self.metrics.restarts.increment(1);
                 }
                 Step::Stop => return Ok(SnapBootstrapOutcome::Stopped),
             }
@@ -270,6 +282,7 @@ where
                 provider.snap_repairs(write)?.is_empty();
             (applied, complete)
         };
+        self.metrics.applied_block.set(applied.number as f64);
         // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
         // neither their retention nor a newer pivot applies to it.
         if complete && applied == self.pivot()? {
@@ -282,6 +295,7 @@ where
             return Ok(Step::Restart)
         }
         let write = self.advance_pivot(write, head)?;
+        self.metrics.pivot_block.set(self.pivot()?.number as f64);
         // Lists only update accounts already downloaded, so coverage grows once they reach the
         // pivot.
         if let Some(step) = self.catch_up(write).await? {
@@ -300,6 +314,7 @@ where
     // the last block both branches share. Unserved lists are waited for within the served state
     // window.
     async fn recover(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
+        self.metrics.set_phase(SnapPhase::Recovering);
         let pivot = self.pivot()?;
         let provider = self.factory.database_provider_ro()?;
         let Some(reorg) = provider.snap_reorg(write)? else {
@@ -339,6 +354,7 @@ where
                 return Ok(Step::Restart)
             }
             debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
+            self.metrics.unavailable_waits.increment(1);
             return Ok(Step::Wait)
         };
 
@@ -348,6 +364,7 @@ where
         })
         .await?;
         info!(target: "sync::snap", ?pivot, ?ancestor, to = ?generation.target(), "Recovered snap state from a pivot reorg");
+        self.metrics.reorg_recoveries.increment(1);
         Ok(Step::Continue)
     }
 
@@ -364,6 +381,7 @@ where
         // The database takes one writer at a time, so this commits before any download does.
         provider.commit()?;
         info!(target: "sync::snap", ?from, to = ?self.pivot()?, "Advanced snap pivot");
+        self.metrics.pivot_advances.increment(1);
         Ok(advanced)
     }
 
@@ -375,9 +393,12 @@ where
                 CatchUpStep::Complete => return Ok(None),
                 CatchUpStep::Applied { progress, .. } => {
                     debug!(target: "sync::snap", applied = ?progress.applied(), pivot, "Applied block access lists");
+                    self.metrics.set_phase(SnapPhase::CatchingUp);
+                    self.metrics.applied_block.set(progress.applied().number as f64);
                 }
                 CatchUpStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, pivot, "Peer does not serve the pivot's block access lists");
+                    self.metrics.unavailable_waits.increment(1);
                     return Ok(Some(Step::Wait))
                 }
             }
@@ -393,11 +414,19 @@ where
     async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
         for _ in 0..self.ranges_per_check {
             let range = match self.accounts.next_repair().await? {
-                None => return Ok(None),
+                None => {
+                    self.metrics.pending_repairs.set(0.0);
+                    return Ok(None)
+                }
                 Some(AccountRangeStep::Verified(range)) => range,
-                Some(AccountRangeStep::Unavailable { .. }) => return Ok(Some(Step::Wait)),
+                Some(AccountRangeStep::Unavailable { .. }) => {
+                    self.metrics.unavailable_waits.increment(1);
+                    return Ok(Some(Step::Wait))
+                }
             };
+            self.metrics.set_phase(SnapPhase::Repairing);
             let Some(slots) = self.storage.repair_slots(&range).await? else {
+                self.metrics.unavailable_waits.increment(1);
                 return Ok(Some(Step::Wait))
             };
             if let Some(step) = self.download_code(&range).await? {
@@ -406,6 +435,7 @@ where
             let hashed_address = range.origin();
             let remaining = self.accounts.commit_repair(range, slots).await?;
             debug!(target: "sync::snap", %hashed_address, remaining, "Committed snap repair batch");
+            self.metrics.pending_repairs.set(remaining as f64);
             if self.cancel.is_cancelled() {
                 return Ok(Some(Step::Stop))
             }
@@ -415,6 +445,7 @@ where
 
     // Commits up to `ranges_per_check` account ranges, handing the state off once none remain.
     async fn download_ranges(&mut self, write: SnapWrite) -> Result<Step, SnapSyncError> {
+        self.metrics.set_phase(SnapPhase::Downloading);
         for _ in 0..self.ranges_per_check {
             if self.cancel.is_cancelled() {
                 return Ok(Step::Stop)
@@ -423,6 +454,7 @@ where
                 Some(AccountRangeStep::Verified(range)) => range,
                 Some(AccountRangeStep::Unavailable { origin, peer_id }) => {
                     debug!(target: "sync::snap", ?peer_id, %origin, "Peer does not serve the pivot state");
+                    self.metrics.unavailable_waits.increment(1);
                     return Ok(Step::Wait)
                 }
                 None => return self.hand_off(write).await,
@@ -430,7 +462,8 @@ where
             if let Some(step) = self.download_storage_and_code(&range).await? {
                 return Ok(step)
             }
-            self.accounts.commit(range, Default::default(), Vec::new()).await?;
+            let coverage = self.accounts.commit(range, Default::default(), Vec::new()).await?;
+            self.metrics.set_account_progress(coverage.next());
         }
         Ok(Step::Continue)
     }
@@ -444,9 +477,10 @@ where
         loop {
             match self.storage.next(range).await? {
                 StorageRangeStep::Complete => break,
-                StorageRangeStep::Committed(_) => {}
+                StorageRangeStep::Committed(_) => self.metrics.storage_responses.increment(1),
                 StorageRangeStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's storage");
+                    self.metrics.unavailable_waits.increment(1);
                     return Ok(Some(Step::Wait))
                 }
             }
@@ -470,6 +504,7 @@ where
                 BytecodeStep::Committed { .. } => {}
                 BytecodeStep::Unavailable { peer_id, .. } => {
                     debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's code");
+                    self.metrics.unavailable_waits.increment(1);
                     return Ok(Some(Step::Wait))
                 }
             }
@@ -482,6 +517,7 @@ where
     // Checks the downloaded state is complete and hands it to the merkle stage. The scan reads
     // every account, so it runs on the blocking pool.
     async fn hand_off(&self, write: SnapWrite) -> Result<Step, SnapSyncError> {
+        self.metrics.set_phase(SnapPhase::Verifying);
         let cancel = self.shutdown.as_ref().unwrap_or(&self.cancel).clone();
         self.commit_blocking(move |provider| {
             provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, &cancel)
@@ -619,6 +655,7 @@ mod tests {
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
     };
     use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
         BlockAccessLists,
@@ -635,7 +672,11 @@ mod tests {
     use reth_stages_types::StageId;
     use reth_storage_api::{SnapAttemptId, StageCheckpointReader};
     use reth_trie_common::{HashedPostState, TrieAccount};
-    use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, VecDeque},
+        sync::Arc,
+    };
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
@@ -692,6 +733,25 @@ mod tests {
         provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
         provider.commit().unwrap();
         write
+    }
+
+    // Builds with a recorder, so the run's metrics are read from the returned snapshotter.
+    fn recorded<T>(build: impl FnOnce() -> T) -> (Snapshotter, T) {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        (snapshotter, metrics::with_local_recorder(&recorder, build))
+    }
+
+    // Taking a snapshot resets every value, so it is taken once per check.
+    fn snapshot(snapshotter: &Snapshotter) -> HashMap<String, DebugValue> {
+        snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .map(|(key, _, _, value)| {
+                (key.key().name().trim_start_matches("sync.snap.").to_owned(), value)
+            })
+            .collect()
     }
 
     fn attempt_id(factory: &Factory) -> SnapAttemptId {
@@ -1015,7 +1075,7 @@ mod tests {
             account_range(2, &accounts, 1..3, &[key(2), FAR]),
         ];
         // The head moves past the advance window after the first range.
-        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let (snapshotter, (client, bootstrap)) = recorded(|| scripted(&factory, responses, [3, 8]));
         let mut bootstrap = bootstrap.with_ranges_per_check(1);
 
         let outcome = bootstrap.run().await.unwrap();
@@ -1026,6 +1086,12 @@ mod tests {
         assert_eq!(pivot.number, 7);
         assert_eq!(*client.origins(), [B256::ZERO, key(2)]);
         assert_eq!(client.block_requests().len(), 1);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["pivot_advances"], DebugValue::Counter(1));
+        assert_eq!(metrics["pivot_block"], DebugValue::Gauge(7.0.into()));
+        assert_eq!(metrics["applied_block"], DebugValue::Gauge(7.0.into()));
+        assert_eq!(metrics["account_progress"], DebugValue::Gauge(1.0.into()));
+        assert_eq!(metrics["phase"], DebugValue::Gauge((SnapPhase::HandedOff as u8 as f64).into()));
 
         // The merkle stage rebuilds the trie, which the pivot's header then accepts.
         let verified = rebuild_and_verify(&factory, write, 7);
@@ -1041,10 +1107,14 @@ mod tests {
             account_range(1, &accounts, 0..1, &[key(1)]),
             Err(RequestError::UnsupportedCapability),
         ];
-        let (_, mut bootstrap) = scripted(&factory, responses, [3]);
+        let (snapshotter, (_, mut bootstrap)) = recorded(|| scripted(&factory, responses, [3]));
 
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(bootstrap.context.waits, 1);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["snap_peer_waits"], DebugValue::Counter(1));
+        assert_eq!(metrics["unavailable_waits"], DebugValue::Counter(0));
+        assert_eq!(metrics["phase"], DebugValue::Gauge((SnapPhase::Waiting as u8 as f64).into()));
         let attempt = attempt_id(&factory);
 
         let (client, mut resumed) =
@@ -1106,7 +1176,8 @@ mod tests {
         });
         factory.replace_headers_after(1, &replaced[2..]);
         let orphaned = attempt_id(&factory);
-        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let (snapshotter, (_, mut bootstrap)) =
+            recorded(|| scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]));
 
         let outcome = bootstrap.run().await.unwrap();
 
@@ -1115,6 +1186,9 @@ mod tests {
         };
         assert_ne!(pivot.hash, blocks[2].hash());
         assert_ne!(attempt_id(&factory), orphaned);
+        let metrics = snapshot(&snapshotter);
+        assert_eq!(metrics["restarts"], DebugValue::Counter(1));
+        assert_eq!(metrics["reorg_recoveries"], DebugValue::Counter(0));
     }
 
     #[tokio::test]
