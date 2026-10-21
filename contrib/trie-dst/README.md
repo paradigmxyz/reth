@@ -129,10 +129,10 @@ controls generated operations and the recorded crash plan; Bedrock's recorded
 random/preemption streams control scheduling. Mid-run semantic decision editing
 is unsupported.
 
-The Bedrock-only `crashes` argument defaults to 2 (range 0–16, strictly less than
+The Bedrock-only `crashes` argument defaults to 1 (range 0–16, at most
 `blocks`). Set it to 0 for the happy path. The controller draws distinct block
-numbers, preferring the suffix after threshold persistence can start. When it
-observes the corresponding block-input event, it sends SIGKILL to the Rust
+numbers uniformly across the entire run, from block 1 through the final block.
+When it observes the corresponding block-input event, it sends SIGKILL to the Rust
 process and immediately restarts it against the same directory. The worker
 continues running after emitting that event, so the kill can interrupt trie
 computation or concurrent persistence. These are process crashes: the kernel

@@ -15,7 +15,7 @@ import time
 # Persistence defaults match TreeConfig and EngineArgs in this Reth revision.
 DEFAULTS = {"blocks": 64, "updates": 64, "proof_workers": 2, "timeout_secs": 60,
             "persistence_threshold": 50, "num_state_masking_blocks": 30,
-            "memory_block_buffer_target": None, "crashes": 2}
+            "memory_block_buffer_target": None, "crashes": 1}
 LIMITS = {"crashes": (0, 16), "blocks": (1, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
           "timeout_secs": (1, 3600), "persistence_threshold": (0, 2**64 - 2),
           "num_state_masking_blocks": (0, 2**64 - 1),
@@ -34,8 +34,8 @@ def arguments(values):
             continue
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f"{key} must be an integer in {low}..={high}")
-    if result["crashes"] >= result["blocks"]:
-        raise ValueError("crashes must be less than blocks")
+    if result["crashes"] > result["blocks"]:
+        raise ValueError("crashes must not exceed blocks")
     threshold = result["persistence_threshold"]
     buffer = result["memory_block_buffer_target"]
     if buffer is None:
@@ -168,11 +168,8 @@ def main():
         if decisions is None:
             args = arguments(request["args"])
             crashes = args.pop("crashes")
-            # Prefer kills after threshold persistence can begin, while leaving enough
-            # distinct block boundaries for every requested crash. Record the whole plan.
-            first = min(args["persistence_threshold"] + 2, args["blocks"] - crashes)
             kill_blocks = sorted(random.Random(request["seed"]).sample(
-                range(max(1, first), args["blocks"]), crashes))
+                range(1, args["blocks"] + 1), crashes))
             config = {"workload": args | {"seed": request["seed"]},
                       "kill_blocks": kill_blocks, "run_secs": request["campaign"]["run_secs"]}
             decisions = {"config": config, "seed": request["seed"],
