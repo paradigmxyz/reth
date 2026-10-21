@@ -3185,12 +3185,11 @@ mod tests {
         table::Table,
         tables,
     };
+    use rocksdb::perf::{set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
     use tempfile::TempDir;
 
     /// Number of deleted keys `RocksDB` skipped on this thread while running `f`.
     fn deleted_keys_skipped<R>(f: impl FnOnce() -> R) -> (R, u64) {
-        use rocksdb::perf::{set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
-
         set_perf_stats(PerfStatsLevel::EnableCount);
         let mut ctx = PerfContext::default();
         ctx.reset();

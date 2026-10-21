@@ -968,7 +968,7 @@ fn replace_storage_slot<T, C>(
 where
     T: DupSort<SubKey = B256, Value = StorageEntry>,
     T::Key: Clone,
-    C: DbDupCursorRO<T> + DbCursorRW<T> + DbDupCursorRW<T>,
+    C: DbDupCursorRO<T> + DbCursorRW<T>,
 {
     if cursor
         .seek_by_key_subkey(key.clone(), entry.key)?
@@ -986,10 +986,9 @@ where
 /// without building intermediary structures.
 ///
 /// Uses `append_dup` for `DupSort` tables where insertion order matches key order (the ETL
-/// collector sorts by address, so `AccountChangeSets`, `PlainStorageState`, and
-/// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
-/// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
-/// use `put`/`upsert` which do a full B-tree lookup.
+/// collector sorts by address, so `AccountChangeSets` and `StorageChangeSets` receive data in
+/// sorted order within each account). State tables use `put`/`upsert` to replace existing
+/// genesis entries, with storage slots deleted before replacement.
 #[allow(clippy::clone_on_copy)]
 fn write_account_to_db<TX: DbTxMut>(
     tx: &TX,
@@ -1029,7 +1028,7 @@ fn write_account_to_db<TX: DbTxMut>(
     tx.put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list.clone())?;
 
     // storage entries: each dump slot replaces the same slot from the genesis alloc, other existing
-    // slots of the account stay (see `replace_storage_slot`)
+    // slots of the account stay (see `replace_storage_slot`).
     if let Some(storage) = &genesis_account.storage {
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
         let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -1111,7 +1110,7 @@ where
         .put::<tables::AccountsHistory>(ShardedKey::new(*address, u64::MAX), history_list)?;
 
     if let Some(storage) = &genesis_account.storage {
-        // each dump slot replaces the same slot from the genesis alloc; see `replace_storage_slot`
+        // Each dump slot replaces the same slot from the genesis alloc; see `replace_storage_slot`.
         let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
 
         for (&key, &value) in storage {
@@ -1541,13 +1540,13 @@ mod tests {
                 GenesisAccount {
                     balance: U256::from(1),
                     storage: Some(BTreeMap::from([
-                        // overwritten by the dump
+                        // Overwritten by the dump.
                         (slot(1), val(0x11)),
-                        // omitted by the dump (unchanged since genesis): must survive
+                        // Omitted by the dump (unchanged since genesis): must survive.
                         (slot(2), val(0x12)),
-                        // present in the dump with the same value
+                        // Present in the dump with the same value.
                         (slot(4), val(0x14)),
-                        // zeroed by the dump: must be deleted
+                        // Zeroed by the dump: must be deleted.
                         (slot(6), val(0x16)),
                     ])),
                     ..Default::default()
@@ -1591,11 +1590,11 @@ mod tests {
                     ..Default::default()
                 },
             ),
-            // in the dump without storage: its genesis slot is not listed, so it stays
+            // In the dump without storage: its genesis slot is not listed, so it stays.
             (no_dump_storage, GenesisAccount { balance: U256::from(3), ..Default::default() }),
         ]);
 
-        // genesis overlaid by the dump
+        // Genesis overlaid by the dump.
         let mut expected_alloc = genesis_alloc.clone();
         for (address, account) in &dump_alloc {
             let mut storage =
