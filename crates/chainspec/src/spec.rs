@@ -536,8 +536,6 @@ impl<H: BlockHeader> ChainSpec<H> {
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
-    ///
-    /// Use [`EthChainSpec::next_block_base_fee`] for the Bogota rational fee update.
     pub fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         match self.base_fee_params {
             BaseFeeParamsKind::Constant(bf_params) => bf_params,
@@ -3116,7 +3114,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn bogota_base_fee_activates_on_the_child_timestamp() {
+    fn bogota_preserves_base_fee_at_activation() {
         let spec = ChainSpecBuilder::mainnet().with_bogota_at(15_000).build();
         let parent = Header {
             gas_limit: 30_000_000,
@@ -3126,24 +3124,23 @@ Post-merge hard forks (timestamp based):
             ..Default::default()
         };
         assert_eq!(spec.next_block_base_fee(&parent, 14_999), Some(1_125_000_000));
-        assert_eq!(spec.next_block_base_fee(&parent, 15_000), Some(1_104_166_666));
-        assert_eq!(spec.next_block_base_fee(&parent, 15_012), Some(1_104_166_666));
+        assert_eq!(spec.next_block_base_fee(&parent, 15_000), Some(1_125_000_000));
+        assert_eq!(spec.next_block_base_fee(&parent, 15_012), Some(1_125_000_000));
     }
 
     #[test]
     fn bogota_base_fee_rounding_and_floor() {
         let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
-        // Gas limit, gas used, parent fee, expected child fee. The 99-wei case distinguishes
-        // the spec's gas-target division from multiplying the full expression by 5 first.
+        // Gas limit, gas used, parent fee, expected child fee.
         let cases = [
-            (30_000_000, 30_000_000, 1_000_000_000, 1_104_166_666),
-            (30_000_000, 0, 1_000_000_000, 895_833_334),
+            (30_000_000, 30_000_000, 1_000_000_000, 1_125_000_000),
+            (30_000_000, 0, 1_000_000_000, 875_000_000),
             (30_000_000, 15_000_000, 1_000_000_007, 1_000_000_007),
-            (20, 9, 99, 99),
-            (20, 20, 47, 51),
+            (20, 9, 99, 98),
+            (20, 20, 47, 52),
             (20, 20, 0, 1),
             (20, 20, 1, 2),
-            (20, 0, 9, 9),
+            (20, 0, 9, 8),
             (20, 0, 10, 9),
         ];
         for (gas_limit, gas_used, base_fee, expected) in cases {
@@ -3216,6 +3213,11 @@ Post-merge hard forks (timestamp based):
     fn bogota_builder_has_default_blob_schedule() {
         let spec = ChainSpecBuilder::mainnet().bogota_activated().build();
         assert_eq!(spec.blob_params_at_timestamp(0), Some(BOGOTA_BLOB_PARAMS));
+        let params = spec.blob_params_at_timestamp(0).unwrap();
+        assert_eq!(
+            (params.target_blob_count, params.max_blob_count, params.update_fraction),
+            (14, 21, 11_684_671)
+        );
         let earlier = ChainSpecBuilder::mainnet().amsterdam_activated().build();
         assert_eq!(earlier.blob_params_at_timestamp(0), Some(BlobParams::osaka()));
     }

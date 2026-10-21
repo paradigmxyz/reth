@@ -15,10 +15,5 @@ pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::ne
     b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
 );
 
-/// EIP-8198 blob schedule for the Bogota fork.
-pub(crate) const BOGOTA_BLOB_PARAMS: BlobParams = BlobParams {
-    target_blob_count: 12,
-    max_blob_count: 18,
-    update_fraction: 12_018_519,
-    ..BlobParams::osaka()
-};
+/// Heze devnet-2 retains Amsterdam's blob schedule.
+pub(crate) const BOGOTA_BLOB_PARAMS: BlobParams = BlobParams::bpo2();

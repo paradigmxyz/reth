@@ -81,7 +81,7 @@ jobs:
         if: steps.cache-hive.outputs.cache-hit == 'true'
         run: |
           cd hive_assets
-          for tar_file in *.tar; do
+          for tar_file in *.tar *.tar.gz; do
             if [ -f "$tar_file" ]; then
               echo "Loading $tar_file..."
               docker load -i "$tar_file"
