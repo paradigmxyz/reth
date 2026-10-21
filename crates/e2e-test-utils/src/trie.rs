@@ -10,12 +10,12 @@ use reth_trie::{
     verify::{Output, Verifier},
     StateRoot,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, VerifierCursorFactory};
 
 /// Asserts that the persisted state and trie representation is internally consistent and matches
 /// the state root of the latest persisted block.
 ///
-/// This performs two checks against a single database snapshot:
+/// This performs two checks against persisted database state:
 /// - the state root recomputed from the persisted hashed state matches the state root of the latest
 ///   persisted header, and
 /// - the persisted trie nodes match a recomputation from the hashed state (the library equivalent
@@ -31,6 +31,8 @@ where
         Provider: DBProvider + StorageSettingsCache + BlockNumReader + HeaderProvider,
     >,
 {
+    // Prevent commits while opening the independent snapshots.
+    let snapshot_guard = factory.database_provider_rw()?;
     let provider = factory.database_provider_ro()?;
     let tip = provider.best_block_number()?;
     let header = provider
@@ -39,6 +41,11 @@ where
     let tx = provider.tx_ref();
 
     reth_trie_db::with_adapter!(provider, |A| {
+        let cursors = VerifierCursorFactory::<_, A>::new(|| {
+            factory.database_provider_ro().map(DBProvider::into_tx)
+        })?;
+        drop(snapshot_guard);
+
         // Recompute all account leaves from the persisted hashed state. Storage roots are taken
         // from the persisted storage tries, which the verifier below checks against the hashed
         // storage tables.
@@ -57,8 +64,7 @@ where
             header.state_root()
         );
 
-        let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-        let verifier = Verifier::new(&trie_cursor_factory, DatabaseHashedCursorFactory::new(tx))?;
+        let verifier = Verifier::new(&cursors, &cursors)?;
         let mut inconsistencies = Vec::new();
         for output in verifier {
             match output? {

@@ -1,152 +1,19 @@
 use crate::{
-    hashed_cursor::{HashedCursor, HashedCursorFactory},
-    progress::{IntermediateStateRootState, StateRootProgress},
-    trie::StateRoot,
+    hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor},
     trie_cursor::{
         depth_first::{self, DepthFirstTrieIterator},
         noop::NoopTrieCursorFactory,
-        TrieCursor, TrieCursorFactory,
+        TrieCursor, TrieCursorFactory, TrieStorageCursor,
     },
     Nibbles,
 };
 use alloy_primitives::B256;
+use alloy_rlp::Encodable;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use tracing::trace;
-
-/// Used by [`StateRootBranchNodesIter`] to iterate over branch nodes in a state root.
-#[derive(Debug)]
-enum BranchNode {
-    Account(Nibbles, BranchNodeCompact),
-    Storage(B256, Nibbles, BranchNodeCompact),
-}
-
-/// Iterates over branch nodes produced by a [`StateRoot`]. The `StateRoot` will only used the
-/// hashed accounts/storages tables, meaning it is recomputing the trie from scratch without the use
-/// of the trie tables.
-///
-/// [`BranchNode`]s are iterated over such that:
-/// * Account nodes and storage nodes may be interleaved.
-/// * Storage nodes for the same account will be ordered by ascending path relative to each other.
-/// * Account nodes will be ordered by ascending path relative to each other.
-/// * All storage nodes for one account will finish before storage nodes for another account are
-///   started. In other words, if the current storage account is not equal to the previous, the
-///   previous has no more nodes.
-#[derive(Debug)]
-struct StateRootBranchNodesIter<H> {
-    hashed_cursor_factory: H,
-    account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-    storage_tries: Vec<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
-    curr_storage: Option<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
-    intermediate_state: Option<Box<IntermediateStateRootState>>,
-    complete: bool,
-}
-
-impl<H> StateRootBranchNodesIter<H> {
-    fn new(hashed_cursor_factory: H) -> Self {
-        Self {
-            hashed_cursor_factory,
-            account_nodes: Default::default(),
-            storage_tries: Default::default(),
-            curr_storage: None,
-            intermediate_state: None,
-            complete: false,
-        }
-    }
-
-    /// Sorts a Vec of updates such that it is ready to be yielded from the `next` method. We yield
-    /// by popping off of the account/storage vecs, so we sort them in reverse order.
-    ///
-    /// Depth-first sorting is used because this is the order that the `HashBuilder` computes
-    /// branch nodes internally, even if it produces them as `B256Map`s.
-    fn sort_updates(updates: &mut [(Nibbles, BranchNodeCompact)]) {
-        updates.sort_unstable_by(|a, b| depth_first::cmp(&b.0, &a.0));
-    }
-}
-
-impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
-    type Item = Result<BranchNode, StateRootError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // If we already started iterating through a storage trie's updates, continue doing
-            // so.
-            if let Some((account, storage_updates)) = self.curr_storage.as_mut() &&
-                let Some((path, node)) = storage_updates.pop()
-            {
-                let node = BranchNode::Storage(*account, path, node);
-                return Some(Ok(node))
-            }
-
-            // If there's not a storage trie already being iterated over then check if there's a
-            // storage trie we could start iterating over.
-            if let Some((account, storage_updates)) = self.storage_tries.pop() {
-                debug_assert!(!storage_updates.is_empty());
-
-                self.curr_storage = Some((account, storage_updates));
-                continue;
-            }
-
-            // `storage_updates` is empty, check if there are account updates.
-            if let Some((path, node)) = self.account_nodes.pop() {
-                return Some(Ok(BranchNode::Account(path, node)))
-            }
-
-            // All data from any previous runs of the `StateRoot` has been produced, run the next
-            // partial computation, unless `StateRootProgress::Complete` has been returned in which
-            // case iteration is over.
-            if self.complete {
-                return None
-            }
-
-            let state_root =
-                StateRoot::new(NoopTrieCursorFactory, self.hashed_cursor_factory.clone())
-                    .with_intermediate_state(self.intermediate_state.take().map(|s| *s));
-
-            let updates = match state_root.root_with_progress() {
-                Err(err) => return Some(Err(err)),
-                Ok(StateRootProgress::Complete(_, _, updates)) => {
-                    self.complete = true;
-                    updates
-                }
-                Ok(StateRootProgress::Progress(intermediate_state, _, updates)) => {
-                    self.intermediate_state = Some(intermediate_state);
-                    updates
-                }
-            };
-
-            // collect account updates and sort them in descending order, so that when we pop them
-            // off the Vec they are popped in ascending order.
-            self.account_nodes.extend(updates.account_nodes);
-            Self::sort_updates(&mut self.account_nodes);
-
-            self.storage_tries = updates
-                .storage_tries
-                .into_iter()
-                .filter_map(|(account, t)| {
-                    (!t.storage_nodes.is_empty()).then(|| {
-                        let mut storage_nodes = t.storage_nodes.into_iter().collect::<Vec<_>>();
-                        Self::sort_updates(&mut storage_nodes);
-                        (account, storage_nodes)
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            // `root_with_progress` will output storage updates ordered by their account hash. If
-            // `root_with_progress` only returns a partial result then it will pick up where
-            // it left off in the storage trie on the next run.
-            //
-            // By sorting by the account we ensure that we continue with the partially processed
-            // trie (the last of the previous run) first. We sort in reverse order because we pop
-            // off of this Vec.
-            self.storage_tries.sort_unstable_by_key(|a| Reverse(a.0));
-
-            // loop back to the top.
-        }
-    }
-}
 
 /// Output describes an inconsistency found when comparing the hashed state tables
 /// ([`HashedCursorFactory`]) with that of the trie tables ([`TrieCursorFactory`]). The hashed
@@ -297,172 +164,350 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     }
 }
 
-/// Checks that data stored in the trie database is consistent, using hashed accounts/storages
-/// database tables as the source of truth. This will iteratively recompute the entire trie based
-/// on the hashed state, and produce any discovered [`Output`]s via the `next` method.
+/// Checks trie tables against hashed state, recomputing storage roots on a fixed sync pool.
+///
+/// Cursor factories must provide long-lived read snapshots of the same database version. Each
+/// bounded batch runs a lookahead thread and scoped storage jobs, so no worker can outlive the
+/// borrowed factories. Inconsistencies from every thread are delivered through the same queue.
+/// Storage outputs may arrive in any account order; account progress remains ordered.
 #[derive(Debug)]
 pub struct Verifier<'a, T: TrieCursorFactory, H> {
     trie_cursor_factory: &'a T,
     hashed_cursor_factory: H,
-    branch_node_iter: StateRootBranchNodesIter<H>,
-    outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor<'a>>>,
-    storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor<'a>>>)>,
+    hash_builder: crate::HashBuilder,
+    last_account: Option<B256>,
+    outputs: std::collections::VecDeque<Result<Output, StateRootError>>,
+    pool: reth_tasks::WorkerPool,
     complete: bool,
 }
 
-impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
-    /// Creates a new verifier instance.
+/// Number of storage workers used by the verifier.
+pub const STORAGE_WORKERS: usize = 8;
+
+const ACCOUNT_BATCH_SIZE: usize = 16_384;
+const QUEUE_CAPACITY: usize = 256;
+const ACCOUNT_UPDATE_THRESHOLD: usize = 1024;
+
+impl<'a, T, H> Verifier<'a, T, H>
+where
+    T: TrieCursorFactory + Sync,
+    H: HashedCursorFactory + Clone + Sync,
+{
+    /// Creates a verifier over a fixed database state. Background work is joined before each
+    /// iterator step returns, including on error or cancellation.
     pub fn new(
         trie_cursor_factory: &'a T,
         hashed_cursor_factory: H,
     ) -> Result<Self, DatabaseError> {
         Ok(Self {
             trie_cursor_factory,
-            hashed_cursor_factory: hashed_cursor_factory.clone(),
-            branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
-            outputs: Default::default(),
+            hashed_cursor_factory,
             account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
-            storage: None,
+            hash_builder: crate::HashBuilder::default().with_updates(true),
+            last_account: None,
+            outputs: Default::default(),
+            pool: reth_tasks::WorkerPool::new(STORAGE_WORKERS, "trie-verify"),
             complete: false,
         })
     }
-}
 
-impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H> {
-    fn new_storage(
-        &mut self,
-        account: B256,
-        path: Nibbles,
-        node: BranchNodeCompact,
-    ) -> Result<(), DatabaseError> {
-        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(account)?;
-        let mut storage = SingleVerifier::new(Some(account), trie_cursor)?;
-        storage.next(&mut self.outputs, path, node)?;
-        self.storage = Some((account, storage));
-        Ok(())
-    }
+    fn fill_batch(&mut self) -> Result<(), StateRootError> {
+        let (events_tx, events_rx) = crossbeam_channel::bounded(QUEUE_CAPACITY);
+        // Let the whole batch run ahead while the account thread waits for a large storage root.
+        let (accounts_tx, accounts_rx) = crossbeam_channel::bounded(ACCOUNT_BATCH_SIZE);
+        let trie = self.trie_cursor_factory;
+        let hashed = &self.hashed_cursor_factory;
+        let last = self.last_account;
+        let span = tracing::Span::current();
+        let account_verifier = &mut self.account;
+        let builder = &mut self.hash_builder;
+        let outputs = &mut self.outputs;
+        let last_account = &mut self.last_account;
+        let mut account_rlp = Vec::with_capacity(crate::TRIE_ACCOUNT_RLP_MAX_SIZE);
 
-    /// This method is called using the account hashes at the boundary of [`BranchNode::Storage`]
-    /// sequences, ie once the [`StateRootBranchNodesIter`] has begun yielding storage nodes for a
-    /// different account than it was yielding previously. All accounts between the two should have
-    /// empty storages.
-    fn verify_empty_storages(
-        &mut self,
-        last_account: B256,
-        next_account: B256,
-        start_inclusive: bool,
-        end_inclusive: bool,
-    ) -> Result<(), DatabaseError> {
-        let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
-        let mut account_seeked = false;
-
-        if !start_inclusive {
-            account_seeked = true;
-            account_cursor.seek(last_account)?;
-        }
-
-        loop {
-            let Some((curr_account, _)) = (if account_seeked {
-                account_cursor.next()?
-            } else {
-                account_seeked = true;
-                account_cursor.seek(last_account)?
-            }) else {
-                return Ok(())
-            };
-
-            if curr_account < next_account || (end_inclusive && curr_account == next_account) {
-                trace!(target: "trie::verify", account = ?curr_account, "Verifying account has empty storage");
-
-                let mut storage_cursor =
-                    self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
-                let mut seeked = false;
-                while let Some((path, node)) = if seeked {
-                    storage_cursor.next()?
-                } else {
-                    seeked = true;
-                    storage_cursor.seek(Nibbles::new())?
-                } {
-                    self.outputs.push(Output::StorageExtra(curr_account, path, node));
-                }
-            } else {
-                return Ok(())
-            }
-        }
-    }
-
-    fn try_next(&mut self) -> Result<(), StateRootError> {
-        match self.branch_node_iter.next().transpose()? {
-            None => {
-                self.account.finalize(&mut self.outputs)?;
-                if let Some((prev_account, storage)) = self.storage.as_mut() {
-                    storage.finalize(&mut self.outputs)?;
-
-                    // If there was a previous storage account, and it is the final one, then we
-                    // need to validate that all accounts coming after it have empty storages.
-                    let prev_account = *prev_account;
-
-                    // Calculate the max possible account address (all bits set).
-                    let max_account = B256::repeat_byte(0xFFu8);
-
-                    self.verify_empty_storages(prev_account, max_account, false, true)?;
-                }
-                self.complete = true;
-            }
-            Some(BranchNode::Account(path, node)) => {
-                trace!(target: "trie::verify", ?path, "Account node from state root");
-                self.account.next(&mut self.outputs, path, node)?;
-                // Push progress indicator
-                if !path.is_empty() {
-                    self.outputs.push(Output::Progress(path));
-                }
-            }
-            Some(BranchNode::Storage(account, path, node)) => {
-                trace!(target: "trie::verify", ?account, ?path, "Storage node from state root");
-                match self.storage.as_mut() {
-                    None => {
-                        // First storage account - check for any empty storages before it
-                        self.verify_empty_storages(B256::ZERO, account, true, false)?;
-                        self.new_storage(account, path, node)?;
+        let complete = self.pool.in_place_scope(|jobs| {
+            std::thread::scope(|threads| {
+                let (cancel_tx, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+                let producer_events = events_tx.clone();
+                let producer_cancel = cancel_rx;
+                let producer = threads.spawn(move || {
+                    let _entered = span.enter();
+                    produce_accounts(jobs, (trie, hashed), last, accounts_tx, producer_events, producer_cancel)
+                });
+                let result = (|| -> Result<(), StateRootError> {
+                    loop {
+                        crossbeam_channel::select! {
+                            recv(events_rx) -> event => {
+                                if let Ok(event) = event {
+                                    outputs.push_back(Ok(event?));
+                                }
+                            }
+                            recv(accounts_rx) -> pending => {
+                                let Ok(PendingAccount { address, account, root }) = pending else { break };
+                                let root = if let Some(root) = root {
+                                    loop {
+                                        crossbeam_channel::select! {
+                                            recv(events_rx) -> event => {
+                                                if let Ok(event) = event {
+                                                    outputs.push_back(Ok(event?));
+                                                }
+                                            }
+                                            recv(root) -> root => {
+                                                match root {
+                                                    Ok(root) => break root,
+                                                    Err(_) => {
+                                                        for event in events_rx.try_iter() {
+                                                            outputs.push_back(Ok(event?));
+                                                        }
+                                                        return Err(DatabaseError::Other(
+                                                            "Storage root worker disconnected".into(),
+                                                        ).into())
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    alloy_consensus::EMPTY_ROOT_HASH
+                                };
+                                account_rlp.clear();
+                                account.into_trie_account(root).encode(&mut account_rlp);
+                                builder.add_leaf(Nibbles::unpack(address), &account_rlp);
+                                *last_account = Some(address);
+                                if builder.updates_len() < ACCOUNT_UPDATE_THRESHOLD {
+                                    continue
+                                }
+                                let (next_builder, updates) = std::mem::take(builder).split();
+                                *builder = next_builder.with_updates(true);
+                                // The account trie root is calculated but never persisted.
+                                let mut nodes = updates.into_iter()
+                                    .filter(|(path, _)| !path.is_empty())
+                                    .collect::<Vec<_>>();
+                                nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+                                let mut found = Vec::new();
+                                for (path, node) in nodes {
+                                    account_verifier.next(&mut found, path, node)?;
+                                    found.push(Output::Progress(path));
+                                }
+                                report_outputs(found, &events_tx, &events_rx, outputs)?;
+                            }
+                        }
                     }
-                    Some((prev_account, storage)) if *prev_account == account => {
-                        storage.next(&mut self.outputs, path, node)?;
-                    }
-                    Some((prev_account, storage)) => {
-                        storage.finalize(&mut self.outputs)?;
-                        // Clear any storage entries between the previous account and the new one
-                        let prev_account = *prev_account;
-                        self.verify_empty_storages(prev_account, account, false, false)?;
-                        self.new_storage(account, path, node)?;
-                    }
-                }
+                    for event in events_rx.try_iter() { outputs.push_back(Ok(event?)); }
+                    Ok(())
+                })();
+                // Disconnecting cancellation wakes blocked producers, including during unwinding.
+                drop(cancel_tx);
+                let produced = producer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                result?;
+                produced
+            })
+        })?;
+        self.complete = complete;
+        if self.complete {
+            self.hash_builder.root();
+            let (_, updates) = std::mem::take(&mut self.hash_builder).split();
+            let mut nodes =
+                updates.into_iter().filter(|(path, _)| !path.is_empty()).collect::<Vec<_>>();
+            nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+            let mut found = Vec::new();
+            for (path, node) in nodes {
+                self.account.next(&mut found, path, node)?;
             }
+            self.account.finalize(&mut found)?;
+            report_outputs(found, &events_tx, &events_rx, &mut self.outputs)?;
         }
-
-        // If any outputs were appended we want to reverse them, so they are popped off
-        // in the same order they were appended.
-        self.outputs.reverse();
         Ok(())
     }
 }
 
-impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Verifier<'a, T, H> {
+impl<T, H> Iterator for Verifier<'_, T, H>
+where
+    T: TrieCursorFactory + Sync,
+    H: HashedCursorFactory + Clone + Sync,
+{
     type Item = Result<Output, StateRootError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(output) = self.outputs.pop() {
-                return Some(Ok(output))
+            if let Some(output) = self.outputs.pop_front() {
+                return Some(output)
             }
-
             if self.complete {
                 return None
             }
-
-            if let Err(err) = self.try_next() {
-                return Some(Err(err))
+            if let Err(error) = self.fill_batch() {
+                self.complete = true;
+                self.outputs.push_back(Err(error));
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PendingAccount {
+    address: B256,
+    account: reth_primitives_traits::Account,
+    // Empty storage is verified by the lookahead thread without scheduling a root job.
+    root: Option<crossbeam_channel::Receiver<B256>>,
+}
+
+fn report_outputs(
+    found: Vec<Output>,
+    sender: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    receiver: &crossbeam_channel::Receiver<Result<Output, StateRootError>>,
+    outputs: &mut std::collections::VecDeque<Result<Output, StateRootError>>,
+) -> Result<(), StateRootError> {
+    for output in found {
+        let mut event = Ok(output);
+        loop {
+            match sender.try_send(event) {
+                Ok(()) => break,
+                Err(crossbeam_channel::TrySendError::Full(returned)) => {
+                    event = returned;
+                    // The account thread also consumes the central queue and must not block on it.
+                    for queued in receiver.try_iter() {
+                        outputs.push_back(Ok(queued?));
+                    }
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                    unreachable!("account thread owns receiver")
+                }
+            }
+        }
+    }
+    for queued in receiver.try_iter() {
+        outputs.push_back(Ok(queued?));
+    }
+    Ok(())
+}
+
+fn send_verification<T>(
+    sender: &crossbeam_channel::Sender<T>,
+    value: T,
+    cancel: &crossbeam_channel::Receiver<()>,
+) -> bool {
+    crossbeam_channel::select! {
+        send(sender, value) -> result => result.is_ok(),
+        recv(cancel) -> _ => false,
+    }
+}
+
+fn produce_accounts<'scope, T, H>(
+    jobs: &rayon::Scope<'scope>,
+    factories: (&'scope T, &'scope H),
+    last: Option<B256>,
+    accounts: crossbeam_channel::Sender<PendingAccount>,
+    events: crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    cancel: crossbeam_channel::Receiver<()>,
+) -> Result<bool, StateRootError>
+where
+    T: TrieCursorFactory + Sync,
+    H: HashedCursorFactory + Clone + Sync,
+{
+    let (trie, hashed) = factories;
+    let mut cursor = hashed.hashed_account_cursor()?;
+    let mut next = if let Some(last) = last {
+        cursor.seek(last)?;
+        cursor.next()?
+    } else {
+        cursor.seek(B256::ZERO)?
+    };
+    let Some((first, _)) = next else { return Ok(true) };
+    let mut storage = hashed.hashed_storage_cursor(first)?;
+    let mut stored = trie.storage_trie_cursor(first)?;
+    for _ in 0..ACCOUNT_BATCH_SIZE {
+        let Some((address, account)) = next else { return Ok(true) };
+        storage.set_hashed_address(address);
+        let root = if storage.is_storage_empty()? {
+            stored.set_hashed_address(address);
+            let mut verifier = SingleVerifier::new(Some(address), &mut stored)?;
+            let mut found = Vec::new();
+            verifier.finalize(&mut found)?;
+            for output in found {
+                if !send_verification(&events, Ok(output), &cancel) {
+                    return Ok(false)
+                }
+            }
+            None
+        } else {
+            let (root_tx, root_rx) = crossbeam_channel::bounded(1);
+            let events = events.clone();
+            let cancel = cancel.clone();
+            let span = tracing::Span::current();
+            jobs.spawn(move |_| {
+                let _entered = span.enter();
+                match verify_storage(trie, hashed, address, &events, &cancel) {
+                    Ok(Some(root)) => {
+                        send_verification(&root_tx, root, &cancel);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        send_verification(&events, Err(error), &cancel);
+                    }
+                }
+            });
+            Some(root_rx)
+        };
+        if !send_verification(&accounts, PendingAccount { address, account, root }, &cancel) {
+            return Ok(false)
+        }
+        next = cursor.next()?;
+    }
+    Ok(next.is_none())
+}
+
+fn verify_storage<T, H>(
+    trie: &T,
+    hashed: &H,
+    address: B256,
+    events: &crossbeam_channel::Sender<Result<Output, StateRootError>>,
+    cancel: &crossbeam_channel::Receiver<()>,
+) -> Result<Option<B256>, StateRootError>
+where
+    T: TrieCursorFactory,
+    H: HashedCursorFactory + Clone,
+{
+    let mut verifier = SingleVerifier::new(Some(address), trie.storage_trie_cursor(address)?)?;
+    let mut state = None;
+    loop {
+        if cancel.try_recv() == Err(crossbeam_channel::TryRecvError::Disconnected) {
+            return Ok(None)
+        }
+        let result = crate::StorageRoot::new_hashed(
+            NoopTrieCursorFactory,
+            hashed.clone(),
+            address,
+            Default::default(),
+            #[cfg(feature = "metrics")]
+            Default::default(),
+        )
+        .with_intermediate_state(state.take())
+        .root_with_progress()?;
+        let (root, updates) = match result {
+            crate::StorageRootProgress::Complete(root, _, updates) => (Some(root), updates),
+            crate::StorageRootProgress::Progress(next, _, updates) => {
+                state = Some(*next);
+                (None, updates)
+            }
+        };
+        let mut nodes = updates.storage_nodes.into_iter().collect::<Vec<_>>();
+        nodes.sort_unstable_by(|a, b| depth_first::cmp(&a.0, &b.0));
+        let mut found = Vec::new();
+        for (path, node) in nodes {
+            verifier.next(&mut found, path, node)?;
+        }
+        if root.is_some() {
+            verifier.finalize(&mut found)?;
+        }
+        for output in found {
+            if !send_verification(events, Ok(output), cancel) {
+                return Ok(None)
+            }
+        }
+        if root.is_some() {
+            return Ok(root)
         }
     }
 }
@@ -513,27 +558,41 @@ mod tests {
         factory.account_trie_cursor().unwrap()
     }
 
+    fn verified_trie(factory: &MockHashedCursorFactory) -> MockTrieCursorFactory {
+        let (_, updates) = crate::StateRoot::new(NoopTrieCursorFactory, factory.clone())
+            .root_with_updates()
+            .unwrap();
+        let mut storages = updates
+            .storage_tries
+            .into_iter()
+            .map(|(address, updates)| {
+                (address, updates.storage_nodes.into_iter().collect::<BTreeMap<_, _>>())
+            })
+            .collect::<B256Map<_>>();
+        let mut cursor = factory.hashed_account_cursor().unwrap();
+        let mut next = cursor.seek(B256::ZERO).unwrap();
+        while let Some((address, _)) = next {
+            storages.entry(address).or_default();
+            next = cursor.next().unwrap();
+        }
+        MockTrieCursorFactory::new(updates.account_nodes.into_iter().collect(), storages)
+    }
+
     #[test]
-    fn test_state_root_branch_nodes_iter_empty() {
+    fn test_verifier_empty() {
         // Test with completely empty state
         let factory = MockHashedCursorFactory::new(BTreeMap::new(), B256Map::default());
-        let mut iter = StateRootBranchNodesIter::new(factory);
-
-        // Collect all results - with empty state, should complete without producing nodes
-        let mut count = 0;
-        for result in iter.by_ref() {
-            assert!(result.is_ok(), "Unexpected error: {:?}", result.unwrap_err());
-            count += 1;
-            // Prevent infinite loop in test
-            assert!(count <= 1000, "Too many iterations");
+        let trie = verified_trie(&factory);
+        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        for output in verifier.by_ref() {
+            assert_matches!(output.unwrap(), Output::Progress(_));
         }
-
-        assert!(iter.complete);
+        assert!(verifier.complete);
     }
 
     #[test]
     #[allow(clippy::needless_update)]
-    fn test_state_root_branch_nodes_iter_basic() {
+    fn test_verifier_basic() {
         // Simple test with a few accounts and storage
         let mut accounts = BTreeMap::new();
         let mut storage_tries = B256Map::default();
@@ -557,53 +616,17 @@ mod tests {
         storage_tries.insert(addr1, storage1);
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
-        let mut iter = StateRootBranchNodesIter::new(factory);
-
-        // Collect nodes and verify basic properties
-        let mut account_paths = Vec::new();
-        let mut storage_paths_by_account: B256Map<Vec<Nibbles>> = B256Map::default();
-        let mut iterations = 0;
-
-        for result in iter.by_ref() {
-            iterations += 1;
-            assert!(iterations <= 10000, "Too many iterations - possible infinite loop");
-
-            match result {
-                Ok(BranchNode::Account(path, _)) => {
-                    account_paths.push(path);
-                }
-                Ok(BranchNode::Storage(account, path, _)) => {
-                    storage_paths_by_account.entry(account).or_default().push(path);
-                }
-                Err(e) => panic!("Unexpected error: {:?}", e),
-            }
+        let trie = verified_trie(&factory);
+        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        for output in verifier.by_ref() {
+            assert_matches!(output.unwrap(), Output::Progress(_));
         }
-
-        // Verify account paths are in ascending order
-        for i in 1..account_paths.len() {
-            assert!(
-                account_paths[i - 1] < account_paths[i],
-                "Account paths should be in ascending order"
-            );
-        }
-
-        // Verify storage paths for each account are in ascending order
-        for (account, paths) in storage_paths_by_account {
-            for i in 1..paths.len() {
-                assert!(
-                    paths[i - 1] < paths[i],
-                    "Storage paths for account {:?} should be in ascending order",
-                    account
-                );
-            }
-        }
-
-        assert!(iter.complete);
+        assert!(verifier.complete);
     }
 
     #[test]
     #[allow(clippy::needless_update)]
-    fn test_state_root_branch_nodes_iter_multiple_accounts() {
+    fn test_verifier_multiple_accounts() {
         // Test with multiple accounts to verify ordering
         let mut accounts = BTreeMap::new();
         let mut storage_tries = B256Map::default();
@@ -632,38 +655,12 @@ mod tests {
         }
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
-        let mut iter = StateRootBranchNodesIter::new(factory);
-
-        // Track what we see
-        let mut seen_storage_accounts = Vec::new();
-        let mut current_storage_account = None;
-        let mut iterations = 0;
-
-        for result in iter.by_ref() {
-            iterations += 1;
-            assert!(iterations <= 10000, "Too many iterations");
-
-            match result {
-                Ok(BranchNode::Storage(account, _, _)) => {
-                    if current_storage_account != Some(account) {
-                        // Verify we don't revisit a storage account
-                        assert!(
-                            !seen_storage_accounts.contains(&account),
-                            "Should not revisit storage account {:?}",
-                            account
-                        );
-                        seen_storage_accounts.push(account);
-                        current_storage_account = Some(account);
-                    }
-                }
-                Ok(BranchNode::Account(_, _)) => {
-                    // Account nodes are fine
-                }
-                Err(e) => panic!("Unexpected error: {:?}", e),
-            }
+        let trie = verified_trie(&factory);
+        let mut verifier = Verifier::new(&trie, factory).unwrap();
+        for output in verifier.by_ref() {
+            assert_matches!(output.unwrap(), Output::Progress(_));
         }
-
-        assert!(iter.complete);
+        assert!(verifier.complete);
     }
 
     #[test]

@@ -17,6 +17,7 @@ reth-execution-errors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-trie-common = { workspace = true, features = ["rayon"] }
 
@@ -35,8 +36,10 @@ tracing = { workspace = true, features = ["attributes"] }
 
 # misc
 auto_impl.workspace = true
+crossbeam-channel.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -79,6 +82,7 @@ serde = [
 ]
 test-utils = [
     "triehash",
+    "reth-tasks/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",

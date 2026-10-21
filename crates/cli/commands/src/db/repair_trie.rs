@@ -31,7 +31,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseStateRoot, DatabaseTrieCursorFactory,
-    StorageTrieEntryLike, TrieTableAdapter,
+    StorageTrieEntryLike, TrieTableAdapter, VerifierCursorFactory,
 };
 use std::{
     net::SocketAddr,
@@ -116,19 +116,14 @@ fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
         .unwrap_or_default();
     info!("Database block tip: {}", finish_checkpoint.block_number);
 
-    // Get a database transaction directly from the database
     let db = tool.provider_factory.db_ref();
-    let mut tx = db.tx()?;
-    tx.disable_long_read_transaction_safety();
-
-    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(&tx))
+    reth_trie_db::with_adapter!(tool.provider_factory, |A| do_verify_only::<_, A>(db))
 }
 
-fn do_verify_only<TX: DbTx, A: TrieTableAdapter>(tx: &TX) -> eyre::Result<()> {
+fn do_verify_only<DB: Database, A: TrieTableAdapter>(db: &DB) -> eyre::Result<()> {
     // Create the verifier
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
+    let verifier = Verifier::new(&cursors, &cursors)?;
 
     let metrics = RepairTrieMetrics::new();
 
@@ -219,7 +214,11 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     verify_checkpoints(provider_rw.as_ref())?;
 
     let inconsistent_nodes = reth_trie_db::with_adapter!(tool.provider_factory, |A| {
-        do_verify_and_repair::<_, A>(&mut provider_rw, finish_checkpoint.block_number)?
+        do_verify_and_repair::<_, A>(
+            &mut provider_rw,
+            tool.provider_factory.db_ref(),
+            finish_checkpoint.block_number,
+        )?
     });
 
     if inconsistent_nodes == 0 {
@@ -234,6 +233,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
 
 fn do_verify_and_repair<N: ProviderNodeTypes, A: TrieTableAdapter>(
     provider_rw: &mut reth_provider::DatabaseProviderRW<N::DB, N>,
+    db: &N::DB,
     block_number: u64,
 ) -> eyre::Result<usize>
 where
@@ -245,14 +245,9 @@ where
     let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
     let mut storage_trie_cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
 
-    // Create the cursor factories. These cannot accept the `&mut` tx above because they
-    // require it to be AsRef.
-    let tx = provider_rw.tx_ref();
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
-    let trie_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-
-    // Create the verifier
-    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+    // Open every read snapshot before any repairs are applied.
+    let cursors = VerifierCursorFactory::<_, A>::new(|| db.tx())?;
+    let verifier = Verifier::new(&cursors, &cursors)?;
 
     let metrics = RepairTrieMetrics::new();
 
