@@ -407,7 +407,7 @@ where
                         .expect("already checked for emptiness")
                         .short_key()
                         .is_empty());
-                    self.push_new_branch(path)
+                    self.push_new_branch(path)?
                 }
                 Some(state_mask) => {
                     // Find the number of nibbles shared by the current branch and the new child.
@@ -424,7 +424,7 @@ where
                     // child. Otherwise the new child can be inserted directly into this branch.
                     let nibble = path.get_unchecked(common_prefix_len);
                     if state_mask.is_bit_set(nibble) {
-                        self.push_new_branch(path)
+                        self.push_new_branch(path)?
                     } else {
                         (nibble, trim_nibbles_prefix(&path, common_prefix_len + 1))
                     }
@@ -457,7 +457,13 @@ where
     ///
     /// Returns the nibble of the branch's `state_mask` which should be set for the new child, and
     /// the short key that child should use.
-    fn push_new_branch(&mut self, new_child_path: Nibbles) -> (u8, Nibbles) {
+    ///
+    /// Returns a trie inconsistency error if one child contains the other's path, since neither
+    /// child has a distinct nibble on which to split.
+    fn push_new_branch(
+        &mut self,
+        new_child_path: Nibbles,
+    ) -> Result<(u8, Nibbles), StateProofError> {
         // Get the full path to the root of the existing child. The trie root is used when there is
         // no parent branch.
         let first_child_path = self
@@ -472,11 +478,19 @@ where
             .last()
             .expect("push_new_branch can't be called with empty child_stack")
             .short_key();
-        debug_assert!(!first_child_short_key.is_empty());
-
         // Their shared prefix becomes the new branch's extension. The first differing nibble from
         // each key becomes that child's position in the branch.
         let common_prefix_len = first_child_short_key.common_prefix_length(&new_child_short_key);
+        if common_prefix_len == first_child_short_key.len() ||
+            common_prefix_len == new_child_short_key.len()
+        {
+            let msg = format!(
+                "cannot split overlapping proof children: branch_path={:?}, first_child_path={first_child_path:?}, first_child_short_key={first_child_short_key:?}, new_child_path={new_child_path:?}",
+                self.branch_path,
+            );
+            error!(target: TRACE_TARGET, "{msg}");
+            return Err(StateProofError::TrieInconsistency(msg))
+        }
         let first_child_nibble = first_child_short_key.get_unchecked(common_prefix_len);
         let new_child_nibble = new_child_short_key.get_unchecked(common_prefix_len);
 
@@ -512,7 +526,7 @@ where
             "Pushed new branch",
         );
 
-        (new_child_nibble, new_child_short_key)
+        Ok((new_child_nibble, new_child_short_key))
     }
 
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
@@ -3075,6 +3089,41 @@ mod tests {
             Some(expected_root),
             harness.root_with_prefix_set(prefix_set.freeze()),
             "a dirty prefix must not omit a clean sibling after collapsing a cached branch",
+        );
+    }
+
+    #[test]
+    fn test_overlapping_proof_children_return_inconsistency() {
+        let harness = TrieTestHarness::new(BTreeMap::new());
+        let trie_cursor =
+            harness.trie_cursor_factory().storage_trie_cursor(harness.hashed_address()).unwrap();
+        let hashed_cursor = harness
+            .hashed_cursor_factory()
+            .hashed_storage_cursor(harness.hashed_address())
+            .unwrap();
+        let mut calculator = StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
+        calculator.branch_path = Nibbles::from_nibbles([1]);
+        calculator
+            .branch_stack
+            .push(ProofTrieBranch { ext_len: 1, state_mask: TrieMask::from_nibble(0) });
+        calculator.child_stack.push(ProofTrieBranchChild::RlpNode {
+            node: RlpNode::word_rlp(&B256::ZERO),
+            short_key: Nibbles::new(),
+            hash_mask_bit: false,
+            tree_mask_bit: false,
+        });
+
+        let path = Nibbles::from_nibbles([1, 0, 2]);
+        let child = ProofTrieBranchChild::RlpNode {
+            node: RlpNode::word_rlp(&B256::ZERO),
+            short_key: path,
+            hash_mask_bit: false,
+            tree_mask_bit: false,
+        };
+        let err = calculator.push_child(&mut None, child).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "trie inconsistency: cannot split overlapping proof children: branch_path=Nibbles(0x1), first_child_path=Nibbles(0x10), first_child_short_key=Nibbles(0x), new_child_path=Nibbles(0x102)"
         );
     }
 
