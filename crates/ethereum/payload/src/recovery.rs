@@ -1,17 +1,13 @@
-//! Local payload-building recovery for unwinding transaction execution panics.
+//! Containment and pool eviction for unwinding transaction execution panics.
 
 use alloy_primitives::B256;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_transaction_pool::{error::PoolTransactionError, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use std::{
-    collections::HashSet,
     fmt,
     panic::{catch_unwind, AssertUnwindSafe},
 };
 use tracing::error;
-
-/// Bound replay work when several independent transactions panic.
-const MAX_REBUILDS: usize = 8;
 
 /// An execution panic is local builder policy, not a consensus validation error.
 #[derive(Debug)]
@@ -28,17 +24,8 @@ impl fmt::Display for TransactionPanic {
 
 impl std::error::Error for TransactionPanic {}
 
-impl PoolTransactionError for TransactionPanic {
-    fn is_bad_transaction(&self) -> bool {
-        false
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
 pub(super) fn catch_transaction_panic<T>(
+    pool: &impl TransactionPool,
     hash: B256,
     execute: impl FnOnce() -> T,
 ) -> Result<T, PayloadBuilderError> {
@@ -57,38 +44,16 @@ pub(super) fn catch_transaction_panic<T>(
                 }
             },
         };
-        PayloadBuilderError::other(TransactionPanic { hash, message })
-    })
-}
-
-pub(super) fn rebuild_after_panic<T>(
-    pool: &impl TransactionPool,
-    mut attempt: impl FnMut(&HashSet<B256>, bool) -> Result<T, PayloadBuilderError>,
-) -> Result<T, PayloadBuilderError> {
-    let mut excluded = HashSet::new();
-    loop {
-        let result = attempt(&excluded, !excluded.is_empty());
-        let Err(PayloadBuilderError::Other(error)) = &result else { return result };
-        let Some(panic) = error.downcast_ref::<TransactionPanic>() else { return result };
-        // Evict before checking the retry budget: even the final failing transaction must
-        // not remain available to a later build. Descendants cannot execute without its nonce.
-        let removed = pool.remove_transactions_and_descendants(vec![panic.hash]);
+        let removed = pool.remove_transactions_and_descendants(vec![hash]);
         error!(
             target: "payload_builder",
-            tx_hash = %panic.hash,
-            panic_message = %panic.message,
-            rebuilds = excluded.len(),
+            tx_hash = %hash,
+            panic_message = %message,
             removed_transactions = removed.len(),
-            "transaction execution panicked; evicting transaction and descendants and discarding build attempt"
+            "transaction execution panicked; evicting transaction and descendants and failing build"
         );
-        if excluded.len() == MAX_REBUILDS || !excluded.insert(panic.hash) {
-            return result
-        }
-    }
-}
-
-pub(super) fn excluded_transaction(hash: B256) -> TransactionPanic {
-    TransactionPanic { hash, message: "excluded after execution panic".to_owned() }
+        PayloadBuilderError::other(TransactionPanic { hash, message })
+    })
 }
 
 #[cfg(test)]
@@ -113,67 +78,74 @@ mod tests {
     };
     use std::{
         future::Future,
-        io,
         panic::panic_any,
         pin::pin,
         task::{Context, Poll, Waker},
     };
 
     #[test]
-    fn rebuild_discards_panicking_precompile_writes_and_logs() {
+    fn failed_build_discards_precompile_writes_and_logs() {
         let bad = B256::repeat_byte(1);
         let good = B256::repeat_byte(2);
         let caller = Address::repeat_byte(3);
         let recipient = Address::repeat_byte(4);
         let precompile = Address::repeat_byte(5);
+        let pool = NoopTransactionPool::default();
         let mut parent_db = InMemoryDB::default();
         parent_db.insert_account_info(
             caller,
             AccountInfo { balance: U256::from(1_000_000), ..Default::default() },
         );
         let env = EvmEnv::new(CfgEnv::new_with_spec(SpecId::BERLIN), BlockEnv::default());
-        let mut attempts = 0;
-        let (db, results) =
-            rebuild_after_panic(&NoopTransactionPool::default(), |excluded, retry| {
-                attempts += 1;
-                assert_eq!(retry, attempts > 1);
-                let mut evm = EthEvmFactory::default().create_evm(parent_db.clone(), env.clone());
-                evm.precompiles_mut().apply_precompile(&precompile, |_| {
-                    Some(DynPrecompile::new_stateful(
-                        PrecompileId::Custom("panic-test".into()),
-                        move |mut input| {
-                            input.internals.sstore(precompile, U256::ZERO, U256::from(42)).unwrap();
-                            input.internals.log(Log::new_unchecked(
-                                precompile,
-                                vec![],
-                                Default::default(),
-                            ));
-                            panic!("injected panic after storage write and log")
-                        },
-                    ))
-                });
-                let mut results = vec![];
-                for (hash, nonce, target) in [(good, 0, recipient), (bad, 1, precompile)] {
-                    if excluded.contains(&hash) {
-                        continue
-                    }
-                    let result = catch_transaction_panic(hash, || {
-                        evm.transact_commit(TxEnv {
-                            caller,
-                            nonce,
-                            kind: TxKind::Call(target),
-                            value: U256::from(1),
-                            gas_limit: 100_000,
-                            ..Default::default()
-                        })
-                    })?
-                    .unwrap();
-                    results.push(result);
+        let build = |include_bad| {
+            let mut evm = EthEvmFactory::default().create_evm(parent_db.clone(), env.clone());
+            evm.precompiles_mut().apply_precompile(&precompile, |_| {
+                Some(DynPrecompile::new_stateful(
+                    PrecompileId::Custom("panic-test".into()),
+                    move |mut input| {
+                        input.internals.sstore(precompile, U256::ZERO, U256::from(42)).unwrap();
+                        input.internals.log(Log::new_unchecked(
+                            precompile,
+                            vec![],
+                            Default::default(),
+                        ));
+                        panic!("injected panic after storage write and log")
+                    },
+                ))
+            });
+            let mut results = vec![];
+            for (hash, nonce, target) in [(good, 0, recipient), (bad, 1, precompile)] {
+                if hash == bad && !include_bad {
+                    continue
                 }
-                Ok((evm.into_db(), results))
-            })
-            .unwrap();
-        assert_eq!(attempts, 2);
+                let result = catch_transaction_panic(&pool, hash, || {
+                    evm.transact_commit(TxEnv {
+                        caller,
+                        nonce,
+                        kind: TxKind::Call(target),
+                        value: U256::from(1),
+                        gas_limit: 100_000,
+                        ..Default::default()
+                    })
+                })?
+                .unwrap();
+                results.push(result);
+            }
+            Ok::<_, PayloadBuilderError>((evm.into_db(), results))
+        };
+
+        let error = build(true).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("transaction {bad} panicked: injected panic after storage write and log")
+        );
+        assert_eq!(parent_db.cache.accounts[&caller].info.nonce, 0);
+        assert_eq!(parent_db.cache.accounts[&caller].info.balance, U256::from(1_000_000));
+        assert!(!parent_db.cache.accounts.contains_key(&recipient));
+        assert!(!parent_db.cache.accounts.contains_key(&precompile));
+
+        // A separate build starts from the parent after the scheduler observes the error.
+        let (db, results) = build(false).unwrap();
         assert_eq!(db.cache.accounts[&caller].info.nonce, 1);
         assert_eq!(db.cache.accounts[&caller].info.balance, U256::from(999_999));
         assert_eq!(db.cache.accounts[&recipient].info.balance, U256::from(1));
@@ -185,54 +157,23 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_errors_are_not_retried() {
-        let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
-            attempts += 1;
-            Err(PayloadBuilderError::MissingPayload)
-        });
-        assert!(matches!(result, Err(PayloadBuilderError::MissingPayload)));
-        assert_eq!(attempts, 1);
-    }
-
-    #[test]
-    fn unrelated_internal_errors_are_not_retried() {
-        let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
-            attempts += 1;
-            Err(PayloadBuilderError::other(io::Error::other("provider failure")))
-        });
-        assert_eq!(result.unwrap_err().to_string(), "provider failure");
-        assert_eq!(attempts, 1);
-    }
-
-    #[test]
-    fn successful_execution_errors_are_preserved() {
-        let result = catch_transaction_panic(B256::ZERO, || Err::<(), _>("invalid nonce"));
+    fn successful_execution_errors_are_preserved_without_eviction() {
+        let pool = test_pool();
+        let hash = add_transaction(&pool, Address::repeat_byte(1), 0);
+        let result = catch_transaction_panic(&pool, hash, || Err::<(), _>("invalid nonce"));
         assert_eq!(result.unwrap(), Err("invalid nonce"));
+        assert!(pool.get(&hash).is_some());
     }
 
     #[test]
-    fn multiple_panics_are_bounded() {
-        let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |excluded, _| {
-            attempts += 1;
-            let hash = B256::repeat_byte(excluded.len() as u8);
-            catch_transaction_panic(hash, || panic!("injected panic"))
+    fn string_panic_payload_is_preserved() {
+        let result = catch_transaction_panic(&NoopTransactionPool::default(), B256::ZERO, || {
+            panic_any(String::from("owned panic message"))
         });
-        assert!(result.is_err());
-        assert_eq!(attempts, MAX_REBUILDS + 1);
-    }
-
-    #[test]
-    fn repeated_panicking_hash_is_not_retried_forever() {
-        let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(&NoopTransactionPool::default(), |_, _| {
-            attempts += 1;
-            catch_transaction_panic(B256::ZERO, || panic!("injected panic"))
-        });
-        assert!(result.is_err());
-        assert_eq!(attempts, 2);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!("transaction {} panicked: owned panic message", B256::ZERO)
+        );
     }
 
     #[test]
@@ -243,69 +184,36 @@ mod tests {
                 panic!("panic payload destructor")
             }
         }
-        let result = catch_transaction_panic(B256::ZERO, || panic_any(PanickingDrop));
-        let Err(PayloadBuilderError::Other(error)) = result else { panic!("expected panic error") };
+        let result = catch_transaction_panic(&NoopTransactionPool::default(), B256::ZERO, || {
+            panic_any(PanickingDrop)
+        });
         assert_eq!(
-            error.to_string(),
+            result.unwrap_err().to_string(),
             format!("transaction {} panicked: non-string panic payload", B256::ZERO)
         );
     }
 
     #[test]
-    fn exclusions_do_not_blame_peers() {
-        assert!(!excluded_transaction(B256::ZERO).is_bad_transaction());
-    }
-
-    #[test]
-    fn eviction_keeps_panicking_transactions_out_of_later_builds() {
+    fn panic_fails_once_and_evicts_transaction_and_descendants() {
         let pool = test_pool();
         let sender = Address::repeat_byte(1);
         let bad = add_transaction(&pool, sender, 0);
         let descendant = add_transaction(&pool, sender, 1);
         let good = add_transaction(&pool, Address::repeat_byte(2), 0);
         let mut attempts = 0;
-        rebuild_after_panic(&pool, |_, retry| {
+        let result = catch_transaction_panic(&pool, bad, || {
             attempts += 1;
-            if !retry {
-                return catch_transaction_panic(bad, || panic!("injected panic"))
-            }
-            assert!(pool.get(&bad).is_none());
-            assert!(pool.get(&descendant).is_none());
-            assert_eq!(
-                pool.best_transactions().map(|tx| *tx.hash()).collect::<Vec<_>>(),
-                vec![good]
-            );
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(attempts, 2);
-
-        // An independent build starts with no exclusions and still cannot select the evicted tx.
-        let later = rebuild_after_panic(&pool, |excluded, retry| {
-            assert!(excluded.is_empty());
-            assert!(!retry);
-            Ok(pool.best_transactions().map(|tx| *tx.hash()).collect::<Vec<_>>())
-        })
-        .unwrap();
-        assert_eq!(later, vec![good]);
-    }
-
-    #[test]
-    fn retry_budget_exhaustion_still_evicts_the_last_panicking_transaction() {
-        let pool = test_pool();
-        for sender in 0..=MAX_REBUILDS {
-            add_transaction(&pool, Address::repeat_byte(sender as u8), 0);
-        }
-        let mut attempts = 0;
-        let result = rebuild_after_panic::<()>(&pool, |_, _| {
-            attempts += 1;
-            let tx = pool.best_transactions().next().unwrap();
-            catch_transaction_panic(*tx.hash(), || panic!("injected panic"))
+            panic!("injected panic")
         });
-        assert!(result.is_err());
-        assert_eq!(attempts, MAX_REBUILDS + 1);
-        assert!(pool.is_empty());
-        assert!(pool.best_transactions().next().is_none());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!("transaction {bad} panicked: injected panic")
+        );
+        assert_eq!(attempts, 1);
+        assert!(pool.get(&bad).is_none());
+        assert!(pool.get(&descendant).is_none());
+        // A fresh iterator in a later build cannot select either evicted transaction.
+        assert_eq!(pool.best_transactions().map(|tx| *tx.hash()).collect::<Vec<_>>(), vec![good]);
     }
 
     fn test_pool() -> Pool<
