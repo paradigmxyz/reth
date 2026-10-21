@@ -119,4 +119,6 @@ account-ext = [
     "evm2/account-ext",
     "reth-execution-types/account-ext",
     "revm/account-ext",
+    "reth-rpc-convert/account-ext",
+    "reth-node-api/account-ext",
 ]

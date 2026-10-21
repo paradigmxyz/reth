@@ -39,3 +39,9 @@ serde_json.workspace = true
 
 [features]
 default = []
+account-ext = [
+    "reth-primitives-traits/account-ext",
+    "reth-evm/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "evm2/account-ext",
+]
