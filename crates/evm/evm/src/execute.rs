@@ -24,7 +24,7 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, BundleSource, HashedPostState, StateUpdate};
+use reth_execution_types::{BlockExecutionResult, HashedPostState, StateUpdate};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -34,6 +34,9 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
 use revm::database::BundleState;
+
+#[cfg(feature = "std")]
+use reth_execution_types::BundleSource;
 
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
