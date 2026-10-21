@@ -24,9 +24,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
-    ///
-    /// Use [`Self::next_block_base_fee`] to calculate fees, including fork-specific rational
-    /// updates that cannot be represented by these parameters.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 
     /// Get the [`BlobParams`] for the given timestamp
@@ -131,29 +128,5 @@ impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.get_final_paris_total_difficulty()
-    }
-
-    fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
-        if !self.is_bogota_active_at_timestamp(target_timestamp) {
-            return parent.next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
-        }
-
-        // EIP-8198 activates on the child timestamp, including the first Bogota block.
-        // Divide by the gas target before multiplying by 5 and dividing by 48, matching
-        // the execution spec's integer rounding. An integer denominator cannot express 5/48.
-        let base_fee = parent.base_fee_per_gas()?;
-        let gas_target = parent.gas_limit() / 2;
-        if gas_target == 0 {
-            return Some(base_fee)
-        }
-        let target_fee_gas_delta = u128::from(base_fee) *
-            u128::from(parent.gas_used().abs_diff(gas_target)) /
-            u128::from(gas_target);
-        let delta = u64::try_from(target_fee_gas_delta.checked_mul(5)? / 48).ok()?;
-        Some(if parent.gas_used() > gas_target {
-            base_fee.saturating_add(delta.max(1))
-        } else {
-            base_fee.saturating_sub(delta)
-        })
     }
 }

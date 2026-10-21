@@ -2,21 +2,23 @@
 set -eo pipefail
 
 fixture_variant="${1:-amsterdam}"
+eels_tag="v21.0.1"
+eels_build_args=(--sim.buildarg tag="${eels_tag}")
+eels_blob_build_args=("${eels_build_args[@]}")
 
 case "${fixture_variant}" in
     amsterdam)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet@v7.2.1/fixtures_glamsterdam-devnet.tar.gz"
-        eels_branch="devnets/glamsterdam/7"
         eels_fork="Amsterdam"
         ;;
     osaka)
-        eels_fixtures="https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz"
-        eels_branch="mainnet"
         eels_fork="Osaka"
         ;;
     bogota)
-        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-heze-devnet@v2.0.0/fixtures_heze-devnet.tar.gz"
+        # Heze fixtures are separate from the mainnet simulator image release.
+        eels_fixtures="https://github.com/ethereum/execution-specs/releases/download/tests-heze-devnet%40v2.0.1/fixtures_heze-devnet.tar.gz"
         eels_branch="devnets/heze/2"
+        eels_build_args=(--sim.buildarg fixtures="${eels_fixtures}" --sim.buildarg branch="${eels_branch}")
+        eels_blob_build_args=(--sim.buildarg branch="${eels_branch}")
         eels_fork="Bogota"
         ;;
     *)
@@ -30,29 +32,20 @@ mkdir hive_assets/
 
 cd hivetests
 
-# Keep fixtures compressed in the images to avoid exhausting disk during builds.
-curl --fail --location --retry 3 "${eels_fixtures}" \
-    -o simulators/ethereum/eels/consume-engine/fixtures.tar.gz
-cp simulators/ethereum/eels/consume-engine/fixtures.tar.gz \
-    simulators/ethereum/eels/consume-rlp/fixtures.tar.gz
-eels_fixtures="/fixtures"
-
 go build .
 
 ./hive -client reth # first builds and caches the client
 
-# Run each hive command in the background for each simulator and wait
+# Build fixture-heavy Heze images serially to limit peak disk usage.
 echo "Building images"
 ./hive -client reth --sim "ethereum/eels/consume-engine" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
-    --sim.timelimit 1s || true &
+    "${eels_build_args[@]}" \
+    --sim.timelimit 1s || true
 ./hive -client reth --sim "ethereum/eels/consume-rlp" \
-    --sim.buildarg fixtures="${eels_fixtures}" \
-    --sim.buildarg branch="${eels_branch}" \
-    --sim.timelimit 1s || true &
+    "${eels_build_args[@]}" \
+    --sim.timelimit 1s || true
 ./hive -client reth --sim "ethereum/eels/execute-blobs" \
-    --sim.buildarg branch="${eels_branch}" \
+    "${eels_blob_build_args[@]}" \
     --sim.buildarg fork="${eels_fork}" \
     --sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
