@@ -17,11 +17,15 @@ use std::sync::Arc;
 mod builder;
 mod engine;
 mod execution;
+mod runtime;
+mod source;
 mod storage;
 
 pub use builder::ExecutionPayloadBuilder;
 pub use engine::{ExecutionEngineTypes, ExecutionEngineValidator, ExecutionPayloadTypes};
 pub use execution::{received_source, ExecutionConsensus, ExecutionEvmConfig};
+pub use runtime::{ExecutionEthApiBuilder, ExecutionNode};
+pub use source::ExecutionSourceBackend;
 pub use storage::ExecutionStorage;
 
 #[derive(Clone, Debug)]

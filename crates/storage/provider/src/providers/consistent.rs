@@ -10,9 +10,11 @@ use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
     BlockHeader,
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
+use alloy_eips::{
+    eip7685::Requests, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BlockExecutionResult, RecoveredBlockAndExecutionOutput};
@@ -90,6 +92,25 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 }))
             },
         )
+    }
+
+    /// Pins the executed block in this captured canonical chain, including retained attachments.
+    pub fn executed_block_by_hash(
+        &self,
+        hash: B256,
+    ) -> ProviderResult<Option<ExecutedBlock<N::Primitives>>> {
+        self.get_in_memory_or_storage_by_block(
+            hash.into(),
+            |_| Ok(None),
+            |state| Ok(Some(state.block())),
+        )
+    }
+
+    /// Reads durable execution request bodies under the same captured block identity.
+    /// Live inputs come from the executed block's retained source. Reconstructed execution
+    /// outcomes can contain default empty requests when historical bodies were unavailable.
+    pub fn execution_requests(&self, block: BlockNumHash) -> ProviderResult<Option<Requests>> {
+        self.storage_provider.execution_requests(block)
     }
 
     /// Consumes this consistent view and returns its database provider snapshot.

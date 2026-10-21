@@ -207,6 +207,10 @@ impl ExecutionEvmConfig {
         Ok(Self { inner, validator })
     }
 
+    pub(crate) const fn native_config(&self) -> &EthEvmConfig {
+        &self.inner
+    }
+
     const fn configure_flags(&self, env: &mut EvmEnvFor<Self>, timestamp: u64) {
         let active = self.validator.fork_config().is_active_at_timestamp(timestamp);
         env.cfg_env.enable_amsterdam_eip8037 = active;

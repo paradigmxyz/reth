@@ -11,6 +11,7 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7251::{CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS, CONSOLIDATION_REQUEST_PREDEPLOY_CODE},
     eip7685::RequestsOrHash,
+    BlockNumberOrTag,
 };
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
@@ -25,9 +26,10 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
-use reth_chain_state::CanonicalInMemoryState;
+use reth_chain_state::{CanonicalInMemoryState, NewCanonicalChain};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork, ForkCondition};
 use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
+use reth_db_api::{tables, transaction::DbTxMut};
 use reth_db_common::init::init_genesis;
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineHandle, EngineApiValidator, NoopInvalidBlockHook,
@@ -63,10 +65,12 @@ use reth_provider::{
         create_test_provider_factory_with_chain_spec, create_test_provider_factory_with_node_types,
         MockEthProvider, MockNodeTypesWithDB,
     },
+    BalProvider, BalStoreHandle, RocksDBBalStore, RocksDBProviderFactory, SaveBlocksInput,
+    StateWriter,
 };
 use reth_pureth_block::{
-    ExecutionForkConfig, ExecutionHeader, ExecutionPrimitives, ExecutionSource, PayloadLimits,
-    PayloadSourceError, PayloadSourceInput,
+    ExecutionForkConfig, ExecutionHeader, ExecutionPrimitives, ExecutionSource,
+    ExecutionSourceProvider, PayloadLimits, PayloadSourceError, PayloadSourceInput,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::EngineApiServer;
@@ -82,6 +86,7 @@ use reth_trie_parallel::state_root_task::{
     PayloadStateRootHandle, StateRootComputeOutcome, StateRootHandle, StateRootTaskCancelGuard,
 };
 use std::{
+    num::NonZeroU32,
     sync::{atomic::AtomicBool, mpsc, Arc},
     time::Duration,
 };
@@ -206,6 +211,32 @@ impl Fixture {
 
     fn build(&self) -> ExecutionBuiltPayload {
         self.builder.try_build(self.args(None, None)).unwrap().into_payload().unwrap()
+    }
+
+    async fn add_withdrawal_request(&self) {
+        let sender: PrivateKeySigner = B256::repeat_byte(9).to_string().parse().unwrap();
+        let mut input = vec![0x11; 48];
+        input.extend_from_slice(&3_u64.to_be_bytes());
+        let tx = TxLegacy {
+            chain_id: Some(1),
+            nonce: 1,
+            gas_limit: 1_000_000,
+            gas_price: 2_000_000_000,
+            to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
+            value: U256::from(1),
+            input: input.into(),
+        };
+        let signature = sender.sign_hash_sync(&tx.signature_hash()).unwrap();
+        let tx: TransactionSigned = tx.into_signed(signature).into();
+        let length = tx.encode_2718_len();
+        self.builder
+            .pool
+            .add_transaction(
+                TransactionOrigin::Local,
+                EthPooledTransaction::new(Recovered::new_unchecked(tx, sender.address()), length),
+            )
+            .await
+            .unwrap();
     }
 }
 
@@ -836,6 +867,7 @@ type ReceiverNodeTypes = AnyNodeTypesWithEngine<
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn receiver_executes_and_retains_source_before_accepting_commitments() {
     let fixture = Fixture::new(true).await;
+    fixture.add_withdrawal_request().await;
     tokio::task::block_in_place(|| {
         let built = fixture.build();
         let spec = fixture.builder.client.chain_spec();
@@ -851,9 +883,13 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 Arc::new(spec.as_ref().clone().map_header(ExecutionHeader::legacy)),
             );
             init_genesis(&factory).unwrap();
-            let provider = BlockchainProvider::new(factory).unwrap();
             let runtime = Runtime::test();
             let overlay = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
+            let rocks = factory.rocksdb_provider();
+            let factory = factory
+                .with_overlay_manager(overlay.clone())
+                .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(rocks.clone())));
+            let provider = BlockchainProvider::new(factory.clone()).unwrap();
             let config = TreeConfig::default()
                 .with_has_enough_parallelism(!fallback)
                 .with_state_root_fallback(fallback)
@@ -874,7 +910,7 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 config.invalid_header_hit_eviction_threshold(),
                 fixture.config.parent_header.num_hash(),
                 EngineApiKind::Ethereum,
-                overlay,
+                overlay.clone(),
             );
             let canonical = CanonicalInMemoryState::with_head(
                 fixture.config.parent_header.as_ref().clone(),
@@ -919,6 +955,7 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
             builder.apply_pre_execution_changes().unwrap();
             let assembled = builder.finish(provider.latest().unwrap(), None).unwrap();
             assert_eq!(assembled.block.hash(), empty.block().hash());
+            drop(db);
             let received_empty = receiver
                 .validate_payload(
                     ExecutionData::from(empty.clone()),
@@ -1045,6 +1082,243 @@ async fn receiver_executes_and_retains_source_before_accepting_commitments() {
                 assert!(receiver
                     .validate_payload(altered, TreeCtx::new(&mut state, &canonical))
                     .is_err());
+            }
+            if !parallel_bal && !fallback {
+                let cancelled = AtomicBool::new(false);
+                overlay.insert_block(result.executed_block.clone());
+                overlay.insert_block(received_empty.executed_block.clone());
+                let backend = crate::ExecutionSourceBackend::new(
+                    provider.clone(),
+                    validator.clone(),
+                    NonZeroU32::new(2).unwrap(),
+                )
+                .unwrap();
+                let memory = provider.canonical_in_memory_state();
+                memory.set_pending_block(result.executed_block.clone());
+                let pending =
+                    backend.payload_source(BlockNumberOrTag::Pending.into(), &cancelled).unwrap();
+                assert!(std::ptr::eq(
+                    pending.receipt_snapshot().tree(),
+                    source.receipt_snapshot().tree()
+                ));
+                memory.update_chain(NewCanonicalChain::Commit {
+                    new: vec![result.executed_block.clone()],
+                });
+                memory.set_canonical_head(built.block().sealed_header().clone());
+                memory.set_safe(built.block().sealed_header().clone());
+                memory.set_finalized(built.block().sealed_header().clone());
+                let captured =
+                    backend.payload_source(BlockNumberOrTag::Latest.into(), &cancelled).unwrap();
+                for tag in [
+                    BlockNumberOrTag::Number(1),
+                    BlockNumberOrTag::Safe,
+                    BlockNumberOrTag::Finalized,
+                ] {
+                    let current = backend.receipt_source(tag.into(), &cancelled).unwrap();
+                    assert_eq!(current.block().hash(), built.block().hash());
+                }
+                assert!(matches!(
+                    backend.receipt_source(BlockNumberOrTag::Pending.into(), &cancelled),
+                    Err(PayloadSourceError::MissingInput(PayloadSourceInput::Block))
+                ));
+                let alternate = received_empty.executed_block.clone();
+                memory.update_chain(NewCanonicalChain::Reorg {
+                    old: vec![result.executed_block.clone()],
+                    new: vec![alternate.clone()],
+                });
+                memory.set_canonical_head(empty.block().sealed_header().clone());
+                let current =
+                    backend.payload_source(BlockNumberOrTag::Latest.into(), &cancelled).unwrap();
+                assert_eq!(current.block().hash(), empty.block().hash());
+                assert_eq!(
+                    captured.metadata().canonicality,
+                    reth_pureth_receipt::CanonicalityStatus::Canonical
+                );
+                assert_eq!(
+                    captured.payload().unwrap().serialized(),
+                    source.payload().unwrap().serialized()
+                );
+                // Both branches are retained in the existing graph; requireCanonical is distinct
+                // from an unknown hash. A caller's previously captured source remains unchanged.
+                let explicit =
+                    alloy_eips::RpcBlockHash::from_hash(built.block().hash(), Some(true));
+                assert!(matches!(
+                    backend.receipt_source(explicit.into(), &cancelled),
+                    Err(PayloadSourceError::NonCanonicalBlock(_))
+                ));
+                memory.update_chain(NewCanonicalChain::Reorg {
+                    old: vec![alternate],
+                    new: vec![result.executed_block.clone()],
+                });
+                memory.set_canonical_head(built.block().sealed_header().clone());
+                let typed_builder = ExecutionPayloadBuilder::from_validator(
+                    provider.clone(),
+                    fixture.builder.pool.clone(),
+                    fixture.builder.evm_config.clone(),
+                    EthereumBuilderConfig::default(),
+                    &validator,
+                )
+                .unwrap();
+                // Typed provider and computational native EVM join without replacing the builder
+                // pipeline. This build uses the same genesis parent and real state provider.
+                let mut args = fixture.args(None, None);
+                args.config = fixture.config.clone();
+                let rebuilt = typed_builder.try_build(args).unwrap().into_payload().unwrap();
+                assert_eq!(rebuilt.block().hash(), built.block().hash());
+                let writer = factory.provider_rw().unwrap();
+                writer
+                    .save_blocks(&SaveBlocksInput::new(
+                        vec![result.executed_block.clone()],
+                        0,
+                        0,
+                        1,
+                        1,
+                    ))
+                    .unwrap();
+                writer.commit().unwrap();
+                let identity = built.block().num_hash();
+                assert!(!result.executed_block.execution_outcome().result.requests.is_empty());
+                provider
+                    .bal_store()
+                    .insert(
+                        identity,
+                        reth_storage_api::RawBal::new(built.block_access_list().unwrap().clone()),
+                    )
+                    .unwrap();
+                provider.bal_store().flush(&[identity]).unwrap();
+                // A new provider, BAL-store buffer and source cache force the durable path.
+                let cold_factory = factory
+                    .clone()
+                    .with_overlay_manager(OverlayManager::default())
+                    .with_bal_store(BalStoreHandle::new(RocksDBBalStore::new(rocks)));
+                let cold_provider = BlockchainProvider::new(cold_factory.clone()).unwrap();
+                let cold = crate::ExecutionSourceBackend::new(
+                    cold_provider.clone(),
+                    validator.clone(),
+                    NonZeroU32::new(2).unwrap(),
+                )
+                .unwrap();
+                let narrow = cold.receipt_source(identity.hash.into(), &cancelled).unwrap();
+                let full = cold.payload_source(identity.hash.into(), &cancelled).unwrap();
+                assert!(std::ptr::eq(
+                    narrow.receipt_snapshot().tree(),
+                    full.receipt_snapshot().tree()
+                ));
+                assert_eq!(
+                    full.payload().unwrap().serialized(),
+                    source.payload().unwrap().serialized()
+                );
+                assert_eq!(
+                    full.metadata().source_kind,
+                    reth_pureth_block::PayloadSourceKind::Historical
+                );
+                cold_provider.canonical_in_memory_state().set_canonical_head(
+                    SealedHeader::seal_slow(ExecutionHeader::legacy(spec.genesis_header().clone())),
+                );
+                assert!(matches!(
+                    cold.payload_source(BlockNumberOrTag::Number(1).into(), &cancelled),
+                    Err(PayloadSourceError::MissingInput(PayloadSourceInput::Block))
+                ));
+                let canonical = alloy_eips::RpcBlockHash::from_hash(identity.hash, Some(true));
+                assert!(matches!(
+                    cold.receipt_source(canonical.into(), &cancelled),
+                    Err(PayloadSourceError::NonCanonicalBlock(_))
+                ));
+                cold_provider
+                    .canonical_in_memory_state()
+                    .set_canonical_head(built.block().sealed_header().clone());
+                let no_bal_factory = cold_factory
+                    .clone()
+                    .with_bal_store(BalStoreHandle::new(reth_provider::NoopBalStore));
+                let no_bal = crate::ExecutionSourceBackend::new(
+                    BlockchainProvider::new(no_bal_factory).unwrap(),
+                    validator.clone(),
+                    NonZeroU32::new(2).unwrap(),
+                )
+                .unwrap();
+                assert!(no_bal.receipt_source(identity.hash.into(), &cancelled).is_ok());
+                assert!(matches!(
+                    no_bal.payload_source(identity.hash.into(), &cancelled),
+                    Err(PayloadSourceError::MissingInput(PayloadSourceInput::BlockAccessList))
+                ));
+                let writer = cold_factory.provider_rw().unwrap();
+                writer
+                    .tx_ref()
+                    .delete::<tables::BlockExecutionRequests>(identity.number, None)
+                    .unwrap();
+                writer.commit().unwrap();
+                // Disk-to-memory reconstruction uses default requests when bodies are missing.
+                // It must not turn a missing record into an authenticated empty list.
+                let missing_provider = BlockchainProvider::new(cold_factory.clone()).unwrap();
+                let mut rehydrated = result.executed_block.clone();
+                rehydrated.retained_execution_data = None;
+                Arc::make_mut(&mut rehydrated.execution_output).result.requests =
+                    Default::default();
+                missing_provider
+                    .canonical_in_memory_state()
+                    .update_chain(NewCanonicalChain::Commit { new: vec![rehydrated] });
+                let missing = crate::ExecutionSourceBackend::new(
+                    missing_provider,
+                    validator.clone(),
+                    NonZeroU32::new(2).unwrap(),
+                )
+                .unwrap();
+                assert!(missing.receipt_source(identity.hash.into(), &cancelled).is_ok());
+                assert!(matches!(
+                    missing.payload_source(identity.hash.into(), &cancelled),
+                    Err(PayloadSourceError::MissingInput(PayloadSourceInput::Requests))
+                ));
+                assert!(matches!(
+                    missing.receipt_source(identity.hash.into(), &AtomicBool::new(true)),
+                    Err(PayloadSourceError::Cancelled)
+                ));
+                let writer = cold_factory.provider_rw().unwrap();
+                writer
+                    .tx_ref()
+                    .put::<tables::BlockExecutionRequests>(
+                        identity.number,
+                        reth_db_api::models::StoredExecutionRequests {
+                            block_hash: B256::repeat_byte(0xee),
+                            requests: result
+                                .executed_block
+                                .execution_outcome()
+                                .result
+                                .requests
+                                .iter()
+                                .cloned()
+                                .collect(),
+                        },
+                    )
+                    .unwrap();
+                writer.commit().unwrap();
+                let wrong_identity = crate::ExecutionSourceBackend::new(
+                    BlockchainProvider::new(cold_factory.clone()).unwrap(),
+                    validator.clone(),
+                    NonZeroU32::new(2).unwrap(),
+                )
+                .unwrap();
+                assert!(matches!(
+                    wrong_identity.payload_source(identity.hash.into(), &cancelled),
+                    Err(PayloadSourceError::ProviderRead {
+                        input: PayloadSourceInput::Requests,
+                        ..
+                    })
+                ));
+                let writer = cold_factory.provider_rw().unwrap();
+                writer
+                    .write_execution_requests(
+                        identity,
+                        &result.executed_block.execution_outcome().result.requests,
+                    )
+                    .unwrap();
+                let taken = writer.take_state_above(0).unwrap();
+                assert_eq!(
+                    taken.requests,
+                    vec![result.executed_block.execution_outcome().result.requests.clone()]
+                );
+                writer.commit().unwrap();
+                let reader = cold_factory.provider().unwrap();
+                assert!(reader.execution_requests(identity).unwrap().is_none());
             }
             let skipped = TreeConfig::default().with_skip_state_root(true);
             let mut receiver = BasicEngineValidator::new(

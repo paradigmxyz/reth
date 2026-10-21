@@ -391,6 +391,9 @@ where
                     error: BlockErrorKind::Validation(err),
                 })
             }
+            if block.requests_hash().is_some() {
+                provider.write_execution_requests(block.num_hash(), &result.requests)?;
+            }
             results.push(result);
 
             execution_duration += execute_start.elapsed();

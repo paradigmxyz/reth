@@ -1,11 +1,11 @@
-use crate::ExecutionBuiltPayload;
+use crate::{ExecutionBuiltPayload, ExecutionEngineValidator};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::Sealable;
 use alloy_rpc_types_engine::PayloadAttributes;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::ConsensusError;
 use reth_ethereum_payload_builder::{
@@ -32,27 +32,54 @@ pub struct ExecutionPayloadBuilder<Pool, Client, EvmConfig> {
     builder_config: EthereumBuilderConfig,
     fork: ExecutionForkConfig,
     limits: PayloadLimits,
+    native_chain_spec: Arc<ChainSpec>,
 }
 
 impl<Pool, Client, EvmConfig> ExecutionPayloadBuilder<Pool, Client, EvmConfig> {
-    pub const fn new(
+    pub fn new(
         client: Client,
         pool: Pool,
         evm_config: EvmConfig,
         builder_config: EthereumBuilderConfig,
         fork: ExecutionForkConfig,
         limits: PayloadLimits,
-    ) -> Self {
-        Self { client, pool, evm_config, builder_config, fork, limits }
+    ) -> Self
+    where
+        Client: ChainSpecProvider<ChainSpec = ChainSpec>,
+    {
+        let native_chain_spec = client.chain_spec();
+        Self { client, pool, evm_config, builder_config, fork, limits, native_chain_spec }
+    }
+
+    /// Reuses the ordinary builder with a typed state provider and the Engine's native EVM
+    /// configuration. Computational native headers retain the selected parent identity.
+    pub fn from_validator(
+        client: Client,
+        pool: Pool,
+        evm_config: EvmConfig,
+        builder_config: EthereumBuilderConfig,
+        validator: &ExecutionEngineValidator,
+    ) -> Result<Self, PayloadSourceError>
+    where
+        Client: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
+        validator.validate_chain_spec(client.chain_spec().as_ref())?;
+        Ok(Self {
+            client,
+            pool,
+            evm_config,
+            builder_config,
+            fork: validator.fork_config(),
+            limits: validator.limits(),
+            native_chain_spec: validator.chain_spec().clone(),
+        })
     }
 }
 
 impl<Pool, Client, EvmConfig> ExecutionPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks>
-        + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     fn build(
@@ -72,7 +99,7 @@ where
         }
         let parent = Arc::new(SealedHeader::new(parent.as_native().clone(), parent.hash()));
         let cancel = args.cancel.clone();
-        let spec = self.client.chain_spec();
+        let spec = &self.native_chain_spec;
         cancel.scope(|| {
             if cancel.is_cancelled() {
                 return Ok(BuildOutcome::Cancelled);
@@ -186,9 +213,7 @@ where
 impl<Pool, Client, EvmConfig> PayloadBuilder for ExecutionPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
-    Client: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = Header> + EthereumHardforks>
-        + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = PayloadAttributes;

@@ -149,6 +149,11 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
+    /// Pins a retained graph block, including side branches, without asserting canonicality.
+    pub fn retained_executed_block(&self, hash: B256) -> Option<ExecutedBlock<N::Primitives>> {
+        self.database.overlay_manager().executed_block(hash)
+    }
+
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
@@ -1038,6 +1043,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             |address, storage_key| state_provider.storage(address, storage_key),
         )?;
         let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+        let requests = provider.execution_requests(BlockNumHash::new(block, block_hash))?;
 
         Ok(Some(ExecutionOutcome::new_init(
             state,
@@ -1046,7 +1052,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
             Vec::new(),
             vec![receipts],
             block,
-            Vec::new(),
+            requests.into_iter().collect(),
         )))
     }
 }

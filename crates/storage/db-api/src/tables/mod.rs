@@ -20,7 +20,7 @@ use crate::{
     models::{
         accounts::BlockNumberAddress,
         bal::{StoredBlockAccessList, StoredBlockAccessListKey},
-        blocks::{HeaderHash, StoredBlockOmmers},
+        blocks::{HeaderHash, StoredBlockOmmers, StoredExecutionRequests},
         storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
         StoredBlockBodyIndices, StoredBlockWithdrawals,
@@ -350,6 +350,12 @@ tables! {
     table BlockWithdrawals {
         type Key = BlockNumber;
         type Value = StoredBlockWithdrawals;
+    }
+
+    /// Full execution request groups, including the adopted hash at this canonical height.
+    table BlockExecutionRequests {
+        type Key = BlockNumber;
+        type Value = StoredExecutionRequests;
     }
 
     /// Stores block access list payloads by block number and block hash.

@@ -28,7 +28,7 @@ use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
 };
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{eip7685::Requests, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
@@ -45,7 +45,7 @@ use reth_db_api::{
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
         BlockNumberAddressRange, ShardedKey, StorageBeforeTx, StorageSettings,
-        StoredBlockBodyIndices,
+        StoredBlockBodyIndices, StoredExecutionRequests,
     },
     table::Table,
     tables,
@@ -708,6 +708,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                 if save_mode.with_state() {
                     let execution_output = block.execution_outcome();
+                    if recovered_block.requests_hash().is_some() {
+                        self.write_execution_requests(
+                            recovered_block.num_hash(),
+                            &execution_output.result.requests,
+                        )?;
+                    }
                     let sf_ctx =
                         sf_ctx.expect("static file context exists when blocks are persisted");
 
@@ -1069,6 +1075,47 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
+    }
+
+    /// Returns actual request groups only when their stored identity matches this view.
+    pub fn execution_requests(&self, block: BlockNumHash) -> ProviderResult<Option<Requests>> {
+        let Some(stored) = self.tx.get::<tables::BlockExecutionRequests>(block.number)? else {
+            return Ok(None);
+        };
+        if stored.block_hash != block.hash || self.block_hash(block.number)? != Some(block.hash) {
+            return Err(ProviderError::other(std::io::Error::other(
+                "stored execution requests do not match the canonical block identity",
+            )));
+        }
+        Ok(Some(Requests::new(stored.requests)))
+    }
+
+    /// Reads aligned request groups, preserving absence in older or incomplete history.
+    fn execution_requests_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Option<Vec<Requests>>> {
+        let mut requests = Vec::new();
+        let mut has_request_commitment = false;
+        for number in range {
+            let header = self
+                .header_by_number(number)?
+                .ok_or(ProviderError::HeaderNotFound(number.into()))?;
+            if header.requests_hash().is_none() {
+                // Before request commitments exist, an empty position is protocol-defined.
+                // This also keeps a mixed range aligned when unwinding across activation.
+                requests.push(Requests::default());
+                continue;
+            }
+            has_request_commitment = true;
+            let hash =
+                self.block_hash(number)?.ok_or(ProviderError::HeaderNotFound(number.into()))?;
+            let Some(groups) = self.execution_requests(BlockNumHash::new(number, hash))? else {
+                return Ok(None);
+            };
+            requests.push(groups);
+        }
+        Ok(has_request_commitment.then_some(requests))
     }
 }
 
@@ -2540,6 +2587,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 {
     type Receipt = ReceiptTy<N>;
 
+    fn write_execution_requests(
+        &self,
+        block: BlockNumHash,
+        requests: &Requests,
+    ) -> ProviderResult<()> {
+        self.tx.put::<tables::BlockExecutionRequests>(
+            block.number,
+            StoredExecutionRequests {
+                block_hash: block.hash,
+                requests: requests.iter().cloned().collect(),
+            },
+        )?;
+        Ok(())
+    }
+
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_state<'a>(
         &self,
@@ -2866,6 +2928,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(());
         }
 
+        self.remove::<tables::BlockExecutionRequests>(range.clone())?;
+
         // get transaction receipts
         let from_transaction_num = self.next_tx_num_after_block(block)?;
 
@@ -3007,6 +3071,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
+
+        let requests = self.execution_requests_range(range.clone())?;
+        self.remove::<tables::BlockExecutionRequests>(range.clone())?;
 
         // We are not removing block meta as it is used to get block changesets.
         let block_bodies = self.block_body_indices_range(range.clone())?;
@@ -3181,7 +3248,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             Vec::new(),
             receipts,
             start_block_number,
-            Vec::new(),
+            requests.unwrap_or_default(),
         ))
     }
 }
@@ -3702,6 +3769,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
         let last_block_number = self.last_block_number()?;
+        self.remove::<tables::BlockExecutionRequests>(block + 1..=last_block_number)?;
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
         for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
@@ -3808,6 +3876,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
         // Blocks are not empty, so no need to handle the case of `blocks.last()` being
         // `None`.
         let last_block_number = blocks[blocks.len() - 1].number();
+
+        // Older outcomes can lack request bodies entirely. Never turn that absence into a
+        // present empty request list, or associate a partial vector with the wrong block.
+        if !execution_outcome.requests.is_empty() {
+            if execution_outcome.requests.len() != blocks.len() ||
+                execution_outcome.first_block() != first_number
+            {
+                return Err(ProviderError::other(std::io::Error::other(
+                    "execution request groups do not match the appended block range",
+                )));
+            }
+            for (block, requests) in blocks.iter().zip(&execution_outcome.requests) {
+                if block.requests_hash().is_some() {
+                    self.write_execution_requests(block.num_hash(), requests)?;
+                }
+            }
+        }
 
         let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
 

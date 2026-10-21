@@ -194,6 +194,24 @@ impl ExecutionEngineValidator {
         &self.chain_spec
     }
 
+    /// Checks that the typed provider uses the same genesis and activation schedule.
+    pub fn validate_chain_spec<S: EthChainSpec + Hardforks>(
+        &self,
+        spec: &S,
+    ) -> Result<(), PayloadSourceError> {
+        if spec.chain().id() != self.chain_spec.chain().id() ||
+            spec.genesis_hash() != self.chain_spec.genesis_hash() ||
+            spec.genesis() != self.chain_spec.genesis() ||
+            !spec.forks_iter().map(|(fork, condition)| (fork.name(), condition)).eq(self
+                .chain_spec
+                .forks_iter()
+                .map(|(fork, condition)| (fork.name(), condition)))
+        {
+            return Err(PayloadSourceError::UnsupportedFork);
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn into_rpc<Provider, Pool>(
         self,

@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use alloy_consensus::transaction::Either;
+use alloy_eips::{eip7685::Requests, BlockNumHash};
 use alloy_primitives::BlockNumber;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_storage_errors::provider::ProviderResult;
@@ -86,6 +87,13 @@ impl<'a, R> From<&'a ExecutionOutcome<R>> for WriteStateInput<'a, R> {
 pub trait StateWriter {
     /// Receipt type included into [`ExecutionOutcome`].
     type Receipt: 'static;
+
+    /// Write full request groups from actual execution under their adopted block identity.
+    fn write_execution_requests(
+        &self,
+        block: BlockNumHash,
+        requests: &Requests,
+    ) -> ProviderResult<()>;
 
     /// Write the state and optionally receipts to the database.
     ///

@@ -1,7 +1,7 @@
 //! Block related models and types.
 
 use alloy_consensus::Header;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,42 @@ impl<H: Compact> Compact for StoredBlockOmmers<H> {
 /// Hash of the block header.
 pub type HeaderHash = B256;
 
+/// Full execution request groups associated with one canonical block identity.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    alloy_rlp::RlpEncodable,
+    alloy_rlp::RlpDecodable,
+)]
+pub struct StoredExecutionRequests {
+    /// Adopted block hash, checked when reading a record at a block number.
+    pub block_hash: B256,
+    /// Original ordered request groups; an empty vector is a present empty result.
+    pub requests: Vec<Bytes>,
+}
+
+impl crate::table::Compress for StoredExecutionRequests {
+    type Compressed = Vec<u8>;
+
+    fn compress(self) -> Self::Compressed {
+        alloy_rlp::encode(self)
+    }
+
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+        alloy_rlp::Encodable::encode(self, buf);
+    }
+}
+
+impl crate::table::Decompress for StoredExecutionRequests {
+    fn decompress(value: &[u8]) -> Result<Self, reth_codecs::DecompressError> {
+        alloy_rlp::decode_exact(value).map_err(reth_codecs::DecompressError::new)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,6 +84,21 @@ mod tests {
         ommer.ommers.push(Header::default());
         ommer.ommers.push(Header::default());
         assert_eq!(ommer.clone(), StoredBlockOmmers::decompress(&ommer.compress()).unwrap());
+    }
+
+    #[test]
+    fn execution_requests_preserve_empty_and_reject_corrupt_records() {
+        for requests in [Vec::new(), vec![Bytes::from_static(&[0, 1]), Bytes::from_static(&[2, 3])]]
+        {
+            let record = StoredExecutionRequests { block_hash: B256::repeat_byte(7), requests };
+            let bytes = record.clone().compress();
+            assert_eq!(StoredExecutionRequests::decompress(&bytes).unwrap(), record);
+            assert!(StoredExecutionRequests::decompress(&bytes[..bytes.len() - 1]).is_err());
+            let mut trailing = bytes;
+            trailing.push(0);
+            assert!(StoredExecutionRequests::decompress(&trailing).is_err());
+        }
+        assert!(StoredExecutionRequests::decompress(&[0xc0]).is_err());
     }
 
     #[test]

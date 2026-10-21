@@ -5,7 +5,9 @@ use crate::{
 };
 use alloy_consensus::{crypto::RecoveryError, BlockHeader, Header, Transaction};
 use alloy_eip7928::{bal::Bal, BlockAccessListGasError, BlockAccessListValidationError};
-use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams, BlockId, BlockNumHash};
+use alloy_eips::{
+    eip4844::DATA_GAS_PER_BLOB, eip7685::Requests, eip7840::BlobParams, BlockId, BlockNumHash,
+};
 use alloy_primitives::{keccak256, Bytes, Sealable, B256, U256, U512};
 use alloy_rlp::{Decodable, Encodable};
 use pureth_withdrawal_root::{WithdrawalSnapshot, WithdrawalSnapshotError};
@@ -38,7 +40,7 @@ use std::{
     },
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExecutionSource {
     block: Arc<RecoveredBlock<ExecutionBlock>>,
     native_receipts: Arc<Vec<Receipt>>,
@@ -58,6 +60,44 @@ impl ExecutionSource {
     ) -> Result<Self, PayloadSourceError> {
         let cancelled = AtomicBool::new(false);
         check_cancelled(&cancelled)?;
+        if block.transaction_count() > limits.transactions || bal.length() > limits.bal_bytes {
+            return Err(PayloadSourceError::LimitExceeded);
+        }
+        if block.gas_used() != result.gas_used ||
+            block.blob_gas_used() != Some(result.blob_gas_used)
+        {
+            return Err(PayloadSourceError::SourceMismatch);
+        }
+        let metadata = PayloadSourceMetadata {
+            native_block: BlockNumHash::new(block.number(), block.hash()),
+            source_kind: PayloadSourceKind::Received,
+            canonicality: CanonicalityStatus::Unknown,
+            root_context: RootContext::RethExperimentalUnanchored,
+        };
+        Self::from_receipts(
+            block,
+            Arc::new(result.receipts.clone()),
+            metadata,
+            chain_spec,
+            fork,
+            &cancelled,
+        )?
+        .with_payload(&result.requests, bal, chain_spec, fork, limits, &cancelled)
+    }
+
+    /// Completes checked source readback using actual request/BAL preimages and the retained
+    /// receipt tree. This checks stored commitments; it does not independently execute the block.
+    pub fn with_payload<S: EthChainSpec + EthereumHardforks>(
+        &self,
+        requests: &Requests,
+        bal: &Bal,
+        chain_spec: &S,
+        fork: &ExecutionForkConfig,
+        limits: PayloadLimits,
+        cancelled: &AtomicBool,
+    ) -> Result<Self, PayloadSourceError> {
+        check_cancelled(cancelled)?;
+        let block = &self.block;
         if !fork.is_active_at_timestamp(block.timestamp()) ||
             !block.header().is_ssz() ||
             !chain_spec.is_amsterdam_active_at_timestamp(block.timestamp()) ||
@@ -76,16 +116,14 @@ impl ExecutionSource {
         bal.validate_structure(block.transaction_count())
             .map_err(PayloadSourceError::BalStructure)?;
         bal.validate_gas_limit(block.gas_limit()).map_err(PayloadSourceError::BalGas)?;
-        validate_senders(&block)?;
+        validate_senders(block)?;
         if !block.body().is_ssz() ||
             block.transactions_root() != block.body().calculate_tx_root() ||
             block.withdrawals_root() != block.body().calculate_withdrawals_root()
         {
             return Err(PayloadSourceError::Primitives(PrimitiveError::InvalidBody));
         }
-        if block.gas_used() != result.gas_used ||
-            block.blob_gas_used() != Some(result.blob_gas_used)
-        {
+        if self.chain_id != chain_spec.chain().id() {
             return Err(PayloadSourceError::SourceMismatch);
         }
         let header = block.header().as_native();
@@ -112,28 +150,26 @@ impl ExecutionSource {
         if withdrawals.len() > limits.withdrawals {
             return Err(PayloadSourceError::LimitExceeded);
         }
-        let receipts =
-            Eip6466ReceiptSnapshot::from_block(block.as_ref(), &result.receipts, chain_spec)
-                .map_err(PayloadSourceError::Receipts)?;
-        check_cancelled(&cancelled)?;
+        let receipts = self.receipt_snapshot().clone();
+        check_cancelled(cancelled)?;
         let transactions = TransactionSnapshot::build(
             convert_transactions(block.body().transactions())
                 .map_err(PayloadSourceError::Transactions)?,
         )
         .map_err(PayloadSourceError::Transactions)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let withdrawals = WithdrawalSnapshot::build(withdrawals.to_vec())
             .map_err(PayloadSourceError::Withdrawals)?;
         let requests = ExecutionRequestsSnapshot::build(
-            crate::ExecutionRequests::from_native_groups(&result.requests)
+            crate::ExecutionRequests::from_native_groups(requests)
                 .map_err(PayloadSourceError::Requests)?,
         )
         .map_err(PayloadSourceError::Requests)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let block_access_list =
             BlockAccessListSnapshot::from_rlp(alloy_rlp::encode(bal).into(), limits.bal_bytes)
                 .map_err(PayloadSourceError::Payload)?;
-        check_cancelled(&cancelled)?;
+        check_cancelled(cancelled)?;
         let payload = ExecutionPayloadSnapshot::build(
             ExecutionPayloadFields {
                 parent_hash: header.parent_hash,
@@ -141,7 +177,12 @@ impl ExecutionSource {
                 state_root: header.state_root,
                 number: header.number,
                 gas_limits: GasAmounts { regular: header.gas_limit, blob: blob_limit },
-                gas_used: GasAmounts { regular: result.gas_used, blob: result.blob_gas_used },
+                gas_used: GasAmounts {
+                    regular: header.gas_used,
+                    blob: header
+                        .blob_gas_used
+                        .ok_or(PayloadSourceError::MissingInput(PayloadSourceInput::BlobGasUsed))?,
+                },
                 timestamp: header.timestamp,
                 extra_data: header.extra_data.clone(),
                 mix_hash: header.mix_hash,
@@ -170,19 +211,13 @@ impl ExecutionSource {
         {
             return Err(PayloadSourceError::SourceMismatch);
         }
-        check_cancelled(&cancelled)?;
-        let metadata = PayloadSourceMetadata {
-            native_block: BlockNumHash::new(block.number(), block.hash()),
-            source_kind: PayloadSourceKind::Received,
-            canonicality: CanonicalityStatus::Unknown,
-            root_context: RootContext::RethExperimentalUnanchored,
-        };
+        check_cancelled(cancelled)?;
         Ok(Self {
-            block,
-            native_receipts: Arc::new(result.receipts.clone()),
+            block: self.block.clone(),
+            native_receipts: self.native_receipts.clone(),
             backing: ExecutionSourceBacking::Payload(Arc::new(payload)),
-            metadata,
-            chain_id: chain_spec.chain().id(),
+            metadata: self.metadata,
+            chain_id: self.chain_id,
         })
     }
 
@@ -282,9 +317,16 @@ impl ExecutionSource {
     pub const fn chain_id(&self) -> u64 {
         self.chain_id
     }
+
+    /// Captures operation metadata without changing the shared block, bytes or production trees.
+    pub fn with_canonicality(&self, canonicality: CanonicalityStatus) -> Self {
+        let mut source = self.clone();
+        source.metadata.canonicality = canonicality;
+        source
+    }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum ExecutionSourceBacking {
     Payload(Arc<ExecutionPayloadSnapshot>),
     Receipts(Arc<Eip6466ReceiptSnapshot>),
@@ -789,6 +831,7 @@ pub enum PayloadSourceInput {
 pub enum PayloadSourceError {
     ProviderRead { input: PayloadSourceInput, error: ProviderError },
     MissingInput(PayloadSourceInput),
+    NonCanonicalBlock(BlockNumHash),
     SourceMismatch,
     NativeCommitmentMismatch(PayloadSourceInput),
     StateRootSkipped,
