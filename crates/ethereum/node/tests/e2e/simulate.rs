@@ -1,4 +1,4 @@
-use alloy_primitives::{address, bytes, Address, U256};
+use alloy_primitives::{address, bytes, Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -318,6 +318,58 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
     assert_eq!(result[15].calls.len(), 1);
     assert!(result[15].calls[0].status);
     assert_eq!(result[15].calls[0].return_data.as_ref(), result[0].inner.header.hash.as_slice());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_simulate_v1_moved_precompile_keeps_warm_addresses() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Prague).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    let identity = Address::with_last_byte(0x04);
+    let moved_identity = address!("0x0000000000000000000000000000000000123456");
+    let calls_identity = Address::with_last_byte(0x41);
+    let calls_moved_identity = Address::with_last_byte(0x42);
+    let staticcall = |target: Address| {
+        Bytes::from(
+            [&bytes!("0x5f5f5f5f73")[..], target.as_slice(), &bytes!("0x5afa00")[..]].concat(),
+        )
+    };
+    let contracts = StateOverride::from_iter([
+        (calls_identity, AccountOverride::default().with_code(staticcall(identity))),
+        (calls_moved_identity, AccountOverride::default().with_code(staticcall(moved_identity))),
+    ]);
+    let mut moved = contracts.clone();
+    moved.insert(
+        identity,
+        AccountOverride { move_precompile_to: Some(moved_identity), ..Default::default() },
+    );
+    let payload = SimulatePayload::default()
+        .extend(
+            SimBlock::default()
+                .with_state_overrides(contracts)
+                .call(TransactionRequest::default().to(calls_identity)),
+        )
+        .extend(
+            SimBlock::default()
+                .with_state_overrides(moved)
+                .call(TransactionRequest::default().to(calls_moved_identity))
+                .call(TransactionRequest::default().to(calls_identity)),
+        );
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert!(result.iter().flat_map(|block| &block.calls).all(|call| call.status));
+    let warm_precompile_call = result[0].calls[0].gas_used;
+    // The destination of a move is not a warm address, so the call pays the cold access cost.
+    assert_eq!(result[1].calls[0].gas_used, warm_precompile_call + 2500);
+    // The source of a move stays warm and has no code, so the call skips the precompile cost.
+    assert!(result[1].calls[1].gas_used < warm_precompile_call);
 
     Ok(())
 }
