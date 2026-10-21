@@ -11054,12 +11054,16 @@ dependencies = [
  "rand 0.9.5",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-db",
  "reth-db-api",
  "reth-db-common",
  "reth-engine-primitives",
  "reth-engine-tree",
  "reth-ethereum-primitives",
+ "reth-evm-ethereum",
  "reth-execution-types",
+ "reth-node-builder",
+ "reth-node-core",
  "reth-primitives-traits",
  "reth-provider",
  "reth-stages-types",
@@ -11069,6 +11073,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -6,10 +6,11 @@ use alloy_consensus::Header;
 use alloy_primitives::{keccak256, B256, U256};
 use eyre::{ensure, Context, Result};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-use model::{generate, root, storage_root, Model};
+use model::{apply, generate, root, storage_root, Model, Operation};
 use rand::{rngs::StdRng, SeedableRng};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
+use reth_db::{init_db, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_engine_primitives::MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD;
 use reth_engine_tree::tree::{
@@ -17,30 +18,47 @@ use reth_engine_tree::tree::{
     TreeConfig, CHANGESET_CACHE_RETENTION_BLOCKS,
 };
 use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_node_builder::common::{LaunchContext, WithConfigs};
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    node_config::NodeConfig,
+};
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader};
 use reth_provider::{
-    providers::LatestStateProviderRef,
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-    AccountReader, DatabaseProviderROFactory, HeaderProvider, ProviderFactory, SaveBlocksInput,
+    providers::LatestStateProviderRef, test_utils::MockNodeTypesWithDB, AccountReader,
+    DatabaseProviderROFactory, HeaderProvider, ProviderFactory, SaveBlocksInput,
     StageCheckpointReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_stages_types::StageId;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{RayonConfig, RuntimeBuilder, RuntimeConfig, TokioConfig};
 use reth_trie::{HashedPostState, SortedTrieData};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::BTreeMap,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf,
     sync::{mpsc, Arc},
     time::Duration,
 };
+
+type Node = MockNodeTypesWithDB<Arc<DatabaseEnv>>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct JournalBlock {
+    number: u64,
+    operations: Vec<Operation>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Config {
     seed: u64,
+    datadir: Option<PathBuf>,
     blocks: u64,
     updates: usize,
     proof_workers: usize,
@@ -55,6 +73,7 @@ impl Default for Config {
         let tree = TreeConfig::default();
         Self {
             seed: 0,
+            datadir: None,
             blocks: 64,
             updates: 64,
             proof_workers: 2,
@@ -66,12 +85,7 @@ impl Default for Config {
     }
 }
 
-fn verify(
-    factory: &ProviderFactory<MockNodeTypesWithDB>,
-    state: &Model,
-    tip: u64,
-    state_tip: u64,
-) -> Result<()> {
+fn verify(factory: &ProviderFactory<Node>, state: &Model, tip: u64, state_tip: u64) -> Result<()> {
     let provider = factory.provider()?;
     let checkpoint = provider
         .get_stage_checkpoint(StageId::Finish)?
@@ -212,16 +226,83 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         },
     })
     .build()?;
-    let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()))
-        .with_overlay_manager(OverlayManager::new(runtime.state_trie_overlay_worker_pool()));
+    // A supplied directory survives process death; standalone runs default to a temporary one.
+    let temporary = config.datadir.is_none().then(tempfile::tempdir).transpose()?;
+    let datadir = config.datadir.as_deref().unwrap_or_else(|| temporary.as_ref().unwrap().path());
+    fs::create_dir_all(datadir)?;
+    let journal_path = datadir.join("blocks.jsonl");
+    let mut journal = BTreeMap::<u64, JournalBlock>::new();
+    if journal_path.exists() {
+        for line in
+            fs::read(&journal_path)?.split(|byte| *byte == b'\n').filter(|line| !line.is_empty())
+        {
+            let block: JournalBlock = match serde_json::from_slice(line) {
+                Ok(block) => block,
+                // SIGKILL may interrupt the final append. Each new append starts on a new line.
+                Err(error) if error.is_eof() => continue,
+                Err(error) => return Err(error.into()),
+            };
+            ensure!((1..=config.blocks).contains(&block.number), "journal block out of range");
+            if let Some(previous) = journal.insert(block.number, block.clone()) {
+                ensure!(previous == block, "conflicting journal block {}", block.number);
+            }
+        }
+    }
+    let mut journal_file = OpenOptions::new().create(true).append(true).open(&journal_path)?;
+    let chain = Arc::new(ChainSpec::default());
+    let data_dir = ChainPath::<DataDirPath>::new(
+        datadir.to_string_lossy().parse()?,
+        chain.chain,
+        Default::default(),
+    );
+    let db = Arc::new(init_db(data_dir.db(), Default::default())?);
+    let context = LaunchContext::new(runtime.clone(), data_dir)
+        .with(WithConfigs { config: NodeConfig::new(chain), toml_config: Default::default() })
+        .attach(db);
+    println!("{}", json!({"recovery": "start"}));
+    // This is the node's startup path, including consistency checks, the durable unwind
+    // marker and Merkle's walk_all_changed_branch_children recovery mode.
+    let factory = runtime.handle().block_on(
+        context.create_provider_factory_with_recovery::<Node, EthEvmConfig>(
+            OverlayManager::new(runtime.state_trie_overlay_worker_pool()),
+            None,
+            &[],
+            |factory| {
+                let checkpoint =
+                    factory.provider()?.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+                let partial = checkpoint
+                    .finish_stage_checkpoint()
+                    .and_then(|finish| finish.partial_state_trie());
+                println!(
+                    "{}",
+                    json!({"recovery": "frontiers", "finish": checkpoint.block_number,
+                    "partial_state_trie": partial})
+                );
+                Ok(())
+            },
+        ),
+    )?;
     reth_db_common::init::init_genesis(&factory)?;
     let manager = factory.overlay_manager();
-    let mut parent =
-        factory.provider()?.sealed_header(0)?.ok_or_else(|| eyre::eyre!("missing genesis"))?;
+    let base =
+        factory.provider()?.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
+    let mut parent = factory
+        .provider()?
+        .sealed_header(base)?
+        .ok_or_else(|| eyre::eyre!("missing header {base}"))?;
+    let base_hash = parent.hash();
     let strategy = DefaultStateRootStrategy::default();
-    let genesis_hash = parent.hash();
-    let mut rng = StdRng::seed_from_u64(config.seed);
     let mut state = Model::default();
+    for number in 1..=base {
+        let block =
+            journal.get(&number).ok_or_else(|| eyre::eyre!("missing journal block {number}"))?;
+        apply(&mut state, number, &block.operations);
+    }
+    if base > 0 {
+        verify(&factory, &state, base, base)?;
+    }
+    ensure!(root(&state) == parent.state_root(), "recovered root at {base}");
+    println!("{}", json!({"recovery": "complete", "head": base, "root": root(&state)}));
     let mut blocks = Vec::<ExecutedBlock<EthPrimitives>>::new();
     let mut snapshots = vec![state.clone()];
     let timeout = Duration::from_secs(config.timeout_secs);
@@ -241,15 +322,15 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             }
         }
     });
-    let mut db_tip = 0;
-    let mut state_tip = 0;
+    let mut db_tip = base;
+    let mut state_tip = base;
     let mut commits = 0;
     let mut partial_commits = 0;
     let mut pending_save = None;
     let mut prune_requested = false;
     let mut shutdown = false;
     loop {
-        let head = blocks.len() as u64;
+        let head = base + blocks.len() as u64;
         if let Some((next_db, next_state)) = pending_save {
             let result = if shutdown ||
                 head.saturating_sub(state_tip).saturating_sub(buffer) >= backpressure
@@ -279,17 +360,17 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                 manager.evict_cached_changesets(
                     db_tip.saturating_sub(CHANGESET_CACHE_RETENTION_BLOCKS),
                 );
-                verify(&factory, &snapshots[db_tip as usize], db_tip, state_tip)?;
+                verify(&factory, &snapshots[(db_tip - base) as usize], db_tip, state_tip)?;
                 manager.remove_blocks(
                     blocks
                         .iter()
                         .filter(|block| block.recovered_block().number() <= state_tip)
                         .map(|block| block.recovered_block().hash()),
                 );
-                let anchor = if state_tip == 0 {
-                    genesis_hash
+                let anchor = if state_tip == base {
+                    base_hash
                 } else {
-                    blocks[state_tip as usize - 1].recovered_block().hash()
+                    blocks[(state_tip - base) as usize - 1].recovered_block().hash()
                 };
                 manager.precompute_execution_overlay(parent.hash(), anchor);
                 prune_requested = true;
@@ -314,7 +395,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
                         "shutdown": shutdown})
                     );
                     request_tx.send(SaveBlocksInput::new(
-                        blocks[state_tip as usize..next_db as usize].to_vec(),
+                        blocks[(state_tip - base) as usize..(next_db - base) as usize].to_vec(),
                         db_tip,
                         state_tip,
                         next_db,
@@ -334,7 +415,21 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             continue;
         }
         let number = head + 1;
-        let (bundle, updates, operations) = generate(&mut rng, &mut state, number, config.updates);
+        let operations = if let Some(block) = journal.get(&number) {
+            block.operations.clone()
+        } else {
+            // New input is journaled before it can reach persistence. Replayed input is read,
+            // never regenerated, so a completed commit does not depend on its acknowledgement.
+            let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number));
+            let operations = generate(&mut rng, &state, config.updates);
+            let record =
+                serde_json::to_vec(&JournalBlock { number, operations: operations.clone() })?;
+            journal_file.write_all(b"\n")?;
+            journal_file.write_all(&record)?;
+            journal_file.write_all(b"\n")?;
+            operations
+        };
+        let (bundle, updates) = apply(&mut state, number, &operations);
         // Print before entering production tasks so a panic still leaves the input on disk.
         println!(
             "{}",

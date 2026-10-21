@@ -3,6 +3,8 @@
 
 import json
 import os
+import random
+import select
 from pathlib import Path
 import shutil
 import signal
@@ -13,8 +15,8 @@ import time
 # Persistence defaults match TreeConfig and EngineArgs in this Reth revision.
 DEFAULTS = {"blocks": 64, "updates": 64, "proof_workers": 2, "timeout_secs": 60,
             "persistence_threshold": 50, "num_state_masking_blocks": 30,
-            "memory_block_buffer_target": None}
-LIMITS = {"blocks": (1, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
+            "memory_block_buffer_target": None, "crashes": 2}
+LIMITS = {"crashes": (0, 16), "blocks": (1, 1024), "updates": (1, 4096), "proof_workers": (1, 16),
           "timeout_secs": (1, 3600), "persistence_threshold": (0, 2**64 - 2),
           "num_state_masking_blocks": (0, 2**64 - 1),
           "memory_block_buffer_target": (0, 2**64 - 1)}
@@ -32,6 +34,8 @@ def arguments(values):
             continue
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f"{key} must be an integer in {low}..={high}")
+    if result["crashes"] >= result["blocks"]:
+        raise ValueError("crashes must be less than blocks")
     threshold = result["persistence_threshold"]
     buffer = result["memory_block_buffer_target"]
     if buffer is None:
@@ -77,18 +81,74 @@ def collect(destination, progress=False):
 
 
 def worker(config):
+    process = None
+    killed = 0
+    recovered = 0
+    plan = list(config["kill_blocks"])
+    deadline = time.monotonic() + max(1, config["run_secs"] - 5)
     try:
-        with (STATE / "run.log").open("w") as output:
-            result = subprocess.run(
-                ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
-                 json.dumps(config["workload"])], stdout=output, stderr=subprocess.STDOUT,
-                timeout=max(1, config["run_secs"] - 5), check=False)
-        ok = result.returncode == 0
-        detail = f"exit={result.returncode}; " + (STATE / "run.log").read_text()[-12000:]
+        workload = config["workload"] | {"datadir": str(STATE / "data")}
+        with (STATE / "run.log").open("wb") as output:
+            while True:
+                process = subprocess.Popen(
+                    ["/usr/local/bin/thread-fuzz", "/usr/local/bin/reth-trie-dst",
+                     json.dumps(workload)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                pending = b""
+                planned = False
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("workload recovery campaign timed out")
+                    if not select.select([process.stdout], [], [], min(remaining, 0.1))[0]:
+                        continue
+                    data = os.read(process.stdout.fileno(), 65536)
+                    if not data:
+                        break
+                    output.write(data)
+                    output.flush()
+                    pending += data
+                    while b"\n" in pending:
+                        line, pending = pending.split(b"\n", 1)
+                        try:
+                            event = json.loads(line)
+                        except (ValueError, UnicodeDecodeError):
+                            continue  # Rust errors/backtraces share stdout with JSON events.
+                        if not isinstance(event, dict):
+                            continue
+                        if event.get("recovery") == "complete":
+                            recovered += 1
+                        if not planned and plan and event.get("block", 0) >= plan[0]:
+                            process.send_signal(signal.SIGKILL)
+                            target = plan.pop(0)
+                            killed += 1
+                            planned = True
+                            output.write((json.dumps({"nemesis": "kill", "target": target,
+                                                      "block": event["block"], "kills": killed}) + "\n").encode())
+                            output.flush()
+                code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                process.stdout.close()
+                if planned:
+                    if code != -signal.SIGKILL:
+                        raise RuntimeError(f"planned SIGKILL did not kill worker: exit={code}")
+                    continue
+                if code != 0:
+                    raise RuntimeError(f"unexpected worker exit={code}")
+                if plan:
+                    raise RuntimeError(f"nemesis did not fire at blocks {plan}")
+                break
+        ok = True
+        detail = f"completed after {killed} SIGKILL/restarts"
     except Exception as error:
         ok, detail = False, str(error)
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+    if not ok:
+        detail += "; " + (STATE / "run.log").read_text(errors="replace")[-12000:]
     assertion(ok, detail)
-    (STATE / "done.json").write_text(json.dumps({"ok": ok}))
+    (STATE / "done.json").write_text(json.dumps({"ok": ok, "kills": killed,
+                                               "armed": len(config["kill_blocks"]), "recoveries": recovered}))
 
 
 def main():
@@ -106,8 +166,15 @@ def main():
             raise ValueError("this workload has no mid-run semantic decisions to redraw or drop")
         decisions = request.get("decisions")
         if decisions is None:
-            config = {"workload": arguments(request["args"]) | {"seed": request["seed"]},
-                      "run_secs": request["campaign"]["run_secs"]}
+            args = arguments(request["args"])
+            crashes = args.pop("crashes")
+            # Prefer kills after threshold persistence can begin, while leaving enough
+            # distinct block boundaries for every requested crash. Record the whole plan.
+            first = min(args["persistence_threshold"] + 2, args["blocks"] - crashes)
+            kill_blocks = sorted(random.Random(request["seed"]).sample(
+                range(max(1, first), args["blocks"]), crashes))
+            config = {"workload": args | {"seed": request["seed"]},
+                      "kill_blocks": kill_blocks, "run_secs": request["campaign"]["run_secs"]}
             decisions = {"config": config, "seed": request["seed"],
                          "rng_seed": request["seed"], "preempt": request["preempt"]}
         decisions = dict(decisions)
@@ -145,9 +212,9 @@ def main():
             assertion(False, "workload incomplete; " + (log.read_text()[-12000:] if log.exists() else "never started"))
         out = Path("/bedrock/out")
         out.mkdir(parents=True, exist_ok=True)
-        for name in ["run.log", "controller.log", "done.json"]:
+        for name in ["run.log", "controller.log", "done.json", "data/blocks.jsonl"]:
             if (STATE / name).exists():
-                shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + name))
+                shutil.copyfile(STATE / name, out / ("reth-trie-dst-" + Path(name).name))
         collect(out / "assertions.jsonl")
     elif hook == "observe":
         return {"decisions": request["decisions"], "decision_diff": (["recorded decisions differ"] if request.get("original") is not None

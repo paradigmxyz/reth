@@ -16,7 +16,7 @@ From the reth repository root:
 
 ```sh
 cargo build --locked -p reth-trie-dst --profile dst
-target/dst/reth-trie-dst '{"seed":42,"blocks":64}' > /tmp/reth-trie-dst-42.log
+target/dst/reth-trie-dst '{"seed":42,"blocks":64,"datadir":"/tmp/trie-42"}' > /tmp/reth-trie-dst-42.log
 ```
 
 Prerequisites for native builds are reth's normal Rust/native build dependencies,
@@ -29,6 +29,7 @@ The executable accepts one optional JSON object:
 | Field | Default | Range |
 | --- | --- | --- |
 | `seed` | 0 | unsigned 64-bit integer |
+| `datadir` | temporary directory | persistent database and journal directory; reuse to restart |
 | `blocks` | 64 | 1–1024 |
 | `updates` | 64 | 1–4096 per block |
 | `proof_workers` | 2 | 1–16 per account/storage pool |
@@ -87,7 +88,7 @@ and calculate a fresh database-backed root. Metrics report proof revelation,
 trie reuse, pruning, overlay computation, and partial commits. Their counts
 depend on the selected persistence settings and run length.
 
-The chain is linear. Reorgs, crash recovery, EVM execution, arbitrary account
+The chain is linear. Reorgs, EVM execution, arbitrary account
 destruction and storage wipes are excluded. In particular, the generator does
 not invent storage wipes outside valid CREATE2/SELFDESTRUCT semantics.
 
@@ -124,11 +125,45 @@ The controller implements `parse-args`, `config`, `warmup`, `start`, `progress`,
 `finalize` and `observe`. It starts the executable under Bedrock's `thread-fuzz`,
 so the scheduler varies the real task/proof/persistence interleavings. Each seed
 starts with a new empty database after the shared warm checkpoint. The seed
-controls generated operations; Bedrock's recorded random/preemption streams
-control scheduling. Mid-run semantic decision editing is unsupported.
+controls generated operations and the recorded crash plan; Bedrock's recorded
+random/preemption streams control scheduling. Mid-run semantic decision editing
+is unsupported.
+
+The Bedrock-only `crashes` argument defaults to 2 (range 0–16, strictly less than
+`blocks`). Set it to 0 for the happy path. The controller draws distinct block
+numbers, preferring the suffix after threshold persistence can start. When it
+observes the corresponding block-input event, it sends SIGKILL to the Rust
+process and immediately restarts it against the same directory. The worker
+continues running after emitting that event, so the kill can interrupt trie
+computation or concurrent persistence. These are process crashes: the kernel
+and its page cache survive. Container restarts and power-loss faults are outside
+this workload.
+
+Before processing each new block, Rust appends its operations to `blocks.jsonl`.
+Startup reads the journal into block-number order, deduplicates identical records,
+rejects conflicting records, and ignores incomplete JSON left by an interrupted
+append. A new append starts on a fresh line. Operations are read back rather than
+regenerated, including blocks that must be replayed after an unwind.
+
+Startup uses `LaunchContext::create_provider_factory_with_recovery`, the real node
+startup path. It checks storage consistency and unwinds the production pipeline
+when `partial_state_trie < Finish`. Reth's durable unwind marker also handles a
+second crash during recovery. The actual committed checkpoint determines the
+recovered head, including commits whose acknowledgement was lost. The reference
+state is reconstructed from the journal through that head and compared with the
+recovered header root, hashed tables, storage, and fresh DB-backed proofs. All
+volatile overlays and the sparse trie start cold; generation then resumes at the
+next block. Keep the same seed and configuration when reopening a directory.
+
+The run log records pre-recovery Finish/state-trie frontiers, the recovered head
+and root, each kill, and the existing block/persistence events. `done.json` reports
+armed and fired kill counts and completed recoveries. A missed kill, unexpected
+process exit, failed recovery check, or failure to finish within the seed horizon
+fails the run.
 
 Finalization reports unfinished work as a failure and collects `reth-trie-dst-run.log`,
-`reth-trie-dst-controller.log`, and `reth-trie-dst-done.json` under `/bedrock/out` alongside
+`reth-trie-dst-controller.log`, `reth-trie-dst-done.json`, and the append-only
+`reth-trie-dst-blocks.jsonl` under `/bedrock/out` alongside
 the merged assertion stream. A worker timeout also fails the run. Increase the
 driver's per-seed virtual horizon (`--run-secs`) if a larger configuration cannot
 finish before finalization.

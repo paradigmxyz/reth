@@ -10,7 +10,7 @@ use rand::{rngs::StdRng, Rng};
 use reth_primitives_traits::Account;
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::{database::BundleState, state::AccountInfo};
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
@@ -21,45 +21,80 @@ pub struct ModelAccount {
 
 pub type Model = BTreeMap<Address, ModelAccount>;
 
-pub fn generate(
-    rng: &mut StdRng,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Operation {
+    Account { address: Address, account: Account },
+    Storage { address: Address, slot: U256, value: U256 },
+}
+
+impl Operation {
+    fn apply(&self, state: &mut Model) -> (Address, HashedPostState) {
+        let mut delta = HashedPostState::default();
+        let address = match self {
+            Self::Account { address, account } => {
+                state.entry(*address).or_default().account = *account;
+                delta.accounts.insert(keccak256(address), Some(*account));
+                *address
+            }
+            Self::Storage { address, slot, value } => {
+                let entry = state.get_mut(address).expect("storage account exists");
+                if value.is_zero() {
+                    entry.storage.remove(slot);
+                } else {
+                    entry.storage.insert(*slot, *value);
+                }
+                delta.storages.insert(
+                    keccak256(address),
+                    HashedStorage {
+                        storage: HashMap::from_iter([(keccak256(B256::from(*slot)), *value)]),
+                    },
+                );
+                *address
+            }
+        };
+        (address, delta)
+    }
+}
+
+pub fn generate(rng: &mut StdRng, state: &Model, updates: usize) -> Vec<Operation> {
+    let mut state = state.clone();
+    (0..updates)
+        .map(|_| {
+            let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
+            let operation = if !state.contains_key(&address) || rng.random_ratio(1, 4) {
+                let mut account =
+                    state.get(&address).map(|entry| entry.account).unwrap_or_default();
+                account.nonce += 1;
+                account.balance = U256::from(rng.random_range(1..=1_000_000u64));
+                Operation::Account { address, account }
+            } else {
+                let slot = U256::from(rng.random_range(0..64u64));
+                let value = if rng.random_ratio(1, 3) {
+                    U256::ZERO
+                } else {
+                    U256::from(rng.random::<u64>())
+                };
+                Operation::Storage { address, slot, value }
+            };
+            operation.apply(&mut state);
+            operation
+        })
+        .collect()
+}
+
+pub fn apply(
     state: &mut Model,
     number: u64,
-    updates: usize,
-) -> (BundleState, Vec<HashedPostState>, Vec<Value>) {
+    operations: &[Operation],
+) -> (BundleState, Vec<HashedPostState>) {
     let before = state.clone();
     let mut touched = BTreeMap::<Address, BTreeSet<U256>>::new();
     let mut stream = Vec::new();
-    let mut operations = Vec::new();
-    for _ in 0..updates {
-        let address = Address::from_word(B256::from(U256::from(rng.random_range(1..=16u64))));
-        let new_account = !state.contains_key(&address);
-        let entry = state.entry(address).or_default();
-        let mut delta = HashedPostState::default();
-        let hashed_address = keccak256(address);
+    for operation in operations {
+        let (address, delta) = operation.apply(state);
         let slots = touched.entry(address).or_default();
-        if new_account || rng.random_ratio(1, 4) {
-            entry.account.nonce += 1;
-            entry.account.balance = U256::from(rng.random_range(1..=1_000_000u64));
-            delta.accounts.insert(hashed_address, Some(entry.account.to_owned()));
-            operations.push(json!({"address": address, "account": entry.account}));
-        } else {
-            let slot = U256::from(rng.random_range(0..64u64));
-            let value =
-                if rng.random_ratio(1, 3) { U256::ZERO } else { U256::from(rng.random::<u64>()) };
-            if value.is_zero() {
-                entry.storage.remove(&slot);
-            } else {
-                entry.storage.insert(slot, value);
-            }
-            slots.insert(slot);
-            delta.storages.insert(
-                hashed_address,
-                HashedStorage {
-                    storage: HashMap::from_iter([(keccak256(B256::from(slot)), value)]),
-                },
-            );
-            operations.push(json!({"address": address, "slot": slot, "value": value}));
+        if let Operation::Storage { slot, .. } = operation {
+            slots.insert(*slot);
         }
         stream.push(delta);
     }
@@ -100,7 +135,7 @@ pub fn generate(
             )
             .state_storage(address, storage);
     }
-    (bundle.build(), stream, operations)
+    (bundle.build(), stream)
 }
 
 pub fn storage_root(account: &ModelAccount) -> B256 {
