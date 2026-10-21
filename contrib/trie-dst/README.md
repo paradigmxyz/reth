@@ -56,8 +56,17 @@ and deletes individual slots. Each block receives the configured number of
 updates. It independently tracks the complete state and builds a per-block
 `BundleState` with original and final account/storage values and reverts.
 
-The production task consumes streamed hashed updates. At each block boundary,
-its root must equal a root rebuilt from the reference maps with `HashBuilder`:
+The production task consumes hashed updates in randomized batches of 1–16
+operations, preserving write order and merging repeated keys within each batch.
+Hint-only batches are randomly interleaved through the production prewarming
+stream, which produces `LeafUpdate::Touched` entries without changing state.
+Hints include a random nonempty subset of distinct written keys plus read-only
+accesses to unwritten accounts/storage. They overlap actual updates without
+always covering them, and may arrive before or after an overlapping write.
+Batch composition and hint targets are logged; the completion summary counts
+update and hint batches. Batching and hints are seeded per block for replay.
+At each block boundary, its root must equal a root rebuilt from the reference
+maps with `HashBuilder`:
 storage leaves first, followed by RLP account leaves. Its actual hashed state
 and trie updates are attached to the synthetic executed block alongside the
 bundle, then inserted into the real overlay manager.

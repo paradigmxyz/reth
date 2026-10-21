@@ -3,18 +3,20 @@
 mod model;
 
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use eyre::{ensure, Context, Result};
 use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
 use model::{apply, generate, root, storage_root, Model, Operation};
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_engine_primitives::MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD;
 use reth_engine_tree::tree::{
-    state_root_strategy::{publish_sparse_trie, DefaultStateRootStrategy, StateRootTaskOptions},
+    state_root_strategy::{
+        publish_sparse_trie, DefaultStateRootStrategy, StateAccessHint, StateRootTaskOptions,
+    },
     TreeConfig, CHANGESET_CACHE_RETENTION_BLOCKS,
 };
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -38,7 +40,7 @@ use reth_trie::{HashedPostState, SortedTrieData};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::Write,
     path::PathBuf,
@@ -326,6 +328,8 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
     let mut state_tip = base;
     let mut commits = 0;
     let mut partial_commits = 0;
+    let mut update_batches = 0;
+    let mut hint_batches = 0;
     let mut pending_save = None;
     let mut prune_requested = false;
     let mut shutdown = false;
@@ -461,11 +465,81 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
             },
         );
         let stream = handle.take_hashed_update_stream();
-        // Only the hashed update stream is used by this workload.
-        drop(handle.take_hint_stream());
-        for update in updates {
-            stream.on_hashed_state_update(update);
+        let hints = handle.take_hint_stream();
+        let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(number).rotate_left(32));
+        let written = updates
+            .iter()
+            .flat_map(|update| {
+                update
+                    .accounts
+                    .keys()
+                    .chain(update.storages.keys())
+                    .map(|address| (*address, None))
+                    .chain(update.storages.iter().flat_map(|(address, storage)| {
+                        storage.storage.keys().map(move |slot| (*address, Some(*slot)))
+                    }))
+            })
+            .collect::<BTreeSet<_>>();
+        let mut targets = written.iter().copied().collect::<Vec<_>>();
+        targets.shuffle(&mut rng);
+        // Prewarming sees only some writes; synthetic read-only accesses add false positives.
+        let count =
+            if targets.len() > 1 { rng.random_range(1..targets.len()) } else { targets.len() };
+        targets.truncate(count);
+        for _ in 0..rng.random_range(1..=8) {
+            let address = Address::from_word(B256::from(U256::from(rng.random_range(17..=32u64))));
+            let slot = rng
+                .random_bool(0.5)
+                .then(|| keccak256(B256::from(U256::from(rng.random_range(0..64u64)))));
+            targets.push((keccak256(address), slot));
         }
+        let hinted = targets
+            .iter()
+            .flat_map(|(address, slot)| [(*address, None), (*address, *slot)])
+            .collect::<BTreeSet<_>>();
+        println!(
+            "{}",
+            json!({"block_number": number, "hint_coverage": {
+            "written": written.len(), "overlap": written.intersection(&hinted).count(),
+            "unhinted": written.difference(&hinted).count(),
+            "read_only": hinted.difference(&written).count()}})
+        );
+        targets.shuffle(&mut rng);
+        let mut targets = targets.into_iter();
+        let mut updates = updates.into_iter();
+        while targets.len() > 0 || updates.len() > 0 {
+            if targets.len() > 0 && (updates.len() == 0 || rng.random_bool(0.5)) {
+                let size = rng.random_range(1..=targets.len().min(16));
+                let mut hint = StateAccessHint::default();
+                for (address, slot) in targets.by_ref().take(size) {
+                    if let Some(slot) = slot {
+                        hint.storages.entry(address).or_default().push(slot);
+                    } else {
+                        hint.accounts.push(address);
+                    }
+                }
+                println!(
+                    "{}",
+                    json!({"block_number": number, "batch": "hint",
+                    "accounts": hint.accounts, "storages": hint.storages})
+                );
+                hints.on_access_hint(hint);
+                hint_batches += 1;
+            } else {
+                let size = rng.random_range(1..=updates.len().min(16));
+                let mut batch = HashedPostState::default();
+                for update in updates.by_ref().take(size) {
+                    batch.extend(update);
+                }
+                println!(
+                    "{}",
+                    json!({"block_number": number, "batch": "update", "operations": size})
+                );
+                stream.on_hashed_state_update(batch);
+                update_batches += 1;
+            }
+        }
+        drop(hints);
         stream.finish();
         let outcome = handle.take_state_root_rx().recv_timeout(timeout)??;
         ensure!(
@@ -521,6 +595,7 @@ fn run(config: &Config, snapshotter: &Snapshotter) -> Result<()> {
         "{}",
         json!({"completed": true, "seed": config.seed, "blocks": config.blocks,
         "commits": commits, "partial_commits": partial_commits,
+        "update_batches": update_batches, "hint_batches": hint_batches,
         "metrics": metrics})
     );
     Ok(())
