@@ -459,8 +459,7 @@ dependencies = [
 [[package]]
 name = "alloy-primitives"
 version = "1.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5e9dbd49258ac3ab893a481d46be29b58be7f734dcac46cd80b6b13ee36566c"
+source = "git+https://github.com/alloy-rs/core?branch=dani%2Fkeccak-cache-lock-free#94746b1703b4d18b4bc747c4e86ddac0987a910e"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -468,6 +467,7 @@ dependencies = [
  "cfg-if",
  "const-hex",
  "derive_more",
+ "equivalent",
  "fixed-cache",
  "foldhash 0.2.0",
  "getrandom 0.4.3",
@@ -4102,9 +4102,9 @@ checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "fixed-cache"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe63500644ef0269fe6b744e7e5dc5c20b5eebf3d881bc2be53f194636f6583"
+checksum = "57b811067c17dd16568d50c522f03fa65227c7f602c88f77d38e7842c51ba964"
 dependencies = [
  "equivalent",
  "rapidhash",
