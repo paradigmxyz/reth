@@ -70,7 +70,7 @@ revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip
 
 # rpc
 jsonrpsee.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 jsonrpsee-types.workspace = true
 
 # async

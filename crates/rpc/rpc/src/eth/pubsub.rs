@@ -9,22 +9,25 @@ use alloy_rpc_types_eth::{
     },
     Filter,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
+use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
-    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcLog, RpcNodeCore,
-    RpcTransaction,
+    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcLog,
+    RpcNodeCore, RpcTransaction,
 };
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
+use serde_json::value::RawValue;
+use tokio::sync::{broadcast, OnceCell};
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -35,17 +38,21 @@ use tracing::error;
 ///
 /// This handles `eth_subscribe` RPC calls.
 #[derive(Clone)]
-pub struct EthPubSub<Eth> {
+pub struct EthPubSub<Eth: EthApiTypes> {
     /// All nested fields bundled together.
     inner: Arc<EthPubSubInner<Eth>>,
 }
 
 // === impl EthPubSub ===
 
-impl<Eth> EthPubSub<Eth> {
+impl<Eth: EthApiTypes> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
     pub fn new(eth_api: Eth, subscription_task_spawner: Runtime) -> Self {
-        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        let inner = EthPubSubInner {
+            eth_api,
+            subscription_task_spawner,
+            all_logs: SharedFeed::new(LOG_FEED_CAPACITY),
+        };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -102,6 +109,17 @@ where
                     }
                     _ => Default::default(),
                 };
+                if filter == Filter::default() {
+                    // Every unfiltered subscriber receives the same logs, so they share one feed
+                    // that converts and encodes each log once.
+                    let rx = self.inner.all_logs.subscribe(|tx| {
+                        let pubsub = self.clone();
+                        self.inner.subscription_task_spawner.spawn_task(async move {
+                            forward(pubsub.log_stream(Filter::default()), tx).await
+                        });
+                    });
+                    return pipe_shared(accepted_sink, rx).await
+                }
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
             SubscriptionKind::NewPendingTransactions => {
@@ -294,26 +312,64 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
+/// Pipes the items of shared batches to the subscription sink, reusing their cached JSON.
+async fn pipe_shared<T: Serialize>(
+    sink: SubscriptionSink,
+    mut rx: broadcast::Receiver<Arc<SharedBatch<T>>>,
+) -> Result<(), ErrorObject<'static>> {
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                // connection dropped
+                break Ok(())
+            },
+            res = rx.recv() => {
+                let batch = match res {
+                    Ok(batch) => batch,
+                    // skip the batches missed while lagging behind
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        // feed ended
+                        break Ok(())
+                    }
+                };
+                for json in batch.json().await {
+                    let msg = SubscriptionMessage::new(
+                        sink.method_name(),
+                        sink.subscription_id(),
+                        json,
+                    ).map_err(SubscriptionSerializeError::new)?;
+
+                    if sink.send(msg).await.is_err() {
+                        return Ok(())
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<Eth: EthApiTypes> std::fmt::Debug for EthPubSub<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
     }
 }
 
 /// Container type `EthPubSub`
-#[derive(Clone)]
-struct EthPubSubInner<EthApi> {
+struct EthPubSubInner<EthApi: EthApiTypes> {
     /// The `eth` API.
     eth_api: EthApi,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Runtime,
+    /// Shared feed for `logs` subscriptions without a filter.
+    all_logs: SharedFeed<RpcLog<EthApi::NetworkTypes>>,
 }
 
 // == impl EthPubSubInner ===
 
 impl<Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Provider: BlockNumReader>,
+    Eth: EthApiTypes + RpcNodeCore<Provider: BlockNumReader>,
 {
     /// Returns the current sync status for the `syncing` subscription
     fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -338,7 +394,7 @@ where
 
 impl<Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Pool: TransactionPool>,
+    Eth: EthApiTypes + RpcNodeCore<Pool: TransactionPool>,
 {
     /// Returns a stream that yields all transaction hashes emitted by the txpool.
     fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
@@ -350,5 +406,175 @@ where
         &self,
     ) -> impl Stream<Item = NewTransactionEvent<<Eth::Pool as TransactionPool>::Transaction>> {
         self.eth_api.pool().new_pending_pool_transactions_listener()
+    }
+}
+
+/// Maximum number of ready items [`forward`] collects into one [`SharedBatch`].
+const MAX_SHARED_BATCH_LEN: usize = 4096;
+
+/// Capacity of the shared `logs` feed, in batches.
+///
+/// Its upstream produces about one batch per canonical state notification, so this matches the
+/// buffer of the canonical state notification channel.
+const LOG_FEED_CAPACITY: usize = 256;
+
+/// Sender half of a [`SharedFeed`] channel.
+type SharedSender<T> = broadcast::Sender<Arc<SharedBatch<T>>>;
+
+/// An upstream shared by all subscribers of one subscription kind.
+///
+/// The upstream task starts with the first subscriber and exits once none are left, and the next
+/// subscriber starts a new one.
+struct SharedFeed<T> {
+    /// The latest channel, whose only strong sender is owned by its upstream task.
+    tx: Mutex<Option<broadcast::WeakSender<Arc<SharedBatch<T>>>>>,
+    /// Capacity of each channel, in batches.
+    capacity: usize,
+}
+
+impl<T> SharedFeed<T> {
+    const fn new(capacity: usize) -> Self {
+        Self { tx: Mutex::new(None), capacity }
+    }
+
+    /// Subscribes to the feed, calling `start` to spawn a new upstream task if no subscriber is
+    /// live.
+    ///
+    /// `start` receives the only strong sender of the new channel, so subscribers see the channel
+    /// close once the upstream task exits.
+    fn subscribe(
+        &self,
+        start: impl FnOnce(SharedSender<T>),
+    ) -> broadcast::Receiver<Arc<SharedBatch<T>>> {
+        let mut weak_tx = self.tx.lock();
+        // Receivers are only added here while at least one is live, so a channel that lost its
+        // last receiver is never joined again and its upstream task can exit.
+        if let Some(tx) = weak_tx.as_ref().and_then(|tx| tx.upgrade()) &&
+            tx.receiver_count() > 0
+        {
+            return tx.subscribe()
+        }
+        let (tx, rx) = broadcast::channel(self.capacity);
+        *weak_tx = Some(tx.downgrade());
+        start(tx);
+        rx
+    }
+}
+
+/// Subscription items shared by all subscribers of a [`SharedFeed`], encoded to JSON at most once.
+struct SharedBatch<T> {
+    items: Vec<T>,
+    /// Encoded by the first subscriber that sends the batch. tokio's [`OnceCell`] makes concurrent
+    /// subscribers await that encoding instead of encoding again.
+    json: OnceCell<Vec<Box<RawValue>>>,
+}
+
+impl<T: Serialize> SharedBatch<T> {
+    fn new(items: Vec<T>) -> Arc<Self> {
+        Arc::new(Self { items, json: OnceCell::new() })
+    }
+
+    /// Returns the JSON encoding of every item, encoding them on the first call.
+    async fn json(&self) -> &[Box<RawValue>] {
+        self.json
+            .get_or_init(|| async {
+                self.items
+                    .iter()
+                    .filter_map(|item| match serde_json::value::to_raw_value(item) {
+                        Ok(json) => Some(json),
+                        Err(err) => {
+                            error!(target: "rpc::eth", %err, "Failed to serialize subscription item");
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .await
+    }
+}
+
+/// Forwards `upstream` to `tx` until no subscriber is left, batching the items that are ready
+/// together.
+async fn forward<T, St>(upstream: St, tx: SharedSender<T>)
+where
+    St: Stream<Item = T> + Unpin,
+    T: Serialize,
+{
+    let mut upstream = upstream.fuse();
+    while let Some(item) = upstream.next().await {
+        let mut items = vec![item];
+        while items.len() < MAX_SHARED_BATCH_LEN &&
+            let Some(Some(item)) = upstream.next().now_or_never()
+        {
+            items.push(item);
+        }
+        if tx.send(SharedBatch::new(items)).is_err() {
+            break
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, Bytes, B256};
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+
+    #[tokio::test]
+    async fn shared_batch_json_matches_item_serialization() {
+        let items = (0..3u8)
+            .map(|i| alloy_rpc_types_eth::Log {
+                inner: alloy_primitives::Log::new_unchecked(
+                    Address::repeat_byte(i),
+                    vec![B256::repeat_byte(i)],
+                    Bytes::from(vec![i]),
+                ),
+                block_number: Some(i.into()),
+                log_index: Some(i.into()),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let batch = SharedBatch::new(items.clone());
+
+        let json = batch.json().await.iter().map(|json| json.get()).collect::<Vec<_>>();
+        let expected =
+            items.iter().map(|item| serde_json::to_string(item).unwrap()).collect::<Vec<_>>();
+        assert_eq!(json, expected);
+    }
+
+    #[tokio::test]
+    async fn forward_batches_ready_items_until_no_subscriber_is_left() {
+        let (items_tx, items_rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = broadcast::channel(1);
+        items_tx.send(1u64).unwrap();
+        items_tx.send(2).unwrap();
+        let upstream = tokio::spawn(forward(UnboundedReceiverStream::new(items_rx), tx));
+
+        assert_eq!(rx.recv().await.unwrap().items, [1, 2]);
+
+        drop(rx);
+        items_tx.send(3).unwrap();
+        upstream.await.unwrap();
+    }
+
+    #[test]
+    fn shared_feed_starts_one_upstream_per_live_channel() {
+        let feed = SharedFeed::<u64>::new(1);
+        let mut upstreams = Vec::new();
+
+        let first = feed.subscribe(|tx| upstreams.push(tx));
+        let second = feed.subscribe(|tx| upstreams.push(tx));
+        assert_eq!(upstreams.len(), 1);
+
+        // The channel lost its last receiver, so its upstream may already be exiting.
+        drop((first, second));
+        let _third = feed.subscribe(|tx| upstreams.push(tx));
+        assert_eq!(upstreams.len(), 2);
+
+        // Upstreams that ended drop their sender, which also requires a new one.
+        upstreams.clear();
+        let _fourth = feed.subscribe(|tx| upstreams.push(tx));
+        assert_eq!(upstreams.len(), 1);
     }
 }
