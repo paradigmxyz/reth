@@ -648,4 +648,37 @@ mod tests {
             assert_eq!(planned.total_output_size, expected_size * 10, "{selection}");
         }
     }
+
+    #[test]
+    fn range_selections_preserve_legacy_tip_archives() {
+        // Legacy manifests stored the snapshot height in total_blocks, not the block count.
+        // At an exact chunk boundary, the legacy generator did not emit the next archive.
+        for (block, expected_files, expected_size) in
+            [(24, vec!["transactions-20-29.tar.zst"], 30), (20, vec![], 0)]
+        {
+            let manifest = test_manifest_with_component_tip(block, block);
+            let component = SnapshotComponentType::Transactions;
+            for selection in [ComponentSelection::Since(block), ComponentSelection::Distance(1)] {
+                let planned =
+                    collect_planned_archives(&manifest, &BTreeMap::from([(component, selection)]))
+                        .unwrap();
+                assert_eq!(
+                    planned
+                        .archives
+                        .iter()
+                        .map(|a| a.archive.file_name.as_str())
+                        .collect::<Vec<_>>(),
+                    expected_files,
+                    "{selection}"
+                );
+                assert_eq!(planned.total_download_size, expected_size, "{selection}");
+                assert_eq!(planned.total_output_size, expected_size * 10, "{selection}");
+                assert_eq!(
+                    manifest.chunks_for_distance(component, Some(1)),
+                    expected_files.len() as u64,
+                    "{selection}"
+                );
+            }
+        }
+    }
 }

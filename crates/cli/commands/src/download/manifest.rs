@@ -107,6 +107,7 @@ pub struct ChunkedArchive {
     ///
     /// Coverage is contiguous from block zero. The final chunk may be partial; its actual
     /// last block is `total_blocks - 1`, irrespective of its filename's range end.
+    /// Older manifests may store the declared snapshot block instead of the count.
     pub total_blocks: u64,
     /// Compressed size of each chunk in bytes, ordered from first to last.
     /// Computed during manifest generation. Older manifests may omit this.
@@ -447,7 +448,9 @@ impl SnapshotManifest {
         // The final archive may extend past the snapshot block. Counting back from its end
         // would shift the requested history window forward and could skip a required chunk.
         let first_block = self.block.saturating_sub(distance.saturating_sub(1));
-        if distance == 0 || first_block >= chunked.total_blocks {
+        // Legacy manifests used an inclusive block height for total_blocks. At equality,
+        // conservatively retain the boundary chunk if it exists.
+        if distance == 0 || first_block > chunked.total_blocks {
             return chunked.num_chunks();
         }
         first_block / chunked.blocks_per_file
