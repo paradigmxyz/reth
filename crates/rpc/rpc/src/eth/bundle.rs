@@ -519,8 +519,8 @@ mod tests {
             .await
             .unwrap();
 
-        let second_fee = response.results[1].gas_fees;
-        assert_eq!(response.results[1].coinbase_diff, second_fee);
+        assert_eq!(response.results[0].revert, None);
+        assert_eq!(response.results[1].coinbase_diff, response.results[1].gas_fees);
     }
 
     fn assert_bundle_fees(response: &EthCallBundleResponse, expected_tip: u128) {
