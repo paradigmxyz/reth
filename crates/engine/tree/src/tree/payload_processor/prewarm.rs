@@ -137,7 +137,7 @@ where
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
-            prewarming_threads = ctx.stateful_pool.current_num_threads(),
+            prewarming_threads = executor.prewarming_pool().current_num_threads(),
             transaction_count = ctx.env.transaction_count,
             "Initialized prewarm task"
         );
@@ -151,8 +151,8 @@ where
     /// Streams pending transactions and executes them in parallel on the prewarming pool.
     ///
     /// Uses `in_place_scope` to dispatch transactions as they arrive and wait for all spawned
-    /// tasks to complete. State is cleared when the last context holding its worker-state owner
-    /// is dropped. Each worker lazily initialises its EVM state on first access via
+    /// tasks to complete. The task-local state owner is dropped before signaling completion,
+    /// releasing cache references before cache publication. Each worker initialises its EVM via
     /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init).
     fn spawn_txs_prewarm<Tx>(
         &self,
@@ -163,6 +163,7 @@ where
         Tx: ExecutableTxFor<Evm> + Clone + Send + Sync + 'static,
     {
         let ctx = self.ctx.clone();
+        let pool = Arc::clone(self.executor.prewarming_pool());
         let span = Span::current();
 
         self.executor.spawn_blocking_named("prewarm-txs", move || {
@@ -179,61 +180,72 @@ where
             let state_root_hint_stream = state_root_hint_stream.as_ref();
             // Transactions to execute again when their results become stale.
             let mut refresh_txs = Vec::new();
-            ctx.stateful_pool.in_place_scope(|s| {
-                while let Ok((index, tx)) = pending.recv() {
-                    if ctx.should_stop() {
-                        trace!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            "Termination requested, stopping transaction distribution"
-                        );
-                        break;
+            {
+                let pool = WorkerStatefulPool::new(pool);
+                let pool = &pool;
+                pool.in_place_scope(|s| {
+                    while let Ok((index, tx)) = pending.recv() {
+                        if ctx.should_stop() {
+                            trace!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                "Termination requested, stopping transaction distribution"
+                            );
+                            break;
+                        }
+
+                        // skip transactions already executed by the main loop
+                        if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
+                            continue;
+                        }
+
+                        tx_count += 1;
+                        if ctx.prewarm_results.is_some() {
+                            refresh_txs.push((index, tx.clone()));
+                        }
+                        // Seed results before queueing, so that they are ready as soon as possible.
+                        let seeded = if let Some(results) = &ctx.prewarm_results &&
+                            let Some(seeds) = &ctx.env.pool_seeds
+                        {
+                            results.seed(index, tx.tx().tx_hash(), seeds)
+                        } else {
+                            None
+                        };
+                        if seeded.is_some() {
+                            ctx.metrics.seeded_transactions.increment(1);
+                        }
+                        let parent_span = Span::current();
+                        s.spawn(move |_| {
+                            let _enter = trace_span!(
+                                target: "engine::tree::payload_processor::prewarm",
+                                parent: parent_span,
+                                "prewarm_tx",
+                                i = index,
+                            )
+                            .entered();
+                            Self::transact_worker(
+                                ctx,
+                                pool,
+                                index,
+                                tx,
+                                seeded,
+                                state_root_hint_stream,
+                            );
+                        });
                     }
 
-                    // skip transactions already executed by the main loop
-                    if index < ctx.executed_tx_index.load(Ordering::Relaxed) {
-                        continue;
-                    }
-
-                    tx_count += 1;
-                    if ctx.prewarm_results.is_some() {
-                        refresh_txs.push((index, tx.clone()));
-                    }
-                    // Seed results before queueing, so that they are ready as soon as possible.
-                    let seeded = if let Some(results) = &ctx.prewarm_results &&
-                        let Some(seeds) = &ctx.env.pool_seeds
+                    // Send withdrawal prefetch targets after all transactions dispatched
+                    if let Some(state_root_hint_stream) = state_root_hint_stream &&
+                        let Some(withdrawals) = &ctx.env.withdrawals &&
+                        !withdrawals.is_empty()
                     {
-                        results.seed(index, tx.tx().tx_hash(), seeds)
-                    } else {
-                        None
-                    };
-                    if seeded.is_some() {
-                        ctx.metrics.seeded_transactions.increment(1);
+                        let targets = multiproof_targets_from_withdrawals(withdrawals);
+                        state_root_hint_stream.on_access_hint(targets.into());
                     }
-                    let parent_span = Span::current();
-                    s.spawn(move |_| {
-                        let _enter = trace_span!(
-                            target: "engine::tree::payload_processor::prewarm",
-                            parent: parent_span,
-                            "prewarm_tx",
-                            i = index,
-                        )
-                        .entered();
-                        Self::transact_worker(ctx, index, tx, seeded, state_root_hint_stream);
-                    });
-                }
+                });
 
-                // Send withdrawal prefetch targets after all transactions dispatched
-                if let Some(state_root_hint_stream) = state_root_hint_stream &&
-                    let Some(withdrawals) = &ctx.env.withdrawals &&
-                    !withdrawals.is_empty()
-                {
-                    let targets = multiproof_targets_from_withdrawals(withdrawals);
-                    state_root_hint_stream.on_access_hint(targets.into());
+                if let Some(results) = &ctx.prewarm_results {
+                    Self::refresh_results(ctx, pool, results, &refresh_txs);
                 }
-            });
-
-            if let Some(results) = &ctx.prewarm_results {
-                Self::refresh_results(ctx, results, &refresh_txs);
             }
 
             let _ = actions_tx
@@ -250,6 +262,7 @@ where
     /// prewarming stops.
     fn refresh_results<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerStatefulPool,
         results: &PrewarmResults<HaltReasonFor<Evm>>,
         txs: &[(usize, Tx)],
     ) where
@@ -276,8 +289,8 @@ where
             let refreshed = !stale.is_empty();
             if refreshed {
                 let cursor = AtomicUsize::new(0);
-                ctx.stateful_pool.in_place_scope(|s| {
-                    for _ in 0..ctx.stateful_pool.current_num_threads().min(stale.len()) {
+                pool.in_place_scope(|s| {
+                    for _ in 0..pool.current_num_threads().min(stale.len()) {
                         s.spawn(|_| {
                             while let Some((index, tx)) =
                                 stale.get(cursor.fetch_add(1, Ordering::Relaxed))
@@ -285,7 +298,7 @@ where
                                 if ctx.should_stop() {
                                     break
                                 }
-                                Self::transact_worker(ctx, *index, tx.clone(), None, None);
+                                Self::transact_worker(ctx, pool, *index, tx.clone(), None, None);
                             }
                         });
                     }
@@ -311,6 +324,7 @@ where
     /// [`get_or_init`](reth_tasks::WorkerStatefulPool::get_or_init) on first access.
     fn transact_worker<Tx>(
         ctx: &PrewarmContext<N, P, Evm>,
+        pool: &WorkerStatefulPool,
         index: usize,
         tx: Tx,
         seeded: Option<Arc<PoolTx<HaltReasonFor<Evm>>>>,
@@ -322,7 +336,7 @@ where
             return;
         }
 
-        ctx.stateful_pool.get_or_init(
+        pool.get_or_init(
             || ctx.evm_for_ctx(),
             |state| {
                 let Some(evm) = state.as_mut() else { return };
@@ -523,7 +537,8 @@ where
 
         if let Some(hashed_update_stream) = hashed_update_stream {
             let ctx = ctx.clone();
-            Arc::clone(&ctx.stateful_pool).spawn(move || {
+            let pool = Arc::clone(self.executor.bal_streaming_pool());
+            self.executor.bal_streaming_pool().spawn(move || {
                 let branch_span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
                     parent: &stream_parent_span,
@@ -533,20 +548,22 @@ where
                 let parent_span = branch_span.clone();
                 let _span = branch_span.entered();
 
-                stream_bal.as_bal().par_iter().for_each(|account_changes| {
-                    ctx.stateful_pool.get_or_init(
-                        || None,
-                        |provider| {
-                            ctx.send_bal_hashed_state(
-                                &parent_span,
-                                provider,
-                                account_changes,
-                                &hashed_update_stream,
-                            );
-                        },
-                    );
-                });
-
+                {
+                    let pool = WorkerStatefulPool::new(pool);
+                    stream_bal.as_bal().par_iter().for_each(|account_changes| {
+                        pool.get_or_init(
+                            || None,
+                            |provider| {
+                                ctx.send_bal_hashed_state(
+                                    &parent_span,
+                                    provider,
+                                    account_changes,
+                                    &hashed_update_stream,
+                                );
+                            },
+                        );
+                    });
+                }
                 hashed_update_stream.finish();
                 let _ = stream_tx.send(());
             });
@@ -695,8 +712,6 @@ where
     pub cache_metrics: Option<CachedStateMetrics>,
     /// Metrics for shared execution cache state. `None` disables metrics recording.
     pub cache_state_metrics: Option<CachedStateCacheMetrics>,
-    /// Shared owner of this run's worker-local state, cleared when its last handle is dropped.
-    pub stateful_pool: Arc<WorkerStatefulPool>,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -1011,6 +1026,7 @@ mod tests {
     use reth_storage_overlay::OverlayManager;
     use reth_tasks::WorkerPool;
     use revm::database::EmptyDB;
+    use std::time::Duration;
 
     #[test]
     fn terminate_event_stops_transaction_execution() {
@@ -1027,7 +1043,6 @@ mod tests {
             metrics: PrewarmMetrics::default(),
             cache_metrics: None,
             cache_state_metrics: None,
-            stateful_pool: WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "prewarm-test"))),
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,
@@ -1091,7 +1106,6 @@ mod tests {
                 metrics: PrewarmMetrics::default(),
                 cache_metrics: None,
                 cache_state_metrics: None,
-                stateful_pool: WorkerStatefulPool::new(Arc::clone(&pool)),
                 terminate_execution: Arc::new(AtomicBool::new(false)),
                 executed_tx_index: Arc::new(AtomicUsize::new(0)),
                 precompile_cache_disabled: false,
@@ -1101,10 +1115,9 @@ mod tests {
                 prewarm_results: Some(Arc::clone(&results)),
             };
             let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx.clone()) };
-            pool.install_fn(|| {
-                PrewarmCacheTask::<EthPrimitives, MockEthProvider, EthEvmConfig>::transact_worker(
-                    &ctx, 0, tx, None, None,
-                )
+            let stateful_pool = WorkerStatefulPool::new(Arc::clone(&pool));
+            stateful_pool.install_fn(|| {
+                PrewarmCacheTask::transact_worker(&ctx, &stateful_pool, 0, tx, None, None)
             });
             results.take_valid(0, &mut EmptyDB::default()).unwrap().unwrap().state
         };
@@ -1113,6 +1126,54 @@ mod tests {
         let state = prewarm(Address::repeat_byte(0xb));
         assert!(state.contains_key(&Address::repeat_byte(0xb)));
         assert!(!state.contains_key(&Address::repeat_byte(0xa)));
+    }
+
+    #[test]
+    fn transaction_prewarm_releases_worker_cache_before_cache_task_finishes() {
+        let runtime = Runtime::test();
+        let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
+        let mut ctx = test_prewarm_context(saved.clone(), Gauge::noop());
+        let provider = MockEthProvider::default();
+        provider.enable_database_provider();
+        provider.add_header(B256::ZERO, Default::default());
+        provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
+        ctx.provider = OverlayStateProviderFactory::new(
+            provider,
+            OverlayManager::default().overlay_builder(B256::ZERO),
+        );
+        assert!(ctx.evm_for_ctx().is_some());
+        let tx = Recovered::new_unchecked(
+            TransactionSigned::new_unhashed(
+                TxLegacy {
+                    gas_limit: 21_000,
+                    to: TxKind::Call(Address::repeat_byte(2)),
+                    ..Default::default()
+                }
+                .into(),
+                Signature::test_signature(),
+            ),
+            Address::repeat_byte(1),
+        );
+        let tx = WithTxEnv { tx_env: ctx.evm_config.tx_env(&tx), tx: Arc::new(tx) };
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(runtime, PayloadExecutionCache::default(), ctx);
+        let (pending_tx, pending_rx) = mpsc::channel();
+        pending_tx.send((0, tx)).unwrap();
+        drop(pending_tx);
+        task.spawn_txs_prewarm(pending_rx, actions_tx, None);
+        assert!(matches!(
+            task.actions_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 1 }
+        ));
+
+        // The dispatcher can still be dropping its context after sending completion. The cache
+        // task remains alive, but its workers must no longer retain any cache references.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while saved.usage_count() != 2 {
+            assert!(Instant::now() < deadline, "worker state outlived transaction prewarming");
+            std::thread::yield_now();
+        }
+        assert!(task.ctx.saved_cache.is_some());
     }
 
     fn test_prewarm_context(
@@ -1134,7 +1195,6 @@ mod tests {
             },
             cache_metrics: None,
             cache_state_metrics: None,
-            stateful_pool: WorkerStatefulPool::new(Arc::new(WorkerPool::new(1, "prewarm-test"))),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,
