@@ -18,9 +18,8 @@ use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
-    BlockExecutionError, Database, Evm as RethEvm, EvmEnv,
+    BlockExecutionError, BundleState, Database, Evm as RethEvm, EvmEnv,
 };
-use reth_execution_types::HashedPostState;
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
@@ -313,7 +312,7 @@ pub fn execute_transactions<S, T, EvmTypes>(
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
-    hashed_state: Option<&mut HashedPostState>,
+    simulation_state: Option<&mut BundleState>,
     converter: &T,
 ) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
@@ -401,16 +400,16 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    let result = if let Some(hashed_state) = hashed_state {
+    let result = if let Some(simulation_state) = simulation_state {
         builder.finish_with_state_root(&state_provider, |output| {
-            // Every simulated block is rooted against the original provider snapshot.
-            hashed_state.extend(
-                state_provider
-                    .hashed_post_state(&output.state)
-                    .map_err(BlockExecutionError::other)?,
-            );
+            // Preserve override storage wipes and account lifecycle changes across blocks before
+            // hashing against the original provider snapshot.
+            simulation_state.extend(output.state.clone());
+            let hashed_state = state_provider
+                .hashed_post_state(simulation_state)
+                .map_err(BlockExecutionError::other)?;
             state_provider
-                .state_root_with_updates(hashed_state.clone())
+                .state_root_with_updates(hashed_state)
                 .map(Some)
                 .map_err(BlockExecutionError::other)
         })?
