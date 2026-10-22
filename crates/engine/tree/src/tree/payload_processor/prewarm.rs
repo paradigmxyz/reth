@@ -42,7 +42,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
-use reth_tasks::{pool::WorkerPool, Runtime};
+use reth_tasks::{pool::WorkerPool, Runtime, WorkerRunId};
 use reth_trie_common::MultiProofTargetsV2;
 use revm::{context::Transaction as _, state::EvmState};
 use std::{
@@ -183,7 +183,7 @@ where
             let mut refresh_txs = Vec::new();
             pool.in_place_scope(|s| {
                 s.spawn(|_| {
-                    pool.init::<PrewarmEvmState<Evm>>(|_| ctx.evm_for_ctx());
+                    pool.init::<PrewarmEvmState<Evm>>(&ctx.run_id, |_| ctx.evm_for_ctx());
                 });
 
                 while let Ok((index, tx)) = pending.recv() {
@@ -243,7 +243,7 @@ where
             }
 
             // All tasks are done — clear per-thread EVM state for the next block.
-            pool.clear();
+            pool.clear(&ctx.run_id);
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
@@ -338,14 +338,9 @@ where
                 return;
             }
 
-            let state = worker.get_or_init::<PrewarmEvmState<Evm>>(|| ctx.evm_for_ctx());
-            // The pool is shared across blocks, so this thread may still hold the EVM of a
-            // previous prewarm run that has not finished yet. Runs of payloads that claim the same
-            // block hash may use different block environments, so the hash cannot tell them apart.
-            if !Arc::ptr_eq(&state.run, &ctx.terminate_execution) {
-                *state = ctx.evm_for_ctx();
-            }
-            let Some(evm) = state.evm.as_mut() else { return };
+            let state =
+                worker.get_or_init::<PrewarmEvmState<Evm>>(&ctx.run_id, || ctx.evm_for_ctx());
+            let Some(evm) = state.as_mut() else { return };
 
             let start = Instant::now();
 
@@ -555,7 +550,8 @@ where
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
-                        let provider = worker.get_or_init::<Option<EvmStateProviderBox>>(|| None);
+                        let provider =
+                            worker.get_or_init::<Option<EvmStateProviderBox>>(&ctx.run_id, || None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
@@ -609,7 +605,7 @@ where
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
         // Drop the per-thread providers
-        executor.bal_streaming_pool().clear();
+        executor.bal_streaming_pool().clear(&self.ctx.run_id);
 
         let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: 0 });
     }
@@ -716,6 +712,8 @@ where
     pub cache_metrics: Option<CachedStateMetrics>,
     /// Metrics for shared execution cache state. `None` disables metrics recording.
     pub cache_state_metrics: Option<CachedStateCacheMetrics>,
+    /// Identity shared by this run's worker initialization, accesses, and cleanup.
+    pub run_id: WorkerRunId,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub terminate_execution: Arc<AtomicBool>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
@@ -737,14 +735,8 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-struct PrewarmEvmState<Evm: ConfigureEvm> {
-    /// Termination flag of the prewarm run that created the EVM, which identifies the run.
-    run: Arc<AtomicBool>,
-    /// The EVM, `None` if its state provider could not be created.
-    evm: Option<
-        EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>,
-    >,
-}
+type PrewarmEvmState<Evm> =
+    Option<EvmFor<Evm, RecordingDb<StateProviderDatabase<EvmStateProviderBox>>, BalanceTracker>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -760,7 +752,7 @@ where
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Creates a per-thread EVM for prewarming, tagged with the prewarm run it belongs to.
+    /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
@@ -771,7 +763,7 @@ where
                     %err,
                     "Failed to build state provider in prewarm thread"
                 );
-                return PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: None }
+                return None
             }
         };
 
@@ -824,7 +816,7 @@ where
             });
         }
 
-        PrewarmEvmState { run: Arc::clone(&self.terminate_execution), evm: Some(evm) }
+        Some(evm)
     }
 
     /// Returns `true` if prewarming should stop.
@@ -1051,6 +1043,7 @@ mod tests {
             metrics: PrewarmMetrics::default(),
             cache_metrics: None,
             cache_state_metrics: None,
+            run_id: WorkerRunId::default(),
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,
@@ -1114,6 +1107,7 @@ mod tests {
                 metrics: PrewarmMetrics::default(),
                 cache_metrics: None,
                 cache_state_metrics: None,
+                run_id: WorkerRunId::default(),
                 terminate_execution: Arc::new(AtomicBool::new(false)),
                 executed_tx_index: Arc::new(AtomicUsize::new(0)),
                 precompile_cache_disabled: false,
@@ -1156,6 +1150,7 @@ mod tests {
             },
             cache_metrics: None,
             cache_state_metrics: None,
+            run_id: WorkerRunId::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
             precompile_cache_disabled: false,
