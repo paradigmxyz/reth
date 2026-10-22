@@ -7,8 +7,8 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use reth_trie_common::{
-    account_from_revm, native_account, native_bytecode, revm_account, revm_bytecode,
-    HashedPostState, HashedStorage,
+    account_from_revm, account_to_revm, native_account, native_bytecode, revm_account,
+    revm_bytecode, HashedPostState, HashedStorage,
 };
 use revm::{
     database::{
@@ -332,15 +332,7 @@ pub fn evm_state_to_state_update(state: &revm::state::EvmState) -> StateUpdate {
 fn empty_account() -> Account {
     // Account::from initializes the original-info box directly, without constructing and
     // immediately dropping the default empty bytecode in both account-info values.
-    Account::from(AccountInfo {
-        balance: alloy_primitives::U256::ZERO,
-        nonce: 0,
-        code_hash: alloy_primitives::KECCAK256_EMPTY,
-        code: None,
-        account_id: None,
-        #[cfg(feature = "account-ext")]
-        extension: Default::default(),
-    })
+    Account::from(account_to_revm(reth_primitives_traits::Account::default()))
 }
 
 fn update_account(
