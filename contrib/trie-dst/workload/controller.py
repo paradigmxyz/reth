@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 # Persistence defaults match TreeConfig and EngineArgs in this Reth revision.
@@ -82,8 +83,11 @@ def collect(destination, progress=False):
 
 def native(hook, request):
     binary = Path(__file__).with_name("reth-trie-dst")
-    result = subprocess.run([str(binary), hook], input=json.dumps(request), text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    # The host uses the guest's instrumented binary without issuing VM hypercalls.
+    with tempfile.TemporaryDirectory() as coverage_dir:
+        result = subprocess.run([str(binary), hook], input=json.dumps(request), text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                                env=os.environ | {"BEDROCK_COVERAGE_DIR": coverage_dir})
     return json.loads(result.stdout)
 
 

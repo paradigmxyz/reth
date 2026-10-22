@@ -50,10 +50,6 @@ sccache --zero-stats >/dev/null
 trap 'sccache --show-stats > /run-info/sccache.txt; cat /run-info/sccache.txt' EXIT
 # Keep the DST profile: it inherits profiling and enables debug assertions and
 # overflow checks for the harness. Do not switch these builds to profiling.
-cargo build --locked -p reth-trie-dst --profile dst
-binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
-printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
-objcopy --strip-debug "$binary" /run-info/reth-trie-dst
 if [ "${DST_CMD:-campaign}" = fuzz ]; then
   clang -O2 -fPIC -c /bedrock-guest/libfeedback.c -o /out/libfeedback.o
   clang -O2 -fPIC -c /bedrock-guest/libpcguard.c -o /out/libpcguard.o
@@ -71,8 +67,13 @@ if [ "${DST_CMD:-campaign}" = fuzz ]; then
   expected=$(( ( (0x$size / 4) + 4095 ) / 4096 * 4096 ))
   test "$measured" = "$expected" && test "$expected" -gt 0 && test "$expected" -le $((64 << 20))
   rm -rf /out/cov-smoke
+else
+  cargo build --locked -p reth-trie-dst --profile dst
+  binary="$CARGO_TARGET_DIR/dst/reth-trie-dst"
 fi
+printf 'cargo_secs=%s\n' "$SECONDS" >> /run-info/cache-info.env
 # Keep symbols in the cached executable for debugging recorded failures.
+objcopy --strip-debug "$binary" /run-info/reth-trie-dst
 objcopy --strip-debug "$binary" /out/reth-trie-dst
 sccache gcc -O2 -I /bedrock-guest -x c - -o /out/bedrock-ready <<'C'
 #include "libvmcall.h"
