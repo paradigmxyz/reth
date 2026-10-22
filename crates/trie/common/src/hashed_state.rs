@@ -1,5 +1,6 @@
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    revm_compat::account_from_revm,
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
     KeyHasher, MultiProofTargets, Nibbles,
 };
@@ -48,7 +49,7 @@ impl HashedPostState {
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account = account.info.as_ref().map(account_from_revm);
                 let hashed_storage = HashedStorage::from_iter(
                     account
                         .storage
@@ -885,7 +886,7 @@ mod tests {
         // Validate the account info.
         assert_eq!(
             *hashed_state.accounts.get(&keccak256(address)).unwrap(),
-            Some(account_info.into())
+            Some(account_from_revm(&account_info))
         );
     }
 
@@ -965,7 +966,7 @@ mod tests {
         };
 
         // Create hashed accounts with addresses.
-        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
+        let account_1 = (keccak256(address_1), Some(account_from_revm(&account_info_1)));
         let account_2 = (keccak256(address_2), None);
 
         // Add accounts to the hashed post state.

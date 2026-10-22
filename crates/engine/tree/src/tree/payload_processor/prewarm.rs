@@ -1361,7 +1361,7 @@ mod tests {
         let code = revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
-            .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
+            .insert_code(B256::repeat_byte(3), Some(reth_execution_types::reth_bytecode(&code)));
         (result_rx, reader)
     }
 

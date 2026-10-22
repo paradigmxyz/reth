@@ -1688,7 +1688,7 @@ mod tests {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
             for update in &state_updates {
                 let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(Account::from_revm_account(account)))
+                    (*address, Some(reth_execution_types::account_from_revm(&account.info)))
                 });
                 provider_rw
                     .insert_account_for_hashing(account_updates)
@@ -1715,7 +1715,7 @@ mod tests {
                     .map(|(key, value)| (B256::from(*key), value.present_value))
                     .collect();
                 let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = Account::from_revm_account(account);
+                entry.0 = reth_execution_types::account_from_revm(&account.info);
                 entry.1.extend(storage);
             }
         }
@@ -1787,7 +1787,7 @@ mod tests {
                 for (address, account) in &mut update {
                     account.info.nonce += number as u64;
                     accumulated_state.get_mut(address).unwrap().0 =
-                        Account::from_revm_account(account);
+                        reth_execution_types::account_from_revm(&account.info);
                 }
                 state_hook.on_state(reth_execution_types::evm_state_to_state_update(&update));
                 root_from_regular = state_root(accumulated_state.clone());

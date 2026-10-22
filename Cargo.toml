@@ -437,9 +437,9 @@ reth-zstd-compressors = { version = "0.8.2", default-features = false }
 # revm
 revm = { version = "43.0.3", default-features = false }
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "23b49a5de13becb00311fedafb12991690465726", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "23b49a5de13becb00311fedafb12991690465726", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "23b49a5de13becb00311fedafb12991690465726", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "35a2eb035a29875164a7e4638e29ee89a706a679", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "35a2eb035a29875164a7e4638e29ee89a706a679", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "35a2eb035a29875164a7e4638e29ee89a706a679", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -671,3 +671,14 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# LLVM 23 support is not released yet.
+inkwell = { git = "https://github.com/TheDan64/inkwell", rev = "c9d9734ae17dbaf1d9902dab3b8ee9d2041781ff" }
+
+# reth-core
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "7041982f28cc83b1f757b1cc8a166cdae4875b63" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "7041982f28cc83b1f757b1cc8a166cdae4875b63" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "7041982f28cc83b1f757b1cc8a166cdae4875b63" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "7041982f28cc83b1f757b1cc8a166cdae4875b63" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "7041982f28cc83b1f757b1cc8a166cdae4875b63" }

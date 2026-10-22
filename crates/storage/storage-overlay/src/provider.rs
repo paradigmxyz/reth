@@ -37,6 +37,7 @@ use reth_trie::{
     MultiProofTargetsV2, StateRoot, StorageMultiProof, StorageProof, StorageRoot, TrieInput,
     TrieInputSorted,
 };
+use reth_trie_common::{account_from_revm, reth_bytecode};
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
@@ -483,7 +484,7 @@ where
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.as_ref().map(Account::from))
+            return Ok(account.as_ref().map(account_from_revm))
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -583,7 +584,7 @@ where
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         let (overlay, _) = self.execution_overlay()?;
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
-            return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
+            return Ok(Some(reth_bytecode(bytecode)));
         }
         self.provider()
             .tx()
@@ -1382,15 +1383,15 @@ mod tests {
             false,
         );
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert_eq!(
+            provider.basic_account(&address).unwrap(),
+            Some(account_from_revm(&account_info))
+        );
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
-        assert_eq!(
-            provider.bytecode_by_hash(&code_hash).unwrap(),
-            Some(reth_primitives_traits::Bytecode(bytecode))
-        );
+        assert_eq!(provider.bytecode_by_hash(&code_hash).unwrap(), Some(reth_bytecode(&bytecode)));
     }
 
     #[test]

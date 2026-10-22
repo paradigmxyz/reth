@@ -33,7 +33,7 @@ use evm2::{
         AccountChanges, AccountInfo, Database, Db, DbResult, DynDatabase, PendingState, StorageSlot,
     },
     interpreter::{op, InstrStop, Interpreter, Message, MessageKind, MessageResult},
-    utils::word_to_address,
+    utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, TxResultWithState, Version,
 };
 use parking_lot::{Mutex, RwLock};
@@ -1011,7 +1011,7 @@ impl<T: EvmTypes> Inspector<T> for BalanceTracker {
         let address = match interp.opcode() {
             op::BALANCE => {
                 let Some(word) = interp.stack().peek(0) else { return };
-                word_to_address(word)
+                word.to_address()
             }
             op::SELFBALANCE | op::SELFDESTRUCT => interp.message().destination,
             op::COINBASE => {
