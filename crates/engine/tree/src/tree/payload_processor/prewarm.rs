@@ -380,8 +380,13 @@ where
             let Some(results) = &ctx.prewarm_results else {
                 let mut proof_targets = PrewarmProofTargetsSink::default();
                 if let Err(err) = evm.transact_and_discard(&tx_env, &mut proof_targets) {
-                    trace!(target: "engine::tree::payload_processor::prewarm", %err,
-                        "Error when executing prewarm transaction");
+                    trace!(
+                        target: "engine::tree::payload_processor::prewarm",
+                        %err,
+                        tx_hash=%tx.tx().tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
                     ctx.metrics.transaction_errors.increment(1);
                     return;
                 }
@@ -416,6 +421,8 @@ where
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
+                        tx_hash=%tx.tx().tx_hash(),
+                        sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);

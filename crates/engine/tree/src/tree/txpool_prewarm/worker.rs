@@ -222,16 +222,14 @@ where
         } else {
             evm_config.evm_with_env(db, evm_env)
         };
-        let mut end = BatchEnd::GoAgain;
         let deadline = Instant::now() + REFRESH_INTERVAL;
         while self.commands.is_empty() && Instant::now() < deadline {
             let Some(Transaction { hash, sender, transaction }) = transactions.next() else {
-                end = BatchEnd::Rest;
-                break
+                return BatchEnd::Rest
             };
             let speculative = SpeculativeTx::new(sender, transaction.inner());
             let tx_env = evm_config.tx_env(transaction);
-            if let Some(results) = &job.results {
+            let result = if let Some(results) = &job.results {
                 // The underlying CachedReads retains warmed data; the EVM overlay must not hide
                 // reads from the recorder or keep values from an earlier prediction.
                 drop(evm.take_state_cache());
@@ -239,22 +237,25 @@ where
                 let result =
                     evm.transact_with_inspector(&tx_env, BalanceTracker::new(recording.clone()));
                 let reads = recording.take_reads();
-                match result {
-                    Ok((mut balances, result)) => {
-                        if let Some(reads) = reads {
-                            results.store(hash, result, reads, &mut balances, speculative);
-                        }
+                result.map(|(mut balances, result)| {
+                    if let Some(reads) = reads {
+                        results.store(hash, result, reads, &mut balances, speculative);
                     }
-                    Err(err) => {
-                        trace!(target: "engine::tree::txpool_prewarm", %err, tx_hash = ?hash, %sender, "speculative txpool transaction execution failed")
-                    }
-                }
-            } else if let Err(err) = evm.transact_result(&tx_env) {
-                trace!(target: "engine::tree::txpool_prewarm", %err, tx_hash = ?hash, %sender, "speculative txpool transaction execution failed");
+                })
+            } else {
+                evm.transact_result(&tx_env).map(drop)
+            };
+            if let Err(err) = result {
+                trace!(
+                    target: "engine::tree::txpool_prewarm",
+                    %err,
+                    tx_hash = ?hash,
+                    %sender,
+                    "speculative txpool transaction execution failed"
+                );
             }
         }
-        drop(evm);
-        end
+        BatchEnd::GoAgain
     }
 
     /// Publishes a fresh snapshot if the cache gained reads since the last publication.
